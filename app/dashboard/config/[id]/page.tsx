@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { getWhatsAppConfig } from "@/lib/db"
-import { WhatsAppConfigForm } from "@/components/dashboard/whatsapp-config-form"
+import { WhatsAppConfigFormWrapper } from "@/components/dashboard/whatsapp-config-form-wrapper"
 
 interface ConfigPageProps {
   params: {
@@ -31,7 +31,7 @@ export default async function ConfigPage({ params }: ConfigPageProps) {
           </p>
         </div>
 
-        <WhatsAppConfigForm config={config} />
+        <WhatsAppConfigFormWrapper config={config} />
       </div>
     )
   } catch (error) {

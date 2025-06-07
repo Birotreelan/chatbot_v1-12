@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,6 +22,8 @@ interface WhatsAppConfigFormProps {
 }
 
 export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigFormProps) {
+  const [mounted, setMounted] = useState(false)
+  const [baseUrl, setBaseUrl] = useState("")
   const [formData, setFormData] = useState({
     displayName: config?.displayName || "",
     phoneNumberId: config?.phoneNumberId || "",
@@ -55,6 +57,13 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
   })
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
+
+  useEffect(() => {
+    setMounted(true)
+    if (typeof window !== "undefined") {
+      setBaseUrl(window.location.origin)
+    }
+  }, [])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target
@@ -141,7 +150,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
         description: `La configuración se ha ${isNew ? "creado" : "actualizado"} correctamente.`,
       })
 
-      if (isNew && result.id) {
+      if (isNew && result.id && mounted) {
         // Redirigir a la página de edición
         window.location.href = `/dashboard/config/${result.id}`
       }
@@ -160,33 +169,67 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     }
   }
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast({
-      title: "Copiado",
-      description: "El texto se ha copiado al portapapeles.",
-    })
+  const copyToClipboard = async (text: string) => {
+    if (!mounted || typeof window === "undefined") return
+
+    try {
+      await navigator.clipboard.writeText(text)
+      toast({
+        title: "Copiado",
+        description: "El texto se ha copiado al portapapeles.",
+      })
+    } catch (err) {
+      console.error("Error al copiar:", err)
+      toast({
+        title: "Error",
+        description: "No se pudo copiar el texto.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const openInNewTab = (url: string) => {
+    if (!mounted || typeof window === "undefined") return
+    window.open(url, "_blank", "noopener,noreferrer")
   }
 
   const getWidgetUrl = () => {
-    if (!config?.id) return ""
-    return `${window.location.origin}/widget/${config.id}`
+    if (!config?.id || !baseUrl) return ""
+    return `${baseUrl}/widget/${config.id}`
   }
 
   const getChatUrl = () => {
-    if (!config?.id) return ""
-    return `${window.location.origin}/chat/${config.id}`
+    if (!config?.id || !baseUrl) return ""
+    return `${baseUrl}/chat/${config.id}`
   }
 
   const getEmbedCode = () => {
-    if (!config?.id) return ""
+    if (!config?.id || !baseUrl) return ""
     return `<iframe src="${getWidgetUrl()}" width="400" height="600" frameborder="0" style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></iframe>`
   }
 
   const getJavaScriptCode = () => {
-    if (!config?.id || !config?.cliente_id) return "// Se requiere cliente_id para generar el código"
+    if (!config?.id || !config?.cliente_id || !baseUrl) return "// Se requiere cliente_id para generar el código"
 
-    return `<script src="${window.location.origin}/widget-loader.js" data-client-id="${config.cliente_id}"></script>`
+    return `<script src="${baseUrl}/widget-loader.js" data-client-id="${config.cliente_id}"></script>`
+  }
+
+  // Mostrar loading hasta que el componente esté montado
+  if (!mounted) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Cargando configuración...</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+            <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
@@ -586,7 +629,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
             </TabsContent>
 
             <TabsContent value="integration" className="space-y-6">
-              {!isNew && config?.id && (
+              {!isNew && config?.id && baseUrl && (
                 <>
                   <div className="space-y-4">
                     <h3 className="text-lg font-semibold">URLs del Widget</h3>
@@ -608,7 +651,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => window.open(getWidgetUrl(), "_blank")}
+                            onClick={() => openInNewTab(getWidgetUrl())}
                           >
                             <ExternalLink className="h-4 w-4" />
                           </Button>
@@ -627,12 +670,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                           >
                             <Copy className="h-4 w-4" />
                           </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => window.open(getChatUrl(), "_blank")}
-                          >
+                          <Button type="button" variant="outline" size="sm" onClick={() => openInNewTab(getChatUrl())}>
                             <Eye className="h-4 w-4" />
                           </Button>
                         </div>
@@ -697,10 +735,12 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                 </>
               )}
 
-              {isNew && (
+              {(isNew || !config?.id || !baseUrl) && (
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
                   <p className="text-gray-600">
-                    Los códigos de integración estarán disponibles después de guardar la configuración.
+                    {isNew
+                      ? "Los códigos de integración estarán disponibles después de guardar la configuración."
+                      : "Cargando códigos de integración..."}
                   </p>
                 </div>
               )}
