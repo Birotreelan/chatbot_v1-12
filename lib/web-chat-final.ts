@@ -1,5 +1,10 @@
-import { openai } from "./openai"
+import OpenAI from "openai"
 import { validateDNI, searchTurnos } from "./clinic-api"
+
+// Inicializar OpenAI directamente en este archivo
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
 
 interface WebChatConfig {
   id: string
@@ -41,7 +46,7 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] SessionId limpio: ${cleanSessionId}`)
 
     // Crear identificador único para el thread
-    const threadIdentifier = `${cleanSessionId}_${config.id}`
+    const threadIdentifier = `web_${cleanSessionId}_${config.id}`
     console.log(`[WEB-CHAT-FINAL] Thread identifier: ${threadIdentifier}`)
 
     // Obtener o crear thread
@@ -67,6 +72,11 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
 async function getOrCreateWebThread(identifier: string): Promise<string> {
   try {
     console.log(`[WEB-CHAT-FINAL] Buscando thread: ${identifier}`)
+
+    // Verificar que OpenAI esté inicializado
+    if (!openai || !openai.beta || !openai.beta.threads) {
+      throw new Error("OpenAI no está correctamente inicializado")
+    }
 
     // Buscar thread existente
     console.log(`[WEB-CHAT-FINAL] Listando threads existentes...`)
@@ -98,7 +108,23 @@ async function getOrCreateWebThread(identifier: string): Promise<string> {
     return newThread.id
   } catch (error) {
     console.error("[WEB-CHAT-FINAL] Error en getOrCreateWebThread:", error)
-    throw error
+
+    // Si hay error buscando threads, crear uno nuevo directamente
+    try {
+      console.log(`[WEB-CHAT-FINAL] Intentando crear thread directamente: ${identifier}`)
+      const newThread = await openai.beta.threads.create({
+        metadata: {
+          identifier,
+          type: "web",
+          created_at: new Date().toISOString(),
+        },
+      })
+      console.log(`[WEB-CHAT-FINAL] Thread creado directamente: ${newThread.id}`)
+      return newThread.id
+    } catch (createError) {
+      console.error("[WEB-CHAT-FINAL] Error creando thread directamente:", createError)
+      throw createError
+    }
   }
 }
 
