@@ -5,6 +5,9 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
+// Exportar la instancia para uso en otros módulos
+export { openai }
+
 // Tiempo máximo de espera para la ejecución del asistente (en milisegundos)
 const MAX_WAIT_TIME = 30000 // 30 segundos
 const POLLING_INTERVAL = 1000 // 1 segundo

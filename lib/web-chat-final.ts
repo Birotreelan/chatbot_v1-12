@@ -1,13 +1,9 @@
-import OpenAI from "openai"
+import { openai } from "./openai"
 import { validateDNI, searchTurnos } from "./clinic-api"
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
 
 interface WebChatConfig {
   id: string
-  name: string
+  displayName: string
   assistantId: string
   enabled: boolean
   widgetEnabled: boolean
@@ -24,7 +20,7 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
   try {
     const { message, sessionId, config, ip } = params
     console.log(`[WEB-CHAT-FINAL] Procesando mensaje para sessionId: ${sessionId}`)
-    console.log(`[WEB-CHAT-FINAL] Cliente: ${config.name}, IP: ${ip}`)
+    console.log(`[WEB-CHAT-FINAL] Cliente: ${config.displayName}, IP: ${ip}`)
 
     // Validar parámetros
     if (!sessionId) {
@@ -73,9 +69,11 @@ async function getOrCreateWebThread(identifier: string): Promise<string> {
     console.log(`[WEB-CHAT-FINAL] Buscando thread: ${identifier}`)
 
     // Buscar thread existente
+    console.log(`[WEB-CHAT-FINAL] Listando threads existentes...`)
     const threads = await openai.beta.threads.list({
       limit: 100,
     })
+    console.log(`[WEB-CHAT-FINAL] Encontrados ${threads.data.length} threads`)
 
     const existingThread = threads.data.find(
       (thread) => thread.metadata?.identifier === identifier && thread.metadata?.type === "web",
