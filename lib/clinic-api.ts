@@ -14,9 +14,11 @@ export class ClinicAPI {
    */
   private async fetchProxyApi<T>(action: string, params: Record<string, any> = {}): Promise<ApiResponse<T>> {
     try {
-      console.log(`Realizando petición POST a: ${this.proxyUrl}`)
-      console.log(`Action: ${action}, Cliente_Id: ${this.clienteId}`)
-      console.log(`Parámetros:`, params)
+      console.log(`[CLINIC-API] ========== PETICIÓN AL PROXY ==========`)
+      console.log(`[CLINIC-API] URL: ${this.proxyUrl}`)
+      console.log(`[CLINIC-API] Action: ${action}`)
+      console.log(`[CLINIC-API] Cliente_Id: ${this.clienteId}`)
+      console.log(`[CLINIC-API] Parámetros:`, params)
 
       // Preparar el cuerpo de la solicitud - asegurarnos de que Cliente_Id está exactamente como se espera
       const requestBody = {
@@ -25,7 +27,7 @@ export class ClinicAPI {
         ...params,
       }
 
-      console.log(`Cuerpo de la solicitud: ${JSON.stringify(requestBody)}`)
+      console.log(`[CLINIC-API] Cuerpo de la solicitud:`, JSON.stringify(requestBody, null, 2))
 
       // Hacer la petición POST
       const response = await fetch(this.proxyUrl, {
@@ -38,15 +40,17 @@ export class ClinicAPI {
 
       // Obtener el texto de la respuesta
       const responseText = await response.text()
-      console.log(`Respuesta (texto) recibida:`, responseText)
+      console.log(`[CLINIC-API] ========== RESPUESTA DEL PROXY ==========`)
+      console.log(`[CLINIC-API] Status: ${response.status} ${response.statusText}`)
+      console.log(`[CLINIC-API] Respuesta (texto):`, responseText)
 
       // Intentar parsear la respuesta como JSON
       let data
       try {
         data = JSON.parse(responseText)
-        console.log(`Respuesta (JSON) parseada:`, data)
+        console.log(`[CLINIC-API] Respuesta (JSON):`, JSON.stringify(data, null, 2))
       } catch (e) {
-        console.error(`Error al parsear la respuesta JSON:`, e)
+        console.error(`[CLINIC-API] ❌ Error al parsear JSON:`, e)
         return {
           exito: false,
           error: {
@@ -58,7 +62,7 @@ export class ClinicAPI {
 
       // Verificar si hay un error específico de Cliente_Id
       if (data.error && typeof data.error === "string" && data.error.includes("Cliente_Id")) {
-        console.error(`Error de Cliente_Id:`, data.error)
+        console.error(`[CLINIC-API] ❌ Error de Cliente_Id:`, data.error)
         return {
           exito: false,
           error: {
@@ -70,7 +74,7 @@ export class ClinicAPI {
 
       // Verificar si hay un error de la API
       if (!response.ok) {
-        console.error(`Error HTTP en la respuesta: ${response.status} ${response.statusText}`)
+        console.error(`[CLINIC-API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
         return {
           exito: false,
           error: {
@@ -82,7 +86,7 @@ export class ClinicAPI {
 
       // Si la respuesta tiene un formato específico de error
       if (data.error) {
-        console.error(`Error en los datos de la respuesta:`, data.error)
+        console.error(`[CLINIC-API] ❌ Error en los datos:`, data.error)
         return {
           exito: false,
           error: {
@@ -95,7 +99,7 @@ export class ClinicAPI {
       // Si la respuesta tiene un campo "success"
       if (data.success !== undefined) {
         if (!data.success) {
-          console.error(`La API indicó éxito=false:`, data)
+          console.error(`[CLINIC-API] ❌ API indicó éxito=false:`, data)
           return {
             exito: false,
             error: {
@@ -104,6 +108,7 @@ export class ClinicAPI {
             },
           }
         }
+        console.log(`[CLINIC-API] ✅ Respuesta exitosa`)
         return {
           exito: true,
           datos: data.data,
@@ -111,10 +116,11 @@ export class ClinicAPI {
       }
 
       // Si llegamos aquí, asumimos que la respuesta es exitosa
+      console.log(`[CLINIC-API] ✅ Respuesta exitosa (formato directo)`)
       return { exito: true, datos: data }
     } catch (error) {
       // Manejar errores de red u otros
-      console.error(`Error de red o durante el procesamiento:`, error)
+      console.error(`[CLINIC-API] ❌ Error de red:`, error)
       return {
         exito: false,
         error: {
@@ -129,6 +135,7 @@ export class ClinicAPI {
    * Busca un paciente por DNI
    */
   async paciente_dni(dni: string): Promise<ApiResponse<Paciente | null>> {
+    console.log(`[CLINIC-API] 🔍 Buscando paciente por DNI: ${dni}`)
     return this.fetchProxyApi<Paciente | null>("get_paciente", { dni })
   }
 
@@ -136,6 +143,7 @@ export class ClinicAPI {
    * Busca un paciente por teléfono
    */
   async paciente_telefono(telefono: string): Promise<ApiResponse<Paciente | null>> {
+    console.log(`[CLINIC-API] 🔍 Buscando paciente por teléfono: ${telefono}`)
     return this.fetchProxyApi<Paciente | null>("get_paciente", { telefono })
   }
 
@@ -143,6 +151,7 @@ export class ClinicAPI {
    * Obtiene las subespecialidades disponibles
    */
   async obtenerSubespecialidades(): Promise<ApiResponse<{ id: string; nombre: string }[]>> {
+    console.log(`[CLINIC-API] 🔍 Obteniendo subespecialidades`)
     return this.fetchProxyApi<{ id: string; nombre: string }[]>("get_subespecialidades")
   }
 
@@ -152,6 +161,7 @@ export class ClinicAPI {
   async buscarProfesionales(
     busqueda: string,
   ): Promise<ApiResponse<{ id: string; nombre: string; especialidad?: string }[]>> {
+    console.log(`[CLINIC-API] 🔍 Buscando profesionales: ${busqueda}`)
     return this.fetchProxyApi<{ id: string; nombre: string; especialidad?: string }[]>("get_profesionales", {
       busqueda,
     })
@@ -166,6 +176,8 @@ export class ClinicAPI {
     profesionalId?: string,
     pacienteDNI?: string,
   ): Promise<ApiResponse<any>> {
+    console.log(`[CLINIC-API] 🔍 Obteniendo turnos: ${fechaDesde} a ${fechaHasta}`)
+
     const params: Record<string, any> = {
       Fecha_Desde: fechaDesde,
       Fecha_Hasta: fechaHasta,
@@ -173,10 +185,12 @@ export class ClinicAPI {
 
     if (profesionalId) {
       params.Profesional_Id = profesionalId
+      console.log(`[CLINIC-API] - Con profesional ID: ${profesionalId}`)
     }
 
     if (pacienteDNI) {
       params.Paciente_DNI = pacienteDNI
+      console.log(`[CLINIC-API] - Para paciente DNI: ${pacienteDNI}`)
     }
 
     return this.fetchProxyApi<any>("get_turnos", params)
@@ -191,20 +205,70 @@ export class ClinicAPI {
     especialidad?: string,
     profesionalId?: string,
   ): Promise<ApiResponse<any>> {
+    console.log(`[CLINIC-API] ========== BUSCAR TURNOS DISPONIBLES ==========`)
+    console.log(`[CLINIC-API] Parámetros recibidos:`)
+    console.log(`[CLINIC-API] - rangoFechas: "${rangoFechas}"`)
+    console.log(`[CLINIC-API] - profesional: "${profesional}"`)
+    console.log(`[CLINIC-API] - especialidad: "${especialidad}"`)
+    console.log(`[CLINIC-API] - profesionalId: "${profesionalId}"`)
+
+    // Validar que rangoFechas no sea undefined
+    if (!rangoFechas) {
+      console.error(`[CLINIC-API] ❌ rangoFechas es requerido`)
+      return {
+        exito: false,
+        error: {
+          codigo: "PARAMETRO_FALTANTE",
+          mensaje: "El parámetro rangoFechas es requerido",
+        },
+      }
+    }
+
     // Extraer fechas desde y hasta del rango
-    const [fechaDesde, fechaHasta] = rangoFechas.split(" a ")
+    let fechaDesde: string
+    let fechaHasta: string
+
+    try {
+      if (rangoFechas.includes(" a ")) {
+        ;[fechaDesde, fechaHasta] = rangoFechas.split(" a ")
+      } else if (rangoFechas.includes(" to ")) {
+        ;[fechaDesde, fechaHasta] = rangoFechas.split(" to ")
+      } else {
+        // Si no tiene separador, usar como fecha única
+        fechaDesde = rangoFechas
+        fechaHasta = rangoFechas
+      }
+
+      fechaDesde = fechaDesde.trim()
+      fechaHasta = fechaHasta ? fechaHasta.trim() : fechaDesde
+
+      console.log(`[CLINIC-API] ✅ Fechas procesadas: ${fechaDesde} a ${fechaHasta}`)
+    } catch (error) {
+      console.error(`[CLINIC-API] ❌ Error procesando rangoFechas:`, error)
+      return {
+        exito: false,
+        error: {
+          codigo: "FORMATO_FECHA_INVALIDO",
+          mensaje: `Formato de rango de fechas inválido: ${rangoFechas}`,
+        },
+      }
+    }
 
     // Si tenemos el ID del profesional, usarlo directamente
     if (profesionalId) {
-      return this.obtenerTurnos(fechaDesde, fechaHasta || fechaDesde, profesionalId)
+      console.log(`[CLINIC-API] 🎯 Usando profesional ID directamente: ${profesionalId}`)
+      return this.obtenerTurnos(fechaDesde, fechaHasta, profesionalId)
     }
 
     // Si tenemos el nombre del profesional o especialidad, primero buscar el profesional
     if (profesional || especialidad) {
       const busqueda = profesional || especialidad || ""
+      console.log(`[CLINIC-API] 🔍 Buscando profesional primero: ${busqueda}`)
+
       const profesionalesResponse = await this.buscarProfesionales(busqueda)
 
       if (!profesionalesResponse.exito || !profesionalesResponse.datos || profesionalesResponse.datos.length === 0) {
+        console.log(`[CLINIC-API] ❌ No se encontraron profesionales`)
         return {
           exito: false,
           error: {
@@ -216,6 +280,7 @@ export class ClinicAPI {
 
       // Si hay múltiples profesionales, devolver la lista para que el usuario elija
       if (profesionalesResponse.datos.length > 1) {
+        console.log(`[CLINIC-API] 📋 Múltiples profesionales encontrados: ${profesionalesResponse.datos.length}`)
         return {
           exito: true,
           datos: {
@@ -228,11 +293,15 @@ export class ClinicAPI {
 
       // Si solo hay un profesional, usar su ID para buscar turnos
       const profesionalEncontrado = profesionalesResponse.datos[0]
-      return this.obtenerTurnos(fechaDesde, fechaHasta || fechaDesde, profesionalEncontrado.id)
+      console.log(
+        `[CLINIC-API] 🎯 Profesional único encontrado: ${profesionalEncontrado.nombre} (ID: ${profesionalEncontrado.id})`,
+      )
+      return this.obtenerTurnos(fechaDesde, fechaHasta, profesionalEncontrado.id)
     }
 
     // Si no tenemos ni profesional ni especialidad, buscar todos los turnos disponibles
-    return this.obtenerTurnos(fechaDesde, fechaHasta || fechaDesde)
+    console.log(`[CLINIC-API] 🌐 Buscando todos los turnos disponibles`)
+    return this.obtenerTurnos(fechaDesde, fechaHasta)
   }
 
   /**
@@ -259,6 +328,8 @@ export class ClinicAPI {
       comentarios?: string
     },
   ): Promise<ApiResponse<any>> {
+    console.log(`[CLINIC-API] 🔒 Reservando turno: ${agendaId}`)
+
     const params: Record<string, any> = {
       Agenda_Id: agendaId,
       Paciente_Telefono: pacienteData.telefono,
@@ -292,6 +363,7 @@ export function createClinicAPI(clienteId: string): ClinicAPI {
   if (!clienteId) {
     throw new Error("Se requiere el ID del cliente para crear una instancia de ClinicAPI")
   }
+  console.log(`[CLINIC-API] 🏗️ Creando instancia para cliente: ${clienteId}`)
   return new ClinicAPI(clienteId)
 }
 
@@ -307,13 +379,15 @@ export async function validateDNI(
   error?: string
 }> {
   try {
-    console.log(`[VALIDATE-DNI] Validando DNI: ${dni} para cliente: ${clienteId}`)
+    console.log(`[VALIDATE-DNI] ========== VALIDANDO DNI ==========`)
+    console.log(`[VALIDATE-DNI] DNI: ${dni}`)
+    console.log(`[VALIDATE-DNI] Cliente ID: ${clienteId}`)
 
     const clinicAPI = createClinicAPI(clienteId)
     const response = await clinicAPI.paciente_dni(dni)
 
     if (response.exito && response.datos) {
-      console.log(`[VALIDATE-DNI] ✅ DNI válido encontrado:`, response.datos)
+      console.log(`[VALIDATE-DNI] ✅ DNI válido encontrado`)
       return {
         success: true,
         data: response.datos,
@@ -326,7 +400,7 @@ export async function validateDNI(
       }
     }
   } catch (error) {
-    console.error(`[VALIDATE-DNI] Error al validar DNI:`, error)
+    console.error(`[VALIDATE-DNI] ❌ Error al validar DNI:`, error)
     return {
       success: false,
       error: error instanceof Error ? error.message : "Error desconocido",
@@ -339,10 +413,11 @@ export async function validateDNI(
  */
 export async function searchTurnos(
   params: {
-    rangoFechas: string
+    rangoFechas?: string
     profesional?: string
     especialidad?: string
     profesionalId?: string
+    dni?: string
   },
   clienteId: string,
 ): Promise<{
@@ -351,18 +426,30 @@ export async function searchTurnos(
   error?: string
 }> {
   try {
-    console.log(`[SEARCH-TURNOS] Buscando turnos para cliente: ${clienteId}`, params)
+    console.log(`[SEARCH-TURNOS] ========== BUSCANDO TURNOS ==========`)
+    console.log(`[SEARCH-TURNOS] Cliente ID: ${clienteId}`)
+    console.log(`[SEARCH-TURNOS] Parámetros:`, params)
+
+    // Validar que tenemos rangoFechas
+    let rangoFechas = params.rangoFechas
+    if (!rangoFechas) {
+      console.log(`[SEARCH-TURNOS] ⚠️ No se proporcionó rangoFechas, usando valor por defecto`)
+      const hoy = new Date().toISOString().split("T")[0]
+      const mañana = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0] // 7 días
+      rangoFechas = `${hoy} a ${mañana}`
+      console.log(`[SEARCH-TURNOS] 📅 Rango por defecto: ${rangoFechas}`)
+    }
 
     const clinicAPI = createClinicAPI(clienteId)
     const response = await clinicAPI.buscarTurnosDisponibles(
-      params.rangoFechas,
+      rangoFechas,
       params.profesional,
       params.especialidad,
       params.profesionalId,
     )
 
     if (response.exito && response.datos) {
-      console.log(`[SEARCH-TURNOS] ✅ Turnos encontrados:`, response.datos)
+      console.log(`[SEARCH-TURNOS] ✅ Turnos encontrados`)
       return {
         success: true,
         data: response.datos,
@@ -375,7 +462,7 @@ export async function searchTurnos(
       }
     }
   } catch (error) {
-    console.error(`[SEARCH-TURNOS] Error al buscar turnos:`, error)
+    console.error(`[SEARCH-TURNOS] ❌ Error al buscar turnos:`, error)
     return {
       success: false,
       error: error instanceof Error ? error.message : "Error desconocido",
