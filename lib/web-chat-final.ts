@@ -13,9 +13,29 @@ interface WebChatConfig {
   widgetEnabled: boolean
 }
 
-export async function processWebMessage(message: string, sessionId: string, config: WebChatConfig): Promise<string> {
+interface ProcessWebMessageParams {
+  message: string
+  sessionId: string
+  config: WebChatConfig
+  ip: string
+}
+
+export async function processWebMessage(params: ProcessWebMessageParams): Promise<string> {
   try {
+    const { message, sessionId, config, ip } = params
     console.log(`[WEB-CHAT-FINAL] Procesando mensaje para sessionId: ${sessionId}`)
+    console.log(`[WEB-CHAT-FINAL] Cliente: ${config.name}, IP: ${ip}`)
+
+    // Validar parámetros
+    if (!sessionId) {
+      throw new Error("SessionId es requerido")
+    }
+    if (!message) {
+      throw new Error("Message es requerido")
+    }
+    if (!config?.assistantId) {
+      throw new Error("Config.assistantId es requerido")
+    }
 
     // Limpiar sessionId de prefijos duplicados
     let cleanSessionId = sessionId
