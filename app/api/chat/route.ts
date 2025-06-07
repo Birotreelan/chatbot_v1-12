@@ -1,45 +1,34 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getConfigByClienteId } from "@/lib/db"
 import { processWebMessage } from "@/lib/web-chat"
+import { getConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
 
 export const dynamic = "force-dynamic"
 
 export async function POST(request: NextRequest) {
   try {
-    // Aplicar rate limiting
-    const ip = request.headers.get("x-forwarded-for") || "unknown"
-    const rateLimitResult = await rateLimit(`web_${ip}`, 10) // 10 mensajes por minuto
+    const body = await request.json()
+    const { message, cliente_id, session_id } = body
 
-    if (!rateLimitResult.success) {
-      return new NextResponse(
-        JSON.stringify({
-          error: "Demasiadas solicitudes. Por favor, intenta de nuevo más tarde.",
-          retryAfter: rateLimitResult.retryAfter,
-        }),
-        {
-          status: 429,
-          headers: {
-            "Content-Type": "application/json",
-            "Retry-After": String(rateLimitResult.retryAfter || 60),
-          },
-        },
+    console.log(`[CHAT API] Procesando mensaje para cliente_id: ${cliente_id}, session_id: ${session_id}`)
+
+    // Validar parámetros requeridos
+    if (!message || !cliente_id || !session_id) {
+      return NextResponse.json(
+        { error: "Faltan parámetros requeridos: message, cliente_id, session_id" },
+        { status: 400 },
       )
     }
 
-    // Obtener datos del cuerpo de la solicitud
-    const { message, cliente_id, session_id } = await request.json()
+    // Obtener IP del cliente para rate limiting
+    const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
 
-    // Validar datos
-    if (!message || !cliente_id || !session_id) {
-      return new NextResponse(
-        JSON.stringify({
-          error: "Se requieren los campos message, cliente_id y session_id",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
+    // Rate limiting por IP
+    const rateLimitResult = await rateLimit(`chat_ip_${ip}`, 10) // 10 mensajes por minuto por IP
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { error: "Demasiados mensajes. Por favor, espera un momento antes de enviar otro mensaje." },
+        { status: 429 },
       )
     }
 
@@ -47,29 +36,17 @@ export async function POST(request: NextRequest) {
     const config = await getConfigByClienteId(cliente_id)
 
     if (!config) {
-      return new NextResponse(
-        JSON.stringify({
-          error: "Configuración no encontrada para el cliente_id proporcionado",
-        }),
-        {
-          status: 404,
-          headers: { "Content-Type": "application/json" },
-        },
-      )
+      console.error(`[CHAT API] Configuración no encontrada para cliente_id: ${cliente_id}`)
+      return NextResponse.json({ error: "Configuración no encontrada" }, { status: 404 })
     }
 
     // Verificar si el widget está habilitado
-    if (!config.widgetEnabled) {
-      return new NextResponse(
-        JSON.stringify({
-          error: "El widget no está habilitado para este cliente",
-        }),
-        {
-          status: 403,
-          headers: { "Content-Type": "application/json" },
-        },
-      )
+    if (config.widgetEnabled === false) {
+      console.error(`[CHAT API] Widget deshabilitado para cliente_id: ${cliente_id}`)
+      return NextResponse.json({ error: "Widget no habilitado" }, { status: 403 })
     }
+
+    console.log(`[CHAT API] Configuración encontrada: ${config.displayName}`)
 
     // Procesar el mensaje
     const response = await processWebMessage({
@@ -79,27 +56,33 @@ export async function POST(request: NextRequest) {
       ip,
     })
 
-    // Devolver la respuesta
-    return new NextResponse(
-      JSON.stringify({
-        response,
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      },
-    )
-  } catch (error) {
-    console.error("Error al procesar mensaje del chat:", error)
+    console.log(`[CHAT API] Respuesta generada: ${response.length} caracteres`)
 
-    return new NextResponse(
-      JSON.stringify({
-        error: "Error interno del servidor",
-      }),
+    return NextResponse.json({
+      response,
+      success: true,
+    })
+  } catch (error) {
+    console.error("[CHAT API] Error al procesar mensaje:", error)
+
+    return NextResponse.json(
       {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
+        error: "Error interno del servidor",
+        details: error instanceof Error ? error.message : String(error),
       },
+      { status: 500 },
     )
   }
+}
+
+export async function GET() {
+  return NextResponse.json(
+    {
+      message: "Chat API funcionando",
+      endpoints: {
+        POST: "Enviar mensaje de chat",
+      },
+    },
+    { status: 200 },
+  )
 }
