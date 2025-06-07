@@ -29,13 +29,13 @@ export default async function WhatsAppConfigPage({ params }: WhatsAppConfigPageP
 
     return (
       <div className="container mx-auto py-8">
-        <h1 className="text-3xl font-bold mb-8">Editar Configuración de WhatsApp</h1>
-        <p className="text-sm text-gray-600 mb-4">
-          ID: {config.id} | Nombre: {config.displayName}
+        <h1 className="text-3xl font-bold mb-8">Configuración: {config.displayName}</h1>
+        <p className="text-sm text-gray-600 mb-6">
+          ID: {config.id} | Estado: {config.active ? "Activo" : "Inactivo"}
         </p>
 
         <Tabs defaultValue="config" className="w-full">
-          <TabsList className="mb-4">
+          <TabsList className="mb-6">
             <TabsTrigger value="config">Configuración</TabsTrigger>
             <TabsTrigger value="api-test">Prueba de API</TabsTrigger>
             <TabsTrigger value="cliente-id-test">Prueba de Cliente_Id</TabsTrigger>
@@ -68,7 +68,6 @@ export default async function WhatsAppConfigPage({ params }: WhatsAppConfigPageP
   } catch (error) {
     console.error(`[CONFIG PAGE] Error al cargar configuración para ID ${params.id}:`, error)
 
-    // Mostrar una página de error más informativa
     return (
       <div className="container mx-auto py-8">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
@@ -93,5 +92,4 @@ export default async function WhatsAppConfigPage({ params }: WhatsAppConfigPageP
   }
 }
 
-// Desactivamos la generación estática para esta página
 export const dynamic = "force-dynamic"
