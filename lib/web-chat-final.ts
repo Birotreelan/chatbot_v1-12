@@ -48,8 +48,8 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] 🌐 Usando thread: ${threadId}`)
     console.log(`[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
 
-    // Procesar mensaje
-    const response = await processMessageWithOpenAI(threadId, message, config.assistantId, config.id)
+    // Procesar mensaje - usar el cliente_id real de la configuración
+    const response = await processMessageWithOpenAI(threadId, message, config.assistantId, params.config.id)
     console.log(`[WEB-CHAT-FINAL] ✅ Respuesta: ${response.length} caracteres`)
 
     return response
@@ -272,7 +272,14 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
 
           case "search_turnos":
             console.log(`[WEB-CHAT-FINAL] Buscando turnos para DNI: ${args.dni} para cliente: ${clienteId}`)
-            const turnosResult = await searchTurnos({ dni: args.dni }, clienteId)
+            // La función searchTurnos espera parámetros específicos
+            const turnosResult = await searchTurnos(
+              {
+                rangoFechas: "hoy a mañana", // Rango por defecto
+                dni: args.dni,
+              },
+              clienteId,
+            )
             output = JSON.stringify(turnosResult)
             break
 
