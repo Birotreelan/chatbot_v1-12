@@ -150,6 +150,10 @@ export async function GET(req: Request) {
 }
 
 // Configuración para Vercel Cron
-export const config = {
-  schedule: "0 2 * * *", // Ejecutar a las 2:00 AM todos los días
-}
+export const dynamic = "force-dynamic"
+export const runtime = "nodejs"
+
+// Configuración de cron usando la nueva sintaxis
+export const maxDuration = 60 // 60 segundos máximo de ejecución (límite permitido)
+
+// La configuración del cron se debe hacer en vercel.json
