@@ -137,6 +137,42 @@ const FUNCTION_MESSAGES = {
   default: "Estoy procesando tu solicitud, dame un momento por favor.",
 }
 
+// Función para procesar mensajes individuales (para compatibilidad)
+export async function processIndividualMessage(
+  message: string,
+  phoneNumberId: string,
+  userPhoneNumber: string,
+  assistantId?: string,
+) {
+  console.log(`[OPENAI-TOOLS] Procesando mensaje individual para ${userPhoneNumber}`)
+
+  try {
+    // Obtener la configuración
+    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+    if (!config) {
+      throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
+    }
+
+    // Crear o obtener thread
+    const { getThread } = await import("@/lib/thread-manager")
+    const thread = await getThread(userPhoneNumber, config.id)
+
+    // Procesar con el asistente
+    const result = await getAssistantResponse(
+      thread.id,
+      message,
+      phoneNumberId,
+      assistantId || config.assistantId || process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
+    )
+
+    return result
+  } catch (error) {
+    console.error("[OPENAI-TOOLS] Error en processIndividualMessage:", error)
+    await logError("process_individual_message", error instanceof Error ? error : new Error(String(error)))
+    throw error
+  }
+}
+
 // Función para truncar respuestas largas de herramientas
 function truncateToolResponse(response: any, maxLength = 1000): any {
   const responseStr = JSON.stringify(response)

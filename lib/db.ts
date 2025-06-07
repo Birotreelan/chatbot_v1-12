@@ -551,3 +551,14 @@ export async function updateWhatsAppStats(
 export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig | null> {
   return getWhatsAppConfig(id)
 }
+
+// Función para obtener configuración por clienteId
+export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppConfig | null> {
+  try {
+    const configs = await getAllWhatsAppConfigs()
+    return configs.find((config) => config.cliente_id === clienteId)
+  } catch (error) {
+    console.error("Error al buscar configuración por cliente_id:", error)
+    return null
+  }
+}

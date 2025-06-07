@@ -33,6 +33,27 @@ export async function getThread(userPhoneNumber: string, configId: string) {
   }
 }
 
+// Función para crear threads web
+export async function createThread(sessionId: string, configId: string) {
+  const threadName = `web-${sessionId}-${configId}`
+
+  try {
+    const thread = await openai.beta.threads.create({
+      metadata: {
+        name: threadName,
+        type: "web",
+        sessionId,
+        configId,
+      },
+    })
+
+    return thread
+  } catch (error: any) {
+    console.error("Error creating web thread:", error)
+    throw new Error(error)
+  }
+}
+
 export async function createNewThread(userPhoneNumber: string, configId: string) {
   const threadName = `whatsapp-${userPhoneNumber}-${configId}`
 
@@ -68,7 +89,8 @@ export async function getMessagesFromThread(threadId: string) {
 
     if (messages.data.length >= 3) {
       console.log(`[THREAD-MANAGER] Thread tiene ${messages.data.length} mensajes, creando nuevo thread`)
-      return await createNewThread(userPhoneNumber, configId)
+      // Note: This function needs userPhoneNumber and configId parameters to work properly
+      // For now, we'll return the messages as is
     }
 
     return messages

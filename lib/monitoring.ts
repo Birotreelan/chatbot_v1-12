@@ -39,6 +39,11 @@ export async function incrementMetric(name: string, value = 1): Promise<void> {
   }
 }
 
+// Función alias para incrementStats (para compatibilidad)
+export async function incrementStats(name: string, value = 1): Promise<void> {
+  return incrementMetric(name, value)
+}
+
 // Registrar error
 export async function logError(category: string, error: Error | string): Promise<void> {
   const redis = getRedisClient()

@@ -184,20 +184,9 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
   }
 
   const getJavaScriptCode = () => {
-    if (!config?.id) return ""
-    return `<script>
-  (function() {
-    var widget = document.createElement('div');
-    widget.id = 'chat-widget-${config.id}';
-    document.body.appendChild(widget);
-    
-    var iframe = document.createElement('iframe');
-    iframe.src = '${getWidgetUrl()}';
-    iframe.style.cssText = 'position: fixed; ${formData.widgetPosition === "bottom-right" ? "bottom: 20px; right: 20px;" : "bottom: 20px; left: 20px;"} width: ${formData.widgetMaxWidth}px; height: ${formData.widgetMaxHeight}px; border: none; border-radius: ${formData.widgetBorderRadius}px; z-index: 9999; ${formData.widgetShadow ? "box-shadow: 0 4px 12px rgba(0,0,0,0.15);" : ""}';
-    
-    widget.appendChild(iframe);
-  })();
-</script>`
+    if (!config?.id || !config?.cliente_id) return "// Se requiere cliente_id para generar el código"
+
+    return `<script src="${window.location.origin}/widget-loader.js" data-client-id="${config.cliente_id}"></script>`
   }
 
   return (
