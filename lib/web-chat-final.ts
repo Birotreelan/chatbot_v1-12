@@ -160,7 +160,8 @@ async function processWithOpenAI(threadId: string, message: string, assistantId:
     })
     console.log(`[WEB-CHAT-FINAL] Run creado: ${run.id}`)
 
-    // Esperar completación
+    // Esperar completación - PASAR EXPLÍCITAMENTE LOS PARÁMETROS
+    console.log(`[WEB-CHAT-FINAL] Llamando waitForCompletion con threadId: ${threadId}, runId: ${run.id}`)
     const finalResponse = await waitForCompletion(threadId, run.id)
     return finalResponse
   } catch (error) {
@@ -171,26 +172,33 @@ async function processWithOpenAI(threadId: string, message: string, assistantId:
 
 async function waitForCompletion(threadId: string, runId: string): Promise<string> {
   try {
-    console.log(`[WEB-CHAT-FINAL] Esperando completación - Thread: ${threadId}, Run: ${runId}`)
+    console.log(`[WEB-CHAT-FINAL] ===== INICIO waitForCompletion =====`)
+    console.log(`[WEB-CHAT-FINAL] threadId recibido: "${threadId}"`)
+    console.log(`[WEB-CHAT-FINAL] runId recibido: "${runId}"`)
+    console.log(`[WEB-CHAT-FINAL] threadId type: ${typeof threadId}`)
+    console.log(`[WEB-CHAT-FINAL] runId type: ${typeof runId}`)
 
     // Validar parámetros antes de usar
-    if (!threadId || !threadId.startsWith("thread_")) {
-      throw new Error(`Thread ID inválido en waitForCompletion: ${threadId}`)
+    if (!threadId || typeof threadId !== "string" || !threadId.startsWith("thread_")) {
+      throw new Error(`Thread ID inválido en waitForCompletion: "${threadId}" (type: ${typeof threadId})`)
     }
-    if (!runId || !runId.startsWith("run_")) {
-      throw new Error(`Run ID inválido en waitForCompletion: ${runId}`)
+    if (!runId || typeof runId !== "string" || !runId.startsWith("run_")) {
+      throw new Error(`Run ID inválido en waitForCompletion: "${runId}" (type: ${typeof runId})`)
     }
 
     let attempts = 0
     const maxAttempts = 30
 
     while (attempts < maxAttempts) {
-      console.log(`[WEB-CHAT-FINAL] Intento ${attempts + 1}/${maxAttempts} - Verificando run: ${runId}`)
+      console.log(`[WEB-CHAT-FINAL] Intento ${attempts + 1}/${maxAttempts}`)
+      console.log(`[WEB-CHAT-FINAL] Antes de retrieve - threadId: "${threadId}", runId: "${runId}"`)
 
+      // Llamar a retrieve con parámetros explícitos
       const run = await openai.beta.threads.runs.retrieve(threadId, runId)
       console.log(`[WEB-CHAT-FINAL] Estado del run: ${run.status}`)
 
       if (run.status === "completed") {
+        console.log(`[WEB-CHAT-FINAL] Run completado, obteniendo mensajes...`)
         // Obtener mensajes
         const messages = await openai.beta.threads.messages.list(threadId, {
           limit: 1,
@@ -223,6 +231,7 @@ async function waitForCompletion(threadId: string, runId: string): Promise<strin
     return "La solicitud está tomando más tiempo del esperado. Por favor, intenta nuevamente."
   } catch (error) {
     console.error("[WEB-CHAT-FINAL] Error en waitForCompletion:", error)
+    console.error(`[WEB-CHAT-FINAL] Error details - threadId: "${threadId}", runId: "${runId}"`)
     throw error
   }
 }
@@ -230,6 +239,7 @@ async function waitForCompletion(threadId: string, runId: string): Promise<strin
 async function handleToolCalls(threadId: string, runId: string, run: any): Promise<void> {
   try {
     console.log(`[WEB-CHAT-FINAL] Procesando tool calls para run: ${runId}`)
+    console.log(`[WEB-CHAT-FINAL] handleToolCalls - threadId: "${threadId}", runId: "${runId}"`)
 
     const toolOutputs = []
 
@@ -273,6 +283,7 @@ async function handleToolCalls(threadId: string, runId: string, run: any): Promi
 
     // Enviar tool outputs
     console.log(`[WEB-CHAT-FINAL] Enviando ${toolOutputs.length} tool outputs`)
+    console.log(`[WEB-CHAT-FINAL] submitToolOutputs - threadId: "${threadId}", runId: "${runId}"`)
     await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
       tool_outputs: toolOutputs,
     })
