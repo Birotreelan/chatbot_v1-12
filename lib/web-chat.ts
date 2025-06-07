@@ -24,22 +24,26 @@ export async function processWebMessage({ message, sessionId, config, ip }: Proc
     // Crear o obtener thread para esta sesión web
     console.log(`[WEB-CHAT] Creando/obteniendo thread para sesión: ${sessionId}`)
 
+    // Limpiar sessionId para evitar duplicación
+    const cleanSessionId = sessionId.startsWith("web_") ? sessionId.slice(4) : sessionId
+    const webSessionId = `web_${cleanSessionId}`
+
+    console.log(`[WEB-CHAT] SessionId original: ${sessionId}`)
+    console.log(`[WEB-CHAT] SessionId limpio: ${cleanSessionId}`)
+    console.log(`[WEB-CHAT] SessionId web: ${webSessionId}`)
+
     let thread
     try {
-      // Usar directamente el sessionId sin duplicar el prefijo "web_"
-      const cleanSessionId = sessionId.startsWith("web_") ? sessionId : `web_${sessionId}`
-      thread = await getWebThread(cleanSessionId, config.id)
+      thread = await getWebThread(webSessionId, config.id)
     } catch (error) {
-      console.log(`[WEB-CHAT] Thread no encontrado, creando nuevo thread para sesión: ${sessionId}`)
-      const cleanSessionId = sessionId.startsWith("web_") ? sessionId : `web_${sessionId}`
-      thread = await createThread(cleanSessionId, config.id)
+      console.log(`[WEB-CHAT] Thread no encontrado, creando nuevo thread para sesión: ${webSessionId}`)
+      thread = await createThread(webSessionId, config.id)
     }
 
     console.log(`[WEB-CHAT] Thread obtenido/creado: ${thread.id}`)
 
     // Preparar el mensaje con contexto del cliente (sin duplicar web_)
-    const cleanSessionId = sessionId.startsWith("web_") ? sessionId : `web_${sessionId}`
-    const contextualMessage = `[SISTEMA] PacienteCelular: ${cleanSessionId}
+    const contextualMessage = `[SISTEMA] PacienteCelular: ${webSessionId}
 [SISTEMA] Cliente_Id: ${config.cliente_id}
 [SISTEMA] Canal: Widget Web
 [SISTEMA] Configuración: ${config.displayName}

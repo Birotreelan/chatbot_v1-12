@@ -14,8 +14,15 @@ export async function getThread(userIdentifier: string, configId: string) {
   const isWebThread = userIdentifier.startsWith("web_")
   const threadName = isWebThread ? `web-${userIdentifier}-${configId}` : `whatsapp-${userIdentifier}-${configId}`
 
+  console.log(`[THREAD-MANAGER] Buscando thread: ${threadName} (${isWebThread ? "web" : "whatsapp"})`)
+  console.log(`[THREAD-MANAGER] UserIdentifier: ${userIdentifier}`)
+  console.log(`[THREAD-MANAGER] ConfigId: ${configId}`)
+
   try {
-    console.log(`[THREAD-MANAGER] Buscando thread: ${threadName} (${isWebThread ? "web" : "whatsapp"})`)
+    // Verificar que OpenAI esté correctamente inicializado
+    if (!openai || !openai.beta || !openai.beta.threads) {
+      throw new Error("OpenAI client not properly initialized")
+    }
 
     // Para threads web, intentar buscar por metadata primero
     if (isWebThread) {
@@ -50,6 +57,9 @@ export async function getThread(userIdentifier: string, configId: string) {
     return await createNewThread(userIdentifier, configId)
   } catch (error: any) {
     console.error("[THREAD-MANAGER] Error getting thread:", error)
+    console.error("[THREAD-MANAGER] OpenAI instance:", !!openai)
+    console.error("[THREAD-MANAGER] OpenAI beta:", !!openai?.beta)
+    console.error("[THREAD-MANAGER] OpenAI threads:", !!openai?.beta?.threads)
     throw new Error(`Error getting thread: ${error.message}`)
   }
 }
