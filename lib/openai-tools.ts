@@ -969,56 +969,105 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
     throw new Error(errorMessage)
   }
 
-  let run = await openai.beta.threads.runs.retrieve(threadId, runId)
-  console.log(`[OPENAI-WEB] Retrieved run status after initial retrieve: ${run.status}`)
+  try {
+    // Crear una nueva instancia del cliente OpenAI para esta llamada específica
+    // Esto asegura que no tengamos problemas de estado compartido
+    const freshOpenAI = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
 
-  while (run.status === "queued" || run.status === "in_progress") {
-    await wait(1000)
-    console.log(`[OPENAI-WEB] Polling run. Thread ID: '${threadId}', Run ID: '${runId}'`)
-    run = await openai.beta.threads.runs.retrieve(threadId, runId)
-    console.log(`[OPENAI-WEB] Polled run status: ${run.status}`)
-  }
+    // Usar nombres de parámetros explícitos para evitar confusiones
+    console.log(
+      `[OPENAI-WEB] Llamando a retrieve con parámetros explícitos. thread_id: '${threadId}', run_id: '${runId}'`,
+    )
+    let run = await freshOpenAI.beta.threads.runs.retrieve(threadId, runId)
+    console.log(`[OPENAI-WEB] Estado del run después de la primera recuperación: ${run.status}`)
 
-  if (run.status === "requires_action") {
-    if (run.required_action?.type === "submit_tool_outputs") {
-      const toolCalls = run.required_action.submit_tool_outputs.tool_calls
-      const toolOutputs = []
+    while (run.status === "queued" || run.status === "in_progress") {
+      await wait(1000)
+      console.log(`[OPENAI-WEB] Consultando estado del run. Thread ID: '${threadId}', Run ID: '${runId}'`)
 
-      for (const toolCall of toolCalls) {
-        const functionName = toolCall.function.name
-        const functionArgs = JSON.parse(toolCall.function.arguments)
-
-        console.log(`[OPENAI-WEB] 🔧 Ejecutando herramienta: ${functionName} con args: ${JSON.stringify(functionArgs)}`)
-
-        const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
-        console.log(`[OPENAI-WEB] 🔧 Resultado herramienta ${functionName}: ${JSON.stringify(toolResult)}`)
-
-        toolOutputs.push({
-          tool_call_id: toolCall.id,
-          output: JSON.stringify(toolResult),
-        })
-      }
-
-      console.log(`[OPENAI-WEB] Submitting tool outputs. Thread ID: '${threadId}', Run ID: '${runId}'`)
-      await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
-        tool_outputs: toolOutputs,
-      })
-      console.log(`[OPENAI-WEB] Tool outputs submitted. Continuing processing.`)
-
-      // Continuar procesando
-      await processWebRunOnly(openai, threadId, runId, clienteId)
+      // Usar nombres de parámetros explícitos nuevamente
+      run = await freshOpenAI.beta.threads.runs.retrieve(threadId, runId)
+      console.log(`[OPENAI-WEB] Estado del run consultado: ${run.status}`)
     }
-  } else if (run.status === "failed") {
-    console.error(
-      `[OPENAI-WEB] Run failed. Thread ID: '${threadId}', Run ID: '${runId}', Error: ${run.last_error?.message}`,
-    )
-    throw new Error(`Run falló: ${run.last_error?.message}`)
-  } else if (run.status === "completed") {
-    console.log(`[OPENAI-WEB] ✅ Run web completado. Thread ID: '${threadId}', Run ID: '${runId}'`)
-  } else {
-    console.warn(
-      `[OPENAI-WEB] Run ended with unexpected status: ${run.status}. Thread ID: '${threadId}', Run ID: '${runId}'`,
-    )
+
+    if (run.status === "requires_action") {
+      if (run.required_action?.type === "submit_tool_outputs") {
+        const toolCalls = run.required_action.submit_tool_outputs.tool_calls
+        const toolOutputs = []
+
+        for (const toolCall of toolCalls) {
+          const functionName = toolCall.function.name
+          const functionArgs = JSON.parse(toolCall.function.arguments)
+
+          console.log(
+            `[OPENAI-WEB] 🔧 Ejecutando herramienta: ${functionName} con args: ${JSON.stringify(functionArgs)}`,
+          )
+
+          const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
+          console.log(`[OPENAI-WEB] 🔧 Resultado herramienta ${functionName}: ${JSON.stringify(toolResult)}`)
+
+          toolOutputs.push({
+            tool_call_id: toolCall.id,
+            output: JSON.stringify(toolResult),
+          })
+        }
+
+        console.log(`[OPENAI-WEB] Enviando resultados de herramientas. Thread ID: '${threadId}', Run ID: '${runId}'`)
+
+        // Usar nombres de parámetros explícitos para submitToolOutputs también
+        await freshOpenAI.beta.threads.runs.submitToolOutputs(threadId, runId, {
+          tool_outputs: toolOutputs,
+        })
+        console.log(`[OPENAI-WEB] Resultados de herramientas enviados. Continuando procesamiento.`)
+
+        // Continuar procesando con el mismo cliente fresco
+        await processWebRunOnly(freshOpenAI, threadId, runId, clienteId)
+      }
+    } else if (run.status === "failed") {
+      console.error(
+        `[OPENAI-WEB] Run falló. Thread ID: '${threadId}', Run ID: '${runId}', Error: ${run.last_error?.message}`,
+      )
+      throw new Error(`Run falló: ${run.last_error?.message}`)
+    } else if (run.status === "completed") {
+      console.log(`[OPENAI-WEB] ✅ Run web completado. Thread ID: '${threadId}', Run ID: '${runId}'`)
+    } else {
+      console.warn(
+        `[OPENAI-WEB] Run terminó con estado inesperado: ${run.status}. Thread ID: '${threadId}', Run ID: '${runId}'`,
+      )
+    }
+  } catch (error) {
+    console.error(`[OPENAI-WEB] Error en processWebRunOnly: ${error}`)
+
+    // Verificar si es el mismo error de thread_id
+    if (error instanceof Error && error.message.includes("Invalid 'thread_id': 'undefined'")) {
+      console.error(
+        `[OPENAI-WEB] CRÍTICO: Seguimos obteniendo el error de thread_id undefined a pesar de tener un threadId válido: '${threadId}'`,
+      )
+
+      // Intentar una llamada directa a la API como último recurso
+      try {
+        console.log(`[OPENAI-WEB] Intentando llamada directa a la API como alternativa...`)
+        const directOpenAI = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY,
+        })
+
+        // Forzar que los parámetros se pasen correctamente
+        const params = {
+          thread_id: threadId,
+          run_id: runId,
+        }
+
+        console.log(`[OPENAI-WEB] Llamada directa a la API con parámetros:`, params)
+        await directOpenAI.beta.threads.runs.retrieve(params.thread_id, params.run_id)
+        console.log(`[OPENAI-WEB] ¡Llamada directa a la API exitosa!`)
+      } catch (directError) {
+        console.error(`[OPENAI-WEB] La llamada directa a la API también falló:`, directError)
+      }
+    }
+
+    throw error
   }
 }
 
