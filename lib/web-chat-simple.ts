@@ -26,7 +26,7 @@ export async function processWebMessage({ message, sessionId, config, ip }: Proc
     }
 
     // Limpiar sessionId para evitar duplicación
-    const cleanSessionId = sessionId.startsWith("web_") ? sessionId.slice(4) : sessionId
+    const cleanSessionId = sessionId.replace(/^web_/, "") // Usar replace en lugar de slice
     const webSessionId = `web_${cleanSessionId}`
 
     console.log(`[WEB-CHAT-SIMPLE] SessionId original: ${sessionId}`)
@@ -127,6 +127,8 @@ async function processWebAssistantMessage(
 ): Promise<string> {
   console.log(`[WEB-ASSISTANT-SIMPLE] 🌐 Procesando mensaje web para thread: ${threadId}`)
   console.log(`[WEB-ASSISTANT-SIMPLE] 🚫 GARANTÍA: Este flujo NO enviará mensajes a WhatsApp`)
+  console.log(`[WEB-ASSISTANT-SIMPLE] Assistant ID: ${assistantId}`)
+  console.log(`[WEB-ASSISTANT-SIMPLE] Cliente ID: ${clienteId}`)
 
   // Validar parámetros
   if (!threadId || threadId === "undefined") {
@@ -154,6 +156,7 @@ async function processWebAssistantMessage(
     })
 
     console.log(`[WEB-ASSISTANT-SIMPLE] Run creado: ${run.id}`)
+    console.log(`[WEB-ASSISTANT-SIMPLE] Verificando threadId antes de waitForRunCompletion: ${threadId}`)
 
     // Esperar a que el run se complete
     await waitForRunCompletion(threadId, run.id, clienteId)
@@ -175,8 +178,18 @@ async function processWebAssistantMessage(
 
 // Función para esperar la completación del run
 async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<void> {
+  // Validar parámetros antes de usar
+  if (!threadId || threadId === "undefined") {
+    throw new Error(`Thread ID inválido en waitForRunCompletion: ${threadId}`)
+  }
+
+  if (!runId || runId === "undefined") {
+    throw new Error(`Run ID inválido en waitForRunCompletion: ${runId}`)
+  }
+
   console.log(`[WEB-ASSISTANT-SIMPLE] Esperando completación del run: ${runId}`)
-  console.log(`[WEB-ASSISTANT-SIMPLE] Thread ID: ${threadId}`)
+  console.log(`[WEB-ASSISTANT-SIMPLE] Thread ID válido: ${threadId}`)
+  console.log(`[WEB-ASSISTANT-SIMPLE] Cliente ID: ${clienteId}`)
 
   let run = await openai.beta.threads.runs.retrieve(threadId, runId)
   let pollCount = 0
@@ -186,6 +199,12 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
     console.log(`[WEB-ASSISTANT-SIMPLE] Poll ${pollCount}: Estado del run: ${run.status}`)
 
     await new Promise((resolve) => setTimeout(resolve, 1000))
+
+    // Validar threadId antes de cada llamada
+    if (!threadId || threadId === "undefined") {
+      throw new Error(`Thread ID se volvió inválido durante polling: ${threadId}`)
+    }
+
     run = await openai.beta.threads.runs.retrieve(threadId, runId)
   }
 
@@ -219,6 +238,11 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
       }
 
       console.log(`[WEB-ASSISTANT-SIMPLE] Enviando resultados de herramientas a OpenAI`)
+
+      // Validar threadId antes de enviar tool outputs
+      if (!threadId || threadId === "undefined") {
+        throw new Error(`Thread ID inválido antes de submitToolOutputs: ${threadId}`)
+      }
 
       // Enviar los resultados de las herramientas
       await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
