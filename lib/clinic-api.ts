@@ -294,3 +294,91 @@ export function createClinicAPI(clienteId: string): ClinicAPI {
   }
   return new ClinicAPI(clienteId)
 }
+
+/**
+ * Valida un DNI usando la API de la clínica
+ */
+export async function validateDNI(
+  dni: string,
+  clienteId: string,
+): Promise<{
+  success: boolean
+  data?: any
+  error?: string
+}> {
+  try {
+    console.log(`[VALIDATE-DNI] Validando DNI: ${dni} para cliente: ${clienteId}`)
+
+    const clinicAPI = createClinicAPI(clienteId)
+    const response = await clinicAPI.paciente_dni(dni)
+
+    if (response.exito && response.datos) {
+      console.log(`[VALIDATE-DNI] ✅ DNI válido encontrado:`, response.datos)
+      return {
+        success: true,
+        data: response.datos,
+      }
+    } else {
+      console.log(`[VALIDATE-DNI] ❌ DNI no encontrado o error:`, response.error)
+      return {
+        success: false,
+        error: response.error?.mensaje || "DNI no encontrado",
+      }
+    }
+  } catch (error) {
+    console.error(`[VALIDATE-DNI] Error al validar DNI:`, error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
+  }
+}
+
+/**
+ * Busca turnos disponibles usando la API de la clínica
+ */
+export async function searchTurnos(
+  params: {
+    rangoFechas: string
+    profesional?: string
+    especialidad?: string
+    profesionalId?: string
+  },
+  clienteId: string,
+): Promise<{
+  success: boolean
+  data?: any
+  error?: string
+}> {
+  try {
+    console.log(`[SEARCH-TURNOS] Buscando turnos para cliente: ${clienteId}`, params)
+
+    const clinicAPI = createClinicAPI(clienteId)
+    const response = await clinicAPI.buscarTurnosDisponibles(
+      params.rangoFechas,
+      params.profesional,
+      params.especialidad,
+      params.profesionalId,
+    )
+
+    if (response.exito && response.datos) {
+      console.log(`[SEARCH-TURNOS] ✅ Turnos encontrados:`, response.datos)
+      return {
+        success: true,
+        data: response.datos,
+      }
+    } else {
+      console.log(`[SEARCH-TURNOS] ❌ No se encontraron turnos o error:`, response.error)
+      return {
+        success: false,
+        error: response.error?.mensaje || "No se encontraron turnos disponibles",
+      }
+    }
+  } catch (error) {
+    console.error(`[SEARCH-TURNOS] Error al buscar turnos:`, error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
+  }
+}

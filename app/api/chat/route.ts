@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { processWebMessage } from "@/lib/web-chat-simple"
+import { processWebMessage } from "@/lib/web-chat-final"
 import { getConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
 
