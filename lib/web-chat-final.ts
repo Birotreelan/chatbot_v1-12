@@ -49,7 +49,7 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
 
     // Procesar mensaje
-    const response = await processMessageWithOpenAI(threadId, message, config.assistantId)
+    const response = await processMessageWithOpenAI(threadId, message, config.assistantId, config.id)
     console.log(`[WEB-CHAT-FINAL] ✅ Respuesta: ${response.length} caracteres`)
 
     return response
@@ -92,7 +92,12 @@ async function createWebThread(identifier: string): Promise<string> {
   }
 }
 
-async function processMessageWithOpenAI(threadId: string, message: string, assistantId: string): Promise<string> {
+async function processMessageWithOpenAI(
+  threadId: string,
+  message: string,
+  assistantId: string,
+  clienteId: string,
+): Promise<string> {
   try {
     // 1. Añadir mensaje al thread
     console.log(`[WEB-CHAT-FINAL] Añadiendo mensaje al thread: ${threadId}`)
@@ -168,7 +173,7 @@ async function processMessageWithOpenAI(threadId: string, message: string, assis
     console.log(`[WEB-CHAT-FINAL] Run creado: ${runData.id}`)
 
     // 3. Esperar completación
-    const finalResponse = await waitForRunCompletion(threadId, runData.id)
+    const finalResponse = await waitForRunCompletion(threadId, runData.id, clienteId)
     return finalResponse
   } catch (error) {
     console.error("[WEB-CHAT-FINAL] Error procesando mensaje:", error)
@@ -176,7 +181,7 @@ async function processMessageWithOpenAI(threadId: string, message: string, assis
   }
 }
 
-async function waitForRunCompletion(threadId: string, runId: string): Promise<string> {
+async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
   let attempts = 0
   const maxAttempts = 30
 
@@ -227,7 +232,7 @@ async function waitForRunCompletion(threadId: string, runId: string): Promise<st
         return "Respuesta procesada correctamente."
       } else if (run.status === "requires_action") {
         console.log(`[WEB-CHAT-FINAL] Run requiere acción - procesando tool calls`)
-        await handleToolCalls(threadId, runId, run)
+        await handleToolCalls(threadId, runId, run, clienteId)
       } else if (run.status === "failed" || run.status === "cancelled" || run.status === "expired") {
         console.error(`[WEB-CHAT-FINAL] Run falló con estado: ${run.status}`)
         return "Lo siento, ha ocurrido un error procesando tu solicitud."
@@ -245,7 +250,7 @@ async function waitForRunCompletion(threadId: string, runId: string): Promise<st
   return "La solicitud está tomando más tiempo del esperado. Por favor, intenta nuevamente."
 }
 
-async function handleToolCalls(threadId: string, runId: string, run: any): Promise<void> {
+async function handleToolCalls(threadId: string, runId: string, run: any, clienteId: string): Promise<void> {
   try {
     console.log(`[WEB-CHAT-FINAL] Procesando ${run.required_action.submit_tool_outputs.tool_calls.length} tool calls`)
 
@@ -260,14 +265,14 @@ async function handleToolCalls(threadId: string, runId: string, run: any): Promi
 
         switch (toolCall.function.name) {
           case "validate_dni":
-            console.log(`[WEB-CHAT-FINAL] Validando DNI: ${args.dni}`)
-            const dniResult = await validateDNI(args.dni)
+            console.log(`[WEB-CHAT-FINAL] Validando DNI: ${args.dni} para cliente: ${clienteId}`)
+            const dniResult = await validateDNI(args.dni, clienteId)
             output = JSON.stringify(dniResult)
             break
 
           case "search_turnos":
-            console.log(`[WEB-CHAT-FINAL] Buscando turnos para DNI: ${args.dni}`)
-            const turnosResult = await searchTurnos(args.dni)
+            console.log(`[WEB-CHAT-FINAL] Buscando turnos para DNI: ${args.dni} para cliente: ${clienteId}`)
+            const turnosResult = await searchTurnos({ dni: args.dni }, clienteId)
             output = JSON.stringify(turnosResult)
             break
 
