@@ -954,13 +954,29 @@ export async function processWebOnlyMessage(
 
 // Función para procesar run web sin enviar a WhatsApp
 async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string, clienteId: string): Promise<void> {
-  console.log(`[OPENAI-WEB] Procesando run web: ${runId}`)
+  console.log(
+    `[OPENAI-WEB] processWebRunOnly ENTER. Thread ID: '${threadId}' (Type: ${typeof threadId}), Run ID: '${runId}' (Type: ${typeof runId}), Cliente ID: '${clienteId}'`,
+  )
+
+  if (typeof threadId !== "string" || !threadId.startsWith("thread_")) {
+    const errorMessage = `[OPENAI-WEB] CRITICAL: threadId is invalid before retrieve. Value: '${threadId}', Type: ${typeof threadId}`
+    console.error(errorMessage)
+    throw new Error(errorMessage)
+  }
+  if (typeof runId !== "string" || !runId.startsWith("run_")) {
+    const errorMessage = `[OPENAI-WEB] CRITICAL: runId is invalid before retrieve. Value: '${runId}', Type: ${typeof runId}`
+    console.error(errorMessage)
+    throw new Error(errorMessage)
+  }
 
   let run = await openai.beta.threads.runs.retrieve(threadId, runId)
+  console.log(`[OPENAI-WEB] Retrieved run status after initial retrieve: ${run.status}`)
 
   while (run.status === "queued" || run.status === "in_progress") {
     await wait(1000)
+    console.log(`[OPENAI-WEB] Polling run. Thread ID: '${threadId}', Run ID: '${runId}'`)
     run = await openai.beta.threads.runs.retrieve(threadId, runId)
+    console.log(`[OPENAI-WEB] Polled run status: ${run.status}`)
   }
 
   if (run.status === "requires_action") {
@@ -972,9 +988,10 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         const functionName = toolCall.function.name
         const functionArgs = JSON.parse(toolCall.function.arguments)
 
-        console.log(`[OPENAI-WEB] 🔧 Ejecutando herramienta: ${functionName}`)
+        console.log(`[OPENAI-WEB] 🔧 Ejecutando herramienta: ${functionName} con args: ${JSON.stringify(functionArgs)}`)
 
         const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
+        console.log(`[OPENAI-WEB] 🔧 Resultado herramienta ${functionName}: ${JSON.stringify(toolResult)}`)
 
         toolOutputs.push({
           tool_call_id: toolCall.id,
@@ -982,18 +999,27 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         })
       }
 
+      console.log(`[OPENAI-WEB] Submitting tool outputs. Thread ID: '${threadId}', Run ID: '${runId}'`)
       await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
         tool_outputs: toolOutputs,
       })
+      console.log(`[OPENAI-WEB] Tool outputs submitted. Continuing processing.`)
 
       // Continuar procesando
       await processWebRunOnly(openai, threadId, runId, clienteId)
     }
   } else if (run.status === "failed") {
+    console.error(
+      `[OPENAI-WEB] Run failed. Thread ID: '${threadId}', Run ID: '${runId}', Error: ${run.last_error?.message}`,
+    )
     throw new Error(`Run falló: ${run.last_error?.message}`)
+  } else if (run.status === "completed") {
+    console.log(`[OPENAI-WEB] ✅ Run web completado. Thread ID: '${threadId}', Run ID: '${runId}'`)
+  } else {
+    console.warn(
+      `[OPENAI-WEB] Run ended with unexpected status: ${run.status}. Thread ID: '${threadId}', Run ID: '${runId}'`,
+    )
   }
-
-  console.log(`[OPENAI-WEB] ✅ Run web completado sin enviar a WhatsApp`)
 }
 
 // Importar getAssistantResponse desde lib/assistant.ts
