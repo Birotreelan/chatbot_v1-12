@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getConfigByClienteId } from "@/lib/db"
+import { DEMO_CONFIG, ensureDemoConfig } from "@/lib/demo-config"
 
 export const dynamic = "force-dynamic"
 
@@ -13,15 +14,23 @@ export async function GET(request: NextRequest) {
     }
 
     // Buscar la configuración por cliente_id
-    const config = await getConfigByClienteId(clienteId)
+    let config = await getConfigByClienteId(clienteId)
+
+    // Si no se encuentra y es el cliente de demo, crear/usar configuración por defecto
+    if (!config && clienteId === "demo-client") {
+      await ensureDemoConfig()
+      config = DEMO_CONFIG as any
+    }
 
     if (!config) {
       return new NextResponse("Configuración no encontrada para el cliente_id proporcionado", { status: 404 })
     }
 
-    // Verificar si el widget está habilitado
-    if (!config.widgetEnabled) {
-      return new NextResponse("El widget no está habilitado para este cliente", { status: 403 })
+    // Para la demo, siempre permitir el widget
+    if (clienteId === "demo-client" || !config.widgetEnabled) {
+      if (clienteId !== "demo-client") {
+        return new NextResponse("El widget no está habilitado para este cliente", { status: 403 })
+      }
     }
 
     // Generar el HTML del widget
