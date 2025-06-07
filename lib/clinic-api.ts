@@ -162,9 +162,26 @@ export class ClinicAPI {
     busqueda: string,
   ): Promise<ApiResponse<{ id: string; nombre: string; especialidad?: string }[]>> {
     console.log(`[CLINIC-API] 🔍 Buscando profesionales: ${busqueda}`)
-    return this.fetchProxyApi<{ id: string; nombre: string; especialidad?: string }[]>("get_profesionales", {
-      busqueda,
-    })
+    const response = await this.fetchProxyApi<any>("get_profesionales", { busqueda })
+
+    // Transformar la respuesta para usar el formato esperado
+    if (response.exito && response.datos && response.datos.profesionales) {
+      console.log(`[CLINIC-API] 🔄 Transformando datos de profesionales`)
+      const profesionalesTransformados = response.datos.profesionales.map((p: any) => ({
+        id: p.Id,
+        nombre: p.Nombre_Completo, // ✅ MAPEAR CORRECTAMENTE
+        especialidad: p.Especialidad,
+      }))
+
+      console.log(`[CLINIC-API] ✅ Profesionales transformados:`, profesionalesTransformados)
+
+      return {
+        exito: true,
+        datos: profesionalesTransformados,
+      }
+    }
+
+    return response
   }
 
   /**

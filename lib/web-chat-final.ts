@@ -13,11 +13,12 @@ interface ProcessWebMessageParams {
   sessionId: string
   config: WebChatConfig
   ip: string
-  clienteId: string // ✅ Cliente ID real
+  clienteId: string
 }
 
-// Cache simple para threads web
-const webThreadsCache = new Map<string, string>()
+// Cache simple para threads web - con TTL para evitar threads eternos
+const webThreadsCache = new Map<string, { threadId: string; lastUsed: number }>()
+const THREAD_TTL = 30 * 60 * 1000 // 30 minutos
 
 export async function processWebMessage(params: ProcessWebMessageParams): Promise<string> {
   try {
@@ -49,18 +50,22 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
       cleanSessionId = cleanSessionId.substring(4)
     }
 
-    const threadKey = `${cleanSessionId}_${config.id}`
+    // ✅ CREAR THREAD KEY ÚNICO POR CONVERSACIÓN
+    const threadKey = `${cleanSessionId}_${config.id}_${Date.now()}`
     console.log(`[WEB-CHAT-FINAL] 🔑 Thread key generado: ${threadKey}`)
 
-    // Obtener o crear thread
-    let threadId = webThreadsCache.get(threadKey)
-    if (!threadId) {
-      console.log(`[WEB-CHAT-FINAL] 🆕 Creando nuevo thread para: ${threadKey}`)
-      threadId = await createWebThread(threadKey)
-      webThreadsCache.set(threadKey, threadId)
-    } else {
-      console.log(`[WEB-CHAT-FINAL] ♻️ Reutilizando thread existente: ${threadId}`)
-    }
+    // Limpiar threads expirados
+    cleanExpiredThreads()
+
+    // ✅ SIEMPRE CREAR UN NUEVO THREAD PARA EVITAR DOBLE SALUDO
+    console.log(`[WEB-CHAT-FINAL] 🆕 Creando nuevo thread para evitar historial previo`)
+    const threadId = await createWebThread(threadKey)
+
+    // Guardar en cache con timestamp
+    webThreadsCache.set(threadKey, {
+      threadId,
+      lastUsed: Date.now(),
+    })
 
     console.log(`[WEB-CHAT-FINAL] 🌐 Usando thread: ${threadId}`)
     console.log(`[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
@@ -77,6 +82,27 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
   } catch (error) {
     console.error("[WEB-CHAT-FINAL] ❌ Error en processWebMessage:", error)
     return "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente."
+  }
+}
+
+// Función para limpiar threads expirados
+function cleanExpiredThreads() {
+  const now = Date.now()
+  const expiredKeys: string[] = []
+
+  for (const [key, value] of webThreadsCache.entries()) {
+    if (now - value.lastUsed > THREAD_TTL) {
+      expiredKeys.push(key)
+    }
+  }
+
+  for (const key of expiredKeys) {
+    webThreadsCache.delete(key)
+    console.log(`[WEB-CHAT-FINAL] 🧹 Thread expirado eliminado: ${key}`)
+  }
+
+  if (expiredKeys.length > 0) {
+    console.log(`[WEB-CHAT-FINAL] 🧹 Limpieza completada: ${expiredKeys.length} threads eliminados`)
   }
 }
 
