@@ -1,7 +1,5 @@
 import { OpenAI } from "openai"
 
-const MAX_MESSAGES_PER_THREAD = 5 // Reducido de 10
-
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
@@ -17,6 +15,8 @@ export async function getThread(userIdentifier: string, configId: string) {
   const threadName = isWebThread ? `web-${userIdentifier}-${configId}` : `whatsapp-${userIdentifier}-${configId}`
 
   try {
+    console.log(`[THREAD-MANAGER] Buscando thread: ${threadName} (${isWebThread ? "web" : "whatsapp"})`)
+
     // Para threads web, intentar buscar por metadata primero
     if (isWebThread) {
       const threads = await openai.beta.threads.list({
@@ -39,16 +39,18 @@ export async function getThread(userIdentifier: string, configId: string) {
 
       for (const thread of threads.data) {
         if (thread.metadata?.name === threadName) {
+          console.log(`[THREAD-MANAGER] Thread WhatsApp encontrado: ${thread.id}`)
           return thread
         }
       }
     }
 
     // Si no se encuentra, crear uno nuevo
+    console.log(`[THREAD-MANAGER] Thread no encontrado, creando nuevo: ${threadName}`)
     return await createNewThread(userIdentifier, configId)
   } catch (error: any) {
-    console.error("Error getting thread:", error)
-    throw new Error(error)
+    console.error("[THREAD-MANAGER] Error getting thread:", error)
+    throw new Error(`Error getting thread: ${error.message}`)
   }
 }
 
@@ -57,6 +59,8 @@ export async function createThread(sessionId: string, configId: string) {
   const threadName = `web-${sessionId}-${configId}`
 
   try {
+    console.log(`[THREAD-MANAGER] Creando thread web: ${threadName}`)
+
     const thread = await openai.beta.threads.create({
       metadata: {
         name: threadName,
@@ -66,10 +70,11 @@ export async function createThread(sessionId: string, configId: string) {
       },
     })
 
+    console.log(`[THREAD-MANAGER] Thread web creado: ${thread.id}`)
     return thread
   } catch (error: any) {
-    console.error("Error creating web thread:", error)
-    throw new Error(error)
+    console.error("[THREAD-MANAGER] Error creating web thread:", error)
+    throw new Error(`Error creating web thread: ${error.message}`)
   }
 }
 

@@ -79,15 +79,24 @@ async function processWebAssistantResponse(
   assistantId: string,
   clienteId: string,
 ): Promise<string> {
+  console.log(`[WEB-ASSISTANT] 🌐 Procesando mensaje web para thread: ${threadId}`)
+  console.log(`[WEB-ASSISTANT] 🚫 GARANTÍA: Este flujo NO enviará mensajes a WhatsApp`)
+
+  // Validar parámetros
+  if (!threadId || threadId === "undefined") {
+    throw new Error(`Thread ID inválido: ${threadId}`)
+  }
+
+  if (!assistantId || assistantId === "undefined") {
+    throw new Error(`Assistant ID inválido: ${assistantId}`)
+  }
+
   const OpenAI = (await import("openai")).default
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   })
 
   try {
-    console.log(`[WEB-ASSISTANT] 🌐 Procesando mensaje web para thread: ${threadId}`)
-    console.log(`[WEB-ASSISTANT] 🚫 GARANTÍA: Este flujo NO enviará mensajes a WhatsApp`)
-
     // Añadir el mensaje al thread
     const messageResponse = await openai.beta.threads.messages.create(threadId, {
       role: "user",
@@ -124,6 +133,16 @@ async function processWebAssistantResponse(
 // Función simplificada para esperar la completación del run web
 async function waitForWebRunCompletion(openai: any, threadId: string, runId: string, clienteId: string): Promise<void> {
   console.log(`[WEB-ASSISTANT] Esperando completación del run: ${runId}`)
+  console.log(`[WEB-ASSISTANT] Thread ID: ${threadId}`)
+  console.log(`[WEB-ASSISTANT] Cliente ID: ${clienteId}`)
+
+  if (!threadId || threadId === "undefined") {
+    throw new Error(`Thread ID inválido: ${threadId}`)
+  }
+
+  if (!runId || runId === "undefined") {
+    throw new Error(`Run ID inválido: ${runId}`)
+  }
 
   let run = await openai.beta.threads.runs.retrieve(threadId, runId)
   let pollCount = 0
