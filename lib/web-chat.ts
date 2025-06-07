@@ -1,5 +1,4 @@
 import { createThread } from "@/lib/thread-manager"
-import { getAssistantResponse } from "@/lib/openai-tools"
 import { incrementMetric, logError } from "@/lib/monitoring"
 import { rateLimit } from "@/lib/rate-limit"
 import type { WhatsAppConfig } from "@/lib/types"
@@ -16,7 +15,7 @@ export async function processWebMessage({ message, sessionId, config, ip }: Proc
 
   try {
     // Aplicar rate limiting específico para web
-    const rateLimitResult = await rateLimit(`web_session_${sessionId}`, 5) // 5 mensajes por minuto por sesión
+    const rateLimitResult = await rateLimit(`web_session_${sessionId}`, 5)
 
     if (!rateLimitResult.success) {
       return "Has enviado demasiados mensajes. Por favor, espera un momento antes de enviar otro mensaje."
@@ -27,17 +26,20 @@ export async function processWebMessage({ message, sessionId, config, ip }: Proc
 
     let thread
     try {
-      // Intentar obtener thread existente por sessionId
-      thread = await getWebThread(sessionId, config.id)
+      // Usar directamente el sessionId sin duplicar el prefijo "web_"
+      const cleanSessionId = sessionId.startsWith("web_") ? sessionId : `web_${sessionId}`
+      thread = await getWebThread(cleanSessionId, config.id)
     } catch (error) {
       console.log(`[WEB-CHAT] Thread no encontrado, creando nuevo thread para sesión: ${sessionId}`)
-      thread = await createThread(sessionId, config.id)
+      const cleanSessionId = sessionId.startsWith("web_") ? sessionId : `web_${sessionId}`
+      thread = await createThread(cleanSessionId, config.id)
     }
 
     console.log(`[WEB-CHAT] Thread obtenido/creado: ${thread.id}`)
 
-    // Preparar el mensaje con contexto del cliente
-    const contextualMessage = `[SISTEMA] PacienteCelular: web_${sessionId}
+    // Preparar el mensaje con contexto del cliente (sin duplicar web_)
+    const cleanSessionId = sessionId.startsWith("web_") ? sessionId : `web_${sessionId}`
+    const contextualMessage = `[SISTEMA] PacienteCelular: ${cleanSessionId}
 [SISTEMA] Cliente_Id: ${config.cliente_id}
 [SISTEMA] Canal: Widget Web
 [SISTEMA] Configuración: ${config.displayName}
@@ -45,23 +47,22 @@ export async function processWebMessage({ message, sessionId, config, ip }: Proc
 ${message}`
 
     console.log(`[WEB-CHAT] Enviando mensaje a OpenAI para thread: ${thread.id}`)
+    console.log(`[WEB-CHAT] ⚠️ IMPORTANTE: Este es un mensaje WEB - NO debe enviarse a WhatsApp`)
 
-    // Procesar el mensaje usando el sistema de OpenAI existente
-    await getAssistantResponse(
+    // USAR SOLO LA FUNCIÓN WEB - NUNCA getAssistantResponse
+    const response = await processWebAssistantResponse(
       thread.id,
       contextualMessage,
-      config.phoneNumberId, // Usar phoneNumberId de la configuración
       config.assistantId || process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
+      config.cliente_id || "",
     )
-
-    // Como getAssistantResponse envía directamente a WhatsApp, necesitamos obtener la respuesta
-    // Para web, necesitamos interceptar la respuesta antes de que se envíe a WhatsApp
-    const response = await getLastAssistantMessage(thread.id)
 
     // Incrementar métricas
     await incrementMetric("web_messages_processed")
 
-    console.log(`[WEB-CHAT] Mensaje procesado exitosamente para sesión: ${sessionId}`)
+    console.log(`[WEB-CHAT] ✅ Mensaje procesado exitosamente para sesión: ${sessionId}`)
+    console.log(`[WEB-CHAT] ✅ Respuesta obtenida SIN enviar a WhatsApp: ${response.length} caracteres`)
+
     return response
   } catch (error) {
     console.error(`[WEB-CHAT] Error al procesar mensaje:`, error)
@@ -71,12 +72,128 @@ ${message}`
   }
 }
 
+// Función específica para procesar mensajes web sin enviar a WhatsApp
+async function processWebAssistantResponse(
+  threadId: string,
+  message: string,
+  assistantId: string,
+  clienteId: string,
+): Promise<string> {
+  const OpenAI = (await import("openai")).default
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+
+  try {
+    console.log(`[WEB-ASSISTANT] 🌐 Procesando mensaje web para thread: ${threadId}`)
+    console.log(`[WEB-ASSISTANT] 🚫 GARANTÍA: Este flujo NO enviará mensajes a WhatsApp`)
+
+    // Añadir el mensaje al thread
+    const messageResponse = await openai.beta.threads.messages.create(threadId, {
+      role: "user",
+      content: message,
+    })
+
+    console.log(`[WEB-ASSISTANT] Mensaje añadido al thread: ${messageResponse.id}`)
+
+    // Crear un run con el asistente
+    const run = await openai.beta.threads.runs.create(threadId, {
+      assistant_id: assistantId,
+    })
+
+    console.log(`[WEB-ASSISTANT] Run creado: ${run.id}`)
+
+    // Esperar a que el run se complete (versión simplificada)
+    await waitForWebRunCompletion(openai, threadId, run.id, clienteId)
+
+    console.log(`[WEB-ASSISTANT] Run completado exitosamente`)
+
+    // Obtener la respuesta del asistente
+    const response = await getLastAssistantMessage(threadId)
+
+    console.log(`[WEB-ASSISTANT] ✅ Respuesta obtenida: ${response.length} caracteres`)
+    console.log(`[WEB-ASSISTANT] ✅ CONFIRMADO: No se envió nada a WhatsApp`)
+
+    return response
+  } catch (error) {
+    console.error(`[WEB-ASSISTANT] Error en processWebAssistantResponse:`, error)
+    throw error
+  }
+}
+
+// Función simplificada para esperar la completación del run web
+async function waitForWebRunCompletion(openai: any, threadId: string, runId: string, clienteId: string): Promise<void> {
+  console.log(`[WEB-ASSISTANT] Esperando completación del run: ${runId}`)
+
+  let run = await openai.beta.threads.runs.retrieve(threadId, runId)
+  let pollCount = 0
+
+  while (run.status === "queued" || run.status === "in_progress") {
+    pollCount++
+    console.log(`[WEB-ASSISTANT] Poll ${pollCount}: Estado del run: ${run.status}`)
+
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    run = await openai.beta.threads.runs.retrieve(threadId, runId)
+  }
+
+  console.log(`[WEB-ASSISTANT] Run completado con estado: ${run.status}`)
+
+  if (run.status === "requires_action") {
+    console.log(`[WEB-ASSISTANT] 🔧 Run requiere acción - procesando herramientas`)
+
+    if (run.required_action?.type === "submit_tool_outputs") {
+      const toolCalls = run.required_action.submit_tool_outputs.tool_calls
+      const toolOutputs = []
+
+      console.log(`[WEB-ASSISTANT] Procesando ${toolCalls.length} herramientas`)
+
+      for (const toolCall of toolCalls) {
+        const functionName = toolCall.function.name
+        const functionArgs = JSON.parse(toolCall.function.arguments)
+
+        console.log(`[WEB-ASSISTANT] 🔧 Ejecutando herramienta: ${functionName}`)
+        console.log(`[WEB-ASSISTANT] 🔧 Argumentos:`, functionArgs)
+
+        // Importar la función de herramientas
+        const { executeOpenAITool } = await import("@/lib/openai-tools")
+        const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
+
+        console.log(`[WEB-ASSISTANT] 🔧 Resultado de ${functionName}:`, toolResult)
+
+        toolOutputs.push({
+          tool_call_id: toolCall.id,
+          output: JSON.stringify(toolResult),
+        })
+      }
+
+      console.log(`[WEB-ASSISTANT] Enviando resultados de herramientas a OpenAI`)
+
+      // Enviar los resultados de las herramientas
+      await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
+        tool_outputs: toolOutputs,
+      })
+
+      console.log(`[WEB-ASSISTANT] Resultados enviados, continuando procesamiento`)
+
+      // Continuar esperando la completación
+      await waitForWebRunCompletion(openai, threadId, runId, clienteId)
+    }
+  } else if (run.status === "failed") {
+    console.error(`[WEB-ASSISTANT] ❌ Run falló: ${run.last_error?.message}`)
+    throw new Error(`Run falló: ${run.last_error?.message}`)
+  } else if (run.status === "completed") {
+    console.log(`[WEB-ASSISTANT] ✅ Run completado exitosamente`)
+  } else {
+    console.warn(`[WEB-ASSISTANT] ⚠️ Estado inesperado del run: ${run.status}`)
+  }
+}
+
 // Función para obtener thread web existente
 async function getWebThread(sessionId: string, configId: string) {
   const { getThread } = await import("@/lib/thread-manager")
 
-  // Para web, usamos el sessionId como identificador único
-  return await getThread(`web_${sessionId}`, configId)
+  // Usar el sessionId directamente (ya tiene el prefijo web_ si es necesario)
+  return await getThread(sessionId, configId)
 }
 
 // Función para obtener el último mensaje del asistente
@@ -87,7 +204,7 @@ async function getLastAssistantMessage(threadId: string): Promise<string> {
       apiKey: process.env.OPENAI_API_KEY,
     })
 
-    console.log(`[WEB-CHAT] Obteniendo último mensaje del thread: ${threadId}`)
+    console.log(`[WEB-ASSISTANT] Obteniendo último mensaje del thread: ${threadId}`)
 
     const messages = await openai.beta.threads.messages.list(threadId, {
       order: "desc",
@@ -95,14 +212,14 @@ async function getLastAssistantMessage(threadId: string): Promise<string> {
     })
 
     if (messages.data.length === 0) {
-      console.warn(`[WEB-CHAT] No se encontraron mensajes en el thread: ${threadId}`)
+      console.warn(`[WEB-ASSISTANT] No se encontraron mensajes en el thread: ${threadId}`)
       return "No se pudo obtener una respuesta. Por favor, intenta nuevamente."
     }
 
     const lastMessage = messages.data[0]
 
     if (lastMessage.role !== "assistant") {
-      console.warn(`[WEB-CHAT] El último mensaje no es del asistente: ${lastMessage.role}`)
+      console.warn(`[WEB-ASSISTANT] El último mensaje no es del asistente: ${lastMessage.role}`)
       return "No se pudo obtener una respuesta del asistente. Por favor, intenta nuevamente."
     }
 
@@ -114,10 +231,12 @@ async function getLastAssistantMessage(threadId: string): Promise<string> {
       }
     }
 
-    console.log(`[WEB-CHAT] Mensaje del asistente obtenido: ${messageContent.length} caracteres`)
+    console.log(`[WEB-ASSISTANT] ✅ Mensaje del asistente obtenido: ${messageContent.length} caracteres`)
+    console.log(`[WEB-ASSISTANT] ✅ Contenido: "${messageContent.substring(0, 100)}..."`)
+
     return messageContent || "No se pudo obtener una respuesta. Por favor, intenta nuevamente."
   } catch (error) {
-    console.error(`[WEB-CHAT] Error al obtener último mensaje:`, error)
+    console.error(`[WEB-ASSISTANT] Error al obtener último mensaje:`, error)
     return "Error al obtener la respuesta. Por favor, intenta nuevamente."
   }
 }

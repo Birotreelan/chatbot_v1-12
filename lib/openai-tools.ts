@@ -1077,6 +1077,110 @@ export async function executeOpenAITool(
   }
 }
 
+// Función específica para web que NO envía mensajes a WhatsApp
+export async function processWebOnlyMessage(
+  threadId: string,
+  message: string,
+  assistantId: string,
+  clienteId: string,
+): Promise<string> {
+  console.log(`[OPENAI-WEB] 🌐 PROCESANDO MENSAJE WEB ÚNICAMENTE`)
+  console.log(`[OPENAI-WEB] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
+  console.log(`[OPENAI-WEB] Thread ID: ${threadId}`)
+  console.log(`[OPENAI-WEB] Assistant ID: ${assistantId}`)
+
+  const openai = getOpenAIClient()
+
+  try {
+    // Añadir el mensaje al thread
+    const messageResponse = await openai.beta.threads.messages.create(threadId, {
+      role: "user",
+      content: message,
+    })
+
+    console.log(`[OPENAI-WEB] Mensaje añadido al thread: ${messageResponse.id}`)
+
+    // Crear un run con el asistente
+    const run = await openai.beta.threads.runs.create(threadId, {
+      assistant_id: assistantId,
+    })
+
+    console.log(`[OPENAI-WEB] Run creado: ${run.id}`)
+
+    // Procesar el run SIN enviar a WhatsApp
+    await processWebRunOnly(openai, threadId, run.id, clienteId)
+
+    // Obtener la respuesta
+    const messages = await openai.beta.threads.messages.list(threadId, {
+      order: "desc",
+      limit: 1,
+    })
+
+    if (messages.data.length === 0 || messages.data[0].role !== "assistant") {
+      throw new Error("No se pudo obtener respuesta del asistente")
+    }
+
+    let messageContent = ""
+    for (const content of messages.data[0].content) {
+      if (content.type === "text") {
+        messageContent += content.text.value
+      }
+    }
+
+    console.log(`[OPENAI-WEB] ✅ Respuesta obtenida: ${messageContent.length} caracteres`)
+    console.log(`[OPENAI-WEB] ✅ CONFIRMADO: No se envió nada a WhatsApp`)
+
+    return messageContent
+  } catch (error) {
+    console.error("[OPENAI-WEB] Error:", error)
+    throw error
+  }
+}
+
+// Función para procesar run web sin enviar a WhatsApp
+async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string, clienteId: string): Promise<void> {
+  console.log(`[OPENAI-WEB] Procesando run web: ${runId}`)
+
+  let run = await openai.beta.threads.runs.retrieve(threadId, runId)
+
+  while (run.status === "queued" || run.status === "in_progress") {
+    await wait(1000)
+    run = await openai.beta.threads.runs.retrieve(threadId, runId)
+  }
+
+  if (run.status === "requires_action") {
+    if (run.required_action?.type === "submit_tool_outputs") {
+      const toolCalls = run.required_action.submit_tool_outputs.tool_calls
+      const toolOutputs = []
+
+      for (const toolCall of toolCalls) {
+        const functionName = toolCall.function.name
+        const functionArgs = JSON.parse(toolCall.function.arguments)
+
+        console.log(`[OPENAI-WEB] 🔧 Ejecutando herramienta: ${functionName}`)
+
+        const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
+
+        toolOutputs.push({
+          tool_call_id: toolCall.id,
+          output: JSON.stringify(toolResult),
+        })
+      }
+
+      await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
+        tool_outputs: toolOutputs,
+      })
+
+      // Continuar procesando
+      await processWebRunOnly(openai, threadId, runId, clienteId)
+    }
+  } else if (run.status === "failed") {
+    throw new Error(`Run falló: ${run.last_error?.message}`)
+  }
+
+  console.log(`[OPENAI-WEB] ✅ Run web completado sin enviar a WhatsApp`)
+}
+
 // Tiempo máximo de espera para la respuesta de OpenAI (en milisegundos)
 const OPENAI_TIMEOUT = Number.parseInt(process.env.OPENAI_TIMEOUT || "60000", 10)
 

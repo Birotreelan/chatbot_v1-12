@@ -11,22 +11,41 @@ interface Message {
   content: string
 }
 
-export async function getThread(userPhoneNumber: string, configId: string) {
-  const threadName = `whatsapp-${userPhoneNumber}-${configId}`
+export async function getThread(userIdentifier: string, configId: string) {
+  // Determinar si es WhatsApp o Web basado en el prefijo
+  const isWebThread = userIdentifier.startsWith("web_")
+  const threadName = isWebThread ? `web-${userIdentifier}-${configId}` : `whatsapp-${userIdentifier}-${configId}`
 
   try {
-    const threads = await openai.beta.threads.list({
-      limit: 10,
-      order: "desc",
-    })
+    // Para threads web, intentar buscar por metadata primero
+    if (isWebThread) {
+      const threads = await openai.beta.threads.list({
+        limit: 20,
+        order: "desc",
+      })
 
-    for (const thread of threads.data) {
-      if (thread.metadata?.name === threadName) {
-        return thread
+      for (const thread of threads.data) {
+        if (thread.metadata?.name === threadName || thread.metadata?.sessionId === userIdentifier) {
+          console.log(`[THREAD-MANAGER] Thread web encontrado: ${thread.id}`)
+          return thread
+        }
+      }
+    } else {
+      // Lógica original para WhatsApp
+      const threads = await openai.beta.threads.list({
+        limit: 10,
+        order: "desc",
+      })
+
+      for (const thread of threads.data) {
+        if (thread.metadata?.name === threadName) {
+          return thread
+        }
       }
     }
 
-    return await createNewThread(userPhoneNumber, configId)
+    // Si no se encuentra, crear uno nuevo
+    return await createNewThread(userIdentifier, configId)
   } catch (error: any) {
     console.error("Error getting thread:", error)
     throw new Error(error)
@@ -54,16 +73,26 @@ export async function createThread(sessionId: string, configId: string) {
   }
 }
 
-export async function createNewThread(userPhoneNumber: string, configId: string) {
-  const threadName = `whatsapp-${userPhoneNumber}-${configId}`
+export async function createNewThread(userIdentifier: string, configId: string) {
+  const isWebThread = userIdentifier.startsWith("web_")
+  const threadName = isWebThread ? `web-${userIdentifier}-${configId}` : `whatsapp-${userIdentifier}-${configId}`
 
   try {
+    const metadata: any = {
+      name: threadName,
+    }
+
+    if (isWebThread) {
+      metadata.type = "web"
+      metadata.sessionId = userIdentifier
+      metadata.configId = configId
+    }
+
     const thread = await openai.beta.threads.create({
-      metadata: {
-        name: threadName,
-      },
+      metadata,
     })
 
+    console.log(`[THREAD-MANAGER] Nuevo thread creado: ${thread.id} (${isWebThread ? "web" : "whatsapp"})`)
     return thread
   } catch (error: any) {
     console.error("Error creating thread:", error)
