@@ -19,7 +19,7 @@ export default async function ChatDemoPage({ params }: ChatDemoPageProps) {
       notFound()
     }
 
-    if (!config.widgetEnabled) {
+    if (config.widgetEnabled === false) {
       return (
         <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
