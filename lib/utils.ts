@@ -1,26 +1,21 @@
-import { clsx, type ClassValue } from "clsx"
+import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function adjustColor(color: string, amount: number): string {
-  // Remove # if present
-  const hex = color.replace("#", "")
+// Función para ajustar el brillo de un color hexadecimal
+export function adjustColor(hex: string, amount: number): string {
+  // Remover el # si está presente
+  const color = hex.replace("#", "")
 
-  // Parse RGB values
-  const r = Number.parseInt(hex.substr(0, 2), 16)
-  const g = Number.parseInt(hex.substr(2, 2), 16)
-  const b = Number.parseInt(hex.substr(4, 2), 16)
+  // Convertir hex a RGB
+  const num = Number.parseInt(color, 16)
+  const r = Math.max(0, Math.min(255, (num >> 16) + amount))
+  const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00ff) + amount))
+  const b = Math.max(0, Math.min(255, (num & 0x0000ff) + amount))
 
-  // Adjust brightness
-  const newR = Math.max(0, Math.min(255, r + amount))
-  const newG = Math.max(0, Math.min(255, g + amount))
-  const newB = Math.max(0, Math.min(255, b + amount))
-
-  // Convert back to hex
-  const toHex = (n: number) => n.toString(16).padStart(2, "0")
-
-  return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`
+  // Convertir de vuelta a hex
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`
 }

@@ -116,17 +116,16 @@
 
     buttonTextElement = document.createElement("div")
     buttonTextElement.style.position = "fixed"
-    // Cambiar la línea de posicionamiento bottom para dar más espacio
-    buttonTextElement.style.bottom = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 25}px` // Más espacio vertical
 
-    // Y ajustar el posicionamiento horizontal para que no interfiera con el chat
+    // Posicionar encima del botón para evitar interferencia con el chat
+    buttonTextElement.style.bottom = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 15}px`
+
+    // Posicionar horizontalmente según la configuración
     if (config.position.includes("right")) {
-      // Si el botón está a la derecha, el texto va más a la izquierda para no pisar el chat
-      buttonTextElement.style.right = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 25}px`
+      buttonTextElement.style.right = config.buttonPosition
       buttonTextElement.style.left = "auto"
     } else {
-      // Si el botón está a la izquierda, el texto va más a la derecha
-      buttonTextElement.style.left = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 25}px`
+      buttonTextElement.style.left = config.buttonPosition
       buttonTextElement.style.right = "auto"
     }
 
@@ -139,17 +138,17 @@
     buttonTextElement.style.fontFamily = "system-ui, -apple-system, sans-serif"
     buttonTextElement.style.maxWidth = "200px"
     buttonTextElement.style.textAlign = "center"
-    buttonTextElement.style.zIndex = config.zIndex - 1 // Asegurar que esté por debajo del botón
+    buttonTextElement.style.zIndex = config.zIndex - 1
     buttonTextElement.style.pointerEvents = "auto"
     buttonTextElement.style.cursor = "pointer"
     buttonTextElement.style.whiteSpace = "nowrap"
     buttonTextElement.style.overflow = "hidden"
-    buttonTextElement.style.textOverflow = "ellipsis" // Añadir puntos suspensivos si el texto es muy largo
+    buttonTextElement.style.textOverflow = "ellipsis"
 
     // Animaciones si están habilitadas
     if (widgetConfig.widgetAnimation !== false) {
       buttonTextElement.style.transition = "opacity 0.3s ease, transform 0.3s ease"
-      buttonTextElement.style.transform = config.position.includes("right") ? "translateX(10px)" : "translateX(-10px)"
+      buttonTextElement.style.transform = "translateY(10px)"
       buttonTextElement.style.opacity = "0"
     }
 
@@ -162,7 +161,7 @@
     setTimeout(() => {
       if (buttonTextElement && widgetConfig.widgetAnimation !== false) {
         buttonTextElement.style.opacity = "1"
-        buttonTextElement.style.transform = "translateX(0)"
+        buttonTextElement.style.transform = "translateY(0)"
       } else if (buttonTextElement) {
         buttonTextElement.style.opacity = "1"
       }
@@ -376,7 +375,7 @@
     if (buttonTextElement) {
       if (widgetConfig?.widgetAnimation !== false) {
         buttonTextElement.style.opacity = "0"
-        buttonTextElement.style.transform = config.position.includes("right") ? "translateX(10px)" : "translateX(-10px)"
+        buttonTextElement.style.transform = "translateY(10px)"
       }
       setTimeout(() => {
         if (buttonTextElement && buttonTextElement.parentNode) {
@@ -439,8 +438,6 @@
 
     console.log(`[WIDGET] Cerrando chat`)
 
-    const config = getAppliedConfig()
-
     // Animar el cierre si las animaciones están habilitadas
     if (widgetConfig?.widgetAnimation !== false) {
       iframe.style.opacity = "0"
@@ -490,11 +487,6 @@
     if (buttonTextElement && buttonTextElement.parentNode) {
       buttonTextElement.parentNode.removeChild(buttonTextElement)
       buttonTextElement = null
-    }
-
-    if (headerControls && headerControls.parentNode) {
-      headerControls.parentNode.removeChild(headerControls)
-      headerControls = null
     }
 
     if (widgetContainer && widgetContainer.parentNode) {
