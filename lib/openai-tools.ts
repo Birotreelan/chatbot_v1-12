@@ -904,26 +904,24 @@ export async function processWebOnlyMessage(
   console.log(`[OPENAI-WEB] Thread ID: ${threadId}`)
   console.log(`[OPENAI-WEB] Assistant ID: ${assistantId}`)
 
-  try {
-    // Crear una nueva instancia del cliente OpenAI para esta llamada específica
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    })
+  const openai = getOpenAIClient()
 
+  try {
     // Añadir el mensaje al thread
-    console.log(`[OPENAI-WEB] Añadiendo mensaje al thread: ${threadId}`)
     const messageResponse = await openai.beta.threads.messages.create(threadId, {
       role: "user",
       content: message,
     })
+
     console.log(`[OPENAI-WEB] Mensaje añadido al thread: ${messageResponse.id}`)
 
     // Crear un run con el asistente
-    console.log(`[OPENAI-WEB] Creando run con asistente: ${assistantId}`)
     const run = await openai.beta.threads.runs.create(threadId, {
       assistant_id: assistantId,
     })
+
     console.log(`[OPENAI-WEB] Run creado: ${run.id}`)
+
     // Procesar el run usando el mismo enfoque que WhatsApp pero sin enviar mensajes
     console.log(`[OPENAI-WEB] Esperando a que el run se complete...`)
 
@@ -1020,7 +1018,7 @@ export async function processWebOnlyMessage(
     }
   } catch (error) {
     console.error("[OPENAI-WEB] Error:", error)
-    return "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta nuevamente."
+    throw error
   }
 }
 
