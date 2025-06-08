@@ -113,13 +113,14 @@ export class ClinicAPI {
             exito: false,
             error: {
               codigo: "API_ERROR",
-              mensaje: data.message || "Error desconocido",
+              mensaje: data.message || data.mensaje || "Error desconocido",
             },
           }
         }
+        // Si success es true, devolver los datos completos
         return {
           exito: true,
-          datos: data.data,
+          datos: data, // Devolver toda la respuesta, no solo data.data
         }
       }
 
@@ -532,7 +533,7 @@ export async function reserveTurno(
       email: params.email,
     })
 
-    if (response.exito && response.datos) {
+    if (response.exito) {
       console.log(`[RESERVE-TURNO] ✅ Turno reservado exitosamente:`, response.datos)
       return {
         success: true,
