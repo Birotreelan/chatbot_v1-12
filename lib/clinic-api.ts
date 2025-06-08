@@ -211,8 +211,48 @@ export class ClinicAPI {
         console.log(`Buscando profesional: ${busqueda}`)
         const profesionalesResponse = await this.buscarProfesionales(busqueda)
 
-        if (!profesionalesResponse.exito || !profesionalesResponse.datos || profesionalesResponse.datos.length === 0) {
-          console.log(`No se encontraron profesionales con el criterio: ${busqueda}`)
+        if (!profesionalesResponse.exito) {
+          console.log(`Error al buscar profesionales:`, profesionalesResponse.error)
+          return profesionalesResponse
+        }
+
+        // Verificar que tenemos datos y que tienen la estructura correcta
+        if (!profesionalesResponse.datos) {
+          console.log(`No se recibieron datos de profesionales`)
+          return {
+            exito: false,
+            error: {
+              codigo: "PROFESIONAL_NO_ENCONTRADO",
+              mensaje: `No se encontraron profesionales con el criterio: ${busqueda}`,
+            },
+          }
+        }
+
+        // La API devuelve { profesionales: [...] }, necesitamos extraer el array
+        let profesionales: any[] = []
+        if (Array.isArray(profesionalesResponse.datos)) {
+          // Si ya es un array, usarlo directamente
+          profesionales = profesionalesResponse.datos
+        } else if (
+          profesionalesResponse.datos.profesionales &&
+          Array.isArray(profesionalesResponse.datos.profesionales)
+        ) {
+          // Si está dentro de una propiedad 'profesionales', extraerlo
+          profesionales = profesionalesResponse.datos.profesionales
+        } else {
+          console.log(`Estructura de datos inesperada:`, profesionalesResponse.datos)
+          return {
+            exito: false,
+            error: {
+              codigo: "FORMATO_DATOS_INVALIDO",
+              mensaje: "Formato de datos de profesionales no reconocido",
+            },
+          }
+        }
+
+        console.log(`Profesionales encontrados: ${profesionales.length}`)
+
+        if (profesionales.length === 0) {
           return {
             exito: false,
             error: {
@@ -223,20 +263,20 @@ export class ClinicAPI {
         }
 
         // Si hay múltiples profesionales, devolver la lista para que el usuario elija
-        if (profesionalesResponse.datos.length > 1) {
-          console.log(`Se encontraron ${profesionalesResponse.datos.length} profesionales`)
+        if (profesionales.length > 1) {
+          console.log(`Se encontraron ${profesionales.length} profesionales`)
           return {
             exito: true,
             datos: {
               multiple: true,
-              profesionales: profesionalesResponse.datos,
+              profesionales: profesionales,
               mensaje: "Se encontraron múltiples profesionales. Por favor, seleccione uno.",
             },
           }
         }
 
         // Si solo hay un profesional, usar su ID para buscar turnos
-        const profesionalEncontrado = profesionalesResponse.datos[0]
+        const profesionalEncontrado = profesionales[0]
         console.log(`Profesional encontrado: ${profesionalEncontrado.Nombre_Completo} (${profesionalEncontrado.Id})`)
         return this.obtenerTurnos(fechaDesde, fechaHasta, profesionalEncontrado.Id)
       }
