@@ -10,7 +10,8 @@ export interface WhatsAppConfig {
   verifyToken: string
   accessToken: string
   webhookUrl?: string
-  cliente_id?: string // NUEVO CAMPO AGREGADO
+  cliente_id?: string
+  proxy?: string
 
   // Widget configuration
   widgetEnabled?: boolean
@@ -31,7 +32,11 @@ export interface WhatsAppConfig {
   widgetShadow?: boolean
   widgetAnimation?: boolean
   widgetSoundEnabled?: boolean
-  widgetTheme?: "light" | "dark"
+  widgetTheme?: "light" | "dark" | "auto"
+
+  // Nuevos campos para el botón flotante
+  widgetFloatingButtonText?: string
+  widgetShowFloatingText?: boolean
 
   stats?: {
     messagesReceived: number
@@ -39,4 +44,22 @@ export interface WhatsAppConfig {
     errors: number
     lastMessageAt?: string
   }
+}
+
+export interface ThreadInfo {
+  threadId: string
+  phoneNumber: string
+  whatsappConfigId: string
+  lastMessageAt: string
+  messageCount: number
+  isResetThread?: boolean
+  createdAt?: string
+}
+
+export interface SystemStats {
+  totalConfigs: number
+  activeConfigs: number
+  totalMessages: number
+  totalThreads: number
+  lastUpdated: string
 }

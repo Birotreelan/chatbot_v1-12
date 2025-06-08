@@ -65,6 +65,8 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     verifyToken: config.verifyToken || nanoid(16),
     accessToken: config.accessToken || "",
     webhookUrl: config.webhookUrl,
+    cliente_id: config.cliente_id,
+    proxy: config.proxy,
     // Añadir configuraciones por defecto del widget
     widgetEnabled: config.widgetEnabled !== undefined ? config.widgetEnabled : true,
     widgetTitle: config.widgetTitle || "Asistente Virtual",
@@ -85,8 +87,9 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     widgetAnimation: config.widgetAnimation !== undefined ? config.widgetAnimation : true,
     widgetSoundEnabled: config.widgetSoundEnabled !== undefined ? config.widgetSoundEnabled : true,
     widgetTheme: config.widgetTheme || "light",
-    // Agregar cliente_id si está presente
-    cliente_id: config.cliente_id,
+    // Nuevos campos para el botón flotante
+    widgetFloatingButtonText: config.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual",
+    widgetShowFloatingText: config.widgetShowFloatingText !== undefined ? config.widgetShowFloatingText : true,
     stats: {
       messagesReceived: 0,
       messagesProcessed: 0,

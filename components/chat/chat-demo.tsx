@@ -200,6 +200,14 @@ export function ChatDemo({ config }: ChatDemoProps) {
                 <span className="font-medium">Placeholder:</span>
                 <p className="text-gray-600 text-sm mt-1">"{config.widgetPlaceholder || "Escribe tu mensaje..."}"</p>
               </div>
+              {config.widgetShowFloatingText && (
+                <div>
+                  <span className="font-medium">Texto del Botón Flotante:</span>
+                  <p className="text-gray-600 text-sm mt-1">
+                    "{config.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual"}"
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -308,7 +316,8 @@ export function ChatDemo({ config }: ChatDemoProps) {
                 <h4 className="font-medium">1. Probar el Widget</h4>
                 <p className="text-sm text-gray-600">
                   Busca el botón de chat en la esquina inferior derecha de esta página y haz clic para probarlo, o usa
-                  el botón "Abrir Widget" de arriba.
+                  el botón "Abrir Widget" de arriba. Notarás los nuevos controles de minimizar y cerrar en el header del
+                  chat.
                 </p>
               </div>
               <div>
@@ -320,7 +329,8 @@ export function ChatDemo({ config }: ChatDemoProps) {
               <div>
                 <h4 className="font-medium">3. Personalizar</h4>
                 <p className="text-sm text-gray-600">
-                  Modifica los colores, mensajes y configuración desde el panel de administración.
+                  Modifica los colores, mensajes y configuración desde el panel de administración. Ahora puedes
+                  configurar el texto que acompaña al botón flotante para invitar a los usuarios a interactuar.
                 </p>
               </div>
             </div>
@@ -338,8 +348,10 @@ declare global {
       open: () => void
       close: () => void
       toggle: () => void
+      minimize: () => void
       destroy: () => void
       isOpen: () => boolean
+      isMinimized: () => boolean
       clienteId: string
     }
   }

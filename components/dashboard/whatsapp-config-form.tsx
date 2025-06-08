@@ -54,6 +54,9 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     widgetAnimation: config?.widgetAnimation !== undefined ? config.widgetAnimation : true,
     widgetSoundEnabled: config?.widgetSoundEnabled !== undefined ? config.widgetSoundEnabled : true,
     widgetTheme: config?.widgetTheme || "light",
+    // Nuevos campos para el botón flotante
+    widgetFloatingButtonText: config?.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual",
+    widgetShowFloatingText: config?.widgetShowFloatingText !== undefined ? config.widgetShowFloatingText : true,
   })
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
@@ -459,6 +462,38 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
 
               <Separator />
 
+              {/* Sección del Botón Flotante */}
+              <div className="space-y-4">
+                <h4 className="text-lg font-medium">Configuración del Botón Flotante</h4>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="widgetShowFloatingText"
+                    checked={formData.widgetShowFloatingText}
+                    onCheckedChange={(checked) => handleSwitchChange("widgetShowFloatingText", checked)}
+                  />
+                  <Label htmlFor="widgetShowFloatingText">Mostrar texto junto al botón flotante</Label>
+                </div>
+
+                {formData.widgetShowFloatingText && (
+                  <div className="space-y-2">
+                    <Label htmlFor="widgetFloatingButtonText">Texto del Botón Flotante</Label>
+                    <Input
+                      id="widgetFloatingButtonText"
+                      name="widgetFloatingButtonText"
+                      value={formData.widgetFloatingButtonText}
+                      onChange={handleChange}
+                      placeholder="Obtené tu turno con nuestro asistente virtual"
+                    />
+                    <p className="text-sm text-gray-500">
+                      Este texto aparecerá junto al botón flotante para invitar a los usuarios a interactuar
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="widgetPrimaryColor">Color Primario</Label>
@@ -730,6 +765,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                       </li>
                       <li>• El widget se posicionará automáticamente según la configuración seleccionada</li>
                       <li>• Puedes personalizar todos los aspectos visuales desde la pestaña "Widget"</li>
+                      <li>• El texto del botón flotante aparecerá automáticamente si está habilitado</li>
                     </ul>
                   </div>
                 </>
