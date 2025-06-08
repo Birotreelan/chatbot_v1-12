@@ -1,4 +1,5 @@
 import { validateDNI, searchTurnos } from "./clinic-api"
+import { getArgentinaDateTime } from "./utils/date-utils"
 
 interface WebChatConfig {
   id: string
@@ -18,6 +19,30 @@ interface ProcessWebMessageParams {
 
 // Cache simple para threads web
 const webThreadsCache = new Map<string, string>()
+
+// Función helper para obtener fechas dinámicas
+function getDefaultDateRange(): string {
+  const today = new Date()
+  const nextWeek = new Date(today)
+  nextWeek.setDate(today.getDate() + 7)
+
+  const formatDate = (date: Date): string => {
+    return date.toISOString().split("T")[0] // YYYY-MM-DD
+  }
+
+  return `${formatDate(today)} a ${formatDate(nextWeek)}`
+}
+
+// Función para crear el bloque [SISTEMA]
+function createSystemBlock(clinicName: string): string {
+  const fechaHora = getArgentinaDateTime()
+
+  return `[SISTEMA]
+Nombre: ${clinicName}
+FechaHora: ${fechaHora}
+CelularPaciente: No disponible (consulta web)
+[/SISTEMA]`
+}
 
 export async function processWebMessage(params: ProcessWebMessageParams): Promise<string> {
   try {
@@ -62,8 +87,15 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] 🌐 Usando thread: ${threadId}`)
     console.log(`[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
 
+    // Crear el mensaje con bloque [SISTEMA]
+    const systemBlock = createSystemBlock(config.displayName)
+    const fullMessage = `${systemBlock}\n\n${message}`
+
+    console.log(`[WEB-CHAT-FINAL] 📋 Bloque [SISTEMA] creado:`)
+    console.log(systemBlock)
+
     // Procesar mensaje
-    const response = await processMessageWithOpenAI(threadId, message, config.assistantId, clienteId)
+    const response = await processMessageWithOpenAI(threadId, fullMessage, config.assistantId, clienteId)
     console.log(`[WEB-CHAT-FINAL] ✅ Respuesta: ${response.length} caracteres`)
 
     return response
@@ -171,13 +203,15 @@ async function processMessageWithOpenAI(
             type: "function",
             function: {
               name: "search_turnos",
-              description: "Busca turnos disponibles",
+              description:
+                "Busca turnos disponibles. Si no se especifica rangoFechas, usa fechas actuales automáticamente.",
               parameters: {
                 type: "object",
                 properties: {
                   rangoFechas: {
                     type: "string",
-                    description: "Rango de fechas en formato YYYY-MM-DD a YYYY-MM-DD",
+                    description:
+                      "Rango de fechas en formato YYYY-MM-DD a YYYY-MM-DD. Si no se especifica, usa fechas actuales.",
                   },
                   profesional: {
                     type: "string",
@@ -320,9 +354,17 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
           case "search_turnos":
             console.log(`[WEB-CHAT-FINAL] 📅 Buscando turnos con cliente: ${clienteId}`)
             console.log(`[WEB-CHAT-FINAL] 📋 Parámetros:`, args)
+
+            // Si no hay rangoFechas o es una fecha del pasado, usar fechas dinámicas
+            let rangoFechas = args.rangoFechas
+            if (!rangoFechas || rangoFechas.includes("2024-01-08") || rangoFechas === "hoy a hoy") {
+              rangoFechas = getDefaultDateRange()
+              console.log(`[WEB-CHAT-FINAL] 📅 Usando fechas dinámicas: ${rangoFechas}`)
+            }
+
             const turnosResult = await searchTurnos(
               {
-                rangoFechas: args.rangoFechas || "2024-01-08 a 2024-01-15",
+                rangoFechas: rangoFechas,
                 profesional: args.profesional,
                 especialidad: args.especialidad,
                 profesionalId: args.profesionalId,

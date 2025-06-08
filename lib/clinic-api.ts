@@ -1,5 +1,18 @@
 import type { ApiResponse, Paciente } from "./api-tools/types"
 
+// Función helper para obtener fechas dinámicas
+function getDefaultDateRange(): string {
+  const today = new Date()
+  const nextWeek = new Date(today)
+  nextWeek.setDate(today.getDate() + 7)
+
+  const formatDate = (date: Date): string => {
+    return date.toISOString().split("T")[0] // YYYY-MM-DD
+  }
+
+  return `${formatDate(today)} a ${formatDate(nextWeek)}`
+}
+
 // Clase ClinicAPI para interactuar con el middleware proxy
 export class ClinicAPI {
   private proxyUrl = "https://treelan.net/managment/proxy_service/"
@@ -179,6 +192,8 @@ export class ClinicAPI {
       params.Paciente_DNI = pacienteDNI
     }
 
+    console.log(`🗓️ Buscando turnos con parámetros finales:`, params)
+
     return this.fetchProxyApi<any>("get_turnos", params)
   }
 
@@ -192,33 +207,40 @@ export class ClinicAPI {
     profesionalId?: string,
   ): Promise<ApiResponse<any>> {
     try {
-      // Extraer fechas desde y hasta del rango
-      const fechas = rangoFechas.split(" a ")
-      const fechaDesde = fechas[0] || "2024-01-08"
-      const fechaHasta = fechas[1] || fechaDesde
+      // Si no se proporciona rango de fechas, usar fechas dinámicas
+      let fechasAUsar = rangoFechas
+      if (!rangoFechas || rangoFechas.includes("2024-01-08") || rangoFechas === "hoy a hoy") {
+        fechasAUsar = getDefaultDateRange()
+        console.log(`📅 Usando rango de fechas dinámico: ${fechasAUsar}`)
+      }
 
-      console.log(`Buscando turnos desde ${fechaDesde} hasta ${fechaHasta}`)
+      // Extraer fechas desde y hasta del rango
+      const fechas = fechasAUsar.split(" a ")
+      const fechaDesde = fechas[0]?.trim()
+      const fechaHasta = fechas[1]?.trim() || fechaDesde
+
+      console.log(`🗓️ Buscando turnos desde ${fechaDesde} hasta ${fechaHasta}`)
 
       // Si tenemos el ID del profesional, usarlo directamente
       if (profesionalId) {
-        console.log(`Usando profesional ID directo: ${profesionalId}`)
+        console.log(`👨‍⚕️ Usando profesional ID directo: ${profesionalId}`)
         return this.obtenerTurnos(fechaDesde, fechaHasta, profesionalId)
       }
 
       // Si tenemos el nombre del profesional o especialidad, primero buscar el profesional
       if (profesional || especialidad) {
         const busqueda = profesional || especialidad || ""
-        console.log(`Buscando profesional: ${busqueda}`)
+        console.log(`🔍 Buscando profesional: ${busqueda}`)
         const profesionalesResponse = await this.buscarProfesionales(busqueda)
 
         if (!profesionalesResponse.exito) {
-          console.log(`Error al buscar profesionales:`, profesionalesResponse.error)
+          console.log(`❌ Error al buscar profesionales:`, profesionalesResponse.error)
           return profesionalesResponse
         }
 
         // Verificar que tenemos datos y que tienen la estructura correcta
         if (!profesionalesResponse.datos) {
-          console.log(`No se recibieron datos de profesionales`)
+          console.log(`❌ No se recibieron datos de profesionales`)
           return {
             exito: false,
             error: {
@@ -240,7 +262,7 @@ export class ClinicAPI {
           // Si está dentro de una propiedad 'profesionales', extraerlo
           profesionales = profesionalesResponse.datos.profesionales
         } else {
-          console.log(`Estructura de datos inesperada:`, profesionalesResponse.datos)
+          console.log(`❌ Estructura de datos inesperada:`, profesionalesResponse.datos)
           return {
             exito: false,
             error: {
@@ -250,7 +272,7 @@ export class ClinicAPI {
           }
         }
 
-        console.log(`Profesionales encontrados: ${profesionales.length}`)
+        console.log(`👥 Profesionales encontrados: ${profesionales.length}`)
 
         if (profesionales.length === 0) {
           return {
@@ -264,7 +286,7 @@ export class ClinicAPI {
 
         // Si hay múltiples profesionales, devolver la lista para que el usuario elija
         if (profesionales.length > 1) {
-          console.log(`Se encontraron ${profesionales.length} profesionales`)
+          console.log(`📋 Se encontraron ${profesionales.length} profesionales`)
           return {
             exito: true,
             datos: {
@@ -277,15 +299,15 @@ export class ClinicAPI {
 
         // Si solo hay un profesional, usar su ID para buscar turnos
         const profesionalEncontrado = profesionales[0]
-        console.log(`Profesional encontrado: ${profesionalEncontrado.Nombre_Completo} (${profesionalEncontrado.Id})`)
+        console.log(`✅ Profesional encontrado: ${profesionalEncontrado.Nombre_Completo} (${profesionalEncontrado.Id})`)
         return this.obtenerTurnos(fechaDesde, fechaHasta, profesionalEncontrado.Id)
       }
 
       // Si no tenemos ni profesional ni especialidad, buscar todos los turnos disponibles
-      console.log(`Buscando todos los turnos disponibles`)
+      console.log(`🔍 Buscando todos los turnos disponibles`)
       return this.obtenerTurnos(fechaDesde, fechaHasta)
     } catch (error) {
-      console.error(`Error en buscarTurnosDisponibles:`, error)
+      console.error(`❌ Error en buscarTurnosDisponibles:`, error)
       return {
         exito: false,
         error: {
@@ -430,8 +452,12 @@ export async function searchTurnos(
       }
     }
 
-    // Asegurarse de que rangoFechas tenga un valor predeterminado
-    const rangoFechas = params.rangoFechas || "2024-01-08 a 2024-01-15"
+    // Usar fechas dinámicas si no se proporcionan o son fechas del pasado
+    let rangoFechas = params.rangoFechas
+    if (!rangoFechas || rangoFechas.includes("2024-01-08") || rangoFechas === "hoy a hoy") {
+      rangoFechas = getDefaultDateRange()
+      console.log(`[SEARCH-TURNOS] 📅 Usando rango de fechas dinámico: ${rangoFechas}`)
+    }
 
     const clinicAPI = createClinicAPI(clienteId)
     const response = await clinicAPI.buscarTurnosDisponibles(
