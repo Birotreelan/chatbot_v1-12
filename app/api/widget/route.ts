@@ -1,412 +1,516 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getConfigByClienteId } from "@/lib/db"
-import { DEMO_CONFIG, ensureDemoConfig } from "@/lib/demo-config"
+import { processWebChatMessage } from "@/lib/web-chat-final"
 
 export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
   try {
-    // Obtener el cliente_id de los parámetros de consulta
-    const clienteId = request.nextUrl.searchParams.get("cliente_id")
-    const configOnly = request.nextUrl.searchParams.get("config_only")
+    const { searchParams } = new URL(request.url)
+    const clienteId = searchParams.get("cliente_id")
+    const configOnly = searchParams.get("config_only") === "true"
+
+    console.log(`[WIDGET] GET request - cliente_id: ${clienteId}, config_only: ${configOnly}`)
 
     if (!clienteId) {
-      return new NextResponse("Se requiere el parámetro cliente_id", { status: 400 })
+      console.error("[WIDGET] cliente_id es requerido")
+      return NextResponse.json({ error: "cliente_id es requerido" }, { status: 400 })
     }
 
-    // Buscar la configuración por cliente_id
-    let config = await getConfigByClienteId(clienteId)
-
-    // Si no se encuentra y es el cliente de demo, crear/usar configuración por defecto
-    if (!config && clienteId === "demo-client") {
-      await ensureDemoConfig()
-      config = DEMO_CONFIG as any
-    }
-
+    // Obtener configuración
+    const config = await getConfigByClienteId(clienteId)
     if (!config) {
-      return new NextResponse("Configuración no encontrada para el cliente_id proporcionado", { status: 404 })
+      console.error(`[WIDGET] No se encontró configuración para cliente_id: ${clienteId}`)
+      return NextResponse.json({ error: "Configuración no encontrada" }, { status: 404 })
     }
 
     // Si solo se solicita la configuración, devolverla como JSON
-    if (configOnly === "true") {
+    if (configOnly) {
+      console.log(`[WIDGET] Devolviendo solo configuración para cliente_id: ${clienteId}`)
       return NextResponse.json({
-        widgetPrimaryColor: config.widgetPrimaryColor || "#0ea5e9",
-        widgetSecondaryColor: config.widgetSecondaryColor || "#f0f9ff",
-        widgetHeaderText: config.widgetHeaderText || "Chat en vivo",
-        widgetSubtitle: config.widgetSubtitle || "Estamos aquí para ayudarte",
-        widgetWelcomeMessage: config.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
-        widgetPlaceholder: config.widgetPlaceholder || "Escribe tu mensaje...",
-        widgetButtonText: config.widgetButtonText || "Enviar",
-        widgetBrandingEnabled: config.widgetBrandingEnabled !== false,
-        widgetBrandingText: config.widgetBrandingText || "Powered by AI Assistant",
-        widgetFloatingButtonText: config.widgetFloatingButtonText || "",
-        widgetShowFloatingText: config.widgetShowFloatingText || false,
+        widgetEnabled: config.widgetEnabled,
+        widgetTitle: config.widgetTitle,
+        widgetPrimaryColor: config.widgetPrimaryColor,
+        widgetSecondaryColor: config.widgetSecondaryColor,
+        widgetPosition: config.widgetPosition,
+        widgetWelcomeMessage: config.widgetWelcomeMessage,
+        widgetPlaceholder: config.widgetPlaceholder,
+        widgetButtonText: config.widgetButtonText,
+        widgetHeaderText: config.widgetHeaderText,
+        widgetSubtitle: config.widgetSubtitle,
+        widgetBrandingEnabled: config.widgetBrandingEnabled,
+        widgetBrandingText: config.widgetBrandingText,
+        widgetMaxHeight: config.widgetMaxHeight,
+        widgetMaxWidth: config.widgetMaxWidth,
+        widgetBorderRadius: config.widgetBorderRadius,
+        widgetShadow: config.widgetShadow,
+        widgetAnimation: config.widgetAnimation,
+        widgetSoundEnabled: config.widgetSoundEnabled,
+        widgetTheme: config.widgetTheme,
+        widgetFloatingButtonText: config.widgetFloatingButtonText,
+        widgetShowFloatingText: config.widgetShowFloatingText,
       })
     }
 
-    // Para la demo, siempre permitir el widget
-    if (clienteId === "demo-client" || !config.widgetEnabled) {
-      if (clienteId !== "demo-client") {
-        return new NextResponse("El widget no está habilitado para este cliente", { status: 403 })
-      }
-    }
+    console.log(`[WIDGET] Generando HTML del widget para cliente_id: ${clienteId}`)
 
-    // Generar el HTML del widget
+    // Aplicar configuración del tema
+    const isDarkTheme =
+      config.widgetTheme === "dark" ||
+      (config.widgetTheme === "auto" && request.headers.get("sec-ch-prefers-color-scheme") === "dark")
+
+    const themeColors = isDarkTheme
+      ? {
+          background: "#1f2937",
+          surface: "#374151",
+          text: "#f9fafb",
+          textSecondary: "#d1d5db",
+          border: "#4b5563",
+          inputBg: "#374151",
+          inputBorder: "#6b7280",
+        }
+      : {
+          background: "#ffffff",
+          surface: "#f9fafb",
+          text: "#111827",
+          textSecondary: "#6b7280",
+          border: "#e5e7eb",
+          inputBg: "#ffffff",
+          inputBorder: "#d1d5db",
+        }
+
+    // Generar HTML del widget
     const html = `
-      <!DOCTYPE html>
-      <html lang="es">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${config.widgetTitle || "Chat Asistente"}</title>
-        <style>
-          * {
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${config.widgetTitle || "Chat"}</title>
+    <style>
+        * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-          }
-          
-          body {
-            background-color: ${config.widgetSecondaryColor || "#f0f9ff"};
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: ${themeColors.background};
+            color: ${themeColors.text};
             height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
-          }
-          
-          .chat-header {
-            background-color: ${config.widgetPrimaryColor || "#0ea5e9"};
+        }
+        
+        .chat-header {
+            background: ${config.widgetPrimaryColor || "#0ea5e9"};
             color: white;
-            padding: 12px 16px;
-            display: flex;
-            flex-direction: column;
-            border-top-left-radius: 8px;
-            border-top-right-radius: 8px;
-          }
-          
-          .chat-title {
-            font-size: 16px;
-            font-weight: 600;
-          }
-          
-          .chat-subtitle {
-            font-size: 12px;
-            opacity: 0.8;
-            margin-top: 2px;
-          }
-          
-          .chat-messages {
-            flex: 1;
             padding: 16px;
-            overflow-y: auto;
+            text-align: center;
+            position: relative;
+            ${config.widgetShadow !== false ? "box-shadow: 0 2px 4px rgba(0,0,0,0.1);" : ""}
+        }
+        
+        .chat-header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+        
+        .chat-header p {
+            font-size: 14px;
+            opacity: 0.9;
+            margin: 4px 0 0 0;
+        }
+        
+        .chat-container {
+            flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 12px;
-          }
-          
-          .message {
+            overflow: hidden;
+        }
+        
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            background: ${themeColors.background};
+        }
+        
+        .message {
+            margin-bottom: 16px;
+            ${config.widgetAnimation !== false ? "animation: fadeIn 0.3s ease;" : ""}
+        }
+        
+        .message.bot {
+            text-align: left;
+        }
+        
+        .message.user {
+            text-align: right;
+        }
+        
+        .message-bubble {
+            display: inline-block;
             max-width: 80%;
-            padding: 10px 14px;
+            padding: 12px 16px;
             border-radius: 18px;
-            font-size: 14px;
-            line-height: 1.4;
-          }
-          
-          .user-message {
-            background-color: ${config.widgetPrimaryColor || "#0ea5e9"};
-            color: white;
-            align-self: flex-end;
-            border-bottom-right-radius: 4px;
-          }
-          
-          .bot-message {
-            background-color: #e5e7eb;
-            color: #1f2937;
-            align-self: flex-start;
+            word-wrap: break-word;
+            position: relative;
+        }
+        
+        .message.bot .message-bubble {
+            background: ${themeColors.surface};
+            color: ${themeColors.text};
             border-bottom-left-radius: 4px;
-          }
-          
-          .chat-input-container {
-            padding: 12px;
-            border-top: 1px solid #e5e7eb;
+        }
+        
+        .message.user .message-bubble {
+            background: ${config.widgetPrimaryColor || "#0ea5e9"};
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .welcome-message {
+            text-align: center;
+            padding: 20px;
+            color: ${themeColors.textSecondary};
+            font-style: italic;
+        }
+        
+        .input-container {
+            padding: 16px;
+            background: ${themeColors.surface};
+            border-top: 1px solid ${themeColors.border};
+        }
+        
+        .input-form {
             display: flex;
             gap: 8px;
-            background-color: white;
-          }
-          
-          .chat-input {
+            align-items: flex-end;
+        }
+        
+        .message-input {
             flex: 1;
-            padding: 10px 14px;
-            border: 1px solid #d1d5db;
+            padding: 12px 16px;
+            border: 1px solid ${themeColors.inputBorder};
             border-radius: 24px;
-            outline: none;
+            background: ${themeColors.inputBg};
+            color: ${themeColors.text};
             font-size: 14px;
-          }
-          
-          .chat-input:focus {
+            resize: none;
+            min-height: 44px;
+            max-height: 120px;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+        
+        .message-input:focus {
             border-color: ${config.widgetPrimaryColor || "#0ea5e9"};
-            box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
-          }
-          
-          .send-button {
-            background-color: ${config.widgetPrimaryColor || "#0ea5e9"};
+        }
+        
+        .message-input::placeholder {
+            color: ${themeColors.textSecondary};
+        }
+        
+        .send-button {
+            background: ${config.widgetPrimaryColor || "#0ea5e9"};
             color: white;
             border: none;
-            border-radius: 24px;
-            padding: 0 16px;
-            font-size: 14px;
-            font-weight: 500;
+            border-radius: 50%;
+            width: 44px;
+            height: 44px;
             cursor: pointer;
-            transition: background-color 0.2s;
-          }
-          
-          .send-button:hover {
-            background-color: ${config.widgetPrimaryColor ? adjustColor(config.widgetPrimaryColor, -20) : "#0284c7"};
-          }
-          
-          .send-button:disabled {
-            background-color: #9ca3af;
-            cursor: not-allowed;
-          }
-          
-          .typing-indicator {
             display: flex;
             align-items: center;
-            gap: 4px;
-            padding: 8px 14px;
-            background-color: #e5e7eb;
-            border-radius: 18px;
-            width: fit-content;
-            align-self: flex-start;
-            border-bottom-left-radius: 4px;
-          }
-          
-          .typing-dot {
-            width: 8px;
-            height: 8px;
-            background-color: #6b7280;
-            border-radius: 50%;
-            animation: typing-animation 1.4s infinite ease-in-out both;
-          }
-          
-          .typing-dot:nth-child(1) {
-            animation-delay: -0.32s;
-          }
-          
-          .typing-dot:nth-child(2) {
-            animation-delay: -0.16s;
-          }
-          
-          @keyframes typing-animation {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1); }
-          }
-          
-          .welcome-message {
-            text-align: center;
-            margin: 20px 0;
-            color: #6b7280;
+            justify-content: center;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+        
+        .send-button:hover {
+            transform: scale(1.05);
+            ${config.widgetShadow !== false ? "box-shadow: 0 4px 8px rgba(0,0,0,0.2);" : ""}
+        }
+        
+        .send-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .typing-indicator {
+            display: none;
+            padding: 8px 16px;
+            color: ${themeColors.textSecondary};
+            font-style: italic;
             font-size: 14px;
-          }
-          
-          .branding {
+        }
+        
+        .typing-indicator.show {
+            display: block;
+        }
+        
+        .branding {
             text-align: center;
             padding: 8px;
-            font-size: 11px;
-            color: #9ca3af;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="chat-header">
-          <div class="chat-title">${config.widgetHeaderText || "Chat en vivo"}</div>
-          <div class="chat-subtitle">${config.widgetSubtitle || "Estamos aquí para ayudarte"}</div>
-        </div>
+            font-size: 12px;
+            color: ${themeColors.textSecondary};
+            background: ${themeColors.surface};
+            border-top: 1px solid ${themeColors.border};
+        }
         
-        <div class="chat-messages" id="chat-messages">
-          <div class="welcome-message">
-            ${config.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?"}
-          </div>
-        </div>
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
         
-        <div class="chat-input-container">
-          <input 
-            type="text" 
-            class="chat-input" 
-            id="chat-input" 
-            placeholder="${config.widgetPlaceholder || "Escribe tu mensaje..."}"
-            aria-label="Mensaje"
-          >
-          <button class="send-button" id="send-button" disabled>
-            ${config.widgetButtonText || "Enviar"}
-          </button>
-        </div>
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid ${themeColors.border};
+            border-top: 2px solid ${config.widgetPrimaryColor || "#0ea5e9"};
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
         
         ${
-          config.widgetBrandingEnabled !== false
+          config.widgetAnimation !== false
             ? `
-          <div class="branding">
-            ${config.widgetBrandingText || "Powered by AI Assistant"}
-          </div>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
         `
             : ""
         }
         
-        <script>
-          // Variables globales
-          const clienteId = "${clienteId}";
-          const chatMessages = document.getElementById('chat-messages');
-          const chatInput = document.getElementById('chat-input');
-          const sendButton = document.getElementById('send-button');
-          let isWaitingForResponse = false;
-          
-          // Habilitar/deshabilitar el botón de envío según el contenido del input
-          chatInput.addEventListener('input', function() {
-            sendButton.disabled = this.value.trim() === '' || isWaitingForResponse;
-          });
-          
-          // Enviar mensaje al presionar Enter
-          chatInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter' && !sendButton.disabled) {
-              sendMessage();
-            }
-          });
-          
-          // Enviar mensaje al hacer clic en el botón
-          sendButton.addEventListener('click', sendMessage);
-          
-          // Función para enviar mensaje
-          async function sendMessage() {
-            const message = chatInput.value.trim();
-            if (message === '' || isWaitingForResponse) return;
+        /* Scrollbar personalizado */
+        .messages-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .messages-container::-webkit-scrollbar-track {
+            background: ${themeColors.surface};
+        }
+        
+        .messages-container::-webkit-scrollbar-thumb {
+            background: ${themeColors.border};
+            border-radius: 3px;
+        }
+        
+        .messages-container::-webkit-scrollbar-thumb:hover {
+            background: ${themeColors.textSecondary};
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-header">
+        <h1>${config.widgetHeaderText || "Chat de Soporte"}</h1>
+        <p>${config.widgetSubtitle || "Estamos aquí para ayudarte"}</p>
+    </div>
+    
+    <div class="chat-container">
+        <div class="messages-container" id="messages">
+            <div class="welcome-message">
+                ${config.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?"}
+            </div>
+        </div>
+        
+        <div class="typing-indicator" id="typing">
+            El asistente está escribiendo...
+        </div>
+        
+        <div class="input-container">
+            <form class="input-form" id="messageForm">
+                <textarea 
+                    id="messageInput" 
+                    class="message-input" 
+                    placeholder="${config.widgetPlaceholder || "Escribe tu mensaje..."}"
+                    rows="1"
+                ></textarea>
+                <button type="submit" class="send-button" id="sendButton">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22,2 15,22 11,13 2,9"></polygon>
+                    </svg>
+                </button>
+            </form>
+        </div>
+    </div>
+    
+    ${
+      config.widgetBrandingEnabled !== false
+        ? `
+    <div class="branding">
+        ${config.widgetBrandingText || "Powered by AI Assistant"}
+    </div>
+    `
+        : ""
+    }
+
+    <script>
+        const messagesContainer = document.getElementById('messages');
+        const messageForm = document.getElementById('messageForm');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const typingIndicator = document.getElementById('typing');
+        
+        let isProcessing = false;
+        
+        // Auto-resize textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+        
+        // Handle form submission
+        messageForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
             
-            // Añadir mensaje del usuario al chat
+            const message = messageInput.value.trim();
+            if (!message || isProcessing) return;
+            
+            // Add user message
             addMessage(message, 'user');
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
             
-            // Limpiar input y deshabilitar botón
-            chatInput.value = '';
-            isWaitingForResponse = true;
+            // Show typing indicator
+            showTyping();
+            isProcessing = true;
             sendButton.disabled = true;
             
-            // Mostrar indicador de escritura
-            showTypingIndicator();
-            
             try {
-              // Enviar mensaje al servidor
-              const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  message,
-                  cliente_id: clienteId,
-                  session_id: getSessionId()
-                }),
-              });
-              
-              if (!response.ok) {
-                throw new Error('Error al enviar el mensaje');
-              }
-              
-              const data = await response.json();
-              
-              // Ocultar indicador de escritura
-              hideTypingIndicator();
-              
-              // Añadir respuesta del bot al chat
-              addMessage(data.response, 'bot');
+                const response = await fetch('/api/widget', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        cliente_id: '${clienteId}'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.response) {
+                    addMessage(data.response, 'bot');
+                    ${
+                      config.widgetSoundEnabled !== false
+                        ? `
+                    // Play notification sound
+                    try {
+                        const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBC13yO/eizEIHWq+8+OWT');
+                        audio.volume = 0.3;
+                        audio.play().catch(() => {});
+                    } catch (e) {}
+                    `
+                        : ""
+                    }
+                } else {
+                    addMessage('Lo siento, ha ocurrido un error. Por favor, intenta nuevamente.', 'bot');
+                }
             } catch (error) {
-              console.error('Error:', error);
-              
-              // Ocultar indicador de escritura
-              hideTypingIndicator();
-              
-              // Mostrar mensaje de error
-              addMessage('Lo siento, ha ocurrido un error. Por favor, intenta de nuevo más tarde.', 'bot');
+                console.error('Error:', error);
+                addMessage('Lo siento, ha ocurrido un error de conexión. Por favor, intenta nuevamente.', 'bot');
             } finally {
-              isWaitingForResponse = false;
+                hideTyping();
+                isProcessing = false;
+                sendButton.disabled = false;
+                messageInput.focus();
             }
-          }
-          
-          // Función para añadir un mensaje al chat
-          function addMessage(text, sender) {
-            const messageElement = document.createElement('div');
-            messageElement.className = \`message \${sender}-message\`;
-            messageElement.textContent = text;
+        });
+        
+        function addMessage(text, sender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = \`message \${sender}\`;
             
-            chatMessages.appendChild(messageElement);
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.className = 'message-bubble';
+            bubbleDiv.textContent = text;
             
-            // Scroll al final
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-          }
-          
-          // Funciones para el indicador de escritura
-          function showTypingIndicator() {
-            const indicator = document.createElement('div');
-            indicator.className = 'typing-indicator';
-            indicator.id = 'typing-indicator';
+            messageDiv.appendChild(bubbleDiv);
+            messagesContainer.appendChild(messageDiv);
             
-            for (let i = 0; i < 3; i++) {
-              const dot = document.createElement('div');
-              dot.className = 'typing-dot';
-              indicator.appendChild(dot);
+            // Scroll to bottom
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        function showTyping() {
+            typingIndicator.classList.add('show');
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        function hideTyping() {
+            typingIndicator.classList.remove('show');
+        }
+        
+        // Focus input on load
+        messageInput.focus();
+        
+        // Handle Enter key (submit) and Shift+Enter (new line)
+        messageInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                messageForm.dispatchEvent(new Event('submit'));
             }
-            
-            chatMessages.appendChild(indicator);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-          }
-          
-          function hideTypingIndicator() {
-            const indicator = document.getElementById('typing-indicator');
-            if (indicator) {
-              indicator.remove();
-            }
-          }
-          
-          // Función para obtener o crear un ID de sesión
-          function getSessionId() {
-            let sessionId = localStorage.getItem('treelan_chat_session_id');
-            
-            if (!sessionId) {
-              sessionId = 'web_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15);
-              localStorage.setItem('treelan_chat_session_id', sessionId);
-            }
-            
-            return sessionId;
-          }
-        </script>
-      </body>
-      </html>
+        });
+    </script>
+</body>
+</html>
     `
 
     return new NextResponse(html, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
       },
     })
   } catch (error) {
-    console.error("Error al servir el widget:", error)
-    return new NextResponse("Error interno del servidor", { status: 500 })
+    console.error("[WIDGET] Error en GET:", error)
+    return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 })
   }
 }
 
-// Función auxiliar para ajustar el color (oscurecer/aclarar)
-function adjustColor(color: string, amount: number): string {
-  // Eliminar el # si existe
-  color = color.replace("#", "")
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { message, cliente_id } = body
 
-  // Convertir a RGB
-  let r = Number.parseInt(color.substring(0, 2), 16)
-  let g = Number.parseInt(color.substring(2, 4), 16)
-  let b = Number.parseInt(color.substring(4, 6), 16)
+    console.log(`[WIDGET] POST request - cliente_id: ${cliente_id}, message: ${message}`)
 
-  // Ajustar cada componente
-  r = Math.max(0, Math.min(255, r + amount))
-  g = Math.max(0, Math.min(255, g + amount))
-  b = Math.max(0, Math.min(255, b + amount))
+    if (!message || !cliente_id) {
+      return NextResponse.json({ error: "Mensaje y cliente_id son requeridos" }, { status: 400 })
+    }
 
-  // Convertir de nuevo a hex
-  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)
+    // Procesar el mensaje usando el sistema de chat web
+    const response = await processWebChatMessage(message, cliente_id)
+
+    return NextResponse.json({
+      success: true,
+      response: response,
+    })
+  } catch (error) {
+    console.error("[WIDGET] Error en POST:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Error al procesar el mensaje",
+      },
+      { status: 500 },
+    )
+  }
 }

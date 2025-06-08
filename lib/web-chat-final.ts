@@ -326,6 +326,7 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
       const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
           "OpenAI-Beta": "assistants=v2",
         },
       })
@@ -344,6 +345,7 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
           {
             headers: {
               Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+              "Content-Type": "application/json",
               "OpenAI-Beta": "assistants=v2",
             },
           },
@@ -509,3 +511,5 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
     throw error
   }
 }
+
+export { processWebMessage as processWebChatMessage }

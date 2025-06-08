@@ -5,7 +5,7 @@
     return
   }
 
-  // Configuración por defecto del widget
+  // Configuración por defecto que se sobrescribirá con la del servidor
   const defaultConfig = {
     position: "bottom-right",
     width: "380px",
@@ -43,6 +43,7 @@
   let chatButton = null
   let widgetContainer = null
   let buttonTextElement = null
+  let headerControls = null
   let widgetConfig = null
 
   // Función para obtener la configuración del widget
@@ -63,34 +64,72 @@
     return null
   }
 
+  // Función para obtener la configuración aplicada
+  function getAppliedConfig() {
+    if (!widgetConfig) return defaultConfig
+
+    return {
+      position: widgetConfig.widgetPosition || defaultConfig.position,
+      width: `${widgetConfig.widgetMaxWidth || 380}px`,
+      height: `${widgetConfig.widgetMaxHeight || 600}px`,
+      marginBottom: defaultConfig.marginBottom,
+      marginSide: defaultConfig.marginSide,
+      borderRadius: `${widgetConfig.widgetBorderRadius || 12}px`,
+      boxShadow: widgetConfig.widgetShadow !== false ? defaultConfig.boxShadow : "none",
+      zIndex: defaultConfig.zIndex,
+      buttonSize: defaultConfig.buttonSize,
+      buttonBorderRadius: defaultConfig.buttonBorderRadius,
+      buttonBackgroundColor: widgetConfig.widgetPrimaryColor || defaultConfig.buttonBackgroundColor,
+      buttonBoxShadow: defaultConfig.buttonBoxShadow,
+      buttonIconColor: defaultConfig.buttonIconColor,
+      buttonPosition: defaultConfig.buttonPosition,
+      buttonTextColor: defaultConfig.buttonTextColor,
+      buttonTextBackground: defaultConfig.buttonTextBackground,
+    }
+  }
+
   // Función para crear el contenedor del widget
   function createWidgetContainer() {
     if (widgetContainer) return widgetContainer
+
+    const config = getAppliedConfig()
 
     widgetContainer = document.createElement("div")
     widgetContainer.id = "treelan-chat-widget-container"
     widgetContainer.style.position = "fixed"
     widgetContainer.style.bottom = "0"
-    widgetContainer.style.right = defaultConfig.position === "bottom-right" ? "0" : "auto"
-    widgetContainer.style.left = defaultConfig.position === "bottom-left" ? "0" : "auto"
-    widgetContainer.style.zIndex = defaultConfig.zIndex
+    widgetContainer.style.right = config.position.includes("right") ? "0" : "auto"
+    widgetContainer.style.left = config.position.includes("left") ? "0" : "auto"
+    widgetContainer.style.zIndex = config.zIndex
     widgetContainer.style.pointerEvents = "none"
 
     document.body.appendChild(widgetContainer)
     return widgetContainer
   }
 
-  // Función para crear el texto del botón
+  // Función para crear el texto del botón (al costado)
   function createButtonText() {
     if (!widgetConfig?.widgetShowFloatingText || !widgetConfig?.widgetFloatingButtonText) return null
 
+    const config = getAppliedConfig()
+
     buttonTextElement = document.createElement("div")
     buttonTextElement.style.position = "fixed"
-    buttonTextElement.style.bottom = `${Number.parseInt(defaultConfig.buttonPosition) + Number.parseInt(defaultConfig.buttonSize) + 10}px`
-    buttonTextElement.style.right = defaultConfig.position === "bottom-right" ? defaultConfig.buttonPosition : "auto"
-    buttonTextElement.style.left = defaultConfig.position === "bottom-left" ? defaultConfig.buttonPosition : "auto"
-    buttonTextElement.style.backgroundColor = defaultConfig.buttonTextBackground
-    buttonTextElement.style.color = defaultConfig.buttonTextColor
+    buttonTextElement.style.bottom = `${Number.parseInt(config.buttonPosition) + 15}px` // Centrado verticalmente con el botón
+
+    // Posicionar al costado del botón según la configuración
+    if (config.position.includes("right")) {
+      // Si el botón está a la derecha, el texto va a la izquierda del botón
+      buttonTextElement.style.right = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 15}px`
+      buttonTextElement.style.left = "auto"
+    } else {
+      // Si el botón está a la izquierda, el texto va a la derecha del botón
+      buttonTextElement.style.left = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 15}px`
+      buttonTextElement.style.right = "auto"
+    }
+
+    buttonTextElement.style.backgroundColor = config.buttonTextBackground
+    buttonTextElement.style.color = config.buttonTextColor
     buttonTextElement.style.padding = "8px 12px"
     buttonTextElement.style.borderRadius = "8px"
     buttonTextElement.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)"
@@ -98,12 +137,17 @@
     buttonTextElement.style.fontFamily = "system-ui, -apple-system, sans-serif"
     buttonTextElement.style.maxWidth = "200px"
     buttonTextElement.style.textAlign = "center"
-    buttonTextElement.style.zIndex = defaultConfig.zIndex + 1
+    buttonTextElement.style.zIndex = config.zIndex + 1
     buttonTextElement.style.pointerEvents = "auto"
     buttonTextElement.style.cursor = "pointer"
-    buttonTextElement.style.transition = "opacity 0.3s ease, transform 0.3s ease"
-    buttonTextElement.style.transform = "translateY(10px)"
-    buttonTextElement.style.opacity = "0"
+    buttonTextElement.style.whiteSpace = "nowrap"
+
+    // Animaciones si están habilitadas
+    if (widgetConfig.widgetAnimation !== false) {
+      buttonTextElement.style.transition = "opacity 0.3s ease, transform 0.3s ease"
+      buttonTextElement.style.transform = config.position.includes("right") ? "translateX(10px)" : "translateX(-10px)"
+      buttonTextElement.style.opacity = "0"
+    }
 
     buttonTextElement.textContent = widgetConfig.widgetFloatingButtonText
 
@@ -112,9 +156,11 @@
 
     // Mostrar con animación después de un delay
     setTimeout(() => {
-      if (buttonTextElement) {
+      if (buttonTextElement && widgetConfig.widgetAnimation !== false) {
         buttonTextElement.style.opacity = "1"
-        buttonTextElement.style.transform = "translateY(0)"
+        buttonTextElement.style.transform = "translateX(0)"
+      } else if (buttonTextElement) {
+        buttonTextElement.style.opacity = "1"
       }
     }, 1000)
 
@@ -126,42 +172,50 @@
   function createChatButton() {
     if (chatButton) return chatButton
 
+    const config = getAppliedConfig()
+
     chatButton = document.createElement("div")
     chatButton.id = "treelan-chat-widget-button"
     chatButton.style.position = "fixed"
-    chatButton.style.bottom = defaultConfig.buttonPosition
-    chatButton.style.right = defaultConfig.position === "bottom-right" ? defaultConfig.buttonPosition : "auto"
-    chatButton.style.left = defaultConfig.position === "bottom-left" ? defaultConfig.buttonPosition : "auto"
-    chatButton.style.width = defaultConfig.buttonSize
-    chatButton.style.height = defaultConfig.buttonSize
-    chatButton.style.borderRadius = defaultConfig.buttonBorderRadius
-    chatButton.style.backgroundColor = widgetConfig?.widgetPrimaryColor || defaultConfig.buttonBackgroundColor
-    chatButton.style.boxShadow = defaultConfig.buttonBoxShadow
+    chatButton.style.bottom = config.buttonPosition
+    chatButton.style.right = config.position.includes("right") ? config.buttonPosition : "auto"
+    chatButton.style.left = config.position.includes("left") ? config.buttonPosition : "auto"
+    chatButton.style.width = config.buttonSize
+    chatButton.style.height = config.buttonSize
+    chatButton.style.borderRadius = config.buttonBorderRadius
+    chatButton.style.backgroundColor = config.buttonBackgroundColor
+    chatButton.style.boxShadow = config.buttonBoxShadow
     chatButton.style.cursor = "pointer"
     chatButton.style.display = "flex"
     chatButton.style.alignItems = "center"
     chatButton.style.justifyContent = "center"
-    chatButton.style.transition = "transform 0.3s ease, box-shadow 0.3s ease"
-    chatButton.style.zIndex = defaultConfig.zIndex + 1
+    chatButton.style.zIndex = config.zIndex + 1
     chatButton.style.pointerEvents = "auto"
+
+    // Animaciones si están habilitadas
+    if (widgetConfig?.widgetAnimation !== false) {
+      chatButton.style.transition = "transform 0.3s ease, box-shadow 0.3s ease"
+    }
 
     // Icono del botón (usando SVG inline)
     chatButton.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${defaultConfig.buttonIconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${config.buttonIconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
       </svg>
     `
 
-    // Efectos hover
-    chatButton.addEventListener("mouseenter", function () {
-      this.style.transform = "scale(1.1)"
-      this.style.boxShadow = "0 4px 16px rgba(0,0,0,0.25)"
-    })
+    // Efectos hover si las animaciones están habilitadas
+    if (widgetConfig?.widgetAnimation !== false) {
+      chatButton.addEventListener("mouseenter", function () {
+        this.style.transform = "scale(1.1)"
+        this.style.boxShadow = "0 4px 16px rgba(0,0,0,0.25)"
+      })
 
-    chatButton.addEventListener("mouseleave", function () {
-      this.style.transform = "scale(1)"
-      this.style.boxShadow = defaultConfig.buttonBoxShadow
-    })
+      chatButton.addEventListener("mouseleave", function () {
+        this.style.transform = "scale(1)"
+        this.style.boxShadow = config.buttonBoxShadow
+      })
+    }
 
     // Evento de clic
     chatButton.addEventListener("click", toggleChat)
@@ -170,73 +224,92 @@
     return chatButton
   }
 
-  // Función para crear el header del chat con controles
-  function createChatHeader() {
-    const header = document.createElement("div")
-    header.style.position = "absolute"
-    header.style.top = "0"
-    header.style.right = "0"
-    header.style.padding = "8px"
-    header.style.display = "flex"
-    header.style.gap = "4px"
-    header.style.zIndex = "10"
-    header.style.backgroundColor = "rgba(255, 255, 255, 0.9)"
-    header.style.borderRadius = "0 12px 0 8px"
+  // Función para crear los controles del header
+  function createHeaderControls() {
+    const config = getAppliedConfig()
+
+    headerControls = document.createElement("div")
+    headerControls.style.position = "absolute"
+    headerControls.style.top = "8px"
+    headerControls.style.right = "8px"
+    headerControls.style.display = "flex"
+    headerControls.style.gap = "4px"
+    headerControls.style.zIndex = "1000"
+    headerControls.style.pointerEvents = "auto"
 
     // Botón minimizar
     const minimizeButton = document.createElement("button")
-    minimizeButton.style.width = "24px"
-    minimizeButton.style.height = "24px"
+    minimizeButton.style.width = "28px"
+    minimizeButton.style.height = "28px"
     minimizeButton.style.border = "none"
-    minimizeButton.style.borderRadius = "4px"
-    minimizeButton.style.backgroundColor = "transparent"
+    minimizeButton.style.borderRadius = "6px"
+    minimizeButton.style.backgroundColor = "rgba(255, 255, 255, 0.9)"
     minimizeButton.style.cursor = "pointer"
     minimizeButton.style.display = "flex"
     minimizeButton.style.alignItems = "center"
     minimizeButton.style.justifyContent = "center"
-    minimizeButton.style.transition = "background-color 0.2s ease"
+    minimizeButton.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)"
+    minimizeButton.style.transition = "background-color 0.2s ease, transform 0.1s ease"
     minimizeButton.innerHTML = `
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="5" y1="12" x2="19" y2="12"></line>
       </svg>
     `
-    minimizeButton.addEventListener("click", minimizeChat)
+
+    minimizeButton.addEventListener("click", (e) => {
+      e.stopPropagation()
+      minimizeChat()
+    })
+
     minimizeButton.addEventListener("mouseenter", function () {
       this.style.backgroundColor = "#f0f0f0"
+      this.style.transform = "scale(1.05)"
     })
+
     minimizeButton.addEventListener("mouseleave", function () {
-      this.style.backgroundColor = "transparent"
+      this.style.backgroundColor = "rgba(255, 255, 255, 0.9)"
+      this.style.transform = "scale(1)"
     })
 
     // Botón cerrar
     const closeButton = document.createElement("button")
-    closeButton.style.width = "24px"
-    closeButton.style.height = "24px"
+    closeButton.style.width = "28px"
+    closeButton.style.height = "28px"
     closeButton.style.border = "none"
-    closeButton.style.borderRadius = "4px"
-    closeButton.style.backgroundColor = "transparent"
+    closeButton.style.borderRadius = "6px"
+    closeButton.style.backgroundColor = "rgba(255, 255, 255, 0.9)"
     closeButton.style.cursor = "pointer"
     closeButton.style.display = "flex"
     closeButton.style.alignItems = "center"
     closeButton.style.justifyContent = "center"
-    closeButton.style.transition = "background-color 0.2s ease"
+    closeButton.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)"
+    closeButton.style.transition = "background-color 0.2s ease, transform 0.1s ease"
     closeButton.innerHTML = `
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="6" x2="6" y2="18"></line>
         <line x1="6" y1="6" x2="18" y2="18"></line>
       </svg>
     `
-    closeButton.addEventListener("click", closeChat)
-    closeButton.addEventListener("mouseenter", function () {
-      this.style.backgroundColor = "#fee"
-    })
-    closeButton.addEventListener("mouseleave", function () {
-      this.style.backgroundColor = "transparent"
+
+    closeButton.addEventListener("click", (e) => {
+      e.stopPropagation()
+      closeChat()
     })
 
-    header.appendChild(minimizeButton)
-    header.appendChild(closeButton)
-    return header
+    closeButton.addEventListener("mouseenter", function () {
+      this.style.backgroundColor = "#fee"
+      this.style.transform = "scale(1.05)"
+    })
+
+    closeButton.addEventListener("mouseleave", function () {
+      this.style.backgroundColor = "rgba(255, 255, 255, 0.9)"
+      this.style.transform = "scale(1)"
+    })
+
+    headerControls.appendChild(minimizeButton)
+    headerControls.appendChild(closeButton)
+
+    return headerControls
   }
 
   // Función para alternar el chat
@@ -253,13 +326,34 @@
     if (!iframe) return
 
     isMinimized = !isMinimized
+    const config = getAppliedConfig()
 
     if (isMinimized) {
       iframe.style.height = "60px"
       iframe.style.overflow = "hidden"
+      // Actualizar el icono de minimizar para mostrar "restaurar"
+      const minimizeButton = headerControls?.querySelector("button")
+      if (minimizeButton) {
+        minimizeButton.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="9" y1="9" x2="15" y2="15"></line>
+            <line x1="15" y1="9" x2="9" y2="15"></line>
+          </svg>
+        `
+      }
     } else {
-      iframe.style.height = defaultConfig.height
+      iframe.style.height = config.height
       iframe.style.overflow = "visible"
+      // Restaurar el icono de minimizar
+      const minimizeButton = headerControls?.querySelector("button")
+      if (minimizeButton) {
+        minimizeButton.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        `
+      }
     }
   }
 
@@ -269,10 +363,14 @@
 
     console.log(`[WIDGET] Abriendo chat para cliente_id: ${clienteId}`)
 
-    // Ocultar el texto del botón
+    const config = getAppliedConfig()
+
+    // Ocultar el texto del botón con animación
     if (buttonTextElement) {
-      buttonTextElement.style.opacity = "0"
-      buttonTextElement.style.transform = "translateY(10px)"
+      if (widgetConfig?.widgetAnimation !== false) {
+        buttonTextElement.style.opacity = "0"
+        buttonTextElement.style.transform = config.position.includes("right") ? "translateX(10px)" : "translateX(-10px)"
+      }
       setTimeout(() => {
         if (buttonTextElement && buttonTextElement.parentNode) {
           buttonTextElement.parentNode.removeChild(buttonTextElement)
@@ -285,34 +383,42 @@
     iframe = document.createElement("iframe")
     iframe.src = `${window.location.protocol}//${window.location.host}/api/widget?cliente_id=${encodeURIComponent(clienteId)}`
     iframe.style.position = "fixed"
-    iframe.style.bottom = defaultConfig.marginBottom
-    iframe.style.right = defaultConfig.position === "bottom-right" ? defaultConfig.marginSide : "auto"
-    iframe.style.left = defaultConfig.position === "bottom-left" ? defaultConfig.marginSide : "auto"
-    iframe.style.width = defaultConfig.width
-    iframe.style.height = defaultConfig.height
+    iframe.style.bottom = config.marginBottom
+    iframe.style.right = config.position.includes("right") ? config.marginSide : "auto"
+    iframe.style.left = config.position.includes("left") ? config.marginSide : "auto"
+    iframe.style.width = config.width
+    iframe.style.height = config.height
     iframe.style.border = "none"
-    iframe.style.borderRadius = defaultConfig.borderRadius
-    iframe.style.boxShadow = defaultConfig.boxShadow
-    iframe.style.zIndex = defaultConfig.zIndex - 1
-    iframe.style.opacity = "0"
-    iframe.style.transform = "translateY(20px)"
-    iframe.style.transition = "opacity 0.3s ease, transform 0.3s ease"
+    iframe.style.borderRadius = config.borderRadius
+    iframe.style.boxShadow = config.boxShadow
+    iframe.style.zIndex = config.zIndex - 1
     iframe.style.pointerEvents = "auto"
+
+    // Animaciones de apertura si están habilitadas
+    if (widgetConfig?.widgetAnimation !== false) {
+      iframe.style.opacity = "0"
+      iframe.style.transform = "translateY(20px)"
+      iframe.style.transition = "opacity 0.3s ease, transform 0.3s ease"
+    }
 
     const container = createWidgetContainer()
     container.appendChild(iframe)
 
-    // Agregar header con controles
-    const header = createChatHeader()
-    container.appendChild(header)
+    // Agregar controles del header
+    const controls = createHeaderControls()
+    container.appendChild(controls)
 
     // Animar la apertura
-    setTimeout(() => {
-      if (iframe) {
-        iframe.style.opacity = "1"
-        iframe.style.transform = "translateY(0)"
-      }
-    }, 10)
+    if (widgetConfig?.widgetAnimation !== false) {
+      setTimeout(() => {
+        if (iframe) {
+          iframe.style.opacity = "1"
+          iframe.style.transform = "translateY(0)"
+        }
+      }, 10)
+    } else {
+      iframe.style.opacity = "1"
+    }
 
     isOpen = true
     isMinimized = false
@@ -324,21 +430,28 @@
 
     console.log(`[WIDGET] Cerrando chat`)
 
-    // Animar el cierre
-    iframe.style.opacity = "0"
-    iframe.style.transform = "translateY(20px)"
+    const config = getAppliedConfig()
 
-    setTimeout(() => {
-      if (iframe && iframe.parentNode) {
-        iframe.parentNode.removeChild(iframe)
-        iframe = null
-      }
-      // Remover header también
-      const header = document.querySelector("#treelan-chat-widget-container > div")
-      if (header && header.parentNode) {
-        header.parentNode.removeChild(header)
-      }
-    }, 300)
+    // Animar el cierre si las animaciones están habilitadas
+    if (widgetConfig?.widgetAnimation !== false) {
+      iframe.style.opacity = "0"
+      iframe.style.transform = "translateY(20px)"
+    }
+
+    setTimeout(
+      () => {
+        if (iframe && iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe)
+          iframe = null
+        }
+        // Remover controles del header
+        if (headerControls && headerControls.parentNode) {
+          headerControls.parentNode.removeChild(headerControls)
+          headerControls = null
+        }
+      },
+      widgetConfig?.widgetAnimation !== false ? 300 : 0,
+    )
 
     isOpen = false
     isMinimized = false
@@ -370,6 +483,11 @@
       buttonTextElement = null
     }
 
+    if (headerControls && headerControls.parentNode) {
+      headerControls.parentNode.removeChild(headerControls)
+      headerControls = null
+    }
+
     if (widgetContainer && widgetContainer.parentNode) {
       widgetContainer.parentNode.removeChild(widgetContainer)
       widgetContainer = null
@@ -391,7 +509,7 @@
     // Obtener configuración del widget
     await fetchWidgetConfig()
 
-    console.log(`[WIDGET] Creando widget`)
+    console.log(`[WIDGET] Creando widget con configuración:`, getAppliedConfig())
 
     // Crear el contenedor y el botón
     createWidgetContainer()
@@ -415,6 +533,7 @@
     isOpen: () => isOpen,
     isMinimized: () => isMinimized,
     clienteId: clienteId,
+    getConfig: () => widgetConfig,
   }
 
   // Inicializar el widget
