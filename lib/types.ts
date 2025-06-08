@@ -1,7 +1,7 @@
 export interface WhatsAppConfig {
   id: string
   phoneNumberId: string
-  wabaId?: string
+  wabaId: string
   displayName: string
   assistantId: string
   active: boolean
@@ -10,15 +10,14 @@ export interface WhatsAppConfig {
   verifyToken: string
   accessToken: string
   webhookUrl?: string
-  lastUserPhoneNumber?: string
-  cliente_id?: string
-  proxy?: string
-  // Configuraciones del widget web
+  cliente_id?: string // NUEVO CAMPO AGREGADO
+
+  // Widget configuration
   widgetEnabled?: boolean
   widgetTitle?: string
   widgetPrimaryColor?: string
   widgetSecondaryColor?: string
-  widgetPosition?: "bottom-right" | "bottom-left"
+  widgetPosition?: "bottom-right" | "bottom-left" | "top-right" | "top-left"
   widgetWelcomeMessage?: string
   widgetPlaceholder?: string
   widgetButtonText?: string
@@ -32,13 +31,12 @@ export interface WhatsAppConfig {
   widgetShadow?: boolean
   widgetAnimation?: boolean
   widgetSoundEnabled?: boolean
-  widgetTheme?: "light" | "dark" | "auto"
+  widgetTheme?: "light" | "dark"
+
   stats?: {
     messagesReceived: number
     messagesProcessed: number
     errors: number
     lastMessageAt?: string
-    webChatsStarted?: number
-    webMessagesReceived?: number
   }
 }

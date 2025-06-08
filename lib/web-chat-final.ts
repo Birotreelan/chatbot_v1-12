@@ -6,6 +6,7 @@ interface WebChatConfig {
   assistantId: string
   enabled: boolean
   widgetEnabled: boolean
+  cliente_id?: string
 }
 
 interface ProcessWebMessageParams {
@@ -21,12 +22,23 @@ const webThreadsCache = new Map<string, string>()
 export async function processWebMessage(params: ProcessWebMessageParams): Promise<string> {
   try {
     const { message, sessionId, config, ip } = params
-    console.log(`[WEB-CHAT-FINAL] Procesando mensaje para sessionId: ${sessionId}`)
-    console.log(`[WEB-CHAT-FINAL] Cliente: ${config.displayName}, IP: ${ip}`)
+    console.log(`[WEB-CHAT-FINAL] ========== PROCESANDO MENSAJE WEB ==========`)
+    console.log(`[WEB-CHAT-FINAL] Session ID: ${sessionId}`)
+    console.log(`[WEB-CHAT-FINAL] Cliente: ${config.displayName}`)
+    console.log(`[WEB-CHAT-FINAL] Cliente ID: ${config.cliente_id}`)
+    console.log(`[WEB-CHAT-FINAL] IP: ${ip}`)
+    console.log(`[WEB-CHAT-FINAL] Mensaje: ${message}`)
+    console.log(`[WEB-CHAT-FINAL] ================================================`)
 
     // Validar parámetros
     if (!sessionId || !message || !config?.assistantId) {
       throw new Error("Parámetros requeridos faltantes")
+    }
+
+    // Validar que tenemos cliente_id
+    if (!config.cliente_id) {
+      console.error(`[WEB-CHAT-FINAL] ❌ Cliente ID faltante en configuración`)
+      throw new Error("Cliente ID no configurado")
     }
 
     // Limpiar sessionId
@@ -49,12 +61,12 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
 
     // Procesar mensaje
-    const response = await processMessageWithOpenAI(threadId, message, config.assistantId)
+    const response = await processMessageWithOpenAI(threadId, message, config.assistantId, config.cliente_id)
     console.log(`[WEB-CHAT-FINAL] ✅ Respuesta: ${response.length} caracteres`)
 
     return response
   } catch (error) {
-    console.error("[WEB-CHAT-FINAL] Error:", error)
+    console.error("[WEB-CHAT-FINAL] ❌ Error:", error)
     return "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente."
   }
 }
@@ -92,8 +104,19 @@ async function createWebThread(identifier: string): Promise<string> {
   }
 }
 
-async function processMessageWithOpenAI(threadId: string, message: string, assistantId: string): Promise<string> {
+async function processMessageWithOpenAI(
+  threadId: string,
+  message: string,
+  assistantId: string,
+  clienteId: string,
+): Promise<string> {
   try {
+    console.log(`[WEB-CHAT-FINAL] ========== PROCESANDO CON OPENAI ==========`)
+    console.log(`[WEB-CHAT-FINAL] Thread ID: ${threadId}`)
+    console.log(`[WEB-CHAT-FINAL] Assistant ID: ${assistantId}`)
+    console.log(`[WEB-CHAT-FINAL] Cliente ID: ${clienteId}`)
+    console.log(`[WEB-CHAT-FINAL] ================================================`)
+
     // 1. Añadir mensaje al thread
     console.log(`[WEB-CHAT-FINAL] Añadiendo mensaje al thread: ${threadId}`)
     const messageResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
@@ -146,13 +169,28 @@ async function processMessageWithOpenAI(threadId: string, message: string, assis
             type: "function",
             function: {
               name: "search_turnos",
-              description: "Busca turnos disponibles para un paciente",
+              description: "Busca turnos disponibles",
               parameters: {
                 type: "object",
                 properties: {
-                  dni: { type: "string", description: "DNI del paciente" },
+                  rangoFechas: {
+                    type: "string",
+                    description: "Rango de fechas en formato YYYY-MM-DD a YYYY-MM-DD",
+                  },
+                  profesional: {
+                    type: "string",
+                    description: "Nombre del profesional (opcional)",
+                  },
+                  especialidad: {
+                    type: "string",
+                    description: "Nombre de la especialidad (opcional)",
+                  },
+                  profesionalId: {
+                    type: "string",
+                    description: "ID del profesional (opcional)",
+                  },
                 },
-                required: ["dni"],
+                required: [],
               },
             },
           },
@@ -168,7 +206,7 @@ async function processMessageWithOpenAI(threadId: string, message: string, assis
     console.log(`[WEB-CHAT-FINAL] Run creado: ${runData.id}`)
 
     // 3. Esperar completación
-    const finalResponse = await waitForRunCompletion(threadId, runData.id)
+    const finalResponse = await waitForRunCompletion(threadId, runData.id, clienteId)
     return finalResponse
   } catch (error) {
     console.error("[WEB-CHAT-FINAL] Error procesando mensaje:", error)
@@ -176,9 +214,14 @@ async function processMessageWithOpenAI(threadId: string, message: string, assis
   }
 }
 
-async function waitForRunCompletion(threadId: string, runId: string): Promise<string> {
+async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
   let attempts = 0
   const maxAttempts = 30
+
+  console.log(`[WEB-CHAT-FINAL] ========== ESPERANDO COMPLETACIÓN ==========`)
+  console.log(`[WEB-CHAT-FINAL] Run ID: ${runId}`)
+  console.log(`[WEB-CHAT-FINAL] Cliente ID: ${clienteId}`)
+  console.log(`[WEB-CHAT-FINAL] ================================================`)
 
   while (attempts < maxAttempts) {
     try {
@@ -227,7 +270,7 @@ async function waitForRunCompletion(threadId: string, runId: string): Promise<st
         return "Respuesta procesada correctamente."
       } else if (run.status === "requires_action") {
         console.log(`[WEB-CHAT-FINAL] Run requiere acción - procesando tool calls`)
-        await handleToolCalls(threadId, runId, run)
+        await handleToolCalls(threadId, runId, run, clienteId)
       } else if (run.status === "failed" || run.status === "cancelled" || run.status === "expired") {
         console.error(`[WEB-CHAT-FINAL] Run falló con estado: ${run.status}`)
         return "Lo siento, ha ocurrido un error procesando tu solicitud."
@@ -245,14 +288,20 @@ async function waitForRunCompletion(threadId: string, runId: string): Promise<st
   return "La solicitud está tomando más tiempo del esperado. Por favor, intenta nuevamente."
 }
 
-async function handleToolCalls(threadId: string, runId: string, run: any): Promise<void> {
+async function handleToolCalls(threadId: string, runId: string, run: any, clienteId: string): Promise<void> {
   try {
-    console.log(`[WEB-CHAT-FINAL] Procesando ${run.required_action.submit_tool_outputs.tool_calls.length} tool calls`)
+    console.log(`[WEB-CHAT-FINAL] ========== PROCESANDO TOOL CALLS ==========`)
+    console.log(`[WEB-CHAT-FINAL] Cantidad: ${run.required_action.submit_tool_outputs.tool_calls.length}`)
+    console.log(`[WEB-CHAT-FINAL] Cliente ID: ${clienteId}`)
+    console.log(`[WEB-CHAT-FINAL] ================================================`)
 
     const toolOutputs = []
 
     for (const toolCall of run.required_action.submit_tool_outputs.tool_calls) {
-      console.log(`[WEB-CHAT-FINAL] Procesando tool call: ${toolCall.function.name}`)
+      console.log(`[WEB-CHAT-FINAL] ========== TOOL CALL ==========`)
+      console.log(`[WEB-CHAT-FINAL] Función: ${toolCall.function.name}`)
+      console.log(`[WEB-CHAT-FINAL] Argumentos: ${toolCall.function.arguments}`)
+      console.log(`[WEB-CHAT-FINAL] ================================`)
 
       try {
         let output = ""
@@ -260,19 +309,30 @@ async function handleToolCalls(threadId: string, runId: string, run: any): Promi
 
         switch (toolCall.function.name) {
           case "validate_dni":
-            console.log(`[WEB-CHAT-FINAL] Validando DNI: ${args.dni}`)
-            const dniResult = await validateDNI(args.dni)
+            console.log(`[WEB-CHAT-FINAL] 🔍 Validando DNI: ${args.dni} con cliente: ${clienteId}`)
+            const dniResult = await validateDNI(args.dni, clienteId)
+            console.log(`[WEB-CHAT-FINAL] 📋 Resultado DNI:`, dniResult)
             output = JSON.stringify(dniResult)
             break
 
           case "search_turnos":
-            console.log(`[WEB-CHAT-FINAL] Buscando turnos para DNI: ${args.dni}`)
-            const turnosResult = await searchTurnos(args.dni)
+            console.log(`[WEB-CHAT-FINAL] 📅 Buscando turnos con cliente: ${clienteId}`)
+            console.log(`[WEB-CHAT-FINAL] 📋 Parámetros:`, args)
+            const turnosResult = await searchTurnos(
+              {
+                rangoFechas: args.rangoFechas || "2024-01-08 a 2024-01-15",
+                profesional: args.profesional,
+                especialidad: args.especialidad,
+                profesionalId: args.profesionalId,
+              },
+              clienteId,
+            )
+            console.log(`[WEB-CHAT-FINAL] 📋 Resultado turnos:`, turnosResult)
             output = JSON.stringify(turnosResult)
             break
 
           default:
-            console.log(`[WEB-CHAT-FINAL] Tool call no reconocido: ${toolCall.function.name}`)
+            console.log(`[WEB-CHAT-FINAL] ❌ Tool call no reconocido: ${toolCall.function.name}`)
             output = JSON.stringify({ error: "Función no disponible" })
         }
 
@@ -280,8 +340,10 @@ async function handleToolCalls(threadId: string, runId: string, run: any): Promi
           tool_call_id: toolCall.id,
           output: output,
         })
+
+        console.log(`[WEB-CHAT-FINAL] ✅ Tool call procesado: ${toolCall.function.name}`)
       } catch (error) {
-        console.error(`[WEB-CHAT-FINAL] Error en tool call ${toolCall.function.name}:`, error)
+        console.error(`[WEB-CHAT-FINAL] ❌ Error en tool call ${toolCall.function.name}:`, error)
         toolOutputs.push({
           tool_call_id: toolCall.id,
           output: JSON.stringify({ error: "Error procesando la solicitud" }),
@@ -290,7 +352,9 @@ async function handleToolCalls(threadId: string, runId: string, run: any): Promi
     }
 
     // Enviar tool outputs
-    console.log(`[WEB-CHAT-FINAL] Enviando ${toolOutputs.length} tool outputs`)
+    console.log(`[WEB-CHAT-FINAL] ========== ENVIANDO TOOL OUTPUTS ==========`)
+    console.log(`[WEB-CHAT-FINAL] Cantidad: ${toolOutputs.length}`)
+
     const submitResponse = await fetch(
       `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`,
       {
@@ -307,12 +371,15 @@ async function handleToolCalls(threadId: string, runId: string, run: any): Promi
     )
 
     if (!submitResponse.ok) {
+      const errorText = await submitResponse.text()
+      console.error(`[WEB-CHAT-FINAL] ❌ Error submitting tool outputs: ${submitResponse.status} ${errorText}`)
       throw new Error(`Error submitting tool outputs: ${submitResponse.status}`)
     }
 
-    console.log(`[WEB-CHAT-FINAL] Tool outputs enviados correctamente`)
+    console.log(`[WEB-CHAT-FINAL] ✅ Tool outputs enviados correctamente`)
+    console.log(`[WEB-CHAT-FINAL] ================================================`)
   } catch (error) {
-    console.error("[WEB-CHAT-FINAL] Error en handleToolCalls:", error)
+    console.error("[WEB-CHAT-FINAL] ❌ Error en handleToolCalls:", error)
     throw error
   }
 }

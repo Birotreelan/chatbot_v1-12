@@ -85,6 +85,8 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     widgetAnimation: config.widgetAnimation !== undefined ? config.widgetAnimation : true,
     widgetSoundEnabled: config.widgetSoundEnabled !== undefined ? config.widgetSoundEnabled : true,
     widgetTheme: config.widgetTheme || "light",
+    // Agregar cliente_id si está presente
+    cliente_id: config.cliente_id,
     stats: {
       messagesReceived: 0,
       messagesProcessed: 0,
@@ -572,13 +574,23 @@ export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig 
   return getWhatsAppConfig(id)
 }
 
-// Función para obtener configuración por clienteId
+// Función para obtener configuración por clienteId - NUEVA FUNCIÓN AGREGADA
 export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppConfig | null> {
   try {
+    console.log(`[DB] Buscando configuración para cliente_id: ${clienteId}`)
+
     const configs = await getAllWhatsAppConfigs()
-    return configs.find((config) => config.cliente_id === clienteId)
+    const config = configs.find((config) => config.cliente_id === clienteId)
+
+    if (config) {
+      console.log(`[DB] ✅ Configuración encontrada: ${config.displayName}`)
+      return config
+    }
+
+    console.log(`[DB] ❌ No se encontró configuración para cliente_id: ${clienteId}`)
+    return null
   } catch (error) {
-    console.error("Error al buscar configuración por cliente_id:", error)
+    console.error(`[DB] Error al buscar configuración por cliente_id:`, error)
     return null
   }
 }

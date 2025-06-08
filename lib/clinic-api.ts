@@ -309,6 +309,14 @@ export async function validateDNI(
   try {
     console.log(`[VALIDATE-DNI] Validando DNI: ${dni} para cliente: ${clienteId}`)
 
+    if (!clienteId) {
+      console.error(`[VALIDATE-DNI] ❌ Cliente ID faltante`)
+      return {
+        success: false,
+        error: "ID de cliente requerido",
+      }
+    }
+
     const clinicAPI = createClinicAPI(clienteId)
     const response = await clinicAPI.paciente_dni(dni)
 
@@ -352,6 +360,14 @@ export async function searchTurnos(
 }> {
   try {
     console.log(`[SEARCH-TURNOS] Buscando turnos para cliente: ${clienteId}`, params)
+
+    if (!clienteId) {
+      console.error(`[SEARCH-TURNOS] ❌ Cliente ID faltante`)
+      return {
+        success: false,
+        error: "ID de cliente requerido",
+      }
+    }
 
     const clinicAPI = createClinicAPI(clienteId)
     const response = await clinicAPI.buscarTurnosDisponibles(
