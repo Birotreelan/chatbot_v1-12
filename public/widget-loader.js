@@ -116,16 +116,17 @@
 
     buttonTextElement = document.createElement("div")
     buttonTextElement.style.position = "fixed"
-    buttonTextElement.style.bottom = `${Number.parseInt(config.buttonPosition) + 15}px` // Centrado verticalmente con el botón
+    // Cambiar la línea de posicionamiento bottom para dar más espacio
+    buttonTextElement.style.bottom = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 25}px` // Más espacio vertical
 
-    // Posicionar al costado del botón según la configuración
+    // Y ajustar el posicionamiento horizontal para que no interfiera con el chat
     if (config.position.includes("right")) {
-      // Si el botón está a la derecha, el texto va a la izquierda del botón
-      buttonTextElement.style.right = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 15}px`
+      // Si el botón está a la derecha, el texto va más a la izquierda para no pisar el chat
+      buttonTextElement.style.right = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 25}px`
       buttonTextElement.style.left = "auto"
     } else {
-      // Si el botón está a la izquierda, el texto va a la derecha del botón
-      buttonTextElement.style.left = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 15}px`
+      // Si el botón está a la izquierda, el texto va más a la derecha
+      buttonTextElement.style.left = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 25}px`
       buttonTextElement.style.right = "auto"
     }
 
@@ -234,21 +235,22 @@
     headerControls = document.createElement("div")
     headerControls.id = "treelan-chat-widget-controls"
     headerControls.style.position = "absolute"
-    headerControls.style.top = "8px"
-    headerControls.style.right = "8px"
+    headerControls.style.top = "12px"
+    headerControls.style.right = "12px"
     headerControls.style.display = "flex"
-    headerControls.style.gap = "4px"
-    headerControls.style.zIndex = (Number.parseInt(config.zIndex) + 10).toString() // Asegurar que esté por encima del iframe
+    headerControls.style.gap = "6px"
+    headerControls.style.zIndex = (Number.parseInt(config.zIndex) + 10).toString()
     headerControls.style.pointerEvents = "auto"
 
     // Botón minimizar
     const minimizeButton = document.createElement("button")
     minimizeButton.id = "treelan-chat-widget-minimize"
-    minimizeButton.style.width = "28px"
-    minimizeButton.style.height = "28px"
+    minimizeButton.style.width = "32px"
+    minimizeButton.style.height = "32px"
     minimizeButton.style.border = "none"
     minimizeButton.style.borderRadius = "6px"
-    minimizeButton.style.backgroundColor = "rgba(255, 255, 255, 0.9)"
+    minimizeButton.style.backgroundColor = "rgba(255, 255, 255, 0.95)"
+    minimizeButton.style.backdropFilter = "blur(4px)"
     minimizeButton.style.cursor = "pointer"
     minimizeButton.style.display = "flex"
     minimizeButton.style.alignItems = "center"
@@ -272,18 +274,19 @@
     })
 
     minimizeButton.addEventListener("mouseleave", function () {
-      this.style.backgroundColor = "rgba(255, 255, 255, 0.9)"
+      this.style.backgroundColor = "rgba(255, 255, 255, 0.95)"
       this.style.transform = "scale(1)"
     })
 
     // Botón cerrar
     const closeButton = document.createElement("button")
     closeButton.id = "treelan-chat-widget-close"
-    closeButton.style.width = "28px"
-    closeButton.style.height = "28px"
+    closeButton.style.width = "32px"
+    closeButton.style.height = "32px"
     closeButton.style.border = "none"
     closeButton.style.borderRadius = "6px"
-    closeButton.style.backgroundColor = "rgba(255, 255, 255, 0.9)"
+    closeButton.style.backgroundColor = "rgba(255, 255, 255, 0.95)"
+    closeButton.style.backdropFilter = "blur(4px)"
     closeButton.style.cursor = "pointer"
     closeButton.style.display = "flex"
     closeButton.style.alignItems = "center"
@@ -308,7 +311,7 @@
     })
 
     closeButton.addEventListener("mouseleave", function () {
-      this.style.backgroundColor = "rgba(255, 255, 255, 0.9)"
+      this.style.backgroundColor = "rgba(255, 255, 255, 0.95)"
       this.style.transform = "scale(1)"
     })
 
