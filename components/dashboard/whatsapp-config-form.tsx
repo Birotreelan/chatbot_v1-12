@@ -54,6 +54,8 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     widgetAnimation: config?.widgetAnimation !== undefined ? config.widgetAnimation : true,
     widgetSoundEnabled: config?.widgetSoundEnabled !== undefined ? config.widgetSoundEnabled : true,
     widgetTheme: config?.widgetTheme || "light",
+    widgetButtonSubtext: config?.widgetButtonSubtext || "Obtené tu turno con nuestro asistente virtual",
+    widgetShowButtonText: config?.widgetShowButtonText !== undefined ? config.widgetShowButtonText : true,
   })
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
@@ -442,6 +444,26 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                       <SelectItem value="auto">Automático</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetButtonSubtext">Texto del Botón Flotante</Label>
+                  <Input
+                    id="widgetButtonSubtext"
+                    name="widgetButtonSubtext"
+                    value={formData.widgetButtonSubtext}
+                    onChange={handleChange}
+                    placeholder="Obtené tu turno con nuestro asistente virtual"
+                  />
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="widgetShowButtonText"
+                    checked={formData.widgetShowButtonText}
+                    onCheckedChange={(checked) => handleSwitchChange("widgetShowButtonText", checked)}
+                  />
+                  <Label htmlFor="widgetShowButtonText">Mostrar texto en el botón flotante</Label>
                 </div>
               </div>
 

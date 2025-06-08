@@ -200,6 +200,14 @@ export function ChatDemo({ config }: ChatDemoProps) {
                 <span className="font-medium">Placeholder:</span>
                 <p className="text-gray-600 text-sm mt-1">"{config.widgetPlaceholder || "Escribe tu mensaje..."}"</p>
               </div>
+              {config.widgetShowButtonText && (
+                <div>
+                  <span className="font-medium">Texto del Botón:</span>
+                  <p className="text-gray-600 text-sm mt-1">
+                    "{config.widgetButtonSubtext || "Obtené tu turno con nuestro asistente virtual"}"
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
 

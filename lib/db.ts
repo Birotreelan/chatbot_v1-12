@@ -85,6 +85,8 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     widgetAnimation: config.widgetAnimation !== undefined ? config.widgetAnimation : true,
     widgetSoundEnabled: config.widgetSoundEnabled !== undefined ? config.widgetSoundEnabled : true,
     widgetTheme: config.widgetTheme || "light",
+    widgetButtonSubtext: config.widgetButtonSubtext || "Obtené tu turno con nuestro asistente virtual",
+    widgetShowButtonText: config.widgetShowButtonText !== undefined ? config.widgetShowButtonText : true,
     // Agregar cliente_id si está presente
     cliente_id: config.cliente_id,
     stats: {

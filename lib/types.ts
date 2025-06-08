@@ -32,6 +32,9 @@ export interface WhatsAppConfig {
   widgetAnimation?: boolean
   widgetSoundEnabled?: boolean
   widgetTheme?: "light" | "dark"
+  widgetButtonText?: string
+  widgetButtonSubtext?: string // Nuevo campo para el texto que acompaña al botón
+  widgetShowButtonText?: boolean // Nuevo campo para mostrar/ocultar el texto
 
   stats?: {
     messagesReceived: number
