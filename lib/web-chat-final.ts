@@ -1,5 +1,5 @@
-import { processWebOnlyMessage } from "./openai-tools"
 import { getThread } from "@/lib/thread-manager"
+import { processWebOnlyMessage } from "@/lib/openai-web-processor" // Correct import path
 
 interface WebChatConfig {
   id: string
@@ -16,10 +16,6 @@ interface ProcessWebMessageParams {
   ip: string
   clienteId: string
 }
-
-// Cache simple para threads web - con TTL para evitar threads eternos
-const webThreadsCache = new Map<string, { threadId: string; lastUsed: number }>()
-const THREAD_TTL = 30 * 60 * 1000 // 30 minutos
 
 export async function processWebMessage(params: ProcessWebMessageParams): Promise<string> {
   try {
@@ -47,18 +43,22 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
       cleanSessionId = cleanSessionId.substring(4)
     }
 
-    // ✅ USAR EL MISMO SISTEMA QUE WHATSAPP: Thread Manager
-    console.log(`[WEB-CHAT-FINAL] 🔄 Usando Thread Manager como WhatsApp`)
-
     // Crear un identificador único para el usuario web
     const webUserId = `web_${cleanSessionId}`
     console.log(`[WEB-CHAT-FINAL] 👤 Web User ID: ${webUserId}`)
 
     // Obtener o crear thread usando el mismo sistema que WhatsApp
+    console.log(`[WEB-CHAT-FINAL] 🔄 Obteniendo thread...`)
     const thread = await getThread(webUserId, config.id)
     console.log(`[WEB-CHAT-FINAL] 🧵 Thread obtenido: ${thread.id}`)
 
-    // ✅ USAR LA MISMA FUNCIÓN QUE WHATSAPP PERO SIN ENVIAR A WHATSAPP
+    // Validar que el thread ID es válido
+    if (!thread.id || typeof thread.id !== "string" || !thread.id.startsWith("thread_")) {
+      console.error(`[WEB-CHAT-FINAL] ❌ Thread ID inválido: "${thread.id}"`)
+      throw new Error(`Thread ID inválido: "${thread.id}"`)
+    }
+
+    // Procesar mensaje usando la nueva función dedicada para web
     console.log(`[WEB-CHAT-FINAL] 🚀 Procesando con OpenAI (sin WhatsApp)`)
     const response = await processWebOnlyMessage(thread.id, message, config.assistantId, clienteId)
 
@@ -67,26 +67,5 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
   } catch (error) {
     console.error("[WEB-CHAT-FINAL] ❌ Error en processWebMessage:", error)
     return "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente."
-  }
-}
-
-// Función para limpiar threads expirados
-function cleanExpiredThreads() {
-  const now = Date.now()
-  const expiredKeys: string[] = []
-
-  for (const [key, value] of webThreadsCache.entries()) {
-    if (now - value.lastUsed > THREAD_TTL) {
-      expiredKeys.push(key)
-    }
-  }
-
-  for (const key of expiredKeys) {
-    webThreadsCache.delete(key)
-    console.log(`[WEB-CHAT-FINAL] 🧹 Thread expirado eliminado: ${key}`)
-  }
-
-  if (expiredKeys.length > 0) {
-    console.log(`[WEB-CHAT-FINAL] 🧹 Limpieza completada: ${expiredKeys.length} threads eliminados`)
   }
 }

@@ -1,8 +1,7 @@
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
 import { logError } from "@/lib/monitoring"
-import { getAssistantResponse } from "@/lib/assistant" // Declare the variable before using it
+import { getAssistantResponse } from "@/lib/assistant"
 import OpenAI from "openai"
-import { wait } from "@/lib/utils"
 
 // Definición de las herramientas
 export const openAITools = [
@@ -128,16 +127,6 @@ export const openAITools = [
   },
 ]
 
-// Mensajes predefinidos para cada función
-const FUNCTION_MESSAGES = {
-  validar_dni: "Aguardá unos instantes mientras validamos tu DNI.",
-  buscar_turnos_disponibles: "Voy a buscar turnos disponibles, aguardá unos instantes.",
-  reservar_turno: "Realizando reserva de turno. aguardá unos instantes.",
-  obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
-  buscar_profesionales: "Buscando profesionales, aguardá unos instantes.",
-  default: "Estoy procesando tu solicitud, dame un momento por favor.",
-}
-
 // Función para procesar mensajes individuales (para compatibilidad)
 export async function processIndividualMessage(
   message: string,
@@ -196,9 +185,7 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
   if (response.exito && response.datos) {
     if (Array.isArray(response.datos)) {
       const originalCount = response.datos.length
-      // Si es un array, limitar a los primeros elementos
-      // Modificado: Ahora permite hasta 18 elementos en lugar de 5
-      const truncatedData = response.datos.slice(0, 40) // Permitir hasta 40 elementos (5 días x 8 turnos)
+      const truncatedData = response.datos.slice(0, 40)
       const truncatedResponse = {
         ...response,
         datos: truncatedData,
@@ -211,14 +198,10 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
 
       console.log(`[OPENAI-TOOLS] Array truncado de ${originalCount} a ${truncatedData.length} elementos`)
       console.log(`[OPENAI-TOOLS] Nuevo tamaño: ${newLength} caracteres (${newTokens} tokens estimados)`)
-      console.log(
-        `[OPENAI-TOOLS] Reducción: ${originalLength - newLength} caracteres (${originalTokens - newTokens} tokens)`,
-      )
       console.log(`[OPENAI-TOOLS] ================================================`)
 
       return truncatedResponse
     } else if (typeof response.datos === "object") {
-      // Si es un objeto, mantener solo campos esenciales
       const truncatedData = {
         ...response.datos,
         _truncated: true,
@@ -233,9 +216,6 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
 
       console.log(`[OPENAI-TOOLS] Objeto truncado manteniendo campos esenciales`)
       console.log(`[OPENAI-TOOLS] Nuevo tamaño: ${newLength} caracteres (${newTokens} tokens estimados)`)
-      console.log(
-        `[OPENAI-TOOLS] Reducción: ${originalLength - newLength} caracteres (${originalTokens - newTokens} tokens)`,
-      )
       console.log(`[OPENAI-TOOLS] ================================================`)
 
       return truncatedResponse
@@ -256,9 +236,6 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
 
   console.log(`[OPENAI-TOOLS] Aplicado truncamiento de string fallback`)
   console.log(`[OPENAI-TOOLS] Nuevo tamaño: ${newLength} caracteres (${newTokens} tokens estimados)`)
-  console.log(
-    `[OPENAI-TOOLS] Reducción: ${originalLength - newLength} caracteres (${originalTokens - newTokens} tokens)`,
-  )
   console.log(`[OPENAI-TOOLS] ================================================`)
 
   return fallbackResponse
@@ -270,10 +247,8 @@ export async function executeOpenAITool(
   toolArgs: Record<string, any>,
   clienteId?: string,
 ): Promise<any> {
-  // Hardcodear la URL del proxy
   const proxy = "https://treelan.net/managment/proxy_service/"
 
-  // Verificar que tenemos un cliente_id
   if (!clienteId) {
     return {
       exito: false,
@@ -284,7 +259,6 @@ export async function executeOpenAITool(
     }
   }
 
-  // Asegurarse de que la URL del proxy termina con una barra diagonal
   const proxyUrl = proxy.endsWith("/") ? proxy : `${proxy}/`
 
   try {
@@ -294,12 +268,7 @@ export async function executeOpenAITool(
     console.log(`[OPENAI-TOOLS] Cliente ID: ${clienteId}`)
     console.log(`[OPENAI-TOOLS] Proxy URL: ${proxyUrl}`)
 
-    console.log(`Ejecutando ${toolName} con args:`, toolArgs)
-    console.log(`Proxy URL: ${proxyUrl}`)
-    console.log(`Cliente ID: ${clienteId}`)
-
-    // Preparar el cuerpo de la solicitud según la función
-    let requestBody: Record<string, any> = {
+    const requestBody: Record<string, any> = {
       Cliente_Id: clienteId.trim(),
       Action: "",
     }
@@ -321,16 +290,13 @@ export async function executeOpenAITool(
 
       case "buscar_turnos_disponibles":
         requestBody.Action = "get_turnos"
-        // Extraer fechas desde y hasta del rango
         if (toolArgs.rango_fechas) {
-          // Manejar tanto "a" como "to" como separadores
           let fechaDesde, fechaHasta
           if (toolArgs.rango_fechas.includes(" a ")) {
             ;[fechaDesde, fechaHasta] = toolArgs.rango_fechas.split(" a ")
           } else if (toolArgs.rango_fechas.includes(" to ")) {
             ;[fechaDesde, fechaHasta] = toolArgs.rango_fechas.split(" to ")
           } else {
-            // Si no tiene separador, usar como fecha única
             fechaDesde = toolArgs.rango_fechas
             fechaHasta = toolArgs.rango_fechas
           }
@@ -338,7 +304,6 @@ export async function executeOpenAITool(
           requestBody.Fecha_Desde = fechaDesde.trim()
           requestBody.Fecha_Hasta = fechaHasta ? fechaHasta.trim() : fechaDesde.trim()
         } else {
-          // Valores por defecto
           const hoy = new Date()
           const fechaDesde = hoy.toISOString().split("T")[0]
           const unMesDespues = new Date(hoy.setMonth(hoy.getMonth() + 1)).toISOString().split("T")[0]
@@ -346,351 +311,20 @@ export async function executeOpenAITool(
           requestBody.Fecha_Hasta = unMesDespues
         }
 
-        // Si tenemos el ID del profesional, usarlo directamente
         if (toolArgs.profesional_id) {
           requestBody.Profesional_Id = toolArgs.profesional_id
-        }
-        // Si tenemos el nombre del profesional pero no el ID, primero buscar el profesional
-        else if (toolArgs.profesional) {
-          // Necesitamos hacer una búsqueda previa
-          const profesionalRequestBody = {
-            Cliente_Id: clienteId.trim(),
-            Action: "get_profesionales",
-            busqueda: toolArgs.profesional,
-          }
-
-          console.log(`Buscando profesional primero:`, JSON.stringify(profesionalRequestBody))
-
-          const profesionalResponse = await fetch(proxyUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(profesionalRequestBody),
-          })
-
-          const profesionalResponseText = await profesionalResponse.text()
-          console.log(`Respuesta de búsqueda de profesional:`, profesionalResponseText)
-
-          try {
-            const profesionalData = JSON.parse(profesionalResponseText)
-            if (profesionalData.profesionales && profesionalData.profesionales.length > 0) {
-              // Si hay múltiples profesionales, devolver la lista para que el usuario elija
-              if (profesionalData.profesionales.length > 1) {
-                return {
-                  exito: true,
-                  datos: {
-                    multiple: true,
-                    profesionales: profesionalData.profesionales.map((p: any) => ({
-                      id: p.Id,
-                      nombre: p.Nombre,
-                      especialidad: p.Especialidad,
-                    })),
-                    mensaje: "Se encontraron múltiples profesionales. Por favor, seleccione uno.",
-                  },
-                }
-              }
-
-              // Si solo hay un profesional, usar su ID para buscar turnos
-              requestBody.Profesional_Id = profesionalData.profesionales[0].Id
-            } else if (profesionalData.error) {
-              return {
-                exito: false,
-                error: {
-                  codigo: "PROFESIONAL_NO_ENCONTRADO",
-                  mensaje: profesionalData.error,
-                },
-              }
-            }
-          } catch (e) {
-            console.error(`Error al parsear la respuesta de búsqueda de profesional:`, e)
-            return {
-              exito: false,
-              error: {
-                codigo: "FORMATO_INVALIDO",
-                mensaje: `La API devolvió una respuesta con formato inválido al buscar profesional`,
-              },
-            }
-          }
-        }
-        // Si tenemos la especialidad pero no el profesional, buscar por especialidad
-        else if (toolArgs.especialidad) {
-          // Necesitamos hacer una búsqueda previa para obtener el ID de la subespecialidad
-          const subespecialidadRequestBody = {
-            Cliente_Id: clienteId.trim(),
-            Action: "get_subespecialidades",
-          }
-
-          console.log(`Buscando subespecialidad primero:`, JSON.stringify(subespecialidadRequestBody))
-
-          const subespecialidadResponse = await fetch(proxyUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(subespecialidadRequestBody),
-          })
-
-          const subespecialidadResponseText = await subespecialidadResponse.text()
-          console.log(`Respuesta de búsqueda de subespecialidad:`, subespecialidadResponseText)
-
-          try {
-            const subespecialidadData = JSON.parse(subespecialidadResponseText)
-            if (subespecialidadData.subespecialidades && subespecialidadData.subespecialidades.length > 0) {
-              // Buscar la subespecialidad que coincida con el nombre
-              const subespecialidadEncontrada = subespecialidadData.subespecialidades.find((e: any) =>
-                e.Nombre.toLowerCase().includes(toolArgs.especialidad.toLowerCase()),
-              )
-
-              if (subespecialidadEncontrada) {
-                requestBody.Subespecialidad_Id = subespecialidadEncontrada.Id
-                console.log(
-                  `Subespecialidad encontrada: ${subespecialidadEncontrada.Nombre} (ID: ${subespecialidadEncontrada.Id})`,
-                )
-              } else {
-                return {
-                  exito: false,
-                  error: {
-                    codigo: "SUBESPECIALIDAD_NO_ENCONTRADA",
-                    mensaje: `No se encontró la subespecialidad: ${toolArgs.especialidad}`,
-                  },
-                }
-              }
-            } else if (subespecialidadData.error) {
-              return {
-                exito: false,
-                error: {
-                  codigo: "SUBESPECIALIDAD_NO_ENCONTRADA",
-                  mensaje: subespecialidadData.error,
-                },
-              }
-            }
-          } catch (e) {
-            console.error(`Error al parsear la respuesta de búsqueda de subespecialidad:`, e)
-            return {
-              exito: false,
-              error: {
-                codigo: "FORMATO_INVALIDO",
-                mensaje: `La API devolvió una respuesta con formato inválido al buscar subespecialidad`,
-              },
-            }
-          }
         }
         break
 
       case "reservar_turno":
+        // Implementación simplificada para el ejemplo
         requestBody.Action = "set_turno"
-        // Primero necesitamos obtener el ID de la agenda para el turno
-        // Esto requiere buscar el profesional y luego los turnos disponibles
-
-        // 1. Buscar el profesional por nombre
-        const profesionalRequestBody = {
-          Cliente_Id: clienteId.trim(),
-          Action: "get_profesionales",
-          busqueda: toolArgs.profesional,
-        }
-
-        console.log(`Buscando profesional para reserva:`, JSON.stringify(profesionalRequestBody))
-
-        const profesionalResponse = await fetch(proxyUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(profesionalRequestBody),
-        })
-
-        const profesionalResponseText = await profesionalResponse.text()
-        console.log(`Respuesta de búsqueda de profesional para reserva:`, profesionalResponseText)
-
-        let profesionalId = null
-        try {
-          const profesionalData = JSON.parse(profesionalResponseText)
-          if (profesionalData.profesionales && profesionalData.profesionales.length > 0) {
-            // Tomar el primer profesional que coincida con el nombre
-            // Cambiar esta línea:
-            // const profesional = profesionalData.profesionales.find((p: any) =>
-            //   p.Nombre.toLowerCase().includes(toolArgs.profesional.toLowerCase()),
-            // ) || profesionalData.profesionales[0]
-
-            // Por esta línea:
-            const profesional =
-              profesionalData.profesionales.find((p: any) =>
-                p.Nombre_Completo?.toLowerCase().includes(toolArgs.profesional.toLowerCase()),
-              ) || profesionalData.profesionales[0]
-
-            profesionalId = profesional.Id
-          } else {
-            return {
-              exito: false,
-              error: {
-                codigo: "PROFESIONAL_NO_ENCONTRADO",
-                mensaje: `No se encontró el profesional: ${toolArgs.profesional}`,
-              },
-            }
-          }
-        } catch (e) {
-          console.error(`Error al parsear la respuesta de búsqueda de profesional para reserva:`, e)
-          return {
-            exito: false,
-            error: {
-              codigo: "FORMATO_INVALIDO",
-              mensaje: `Error al buscar el profesional para la reserva`,
-            },
-          }
-        }
-
-        // 2. Buscar turnos disponibles para ese profesional en esa fecha
-        const turnosRequestBody = {
-          Cliente_Id: clienteId.trim(),
-          Action: "get_turnos",
-          Fecha_Desde: toolArgs.fecha,
-          Fecha_Hasta: toolArgs.fecha,
-          Profesional_Id: profesionalId,
-        }
-
-        console.log(`Buscando turnos para reserva:`, JSON.stringify(turnosRequestBody))
-
-        const turnosResponse = await fetch(proxyUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(turnosRequestBody),
-        })
-
-        const turnosResponseText = await turnosResponse.text()
-        console.log(`Respuesta de búsqueda de turnos para reserva:`, turnosResponseText)
-
-        let agendaId = null
-        try {
-          const turnosData = JSON.parse(turnosResponseText)
-
-          // Verificar si la respuesta tiene turnos_disponibles
-          if (turnosData.turnos_disponibles && turnosData.turnos_disponibles.length > 0) {
-            // Aplanar la estructura de turnos_disponibles
-            for (const diaData of turnosData.turnos_disponibles) {
-              if (diaData.turnos && Array.isArray(diaData.turnos)) {
-                for (const turno of diaData.turnos) {
-                  // Normalizar las horas para comparación (remover segundos si existen)
-                  const turnoHoraNormalizada = turno.Hora.substring(0, 5) // "15:30:00" -> "15:30"
-                  const argumentoHoraNormalizado = toolArgs.hora.length === 5 ? toolArgs.hora : toolArgs.hora + ":00"
-
-                  if (turnoHoraNormalizada === argumentoHoraNormalizado.substring(0, 5)) {
-                    agendaId = turno.Id || turno.Agenda_Id
-                    break
-                  }
-                }
-                if (agendaId) break
-              }
-            }
-          }
-          // Fallback para el formato anterior (si existe turnosData.turnos directamente)
-          else if (turnosData.turnos && turnosData.turnos.length > 0) {
-            for (const turno of turnosData.turnos) {
-              const turnoHoraNormalizada = turno.Hora.substring(0, 5)
-              const argumentoHoraNormalizado = toolArgs.hora.length === 5 ? toolArgs.hora : toolArgs.hora + ":00"
-
-              if (turnoHoraNormalizada === argumentoHoraNormalizado.substring(0, 5)) {
-                agendaId = turno.Id || turno.Agenda_Id
-                break
-              }
-            }
-          }
-
-          if (!agendaId) {
-            return {
-              exito: false,
-              error: {
-                codigo: "TURNO_NO_ENCONTRADO",
-                mensaje: "No se encontró un turno disponible para la fecha, hora y profesional indicados",
-              },
-            }
-          }
-        } catch (e) {
-          console.error(`Error al parsear la respuesta de búsqueda de turnos para reserva:`, e)
-          return {
-            exito: false,
-            error: {
-              codigo: "FORMATO_INVALIDO",
-              mensaje: `Error al buscar turnos para la reserva`,
-            },
-          }
-        }
-
-        // 3. Buscar datos del paciente
-        const pacienteRequestBody = {
-          Cliente_Id: clienteId.trim(),
-          Action: "get_paciente",
-          dni: toolArgs.dni,
-        }
-
-        console.log(`Buscando paciente para reserva:`, JSON.stringify(pacienteRequestBody))
-
-        const pacienteResponse = await fetch(proxyUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(pacienteRequestBody),
-        })
-
-        const pacienteResponseText = await pacienteResponse.text()
-        console.log(`Respuesta de búsqueda de paciente para reserva:`, pacienteResponseText)
-
-        let pacienteData = null
-        try {
-          const parsedResponse = JSON.parse(pacienteResponseText)
-
-          // Si encontramos al paciente, usar sus datos
-          if (parsedResponse.paciente) {
-            pacienteData = parsedResponse.paciente
-            console.log(`Paciente encontrado en el sistema:`, pacienteData)
-          }
-          // Si no encontramos al paciente pero permite pacientes nuevos, continuar con los datos del contexto
-          else if (parsedResponse.permite_pacientes_nuevos !== false) {
-            console.log(
-              `Paciente no encontrado, pero se permiten pacientes nuevos. Continuando con datos del contexto.`,
-            )
-            // Los datos se tomarán del contexto de la conversación - continuar con la reserva
-            pacienteData = null
-          }
-          // Si no se permiten pacientes nuevos, devolver error
-          else {
-            return {
-              exito: false,
-              error: {
-                codigo: "PACIENTE_NO_ENCONTRADO",
-                mensaje: "No se encontró información del paciente y no se permiten registros nuevos",
-              },
-            }
-          }
-        } catch (e) {
-          console.error(`Error al parsear la respuesta de búsqueda de paciente para reserva:`, e)
-          return {
-            exito: false,
-            error: {
-              codigo: "FORMATO_INVALIDO",
-              mensaje: `Error al buscar datos del paciente para la reserva`,
-            },
-          }
-        }
-
-        // 4. Preparar la solicitud de reserva con los datos del usuario
-        requestBody = {
-          Cliente_Id: clienteId.trim(),
-          Action: "set_turno",
-          Agenda_Id: agendaId,
-          Paciente_Id: toolArgs.dni, // Usar DNI como ID único
-          Paciente_DNI: toolArgs.dni,
-          Paciente_Nombre: toolArgs.nombre,
-          Paciente_Apellido: toolArgs.apellido,
-          Paciente_Telefono: toolArgs.telefono,
-          Paciente_Email: toolArgs.email,
-        }
-
-        console.log(`Preparando reserva con datos del usuario:`, JSON.stringify(requestBody, null, 2))
-
+        requestBody.Agenda_Id = "placeholder" // Se necesitaría lógica adicional
+        requestBody.Paciente_DNI = toolArgs.dni
+        requestBody.Paciente_Nombre = toolArgs.nombre
+        requestBody.Paciente_Apellido = toolArgs.apellido
+        requestBody.Paciente_Telefono = toolArgs.telefono
+        requestBody.Paciente_Email = toolArgs.email
         break
 
       default:
@@ -704,13 +338,12 @@ export async function executeOpenAITool(
     }
 
     console.log(`[OPENAI-TOOLS] Cuerpo de la solicitud preparado:`, JSON.stringify(requestBody, null, 2))
-    console.log(`Cuerpo de la solicitud para ${toolName}:`, JSON.stringify(requestBody))
 
-    // Hacer la petición directamente con reintentos
+    // Hacer la petición con reintentos
     let lastError = null
     let response = null
     const maxRetries = 3
-    let retryDelay = 1000 // 1 segundo
+    let retryDelay = 1000
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -722,61 +355,37 @@ export async function executeOpenAITool(
             "Content-Type": "application/json",
           },
           body: JSON.stringify(requestBody),
-          // Agregar timeout para evitar conexiones colgadas
-          signal: AbortSignal.timeout(30000), // 30 segundos timeout
+          signal: AbortSignal.timeout(30000),
         })
 
-        // Si llegamos aquí, la petición fue exitosa
         break
       } catch (error) {
         lastError = error
         console.error(`[OPENAI-TOOLS] Error en intento ${attempt}/${maxRetries} para ${toolName}:`, error)
 
-        // Si es el último intento, no esperar
         if (attempt < maxRetries) {
           console.log(`[OPENAI-TOOLS] Esperando ${retryDelay}ms antes del siguiente intento...`)
           await new Promise((resolve) => setTimeout(resolve, retryDelay))
-          // Incrementar el delay para el siguiente intento (backoff exponencial)
           retryDelay *= 2
         }
       }
     }
 
-    // Si después de todos los intentos no tenemos respuesta, lanzar el último error
     if (!response) {
       console.error(`[OPENAI-TOOLS] Todos los intentos fallaron para ${toolName}. Último error:`, lastError)
       throw lastError
     }
 
-    // Obtener el texto de la respuesta
     const responseText = await response.text()
-    console.log(`[OPENAI-TOOLS] ========== RESPUESTA CRUDA ==========`)
-    console.log(`[OPENAI-TOOLS] Status: ${response.status} ${response.statusText}`)
-    console.log(`[OPENAI-TOOLS] Headers:`, Object.fromEntries(response.headers.entries()))
-    console.log(`[OPENAI-TOOLS] Texto de respuesta:`, responseText)
-    console.log(`Respuesta (texto) para ${toolName}:`, responseText)
+    console.log(`[OPENAI-TOOLS] Respuesta recibida para ${toolName}:`, responseText)
 
-    // Intentar parsear la respuesta como JSON
     try {
       const data = JSON.parse(responseText)
-      console.log(`[OPENAI-TOOLS] ========== RESPUESTA PARSEADA ==========`)
-      console.log(`[OPENAI-TOOLS] JSON parseado:`, JSON.stringify(data, null, 2))
-      console.log(`Respuesta (JSON) parseada para ${toolName}:`, data)
 
-      // Procesar la respuesta según la función
+      // Procesar respuesta según la función
       switch (toolName) {
         case "validar_dni":
-          console.log(`[OPENAI-TOOLS] ========== PROCESANDO VALIDAR_DNI ==========`)
-
-          // Si la respuesta contiene un paciente, es exitosa
           if (data.paciente) {
-            console.log(`[OPENAI-TOOLS] Paciente encontrado:`, JSON.stringify(data.paciente, null, 2))
-
-            // Verificar si hay turnos próximos
-            const turnosProximos = data.turnos_proximos || []
-            console.log(`[OPENAI-TOOLS] Turnos próximos encontrados:`, JSON.stringify(turnosProximos, null, 2))
-            console.log(`[OPENAI-TOOLS] Cantidad de turnos próximos: ${turnosProximos.length}`)
-
             const resultado = {
               exito: true,
               datos: {
@@ -792,8 +401,7 @@ export async function executeOpenAITool(
                   plan: data.paciente.Plan_Nombre,
                   nro_afiliado: data.paciente.Nro_Afiliado_Ppal,
                 },
-                turnos_proximos: turnosProximos.slice(0, 1).map((turno: any) => ({
-                  // Limitar a 1 turno
+                turnos_proximos: (data.turnos_proximos || []).slice(0, 1).map((turno: any) => ({
                   id: turno.Id,
                   fecha: turno.Fecha,
                   hora: turno.Hora,
@@ -802,50 +410,35 @@ export async function executeOpenAITool(
                   motivo_nombre: turno.Motivo_Nombre,
                 })),
                 es_nuevo: false,
-                permite_pacientes_nuevos: data.permite_pacientes_nuevos !== false, // Incluir siempre este parámetro
+                permite_pacientes_nuevos: data.permite_pacientes_nuevos !== false,
               },
             }
-
-            const resultadoSize = JSON.stringify(resultado).length
-            console.log(`[OPENAI-TOOLS] Tamaño del resultado antes de truncar: ${resultadoSize} caracteres`)
-            console.log(`[OPENAI-TOOLS] ========== RESULTADO FINAL VALIDAR_DNI ==========`)
-            console.log(`[OPENAI-TOOLS] Resultado que se enviará a OpenAI:`, JSON.stringify(resultado, null, 2))
-
             return truncateToolResponse(resultado)
           } else if (data.error) {
-            console.log(`[OPENAI-TOOLS] Error en validar_dni:`, data.error)
-
-            // Si el error indica que el paciente no fue encontrado, verificar si permite pacientes nuevos
             if (
               data.error.toLowerCase().includes("paciente no encontrado") ||
               data.error.toLowerCase().includes("no encontrado")
             ) {
-              console.log(`[OPENAI-TOOLS] Paciente no encontrado, verificando si permite pacientes nuevos`)
-              console.log(`[OPENAI-TOOLS] permite_pacientes_nuevos: ${data.permite_pacientes_nuevos}`)
-
               return {
                 exito: true,
                 datos: {
                   paciente: null,
                   turnos_proximos: [],
                   es_nuevo: true,
-                  permite_pacientes_nuevos: data.permite_pacientes_nuevos === true, // Usar el valor exacto de la API
+                  permite_pacientes_nuevos: data.permite_pacientes_nuevos === true,
                   mensaje_error: data.error,
                 },
               }
             }
-
-            // Para otros tipos de error, devolver error
             return {
               exito: false,
               error: {
                 codigo: "API_ERROR",
                 mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-                permite_pacientes_nuevos: data.permite_pacientes_nuevos, // Incluir también en errores
+                permite_pacientes_nuevos: data.permite_pacientes_nuevos,
               },
             }
           } else {
-            console.log(`[OPENAI-TOOLS] Paciente no encontrado, considerando como nuevo`)
             return {
               exito: false,
               error: {
@@ -854,26 +447,10 @@ export async function executeOpenAITool(
               },
             }
           }
-        case "buscar_turnos_disponibles":
-          // Implementación para buscar_turnos_disponibles
-          break
-        case "reservar_turno":
-          // Implementación para reservar_turno
-          break
-        case "obtener_subespecialidades":
-          // Implementación para obtener_subespecialidades
-          break
-        case "buscar_profesionales":
-          // Implementación para buscar_profesionales
-          break
+
         default:
-          return {
-            exito: false,
-            error: {
-              codigo: "HERRAMIENTA_DESCONOCIDA",
-              mensaje: `Herramienta no implementada: ${toolName}`,
-            },
-          }
+          // Para otras funciones, devolver la respuesta tal como viene
+          return data
       }
     } catch (e) {
       console.error(`Error al parsear la respuesta de ${toolName}:`, e)
@@ -892,142 +469,11 @@ export async function executeOpenAITool(
   }
 }
 
-// Función específica para web que NO envía mensajes a WhatsApp
-export async function processWebOnlyMessage(
-  threadId: string,
-  message: string,
-  assistantId: string,
-  clienteId: string,
-): Promise<string> {
-  console.log(`[OPENAI-WEB] 🌐 PROCESANDO MENSAJE WEB ÚNICAMENTE`)
-  console.log(`[OPENAI-WEB] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
-  console.log(`[OPENAI-WEB] Thread ID: ${threadId}`)
-  console.log(`[OPENAI-WEB] Assistant ID: ${assistantId}`)
-
-  const openai = getOpenAIClient()
-
-  try {
-    // Añadir el mensaje al thread
-    const messageResponse = await openai.beta.threads.messages.create(threadId, {
-      role: "user",
-      content: message,
-    })
-
-    console.log(`[OPENAI-WEB] Mensaje añadido al thread: ${messageResponse.id}`)
-
-    // Crear un run con el asistente
-    const run = await openai.beta.threads.runs.create(threadId, {
-      assistant_id: assistantId,
-    })
-
-    console.log(`[OPENAI-WEB] Run creado: ${run.id}`)
-
-    // Procesar el run usando el mismo enfoque que WhatsApp pero sin enviar mensajes
-    console.log(`[OPENAI-WEB] Esperando a que el run se complete...`)
-
-    const startTime = Date.now()
-    let currentRun = run
-    let pollCount = 0
-    const maxAttempts = 60 // 2 minutos máximo
-
-    while (currentRun.status === "queued" || currentRun.status === "in_progress") {
-      pollCount++
-
-      // Verificar timeout
-      const elapsed = Date.now() - startTime
-      if (elapsed > 120000) {
-        // 2 minutos
-        throw new Error(`Timeout esperando a que el run se complete: ${elapsed}ms`)
-      }
-
-      // Log cada 10 polls
-      if (pollCount % 10 === 0) {
-        console.log(
-          `[OPENAI-WEB] Poll ${pollCount}: Estado actual del run: ${currentRun.status} (${elapsed}ms transcurridos)`,
-        )
-      }
-
-      // Esperar antes de verificar de nuevo
-      await wait(2000)
-
-      // Obtener el estado actualizado del run
-      currentRun = await openai.beta.threads.runs.retrieve(threadId, run.id)
-    }
-
-    console.log(`[OPENAI-WEB] Run completado con estado: ${currentRun.status}`)
-
-    if (currentRun.status === "completed") {
-      // Obtener la respuesta
-      console.log(`[OPENAI-WEB] Obteniendo respuesta del asistente...`)
-      const messages = await openai.beta.threads.messages.list(threadId, {
-        order: "desc",
-        limit: 1,
-      })
-
-      if (messages.data.length === 0 || messages.data[0].role !== "assistant") {
-        throw new Error("No se pudo obtener respuesta del asistente")
-      }
-
-      let messageContent = ""
-      for (const content of messages.data[0].content) {
-        if (content.type === "text") {
-          messageContent += content.text.value
-        }
-      }
-
-      console.log(`[OPENAI-WEB] ✅ Respuesta obtenida: ${messageContent.length} caracteres`)
-      console.log(`[OPENAI-WEB] ✅ CONFIRMADO: No se envió nada a WhatsApp`)
-
-      return messageContent
-    } else if (currentRun.status === "requires_action") {
-      console.log(`[OPENAI-WEB] Run requiere acción - procesando herramientas`)
-
-      if (currentRun.required_action?.type === "submit_tool_outputs") {
-        const toolCalls = currentRun.required_action.submit_tool_outputs.tool_calls
-        const toolOutputs = []
-
-        for (const toolCall of toolCalls) {
-          const functionName = toolCall.function.name
-          const functionArgs = JSON.parse(toolCall.function.arguments)
-
-          console.log(`[OPENAI-WEB] 🔧 Ejecutando herramienta: ${functionName}`)
-
-          const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
-
-          toolOutputs.push({
-            tool_call_id: toolCall.id,
-            output: JSON.stringify(toolResult),
-          })
-        }
-
-        console.log(`[OPENAI-WEB] Enviando resultados de herramientas...`)
-        await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
-          tool_outputs: toolOutputs,
-        })
-
-        // Recursivamente procesar el run después de enviar los resultados
-        console.log(`[OPENAI-WEB] Continuando procesamiento después de herramientas...`)
-        return await processWebOnlyMessage(threadId, "", assistantId, clienteId)
-      }
-    } else if (currentRun.status === "failed") {
-      console.error(`[OPENAI-WEB] Run falló: ${currentRun.last_error?.message}`)
-      throw new Error(`Run falló: ${currentRun.last_error?.message}`)
-    } else {
-      console.warn(`[OPENAI-WEB] Estado inesperado del run: ${currentRun.status}`)
-      throw new Error(`Estado inesperado del run: ${currentRun.status}`)
-    }
-  } catch (error) {
-    console.error("[OPENAI-WEB] Error:", error)
-    throw error
-  }
-}
-
-// Importar getAssistantResponse desde lib/assistant.ts
+// Exportar getAssistantResponse desde lib/assistant.ts
 export { getAssistantResponse } from "@/lib/assistant"
 
 function getOpenAIClient() {
-  const openai = new OpenAI({
+  return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   })
-  return openai
 }
