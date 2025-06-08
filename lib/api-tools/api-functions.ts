@@ -525,3 +525,11 @@ export async function procesarReservaTurno(
     }
   }
 }
+
+// Función para obtener especialidades (alias para subespecialidades)
+export async function obtenerEspecialidades(
+  clienteId: string,
+  useCache = true,
+): Promise<ApiResponse<{ id: string; nombre: string }[]>> {
+  return obtenerSubespecialidades(clienteId, useCache)
+}
