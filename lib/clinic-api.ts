@@ -364,6 +364,8 @@ export class ClinicAPI {
     if (pacienteData.turnoMotivo) params.Turno_Motivo = pacienteData.turnoMotivo
     if (pacienteData.comentarios) params.Comentarios = pacienteData.comentarios
 
+    console.log(`🎯 Reservando turno con parámetros finales:`, params)
+
     return this.fetchProxyApi<any>("set_turno", params)
   }
 }
@@ -482,6 +484,69 @@ export async function searchTurnos(
     }
   } catch (error) {
     console.error(`[SEARCH-TURNOS] Error al buscar turnos:`, error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
+  }
+}
+
+/**
+ * Reserva un turno usando la API de la clínica
+ */
+export async function reserveTurno(
+  params: {
+    agendaId: string
+    dni: string
+    nombre: string
+    apellido: string
+    telefono: string
+    email: string
+    fecha: string
+    hora: string
+    profesional: string
+  },
+  clienteId: string,
+): Promise<{
+  success: boolean
+  data?: any
+  error?: string
+}> {
+  try {
+    console.log(`[RESERVE-TURNO] Reservando turno para cliente: ${clienteId}`, params)
+
+    if (!clienteId) {
+      console.error(`[RESERVE-TURNO] ❌ Cliente ID faltante`)
+      return {
+        success: false,
+        error: "ID de cliente requerido",
+      }
+    }
+
+    const clinicAPI = createClinicAPI(clienteId)
+    const response = await clinicAPI.reservarTurno(params.agendaId, {
+      dni: params.dni,
+      nombre: params.nombre,
+      apellido: params.apellido,
+      telefono: params.telefono,
+      email: params.email,
+    })
+
+    if (response.exito && response.datos) {
+      console.log(`[RESERVE-TURNO] ✅ Turno reservado exitosamente:`, response.datos)
+      return {
+        success: true,
+        data: response.datos,
+      }
+    } else {
+      console.log(`[RESERVE-TURNO] ❌ Error al reservar turno:`, response.error)
+      return {
+        success: false,
+        error: response.error?.mensaje || "Error al reservar el turno",
+      }
+    }
+  } catch (error) {
+    console.error(`[RESERVE-TURNO] Error al reservar turno:`, error)
     return {
       success: false,
       error: error instanceof Error ? error.message : "Error desconocido",

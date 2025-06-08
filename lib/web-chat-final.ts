@@ -1,4 +1,4 @@
-import { validateDNI, searchTurnos } from "./clinic-api"
+import { validateDNI, searchTurnos, reserveTurno } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
 
 interface WebChatConfig {
@@ -230,6 +230,66 @@ async function processMessageWithOpenAI(
               },
             },
           },
+          {
+            type: "function",
+            function: {
+              name: "reserve_turno",
+              description:
+                "Reserva un turno específico para un paciente usando los datos recopilados durante la conversación",
+              parameters: {
+                type: "object",
+                properties: {
+                  dni: {
+                    type: "string",
+                    description: "DNI del paciente",
+                  },
+                  nombre: {
+                    type: "string",
+                    description: "Nombre del paciente recopilado durante la conversación",
+                  },
+                  apellido: {
+                    type: "string",
+                    description: "Apellido del paciente recopilado durante la conversación",
+                  },
+                  telefono: {
+                    type: "string",
+                    description: "Teléfono del paciente recopilado durante la conversación",
+                  },
+                  email: {
+                    type: "string",
+                    description: "Email del paciente recopilado durante la conversación",
+                  },
+                  fecha: {
+                    type: "string",
+                    description: "Fecha del turno en formato YYYY-MM-DD",
+                  },
+                  hora: {
+                    type: "string",
+                    description: "Hora del turno en formato HH:MM",
+                  },
+                  profesional: {
+                    type: "string",
+                    description: "Nombre del profesional",
+                  },
+                  agendaId: {
+                    type: "string",
+                    description: "ID del turno/agenda a reservar",
+                  },
+                },
+                required: [
+                  "dni",
+                  "nombre",
+                  "apellido",
+                  "telefono",
+                  "email",
+                  "fecha",
+                  "hora",
+                  "profesional",
+                  "agendaId",
+                ],
+              },
+            },
+          },
         ],
       }),
     })
@@ -373,6 +433,28 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
             )
             console.log(`[WEB-CHAT-FINAL] 📋 Resultado turnos:`, turnosResult)
             output = JSON.stringify(turnosResult)
+            break
+
+          case "reserve_turno":
+            console.log(`[WEB-CHAT-FINAL] 🎯 Reservando turno con cliente: ${clienteId}`)
+            console.log(`[WEB-CHAT-FINAL] 📋 Datos de reserva:`, args)
+
+            const reserveResult = await reserveTurno(
+              {
+                agendaId: args.agendaId,
+                dni: args.dni,
+                nombre: args.nombre,
+                apellido: args.apellido,
+                telefono: args.telefono,
+                email: args.email,
+                fecha: args.fecha,
+                hora: args.hora,
+                profesional: args.profesional,
+              },
+              clienteId,
+            )
+            console.log(`[WEB-CHAT-FINAL] 📋 Resultado reserva:`, reserveResult)
+            output = JSON.stringify(reserveResult)
             break
 
           default:
