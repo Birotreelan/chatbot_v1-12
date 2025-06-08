@@ -597,3 +597,6 @@ export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppC
     return null
   }
 }
+
+// Export alias for compatibility
+export const getWhatsappConfigByClienteId = getConfigByClienteId

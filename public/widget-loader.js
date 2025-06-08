@@ -102,6 +102,7 @@
     widgetContainer.style.left = config.position.includes("left") ? "0" : "auto"
     widgetContainer.style.zIndex = config.zIndex
     widgetContainer.style.pointerEvents = "none"
+    widgetContainer.style.width = "100%" // Asegurar que el contenedor ocupe todo el ancho
 
     document.body.appendChild(widgetContainer)
     return widgetContainer
@@ -137,10 +138,12 @@
     buttonTextElement.style.fontFamily = "system-ui, -apple-system, sans-serif"
     buttonTextElement.style.maxWidth = "200px"
     buttonTextElement.style.textAlign = "center"
-    buttonTextElement.style.zIndex = config.zIndex + 1
+    buttonTextElement.style.zIndex = config.zIndex - 1 // Asegurar que esté por debajo del botón
     buttonTextElement.style.pointerEvents = "auto"
     buttonTextElement.style.cursor = "pointer"
     buttonTextElement.style.whiteSpace = "nowrap"
+    buttonTextElement.style.overflow = "hidden"
+    buttonTextElement.style.textOverflow = "ellipsis" // Añadir puntos suspensivos si el texto es muy largo
 
     // Animaciones si están habilitadas
     if (widgetConfig.widgetAnimation !== false) {
@@ -189,7 +192,7 @@
     chatButton.style.display = "flex"
     chatButton.style.alignItems = "center"
     chatButton.style.justifyContent = "center"
-    chatButton.style.zIndex = config.zIndex + 1
+    chatButton.style.zIndex = config.zIndex // Asegurar que esté por encima del texto
     chatButton.style.pointerEvents = "auto"
 
     // Animaciones si están habilitadas
@@ -229,16 +232,18 @@
     const config = getAppliedConfig()
 
     headerControls = document.createElement("div")
+    headerControls.id = "treelan-chat-widget-controls"
     headerControls.style.position = "absolute"
     headerControls.style.top = "8px"
     headerControls.style.right = "8px"
     headerControls.style.display = "flex"
     headerControls.style.gap = "4px"
-    headerControls.style.zIndex = "1000"
+    headerControls.style.zIndex = (Number.parseInt(config.zIndex) + 10).toString() // Asegurar que esté por encima del iframe
     headerControls.style.pointerEvents = "auto"
 
     // Botón minimizar
     const minimizeButton = document.createElement("button")
+    minimizeButton.id = "treelan-chat-widget-minimize"
     minimizeButton.style.width = "28px"
     minimizeButton.style.height = "28px"
     minimizeButton.style.border = "none"
@@ -273,6 +278,7 @@
 
     // Botón cerrar
     const closeButton = document.createElement("button")
+    closeButton.id = "treelan-chat-widget-close"
     closeButton.style.width = "28px"
     closeButton.style.height = "28px"
     closeButton.style.border = "none"
@@ -332,13 +338,11 @@
       iframe.style.height = "60px"
       iframe.style.overflow = "hidden"
       // Actualizar el icono de minimizar para mostrar "restaurar"
-      const minimizeButton = headerControls?.querySelector("button")
+      const minimizeButton = headerControls?.querySelector("#treelan-chat-widget-minimize")
       if (minimizeButton) {
         minimizeButton.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="9" y1="9" x2="15" y2="15"></line>
-            <line x1="15" y1="9" x2="9" y2="15"></line>
+            <rect x="5" y="5" width="14" height="14" rx="2" ry="2"></rect>
           </svg>
         `
       }
@@ -346,7 +350,7 @@
       iframe.style.height = config.height
       iframe.style.overflow = "visible"
       // Restaurar el icono de minimizar
-      const minimizeButton = headerControls?.querySelector("button")
+      const minimizeButton = headerControls?.querySelector("#treelan-chat-widget-minimize")
       if (minimizeButton) {
         minimizeButton.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -381,6 +385,7 @@
 
     // Crear iframe del chat
     iframe = document.createElement("iframe")
+    iframe.id = "treelan-chat-widget-iframe"
     iframe.src = `${window.location.protocol}//${window.location.host}/api/widget?cliente_id=${encodeURIComponent(clienteId)}`
     iframe.style.position = "fixed"
     iframe.style.bottom = config.marginBottom
@@ -393,6 +398,7 @@
     iframe.style.boxShadow = config.boxShadow
     iframe.style.zIndex = config.zIndex - 1
     iframe.style.pointerEvents = "auto"
+    iframe.style.backgroundColor = "#ffffff" // Asegurar fondo blanco
 
     // Animaciones de apertura si están habilitadas
     if (widgetConfig?.widgetAnimation !== false) {
