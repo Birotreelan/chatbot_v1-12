@@ -151,8 +151,8 @@ export class ClinicAPI {
    */
   async buscarProfesionales(
     busqueda: string,
-  ): Promise<ApiResponse<{ id: string; nombre: string; especialidad?: string }[]>> {
-    return this.fetchProxyApi<{ id: string; nombre: string; especialidad?: string }[]>("get_profesionales", {
+  ): Promise<ApiResponse<{ Id: string; Nombre_Completo: string; Especialidad?: string }[]>> {
+    return this.fetchProxyApi<{ Id: string; Nombre_Completo: string; Especialidad?: string }[]>("get_profesionales", {
       busqueda,
     })
   }
@@ -191,48 +191,69 @@ export class ClinicAPI {
     especialidad?: string,
     profesionalId?: string,
   ): Promise<ApiResponse<any>> {
-    // Extraer fechas desde y hasta del rango
-    const [fechaDesde, fechaHasta] = rangoFechas.split(" a ")
+    try {
+      // Extraer fechas desde y hasta del rango
+      const fechas = rangoFechas.split(" a ")
+      const fechaDesde = fechas[0] || "2024-01-08"
+      const fechaHasta = fechas[1] || fechaDesde
 
-    // Si tenemos el ID del profesional, usarlo directamente
-    if (profesionalId) {
-      return this.obtenerTurnos(fechaDesde, fechaHasta || fechaDesde, profesionalId)
-    }
+      console.log(`Buscando turnos desde ${fechaDesde} hasta ${fechaHasta}`)
 
-    // Si tenemos el nombre del profesional o especialidad, primero buscar el profesional
-    if (profesional || especialidad) {
-      const busqueda = profesional || especialidad || ""
-      const profesionalesResponse = await this.buscarProfesionales(busqueda)
-
-      if (!profesionalesResponse.exito || !profesionalesResponse.datos || profesionalesResponse.datos.length === 0) {
-        return {
-          exito: false,
-          error: {
-            codigo: "PROFESIONAL_NO_ENCONTRADO",
-            mensaje: `No se encontraron profesionales con el criterio: ${busqueda}`,
-          },
-        }
+      // Si tenemos el ID del profesional, usarlo directamente
+      if (profesionalId) {
+        console.log(`Usando profesional ID directo: ${profesionalId}`)
+        return this.obtenerTurnos(fechaDesde, fechaHasta, profesionalId)
       }
 
-      // Si hay múltiples profesionales, devolver la lista para que el usuario elija
-      if (profesionalesResponse.datos.length > 1) {
-        return {
-          exito: true,
-          datos: {
-            multiple: true,
-            profesionales: profesionalesResponse.datos,
-            mensaje: "Se encontraron múltiples profesionales. Por favor, seleccione uno.",
-          },
+      // Si tenemos el nombre del profesional o especialidad, primero buscar el profesional
+      if (profesional || especialidad) {
+        const busqueda = profesional || especialidad || ""
+        console.log(`Buscando profesional: ${busqueda}`)
+        const profesionalesResponse = await this.buscarProfesionales(busqueda)
+
+        if (!profesionalesResponse.exito || !profesionalesResponse.datos || profesionalesResponse.datos.length === 0) {
+          console.log(`No se encontraron profesionales con el criterio: ${busqueda}`)
+          return {
+            exito: false,
+            error: {
+              codigo: "PROFESIONAL_NO_ENCONTRADO",
+              mensaje: `No se encontraron profesionales con el criterio: ${busqueda}`,
+            },
+          }
         }
+
+        // Si hay múltiples profesionales, devolver la lista para que el usuario elija
+        if (profesionalesResponse.datos.length > 1) {
+          console.log(`Se encontraron ${profesionalesResponse.datos.length} profesionales`)
+          return {
+            exito: true,
+            datos: {
+              multiple: true,
+              profesionales: profesionalesResponse.datos,
+              mensaje: "Se encontraron múltiples profesionales. Por favor, seleccione uno.",
+            },
+          }
+        }
+
+        // Si solo hay un profesional, usar su ID para buscar turnos
+        const profesionalEncontrado = profesionalesResponse.datos[0]
+        console.log(`Profesional encontrado: ${profesionalEncontrado.Nombre_Completo} (${profesionalEncontrado.Id})`)
+        return this.obtenerTurnos(fechaDesde, fechaHasta, profesionalEncontrado.Id)
       }
 
-      // Si solo hay un profesional, usar su ID para buscar turnos
-      const profesionalEncontrado = profesionalesResponse.datos[0]
-      return this.obtenerTurnos(fechaDesde, fechaHasta || fechaDesde, profesionalEncontrado.id)
+      // Si no tenemos ni profesional ni especialidad, buscar todos los turnos disponibles
+      console.log(`Buscando todos los turnos disponibles`)
+      return this.obtenerTurnos(fechaDesde, fechaHasta)
+    } catch (error) {
+      console.error(`Error en buscarTurnosDisponibles:`, error)
+      return {
+        exito: false,
+        error: {
+          codigo: "ERROR_BUSQUEDA_TURNOS",
+          mensaje: error instanceof Error ? error.message : "Error al buscar turnos disponibles",
+        },
+      }
     }
-
-    // Si no tenemos ni profesional ni especialidad, buscar todos los turnos disponibles
-    return this.obtenerTurnos(fechaDesde, fechaHasta || fechaDesde)
   }
 
   /**
@@ -369,9 +390,12 @@ export async function searchTurnos(
       }
     }
 
+    // Asegurarse de que rangoFechas tenga un valor predeterminado
+    const rangoFechas = params.rangoFechas || "2024-01-08 a 2024-01-15"
+
     const clinicAPI = createClinicAPI(clienteId)
     const response = await clinicAPI.buscarTurnosDisponibles(
-      params.rangoFechas,
+      rangoFechas,
       params.profesional,
       params.especialidad,
       params.profesionalId,

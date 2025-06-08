@@ -25,7 +25,7 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] ========== PROCESANDO MENSAJE WEB ==========`)
     console.log(`[WEB-CHAT-FINAL] Session ID: ${sessionId}`)
     console.log(`[WEB-CHAT-FINAL] Cliente: ${config.displayName}`)
-    console.log(`[WEB-CHAT-FINAL] Cliente ID: ${config.cliente_id}`)
+    console.log(`[WEB-CHAT-FINAL] Cliente ID: ${config.id}`)
     console.log(`[WEB-CHAT-FINAL] IP: ${ip}`)
     console.log(`[WEB-CHAT-FINAL] Mensaje: ${message}`)
     console.log(`[WEB-CHAT-FINAL] ================================================`)
@@ -35,8 +35,10 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
       throw new Error("Parámetros requeridos faltantes")
     }
 
-    // Validar que tenemos cliente_id
-    if (!config.cliente_id) {
+    // Obtener cliente_id de la configuración
+    const clienteId = config.cliente_id || config.id
+
+    if (!clienteId) {
       console.error(`[WEB-CHAT-FINAL] ❌ Cliente ID faltante en configuración`)
       throw new Error("Cliente ID no configurado")
     }
@@ -61,7 +63,7 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
 
     // Procesar mensaje
-    const response = await processMessageWithOpenAI(threadId, message, config.assistantId, config.cliente_id)
+    const response = await processMessageWithOpenAI(threadId, message, config.assistantId, clienteId)
     console.log(`[WEB-CHAT-FINAL] ✅ Respuesta: ${response.length} caracteres`)
 
     return response
