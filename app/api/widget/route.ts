@@ -25,6 +25,11 @@ export async function GET(request: NextRequest) {
 
     console.log(`[WIDGET] Configuración encontrada: ${config.displayName}`)
 
+    // Obtener la URL base del servidor
+    const protocol = request.headers.get("x-forwarded-proto") || "https"
+    const host = request.headers.get("host") || request.headers.get("x-forwarded-host")
+    const baseUrl = `${protocol}://${host}`
+
     // Si solo se solicita la configuración, devolver solo eso
     if (configOnly) {
       const widgetConfig = {
@@ -41,6 +46,7 @@ export async function GET(request: NextRequest) {
         widgetSubtitle: config.widgetSubtitle || "Estamos aquí para ayudarte",
         widgetWelcomeMessage: config.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
         widgetPlaceholder: config.widgetPlaceholder || "Escribe tu mensaje...",
+        baseUrl: baseUrl, // Agregar la URL base a la configuración
       }
       console.log(`[WIDGET] Devolviendo configuración:`, widgetConfig)
       return NextResponse.json(widgetConfig)
@@ -321,6 +327,7 @@ export async function GET(request: NextRequest) {
         
         <script>
           const clienteId = "${clienteId}";
+          const baseUrl = "${baseUrl}"; // URL base del servidor
           const chatContainer = document.getElementById('chatContainer');
           const messageInput = document.getElementById('messageInput');
           const sendButton = document.getElementById('sendButton');
@@ -329,6 +336,7 @@ export async function GET(request: NextRequest) {
           // Generar session_id único
           const sessionId = 'web_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
           console.log('[WIDGET-CHAT] Session ID generado:', sessionId);
+          console.log('[WIDGET-CHAT] Base URL:', baseUrl);
           
           // Función para agregar un mensaje al chat
           function addMessage(text, isUser = false) {
@@ -386,8 +394,11 @@ export async function GET(request: NextRequest) {
             showTypingIndicator();
             
             try {
-              // Enviar mensaje al servidor
-              const response = await fetch('/api/chat', {
+              // Enviar mensaje al servidor usando URL absoluta
+              const chatUrl = baseUrl + '/api/chat';
+              console.log('[WIDGET-CHAT] URL de chat:', chatUrl);
+              
+              const response = await fetch(chatUrl, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',

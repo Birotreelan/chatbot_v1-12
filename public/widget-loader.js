@@ -29,6 +29,29 @@
   const currentScript = document.currentScript
   const clienteId = currentScript ? currentScript.getAttribute("data-client-id") : null
 
+  // Obtener la URL base del widget desde el script o usar una por defecto
+  let widgetBaseUrl = currentScript ? currentScript.getAttribute("data-base-url") : null
+
+  // Si no se especifica base-url, intentar detectarla desde el src del script
+  if (!widgetBaseUrl && currentScript && currentScript.src) {
+    try {
+      const scriptUrl = new URL(currentScript.src)
+      widgetBaseUrl = `${scriptUrl.protocol}//${scriptUrl.host}`
+    } catch (e) {
+      console.error("[WIDGET] Error detectando URL base:", e)
+    }
+  }
+
+  // Fallback a localhost para desarrollo
+  if (!widgetBaseUrl) {
+    widgetBaseUrl =
+      window.location.protocol === "https:"
+        ? "https://your-domain.vercel.app" // Reemplaza con tu dominio real
+        : "http://localhost:3000"
+  }
+
+  console.log(`[WIDGET] URL base detectada: ${widgetBaseUrl}`)
+
   if (!clienteId) {
     console.error("[WIDGET] El atributo data-client-id es obligatorio para el widget de chat")
     return
@@ -49,9 +72,10 @@
   async function fetchWidgetConfig() {
     try {
       console.log(`[WIDGET] Obteniendo configuración para cliente_id: ${clienteId}`)
-      const response = await fetch(
-        `${window.location.protocol}//${window.location.host}/api/widget?cliente_id=${encodeURIComponent(clienteId)}&config_only=true`,
-      )
+      const configUrl = `${widgetBaseUrl}/api/widget?cliente_id=${encodeURIComponent(clienteId)}&config_only=true`
+      console.log(`[WIDGET] URL de configuración: ${configUrl}`)
+
+      const response = await fetch(configUrl)
       if (response.ok) {
         const config = await response.json()
         widgetConfig = config
@@ -266,10 +290,12 @@
       }, 300)
     }
 
-    // Crear iframe del chat
+    // Crear iframe del chat con URL absoluta
     iframe = document.createElement("iframe")
     iframe.id = "treelan-chat-widget-iframe"
-    iframe.src = `${window.location.protocol}//${window.location.host}/api/widget?cliente_id=${encodeURIComponent(clienteId)}`
+    const iframeUrl = `${widgetBaseUrl}/api/widget?cliente_id=${encodeURIComponent(clienteId)}`
+    console.log(`[WIDGET] URL del iframe: ${iframeUrl}`)
+    iframe.src = iframeUrl
     iframe.style.position = "fixed"
     iframe.style.bottom = config.marginBottom
     iframe.style.right = config.position.includes("right") ? config.marginSide : "auto"
@@ -419,6 +445,7 @@
     isMinimized: () => isMinimized,
     clienteId: clienteId,
     getConfig: () => widgetConfig,
+    getBaseUrl: () => widgetBaseUrl,
   }
 
   // Inicializar el widget
