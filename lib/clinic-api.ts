@@ -381,17 +381,44 @@ export function createClinicAPI(clienteId: string): ClinicAPI {
   return new ClinicAPI(clienteId)
 }
 
+interface ValidateDNIResponse {
+  success: boolean
+  patient?: {
+    id: string
+    name: string
+    lastName: string
+    dni: string
+    phone?: string
+    email?: string
+  }
+  appointmentsUpcoming?: Array<any>
+  isNew: boolean
+  acceptsNewPatients: boolean
+}
+
+interface TurnosSearchParams {
+  rangoFechas?: string
+  profesional?: string
+  especialidad?: string
+  profesionalId?: string
+}
+
+interface ReserveTurnoParams {
+  agendaId: string
+  dni: string
+  nombre: string
+  apellido: string
+  telefono: string
+  email: string
+  fecha: string
+  hora: string
+  profesional: string
+}
+
 /**
  * Valida un DNI usando la API de la clínica
  */
-export async function validateDNI(
-  dni: string,
-  clienteId: string,
-): Promise<{
-  success: boolean
-  data?: any
-  error?: string
-}> {
+export async function validateDNI(dni: string, clienteId: string): Promise<ValidateDNIResponse> {
   try {
     console.log(`[VALIDATE-DNI] Validando DNI: ${dni} para cliente: ${clienteId}`)
 
@@ -410,7 +437,16 @@ export async function validateDNI(
       console.log(`[VALIDATE-DNI] ✅ DNI válido encontrado:`, response.datos)
       return {
         success: true,
-        data: response.datos,
+        patient: {
+          id: response.datos.Id,
+          name: response.datos.Nombre,
+          lastName: response.datos.Apellido,
+          dni: response.datos.DNI,
+          phone: response.datos.Telefono,
+          email: response.datos.Email,
+        },
+        isNew: false,
+        acceptsNewPatients: true,
       }
     } else {
       console.log(`[VALIDATE-DNI] ❌ DNI no encontrado o error:`, response.error)
@@ -431,19 +467,7 @@ export async function validateDNI(
 /**
  * Busca turnos disponibles usando la API de la clínica
  */
-export async function searchTurnos(
-  params: {
-    rangoFechas: string
-    profesional?: string
-    especialidad?: string
-    profesionalId?: string
-  },
-  clienteId: string,
-): Promise<{
-  success: boolean
-  data?: any
-  error?: string
-}> {
+export async function searchTurnos(params: TurnosSearchParams, clienteId: string): Promise<any> {
   try {
     console.log(`[SEARCH-TURNOS] Buscando turnos para cliente: ${clienteId}`, params)
 
@@ -495,24 +519,7 @@ export async function searchTurnos(
 /**
  * Reserva un turno usando la API de la clínica
  */
-export async function reserveTurno(
-  params: {
-    agendaId: string
-    dni: string
-    nombre: string
-    apellido: string
-    telefono: string
-    email: string
-    fecha: string
-    hora: string
-    profesional: string
-  },
-  clienteId: string,
-): Promise<{
-  success: boolean
-  data?: any
-  error?: string
-}> {
+export async function reserveTurno(params: ReserveTurnoParams, clienteId: string): Promise<any> {
   try {
     console.log(`[RESERVE-TURNO] Reservando turno para cliente: ${clienteId}`, params)
 

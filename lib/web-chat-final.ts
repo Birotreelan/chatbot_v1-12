@@ -290,6 +290,36 @@ async function processMessageWithOpenAI(
               },
             },
           },
+          {
+            type: "function",
+            function: {
+              name: "crear_botones_opciones",
+              description:
+                "Genera una lista de botones interactivos numerados para que el usuario pueda elegir una opción entre varias.",
+              parameters: {
+                type: "object",
+                properties: {
+                  opciones: {
+                    type: "array",
+                    description:
+                      "Lista de opciones que el usuario puede elegir. Cada opción se presentará como un botón numerado.",
+                    items: {
+                      type: "string",
+                    },
+                  },
+                  contexto: {
+                    type: "string",
+                    description: "Breve explicación o título que contextualiza la elección para el usuario.",
+                  },
+                  callback_id: {
+                    type: "string",
+                    description: "Identificador único para esta selección de botones.",
+                  },
+                },
+                required: ["opciones"],
+              },
+            },
+          },
         ],
       }),
     })
@@ -457,6 +487,18 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
             )
             console.log(`[WEB-CHAT-FINAL] 📋 Resultado reserva:`, reserveResult)
             output = JSON.stringify(reserveResult)
+            break
+
+          case "crear_botones_opciones":
+            console.log(`[WEB-CHAT-FINAL] 🔘 Generando botones con opciones`)
+            console.log(`[WEB-CHAT-FINAL] 📋 Opciones:`, args.opciones)
+            // Devolver los datos de los botones para que el frontend los muestre
+            output = JSON.stringify({
+              success: true,
+              opciones: args.opciones,
+              contexto: args.contexto || "",
+              callback_id: args.callback_id || "default_callback",
+            })
             break
 
           default:

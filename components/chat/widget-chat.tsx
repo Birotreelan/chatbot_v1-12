@@ -12,6 +12,11 @@ interface Message {
   content: string
   isUser: boolean
   timestamp: Date
+  buttons?: {
+    options: string[]
+    context?: string
+    callback_id?: string
+  }
 }
 
 interface WidgetChatProps {
@@ -57,12 +62,12 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const sendMessage = async () => {
-    if (!inputValue.trim() || isLoading || !sessionId) return
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || isLoading || !sessionId) return
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: inputValue.trim(),
+      content: text.trim(),
       isUser: true,
       timestamp: new Date(),
     }
@@ -97,12 +102,42 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
       const data = await response.json()
 
       if (data.success && data.response) {
+        // Verificar si la respuesta contiene botones generados por la función
+        const buttonMatch = data.response.match(/Ejecutar función: crear_botones_opciones$$\{(.*?)\}$$/s)
+
+        let content = data.response
+        let buttons = null
+
+        if (buttonMatch) {
+          try {
+            // Extraer y parsear el JSON de los botones
+            const jsonStr = buttonMatch[1]
+            // Reemplazar dobles llaves que pueden estar en el texto para formar un JSON válido
+            const cleanJsonStr = jsonStr.replace(/\{\{/g, "{").replace(/\}\}/g, "}")
+            const buttonData = JSON.parse(cleanJsonStr)
+
+            // Eliminar la parte del texto que contiene la función
+            content = data.response.replace(buttonMatch[0], "")
+            buttons = {
+              options: buttonData.opciones,
+              context: buttonData.contexto,
+              callback_id: buttonData.callback_id,
+            }
+
+            console.log("[WIDGET-CHAT] Botones detectados:", buttons)
+          } catch (e) {
+            console.error("[WIDGET-CHAT] Error al parsear botones:", e)
+          }
+        }
+
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: data.response,
+          content: content.trim(),
           isUser: false,
           timestamp: new Date(),
+          buttons: buttons,
         }
+
         setMessages((prev) => [...prev, botMessage])
       } else {
         throw new Error(data.error || "Error desconocido")
@@ -121,10 +156,19 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
     }
   }
 
+  const handleButtonClick = (option: string) => {
+    console.log("[WIDGET-CHAT] Opción seleccionada:", option)
+    sendMessage(option)
+  }
+
+  const handleSubmit = () => {
+    sendMessage(inputValue)
+  }
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      sendMessage()
+      handleSubmit()
     }
   }
 
@@ -156,6 +200,27 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
               }}
             >
               <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
+
+              {/* Botones interactivos si existen */}
+              {message.buttons && message.buttons.options.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {message.buttons.context && <p className="text-xs font-medium mb-2">{message.buttons.context}</p>}
+                  {message.buttons.options.map((option, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleButtonClick(option)}
+                      className="w-full text-left text-sm py-2 px-3 rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+                      style={{
+                        borderColor: config.widgetPrimaryColor || "#0ea5e9",
+                        color: config.widgetPrimaryColor || "#0ea5e9",
+                      }}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
                 {formatTime(message.timestamp)}
               </p>
@@ -197,7 +262,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
             className="flex-1"
           />
           <Button
-            onClick={sendMessage}
+            onClick={handleSubmit}
             disabled={!inputValue.trim() || isLoading}
             size="sm"
             style={{ backgroundColor: config.widgetPrimaryColor || "#0ea5e9" }}
