@@ -6,19 +6,23 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Copy, ExternalLink, CheckCircle, Loader2, MessageCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import WidgetChat from "./widget-chat"
 import type { WhatsAppConfig } from "@/lib/types"
 
 interface ChatDemoProps {
   config: WhatsAppConfig
+  isEmbedded?: boolean
 }
 
-export function ChatDemo({ config }: ChatDemoProps) {
+export function ChatDemo({ config, isEmbedded = false }: ChatDemoProps) {
+  const [mounted, setMounted] = useState(false)
   const [widgetLoaded, setWidgetLoaded] = useState(false)
   const [currentUrl, setCurrentUrl] = useState("")
   const [widgetError, setWidgetError] = useState<string | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
+    setMounted(true)
     // Solo ejecutar en el cliente
     if (typeof window !== "undefined") {
       setCurrentUrl(window.location.origin)
@@ -106,6 +110,34 @@ export function ChatDemo({ config }: ChatDemoProps) {
   style="border-radius: ${config.widgetBorderRadius || 12}px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
 </iframe>`
 
+  if (!mounted) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="w-16 h-16 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+      </div>
+    )
+  }
+
+  if (isEmbedded) {
+    // Modo embebido - ocupar todo el espacio disponible
+    return (
+      <div className="h-full w-full">
+        <WidgetChat
+          clienteId={config.cliente_id || ""}
+          config={{
+            widgetTitle: config.widgetTitle,
+            widgetSubtitle: config.widgetSubtitle,
+            widgetWelcomeMessage: config.widgetWelcomeMessage,
+            widgetPlaceholder: config.widgetPlaceholder,
+            widgetPrimaryColor: config.widgetPrimaryColor,
+            widgetSecondaryColor: config.widgetSecondaryColor,
+          }}
+        />
+      </div>
+    )
+  }
+
+  // Modo normal - con contenedor y estilos de demo
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-6xl mx-auto space-y-6">
