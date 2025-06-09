@@ -123,14 +123,14 @@ export function ChatDemo({ config, isEmbedded = false }: ChatDemoProps) {
     return (
       <div className="h-full w-full">
         <WidgetChat
-          clienteId={config.cliente_id || ""}
+          clienteId={config.cliente_id || config.id}
           config={{
-            widgetTitle: config.widgetTitle,
-            widgetSubtitle: config.widgetSubtitle,
-            widgetWelcomeMessage: config.widgetWelcomeMessage,
-            widgetPlaceholder: config.widgetPlaceholder,
-            widgetPrimaryColor: config.widgetPrimaryColor,
-            widgetSecondaryColor: config.widgetSecondaryColor,
+            widgetTitle: config.widgetTitle || "Asistente Virtual",
+            widgetSubtitle: config.widgetSubtitle || "Estamos aquí para ayudarte",
+            widgetWelcomeMessage: config.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
+            widgetPlaceholder: config.widgetPlaceholder || "Escribe tu mensaje...",
+            widgetPrimaryColor: config.widgetPrimaryColor || "#0ea5e9",
+            widgetSecondaryColor: config.widgetSecondaryColor || "#f1f5f9",
           }}
         />
       </div>
