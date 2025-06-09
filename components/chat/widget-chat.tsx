@@ -61,9 +61,9 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
   const detectNumberedOptions = (
     text: string,
   ): { hasOptions: boolean; options: Array<{ number: string; text: string }>; cleanText: string } => {
-    // Regex para detectar patrones como "1. Texto", "2) Texto", "1.- Texto", etc.
-    const optionRegex = /^(\d+)[.)-]\s*(.+)$/gm
-    const matches = text.match(optionRegex)
+    // Regex para detectar patrones como "1- Texto" tanto al inicio de línea como en línea
+    const optionRegex = /(\d+)[-.)]\s*([^.]+?)(?=\s+\d+[-.]|\s*$)/g
+    const matches = [...text.matchAll(optionRegex)]
 
     if (!matches || matches.length < 2) {
       return { hasOptions: false, options: [], cleanText: text }
@@ -73,14 +73,14 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
     let cleanText = text
 
     matches.forEach((match) => {
-      const optionMatch = match.match(/^(\d+)[.)-]\s*(.+)$/)
-      if (optionMatch) {
-        const [fullMatch, number, optionText] = optionMatch
-        options.push({ number, text: optionText.trim() })
-        // Remover la opción del texto limpio para evitar duplicación
-        cleanText = cleanText.replace(fullMatch, "").trim()
-      }
+      const [fullMatch, number, optionText] = match
+      options.push({ number, text: optionText.trim() })
+      // Remover la opción del texto limpio para evitar duplicación
+      cleanText = cleanText.replace(fullMatch, "").trim()
     })
+
+    // Limpiar texto residual y espacios extra
+    cleanText = cleanText.replace(/\s+/g, " ").trim()
 
     return { hasOptions: true, options, cleanText }
   }
