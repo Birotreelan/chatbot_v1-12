@@ -60,8 +60,8 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
       throw new Error("Parámetros requeridos faltantes")
     }
 
-    // Obtener cliente_id de la configuración
-    const clienteId = config.cliente_id || config.id
+    // Obtener cliente_id de la configuración - IMPORTANTE: Usar el cliente_id específico si existe
+    const clienteId = config.cliente_id || ""
 
     if (!clienteId) {
       console.error(`[WEB-CHAT-FINAL] ❌ Cliente ID faltante en configuración`)
