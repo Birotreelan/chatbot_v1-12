@@ -1,390 +1,264 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Copy, ExternalLink, CheckCircle, Loader2, MessageCircle } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+import { useState } from "react"
+import { MessageCircle, X, Minus } from "lucide-react"
 import WidgetChat from "./widget-chat"
-import type { WhatsAppConfig } from "@/lib/types"
 
 interface ChatDemoProps {
-  config: WhatsAppConfig
+  config: {
+    id: string
+    cliente_id: string
+    displayName: string
+    widgetEnabled: boolean
+    widgetTitle?: string
+    widgetSubtitle?: string
+    widgetWelcomeMessage?: string
+    widgetPlaceholder?: string
+    widgetPrimaryColor?: string
+    widgetSecondaryColor?: string
+    widgetPosition?: string
+    widgetSize?: string
+    widgetButtonText?: string
+    widgetFloatingText?: string
+    widgetBorderRadius?: string
+  }
   isEmbedded?: boolean
 }
 
 export function ChatDemo({ config, isEmbedded = false }: ChatDemoProps) {
-  const [mounted, setMounted] = useState(false)
-  const [widgetLoaded, setWidgetLoaded] = useState(false)
-  const [currentUrl, setCurrentUrl] = useState("")
-  const [widgetError, setWidgetError] = useState<string | null>(null)
-  const { toast } = useToast()
+  const [isOpen, setIsOpen] = useState(false)
+  const [isMinimized, setIsMinimized] = useState(false)
 
-  useEffect(() => {
-    setMounted(true)
-    // Solo ejecutar en el cliente
-    if (typeof window !== "undefined") {
-      setCurrentUrl(window.location.origin)
+  // Configuración de posición
+  const position = config.widgetPosition || "bottom-right"
+  const isBottomRight = position === "bottom-right"
+  const isBottomLeft = position === "bottom-left"
 
-      // Limpiar cualquier widget existente
-      if (window.TreelanChatWidget) {
-        window.TreelanChatWidget.destroy()
-      }
-
-      // Cargar el widget
-      const script = document.createElement("script")
-      script.src = "/widget-loader.js"
-      script.setAttribute("data-client-id", config.cliente_id || config.id)
-
-      script.onload = () => {
-        console.log("[CHAT DEMO] Widget script cargado")
-        // Dar tiempo para que el widget se inicialice
-        setTimeout(() => {
-          if (window.TreelanChatWidget) {
-            setWidgetLoaded(true)
-            console.log("[CHAT DEMO] Widget inicializado correctamente")
-          } else {
-            setWidgetError("El widget no se inicializó correctamente")
-          }
-        }, 1000)
-      }
-
-      script.onerror = () => {
-        console.error("[CHAT DEMO] Error al cargar el script del widget")
-        setWidgetError("Error al cargar el script del widget")
-      }
-
-      document.head.appendChild(script)
-
-      // Cleanup
-      return () => {
-        if (document.head.contains(script)) {
-          document.head.removeChild(script)
-        }
-        // Limpiar el widget si existe
-        if (window.TreelanChatWidget) {
-          window.TreelanChatWidget.destroy()
-        }
-      }
-    }
-  }, [config.cliente_id, config.id])
-
-  const copyToClipboard = async (text: string) => {
-    if (typeof window !== "undefined" && navigator.clipboard) {
-      try {
-        await navigator.clipboard.writeText(text)
-        toast({
-          title: "Copiado",
-          description: "El texto se ha copiado al portapapeles.",
-        })
-      } catch (err) {
-        console.error("Error al copiar:", err)
-        toast({
-          title: "Error",
-          description: "No se pudo copiar el texto.",
-          variant: "destructive",
-        })
-      }
+  // Configuración de tamaño
+  const size = config.widgetSize || "medium"
+  const getWidgetSize = () => {
+    switch (size) {
+      case "small":
+        return { width: "320px", height: "400px" }
+      case "large":
+        return { width: "420px", height: "600px" }
+      default: // medium
+        return { width: "380px", height: "500px" }
     }
   }
 
-  const openWidget = () => {
-    if (window.TreelanChatWidget) {
-      window.TreelanChatWidget.open()
-    }
-  }
+  const widgetSize = getWidgetSize()
+  const primaryColor = config.widgetPrimaryColor || "#0ea5e9"
+  const borderRadius = config.widgetBorderRadius || "12px"
 
-  const widgetUrl = `${currentUrl}/api/widget?cliente_id=${config.cliente_id || config.id}`
-  const demoUrl = `${currentUrl}/chat/${config.id}`
-
-  const jsCode = `<!-- Widget de Chat -->
-<script src="${currentUrl}/widget-loader.js" data-client-id="${config.cliente_id || config.id}"></script>`
-
-  const iframeCode = `<!-- Widget de Chat (iframe) -->
-<iframe 
-  src="${widgetUrl}" 
-  width="${config.widgetMaxWidth || 400}" 
-  height="${config.widgetMaxHeight || 600}" 
-  frameborder="0"
-  style="border-radius: ${config.widgetBorderRadius || 12}px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-</iframe>`
-
-  if (!mounted) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="w-16 h-16 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
-      </div>
-    )
-  }
-
-  if (isEmbedded) {
-    // Modo embebido - ocupar todo el espacio disponible
-    return (
-      <div className="h-full w-full">
-        <WidgetChat
-          clienteId={config.cliente_id || config.id}
-          config={{
-            widgetTitle: config.widgetTitle || "Asistente Virtual",
-            widgetSubtitle: config.widgetSubtitle || "Estamos aquí para ayudarte",
-            widgetWelcomeMessage: config.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
-            widgetPlaceholder: config.widgetPlaceholder || "Escribe tu mensaje...",
-            widgetPrimaryColor: config.widgetPrimaryColor || "#0ea5e9",
-            widgetSecondaryColor: config.widgetSecondaryColor || "#f1f5f9",
-          }}
-        />
-      </div>
-    )
-  }
-
-  // Modo normal - con contenedor y estilos de demo
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="text-center space-y-4">
-          <h1 className="text-4xl font-bold text-gray-900">Demostración del Widget de Chat</h1>
-          <p className="text-xl text-gray-600">
-            Configuración: <span className="font-semibold">{config.displayName}</span>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      {/* Header de la página de demostración */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-4xl mx-auto px-6 py-8">
+          <div className="text-center">
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">Treelan Assistants</h1>
+            <p className="text-xl text-gray-600">Widget Demo</p>
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>Configuración:</strong> {config.displayName} |<strong> Cliente ID:</strong> {config.cliente_id}{" "}
+                |<strong> Estado:</strong> {config.widgetEnabled ? "Activo" : "Inactivo"}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Contenido de la página simulada */}
+      <div className="max-w-4xl mx-auto px-6 py-12">
+        <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
+          <h2 className="text-2xl font-semibold text-gray-900 mb-4">Bienvenido a nuestro sitio web</h2>
+          <p className="text-gray-600 mb-6">
+            Esta es una página de demostración que simula cómo se vería el widget de chat en un sitio web real. El
+            widget aparece en la esquina inferior derecha y respeta toda la configuración establecida en el panel de
+            control.
           </p>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="bg-gray-50 p-6 rounded-lg">
+              <h3 className="text-lg font-medium text-gray-900 mb-3">Características del Widget</h3>
+              <ul className="space-y-2 text-sm text-gray-600">
+                <li>• Botón flotante personalizable</li>
+                <li>• Colores y estilos configurables</li>
+                <li>• Mensajes de bienvenida personalizados</li>
+                <li>• Posicionamiento flexible</li>
+                <li>• Integración con OpenAI</li>
+              </ul>
+            </div>
+
+            <div className="bg-gray-50 p-6 rounded-lg">
+              <h3 className="text-lg font-medium text-gray-900 mb-3">Configuración Actual</h3>
+              <ul className="space-y-2 text-sm text-gray-600">
+                <li>
+                  • <strong>Título:</strong> {config.widgetTitle || "Asistente Virtual"}
+                </li>
+                <li>
+                  • <strong>Posición:</strong> {position}
+                </li>
+                <li>
+                  • <strong>Tamaño:</strong> {size}
+                </li>
+                <li>
+                  • <strong>Color:</strong> {primaryColor}
+                </li>
+                <li>
+                  • <strong>Texto del botón:</strong> {config.widgetButtonText || "¿Necesitas ayuda?"}
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
 
-        {/* Status del Widget */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              Estado del Widget
-              {widgetError ? (
-                <div className="h-5 w-5 text-red-500">❌</div>
-              ) : widgetLoaded ? (
-                <CheckCircle className="h-5 w-5 text-green-500" />
-              ) : (
-                <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <Badge variant={widgetError ? "destructive" : widgetLoaded ? "default" : "secondary"}>
-                {widgetError ? "Error" : widgetLoaded ? "Cargado" : "Cargando..."}
-              </Badge>
-              <span className="text-sm text-gray-600">
-                {widgetError
-                  ? `Error: ${widgetError}`
-                  : widgetLoaded
-                    ? "El widget está funcionando correctamente. Busca el botón azul en la esquina inferior derecha."
-                    : "Cargando el widget de chat..."}
-              </span>
-            </div>
-            {widgetLoaded && (
-              <div className="mt-4">
-                <Button onClick={openWidget} className="flex items-center gap-2">
-                  <MessageCircle className="h-4 w-4" />
-                  Abrir Widget
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Contenido adicional para simular una página real */}
+        <div className="grid md:grid-cols-3 gap-6">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Servicio 1</h3>
+            <p className="text-gray-600">Descripción del primer servicio que ofrece la empresa.</p>
+          </div>
+          <div className="bg-white rounded-lg shadow p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Servicio 2</h3>
+            <p className="text-gray-600">Descripción del segundo servicio que ofrece la empresa.</p>
+          </div>
+          <div className="bg-white rounded-lg shadow p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Servicio 3</h3>
+            <p className="text-gray-600">Descripción del tercer servicio que ofrece la empresa.</p>
+          </div>
+        </div>
+      </div>
 
-        {/* Grid de información */}
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Configuración Actual */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Configuración Actual</CardTitle>
-              <CardDescription>Personalización aplicada a este widget</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="font-medium">Cliente ID:</span>
-                  <p className="text-gray-600">{config.cliente_id || config.id}</p>
+      {/* Widget flotante */}
+      {config.widgetEnabled && (
+        <div
+          className="fixed z-50"
+          style={{
+            bottom: "20px",
+            right: isBottomRight ? "20px" : "auto",
+            left: isBottomLeft ? "20px" : "auto",
+          }}
+        >
+          {/* Texto flotante */}
+          {!isOpen && config.widgetFloatingText && (
+            <div
+              className="mb-3 px-4 py-2 bg-white rounded-lg shadow-lg border text-sm text-gray-700 max-w-xs animate-bounce"
+              style={{
+                marginRight: isBottomRight ? "70px" : "0",
+                marginLeft: isBottomLeft ? "70px" : "0",
+              }}
+            >
+              {config.widgetFloatingText}
+            </div>
+          )}
+
+          {/* Widget expandido */}
+          {isOpen && (
+            <div
+              className="bg-white rounded-lg shadow-2xl border overflow-hidden mb-4"
+              style={{
+                width: widgetSize.width,
+                height: isMinimized ? "60px" : widgetSize.height,
+                borderRadius: borderRadius,
+              }}
+            >
+              {isMinimized ? (
+                // Header minimizado
+                <div
+                  className="p-4 text-white flex items-center justify-between cursor-pointer"
+                  style={{ backgroundColor: primaryColor }}
+                  onClick={() => setIsMinimized(false)}
+                >
+                  <div className="flex items-center space-x-2">
+                    <MessageCircle className="w-5 h-5" />
+                    <span className="font-medium">{config.widgetTitle || "Asistente Virtual"}</span>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setIsOpen(false)
+                      setIsMinimized(false)
+                    }}
+                    className="text-white hover:text-gray-200 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
-                <div>
-                  <span className="font-medium">Posición:</span>
-                  <p className="text-gray-600">
-                    {config.widgetPosition === "bottom-right" ? "Inferior Derecha" : "Inferior Izquierda"}
-                  </p>
-                </div>
-                <div>
-                  <span className="font-medium">Color Principal:</span>
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-4 h-4 rounded border"
-                      style={{ backgroundColor: config.widgetPrimaryColor || "#0ea5e9" }}
+              ) : (
+                // Widget completo
+                <div className="h-full flex flex-col">
+                  {/* Header del widget con controles */}
+                  <div
+                    className="p-4 text-white flex items-center justify-between"
+                    style={{ backgroundColor: primaryColor }}
+                  >
+                    <div>
+                      <h3 className="font-semibold text-lg">{config.widgetTitle || "Asistente Virtual"}</h3>
+                      <p className="text-sm opacity-90">{config.widgetSubtitle || "Estamos aquí para ayudarte"}</p>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setIsMinimized(true)}
+                        className="text-white hover:text-gray-200 transition-colors"
+                      >
+                        <Minus className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsOpen(false)
+                          setIsMinimized(false)
+                        }}
+                        className="text-white hover:text-gray-200 transition-colors"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Contenido del chat */}
+                  <div className="flex-1 overflow-hidden">
+                    <WidgetChat
+                      clienteId={config.cliente_id}
+                      config={{
+                        widgetTitle: config.widgetTitle,
+                        widgetSubtitle: config.widgetSubtitle,
+                        widgetWelcomeMessage: config.widgetWelcomeMessage,
+                        widgetPlaceholder: config.widgetPlaceholder,
+                        widgetPrimaryColor: config.widgetPrimaryColor,
+                        widgetSecondaryColor: config.widgetSecondaryColor,
+                      }}
+                      hideHeader={true}
                     />
-                    <span className="text-gray-600">{config.widgetPrimaryColor || "#0ea5e9"}</span>
                   </div>
                 </div>
-                <div>
-                  <span className="font-medium">Tema:</span>
-                  <p className="text-gray-600 capitalize">{config.widgetTheme || "light"}</p>
-                </div>
-              </div>
-              <div>
-                <span className="font-medium">Mensaje de Bienvenida:</span>
-                <p className="text-gray-600 text-sm mt-1">
-                  "{config.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?"}"
-                </p>
-              </div>
-              <div>
-                <span className="font-medium">Placeholder:</span>
-                <p className="text-gray-600 text-sm mt-1">"{config.widgetPlaceholder || "Escribe tu mensaje..."}"</p>
-              </div>
-              {config.widgetShowFloatingText && (
-                <div>
-                  <span className="font-medium">Texto del Botón Flotante:</span>
-                  <p className="text-gray-600 text-sm mt-1">
-                    "{config.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual"}"
-                  </p>
-                </div>
               )}
-            </CardContent>
-          </Card>
-
-          {/* URLs y Enlaces */}
-          <Card>
-            <CardHeader>
-              <CardTitle>URLs y Enlaces</CardTitle>
-              <CardDescription>Enlaces para integración y demostración</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="text-sm font-medium">URL del Widget</label>
-                <div className="flex items-center gap-2 mt-1">
-                  <input
-                    type="text"
-                    value={widgetUrl}
-                    readOnly
-                    className="flex-1 px-3 py-2 text-sm border rounded-md bg-gray-50"
-                  />
-                  <Button size="sm" variant="outline" onClick={() => copyToClipboard(widgetUrl)}>
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => window.open(widgetUrl, "_blank")}>
-                    <ExternalLink className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium">URL de Demostración</label>
-                <div className="flex items-center gap-2 mt-1">
-                  <input
-                    type="text"
-                    value={demoUrl}
-                    readOnly
-                    className="flex-1 px-3 py-2 text-sm border rounded-md bg-gray-50"
-                  />
-                  <Button size="sm" variant="outline" onClick={() => copyToClipboard(demoUrl)}>
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Códigos de Integración */}
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Código JavaScript */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Integración JavaScript</CardTitle>
-              <CardDescription>
-                Copia este código en tu sitio web antes del cierre del tag &lt;/body&gt;
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="relative">
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg text-sm overflow-x-auto">
-                  <code>{jsCode}</code>
-                </pre>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="absolute top-2 right-2"
-                  onClick={() => copyToClipboard(jsCode)}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Código iframe */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Integración iframe</CardTitle>
-              <CardDescription>Alternativa usando iframe para sitios con restricciones de JavaScript</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="relative">
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg text-sm overflow-x-auto">
-                  <code>{iframeCode}</code>
-                </pre>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="absolute top-2 right-2"
-                  onClick={() => copyToClipboard(iframeCode)}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Instrucciones */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Instrucciones de Uso</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-medium">1. Probar el Widget</h4>
-                <p className="text-sm text-gray-600">
-                  Busca el botón de chat en la esquina inferior derecha de esta página y haz clic para probarlo, o usa
-                  el botón "Abrir Widget" de arriba. Notarás los nuevos controles de minimizar y cerrar en el header del
-                  chat.
-                </p>
-              </div>
-              <div>
-                <h4 className="font-medium">2. Integrar en tu Sitio Web</h4>
-                <p className="text-sm text-gray-600">
-                  Copia el código JavaScript o iframe de arriba e intégralo en tu sitio web.
-                </p>
-              </div>
-              <div>
-                <h4 className="font-medium">3. Personalizar</h4>
-                <p className="text-sm text-gray-600">
-                  Modifica los colores, mensajes y configuración desde el panel de administración. Ahora puedes
-                  configurar el texto que acompaña al botón flotante para invitar a los usuarios a interactuar.
-                </p>
-              </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          )}
+
+          {/* Botón flotante */}
+          {!isOpen && (
+            <button
+              onClick={() => setIsOpen(true)}
+              className="w-14 h-14 rounded-full text-white shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center group"
+              style={{
+                backgroundColor: primaryColor,
+                borderRadius: borderRadius === "0px" ? "50%" : borderRadius,
+              }}
+            >
+              <MessageCircle className="w-6 h-6 group-hover:scale-110 transition-transform" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Mensaje si el widget está deshabilitado */}
+      {!config.widgetEnabled && (
+        <div className="fixed bottom-4 right-4 bg-red-100 border border-red-300 text-red-700 px-4 py-2 rounded-lg shadow-lg">
+          <p className="text-sm">Widget deshabilitado en la configuración</p>
+        </div>
+      )}
     </div>
   )
-}
-
-// Declaración de tipos para el widget global
-declare global {
-  interface Window {
-    TreelanChatWidget: {
-      open: () => void
-      close: () => void
-      toggle: () => void
-      minimize: () => void
-      destroy: () => void
-      isOpen: () => boolean
-      isMinimized: () => boolean
-      clienteId: string
-    }
-  }
 }
