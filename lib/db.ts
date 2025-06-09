@@ -667,3 +667,6 @@ export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig 
 // Export alias for compatibility
 export const getWhatsappConfigByClienteId = getConfigByClienteId
 export const getConfigById = getWhatsAppConfig // Alias para compatibilidad
+
+// Export alias for compatibility - getConfig
+export const getConfig = getWhatsAppConfig

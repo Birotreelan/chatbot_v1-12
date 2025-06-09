@@ -29,9 +29,10 @@ interface WidgetChatProps {
     widgetPrimaryColor?: string
     widgetSecondaryColor?: string
   }
+  hideHeader?: boolean
 }
 
-export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
+export default function WidgetChat({ clienteId, config, hideHeader = false }: WidgetChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -341,13 +342,15 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header */}
-      <div className="p-4 text-white relative" style={{ backgroundColor: config.widgetPrimaryColor || "#0ea5e9" }}>
-        <div className="text-left">
-          <h3 className="font-semibold text-lg">{config.widgetTitle || "Asistente Virtual"}</h3>
-          <p className="text-sm opacity-90">{config.widgetSubtitle || "Estamos aquí para ayudarte"}</p>
+      {/* Header - solo mostrar si hideHeader es false */}
+      {!hideHeader && (
+        <div className="p-4 text-white relative" style={{ backgroundColor: config.widgetPrimaryColor || "#0ea5e9" }}>
+          <div className="text-left">
+            <h3 className="font-semibold text-lg">{config.widgetTitle || "Asistente Virtual"}</h3>
+            <p className="text-sm opacity-90">{config.widgetSubtitle || "Estamos aquí para ayudarte"}</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">

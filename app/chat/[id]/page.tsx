@@ -1,28 +1,16 @@
 import { notFound } from "next/navigation"
-import { getConfigById } from "@/lib/db"
-import { ChatDemo } from "@/components/chat/chat-demo"
+import { getConfig } from "@/lib/db"
+import { WidgetDemo } from "@/components/chat/widget-demo"
 
 export default async function ChatPage({ params }: { params: { id: string } }) {
-  console.log("[CHAT-PAGE] Cargando configuración para ID:", params.id)
+  const config = await getConfig(params.id)
 
-  try {
-    const config = await getConfigById(params.id)
-
-    if (!config) {
-      console.log("[CHAT-PAGE] Configuración no encontrada para ID:", params.id)
-      notFound()
-    }
-
-    console.log("[CHAT-PAGE] Configuración encontrada:", {
-      id: config.id,
-      displayName: config.displayName,
-      cliente_id: config.cliente_id,
-      widgetEnabled: config.widgetEnabled,
-    })
-
-    return <ChatDemo config={config} isEmbedded={true} />
-  } catch (error) {
-    console.error("[CHAT-PAGE] Error al cargar configuración:", error)
+  if (!config) {
     notFound()
   }
+
+  // Determinar el color primario con fallback a azul
+  const primaryColor = config.widgetPrimaryColor || "#3b82f6"
+
+  return <WidgetDemo config={config} primaryColor={primaryColor} />
 }
