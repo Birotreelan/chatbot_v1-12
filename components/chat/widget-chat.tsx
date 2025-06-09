@@ -61,8 +61,8 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
   const detectNumberedOptions = (
     text: string,
   ): { hasOptions: boolean; options: Array<{ number: string; text: string }>; cleanText: string } => {
-    // Regex para detectar patrones como "1- Texto" tanto al inicio de línea como en línea
-    const optionRegex = /(\d+)[-.)]\s*([^.]+?)(?=\s+\d+[-.]|\s*$)/g
+    // Regex más robusta para detectar patrones como "1. Texto" o "1- Texto" en cualquier parte del texto
+    const optionRegex = /(\d+)[.-]\s+([^.]*?)(?=\s+\d+[.-]|$)/g
     const matches = [...text.matchAll(optionRegex)]
 
     if (!matches || matches.length < 2) {
@@ -72,15 +72,25 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
     const options: Array<{ number: string; text: string }> = []
     let cleanText = text
 
+    // Procesar las opciones encontradas
     matches.forEach((match) => {
       const [fullMatch, number, optionText] = match
-      options.push({ number, text: optionText.trim() })
-      // Remover la opción del texto limpio para evitar duplicación
-      cleanText = cleanText.replace(fullMatch, "").trim()
+      // Limpiar el texto de la opción (remover puntos finales y espacios extra)
+      const cleanOptionText = optionText.trim().replace(/\.$/, "")
+      options.push({ number, text: cleanOptionText })
+
+      // Remover la opción completa del texto limpio
+      cleanText = cleanText.replace(fullMatch, "")
     })
 
-    // Limpiar texto residual y espacios extra
+    // Limpiar espacios extra y normalizar el texto
     cleanText = cleanText.replace(/\s+/g, " ").trim()
+
+    // Si el texto limpio termina con "?" y hay texto después, mantener solo la parte antes de las opciones
+    const beforeOptionsMatch = text.match(/^(.*?\?)\s*\d+[.-]/)
+    if (beforeOptionsMatch) {
+      cleanText = beforeOptionsMatch[1]
+    }
 
     return { hasOptions: true, options, cleanText }
   }
