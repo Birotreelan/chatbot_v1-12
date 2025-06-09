@@ -1,59 +1,77 @@
-import { notFound } from "next/navigation"
-import { getWhatsAppConfig } from "@/lib/db"
-import { ChatDemo } from "@/components/chat/chat-demo"
+"use client"
 
-interface ChatDemoPageProps {
-  params: {
-    id: string
-  }
+import { useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import WidgetChat from "@/components/chat/widget-chat"
+
+interface ChatConfig {
+  id: string
+  name: string
+  clienteId: string
+  widgetTitle?: string
+  widgetSubtitle?: string
+  widgetWelcomeMessage?: string
+  widgetPlaceholder?: string
+  widgetPrimaryColor?: string
+  widgetSecondaryColor?: string
 }
 
-export default async function ChatDemoPage({ params }: ChatDemoPageProps) {
-  console.log(`[CHAT DEMO] Cargando demo para configuración: ${params.id}`)
+export default function ChatPage({ params }: { params: { id: string } }) {
+  const [config, setConfig] = useState<ChatConfig | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+  const isEmbedded = searchParams.get("embedded") === "true"
 
-  try {
-    const config = await getWhatsAppConfig(params.id)
-
-    if (!config) {
-      console.log(`[CHAT DEMO] Configuración ${params.id} no encontrada`)
-      notFound()
+  useEffect(() => {
+    async function fetchConfig() {
+      try {
+        const response = await fetch(`/api/dashboard/configs/${params.id}`)
+        if (!response.ok) {
+          throw new Error(`Error ${response.status}: ${response.statusText}`)
+        }
+        const data = await response.json()
+        setConfig(data)
+      } catch (err) {
+        console.error("Error fetching config:", err)
+        setError("No se pudo cargar la configuración del chat")
+      } finally {
+        setLoading(false)
+      }
     }
 
-    if (config.widgetEnabled === false) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-            <div className="text-6xl mb-4">🚫</div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-4">Widget Deshabilitado</h1>
-            <p className="text-gray-600 mb-6">El widget web no está habilitado para esta configuración.</p>
-            <p className="text-sm text-gray-500">Contacta al administrador para habilitar el widget.</p>
-          </div>
-        </div>
-      )
-    }
+    fetchConfig()
+  }, [params.id])
 
-    console.log(`[CHAT DEMO] Renderizando demo para: ${config.displayName}`)
-
-    return <ChatDemo config={config} />
-  } catch (error) {
-    console.error(`[CHAT DEMO] Error al cargar configuración ${params.id}:`, error)
-
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-          <div className="text-6xl mb-4">⚠️</div>
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Error</h1>
-          <p className="text-gray-600 mb-6">No se pudo cargar la configuración del chat.</p>
-          <details className="text-left text-sm text-gray-500">
-            <summary className="cursor-pointer font-medium">Detalles del error</summary>
-            <pre className="mt-2 bg-gray-100 p-2 rounded overflow-auto">
-              {error instanceof Error ? error.message : String(error)}
-            </pre>
-          </details>
-        </div>
+      <div className="flex items-center justify-center h-screen">
+        <div className="w-16 h-16 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
       </div>
     )
   }
-}
 
-export const dynamic = "force-dynamic"
+  if (error || !config) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen">
+        <div className="text-red-500 text-xl">{error || "Configuración no encontrada"}</div>
+      </div>
+    )
+  }
+
+  // Si está embebido, aplicar estilos específicos para el widget
+  if (isEmbedded) {
+    return (
+      <div className="h-screen w-full overflow-hidden">
+        <WidgetChat clienteId={config.clienteId} config={config} />
+      </div>
+    )
+  }
+
+  // Vista normal para la página de chat
+  return (
+    <div className="max-w-md mx-auto h-screen md:h-[600px] md:my-8 border rounded-lg overflow-hidden shadow-lg">
+      <WidgetChat clienteId={config.clienteId} config={config} />
+    </div>
+  )
+}
