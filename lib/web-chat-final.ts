@@ -115,7 +115,6 @@ async function createWebThread(identifier: string): Promise<string> {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
         "OpenAI-Beta": "assistants=v2",
-        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         metadata: {
@@ -341,6 +340,9 @@ async function processMessageWithOpenAI(
   }
 }
 
+// Variable global para almacenar botones generados
+let lastGeneratedButtons: any = null
+
 async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
   let attempts = 0
   const maxAttempts = 30
@@ -390,8 +392,16 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
         if (messages.data.length > 0) {
           const lastMessage = messages.data[0]
           if (lastMessage.content[0]?.type === "text") {
-            const response = lastMessage.content[0].text.value
-            console.log(`[WEB-CHAT-FINAL] ✅ Respuesta obtenida: ${response.length} caracteres`)
+            let response = lastMessage.content[0].text.value
+
+            // Si se generaron botones, agregar el marcador especial
+            if (lastGeneratedButtons) {
+              console.log(`[WEB-CHAT-FINAL] 🔘 Agregando marcador de botones a la respuesta`)
+              response += `\n\n__WIDGET_BUTTONS__${JSON.stringify(lastGeneratedButtons)}__END_BUTTONS__`
+              lastGeneratedButtons = null // Limpiar después de usar
+            }
+
+            console.log(`[WEB-CHAT-FINAL] ✅ Respuesta final: ${response.length} caracteres`)
             return response
           }
         }
@@ -493,6 +503,16 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
           case "crear_botones_opciones":
             console.log(`[WEB-CHAT-FINAL] 🔘 Generando botones con opciones`)
             console.log(`[WEB-CHAT-FINAL] 📋 Opciones:`, args.opciones)
+
+            // Guardar los botones para agregarlos a la respuesta final
+            lastGeneratedButtons = {
+              opciones: args.opciones,
+              contexto: args.contexto || "",
+              callback_id: args.callback_id || "default_callback",
+            }
+
+            console.log(`[WEB-CHAT-FINAL] 💾 Botones guardados para la respuesta:`, lastGeneratedButtons)
+
             // Devolver los datos de los botones para que el frontend los muestre
             output = JSON.stringify({
               success: true,

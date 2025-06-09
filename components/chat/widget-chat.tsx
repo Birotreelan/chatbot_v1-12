@@ -101,26 +101,27 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
       }
 
       const data = await response.json()
+      console.log("[WIDGET-CHAT] Respuesta completa del servidor:", data)
 
       if (data.success && data.response) {
-        // Verificar si la respuesta contiene botones generados por la función
-        // Patrón mejorado para detectar la función de botones
+        let content = data.response
+        let buttons = null
+
+        console.log("[WIDGET-CHAT] Analizando respuesta para botones...")
+        console.log("[WIDGET-CHAT] Contenido de la respuesta:", content)
+
+        // Método 1: Buscar el patrón de función de botones
         const buttonMatch =
           data.response.match(/Ejecutar función: crear_botones_opciones\$\$\{(.*?)\}\$\$/s) ||
           data.response.match(/crear_botones_opciones\$\$\{(.*?)\}\$\$/s)
 
-        let content = data.response
-        let buttons = null
-
         if (buttonMatch) {
+          console.log("[WIDGET-CHAT] ✅ Patrón de función encontrado:", buttonMatch[0])
           try {
-            // Extraer y parsear el JSON de los botones
             const jsonStr = buttonMatch[1]
-            // Reemplazar dobles llaves que pueden estar en el texto para formar un JSON válido
             const cleanJsonStr = jsonStr.replace(/\{\{/g, "{").replace(/\}\}/g, "}")
             const buttonData = JSON.parse(cleanJsonStr)
 
-            // Eliminar la parte del texto que contiene la función
             content = data.response.replace(buttonMatch[0], "")
             buttons = {
               options: buttonData.opciones,
@@ -128,36 +129,86 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
               callback_id: buttonData.callback_id,
             }
 
-            console.log("[WIDGET-CHAT] Botones detectados:", buttons)
+            console.log("[WIDGET-CHAT] ✅ Botones extraídos del patrón:", buttons)
           } catch (e) {
-            console.error("[WIDGET-CHAT] Error al parsear botones:", e)
+            console.error("[WIDGET-CHAT] ❌ Error al parsear botones del patrón:", e)
           }
-        } else {
-          // Detección alternativa basada en el contenido del mensaje
-          const lines = data.response.split("\n")
-          const optionsIndex = lines.findIndex(
-            (line) =>
-              line.includes("Por favor, elegí una de estas opciones:") ||
-              line.includes("Por favor, elegi una de estas opciones:") ||
-              line.includes("Por favor, elige una de estas opciones:"),
-          )
+        }
 
-          if (optionsIndex !== -1) {
-            // Buscar opciones que comienzan con guión o número
-            const options = lines
-              .slice(optionsIndex + 1)
-              .filter((line) => /^\s*[-\d•]\s+/.test(line.trim()))
-              .map((line) => line.trim().replace(/^\s*[-\d•]\s+/, ""))
+        // Método 2: Detección basada en contenido de texto común
+        if (!buttons) {
+          console.log("[WIDGET-CHAT] 🔍 Buscando opciones en el texto...")
+
+          // Buscar frases que indican opciones
+          const optionIndicators = [
+            "Por favor, elegí una de estas opciones:",
+            "Por favor, elegi una de estas opciones:",
+            "Por favor, elige una de estas opciones:",
+            "Selecciona una opción:",
+            "¿Cómo deseas solicitar tu turno?",
+            "Podés también indicar preferencias",
+          ]
+
+          const lines = content.split("\n")
+          let optionsStartIndex = -1
+
+          // Buscar el índice donde empiezan las opciones
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].toLowerCase()
+            if (optionIndicators.some((indicator) => line.includes(indicator.toLowerCase()))) {
+              optionsStartIndex = i
+              break
+            }
+          }
+
+          if (optionsStartIndex !== -1) {
+            console.log("[WIDGET-CHAT] 📍 Indicador de opciones encontrado en línea:", optionsStartIndex)
+
+            // Extraer opciones que siguen al indicador
+            const options = []
+            for (let i = optionsStartIndex + 1; i < lines.length; i++) {
+              const line = lines[i].trim()
+
+              // Buscar líneas que parecen opciones (empiezan con -, •, número, etc.)
+              if (/^\s*[-•\d]\s+/.test(line) && line.length > 3) {
+                const cleanOption = line.replace(/^\s*[-•\d]+\s*/, "").trim()
+                if (cleanOption.length > 0) {
+                  options.push(cleanOption)
+                }
+              }
+              // Si encontramos una línea vacía o que no parece opción, paramos
+              else if (line.length === 0 || (!line.startsWith("-") && !line.startsWith("•") && !/^\d/.test(line))) {
+                break
+              }
+            }
 
             if (options.length > 0) {
-              console.log("[WIDGET-CHAT] Opciones detectadas en el texto:", options)
+              console.log("[WIDGET-CHAT] ✅ Opciones extraídas del texto:", options)
               buttons = {
                 options: options,
-                context: "Por favor, elige una opción:",
+                context: "Selecciona una opción:",
                 callback_id: "text_options",
               }
+            }
+          }
 
-              // No eliminamos las opciones del texto para mantener el contexto
+          // Método 3: Buscar opciones específicas conocidas
+          if (!buttons) {
+            const knownOptions = [
+              "Con un médico oftalmólogo en particular",
+              "Por especialidad",
+              "Consulta general con cualquier oftalmólogo",
+            ]
+
+            const foundOptions = knownOptions.filter((option) => content.toLowerCase().includes(option.toLowerCase()))
+
+            if (foundOptions.length >= 2) {
+              console.log("[WIDGET-CHAT] ✅ Opciones conocidas encontradas:", foundOptions)
+              buttons = {
+                options: foundOptions,
+                context: "Selecciona una opción:",
+                callback_id: "known_options",
+              }
             }
           }
         }
@@ -169,6 +220,12 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
           timestamp: new Date(),
           buttons: buttons,
         }
+
+        console.log("[WIDGET-CHAT] 📨 Mensaje final a mostrar:", {
+          content: botMessage.content,
+          hasButtons: !!botMessage.buttons,
+          buttons: botMessage.buttons,
+        })
 
         setMessages((prev) => [...prev, botMessage])
       } else {
@@ -203,7 +260,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
   }
 
   const handleButtonClick = (option: string) => {
-    console.log("[WIDGET-CHAT] Opción seleccionada:", option)
+    console.log("[WIDGET-CHAT] 🔘 Opción seleccionada:", option)
     sendMessage(option)
   }
 
@@ -236,12 +293,14 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
               {/* Botones interactivos si existen */}
               {message.buttons && message.buttons.options.length > 0 && (
                 <div className="mt-3 space-y-2">
-                  {message.buttons.context && <p className="text-xs font-medium mb-2">{message.buttons.context}</p>}
+                  {message.buttons.context && (
+                    <p className="text-xs font-medium mb-2 text-gray-600">{message.buttons.context}</p>
+                  )}
                   {message.buttons.options.map((option, index) => (
                     <button
                       key={index}
                       onClick={() => handleButtonClick(option)}
-                      className="w-full text-left text-sm py-2 px-3 rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+                      className="w-full text-left text-sm py-2 px-3 rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors shadow-sm"
                       style={{
                         borderColor: config.widgetPrimaryColor || "#0ea5e9",
                         color: config.widgetPrimaryColor || "#0ea5e9",
@@ -300,7 +359,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
             style={{ backgroundColor: config.widgetPrimaryColor || "#0ea5e9" }}
             className="text-white hover:opacity-90"
           >
-            <Send className="w-4 w-4" />
+            <Send className="w-4 h-4" />
           </Button>
         </div>
       </div>
