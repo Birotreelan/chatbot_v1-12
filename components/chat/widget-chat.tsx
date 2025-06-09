@@ -110,28 +110,48 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
         console.log("[WIDGET-CHAT] Analizando respuesta para botones...")
         console.log("[WIDGET-CHAT] Contenido de la respuesta:", content)
 
-        // Método 1: Buscar el patrón de función de botones
-        const buttonMatch =
-          data.response.match(/Ejecutar función: crear_botones_opciones\$\$\{(.*?)\}\$\$/s) ||
-          data.response.match(/crear_botones_opciones\$\$\{(.*?)\}\$\$/s)
-
-        if (buttonMatch) {
-          console.log("[WIDGET-CHAT] ✅ Patrón de función encontrado:", buttonMatch[0])
+        // Método 0: Buscar el marcador especial de botones
+        const widgetButtonsMatch = content.match(/__WIDGET_BUTTONS__(.+?)__END_BUTTONS__/s)
+        if (widgetButtonsMatch) {
+          console.log("[WIDGET-CHAT] ✅ Marcador especial de botones encontrado")
           try {
-            const jsonStr = buttonMatch[1]
-            const cleanJsonStr = jsonStr.replace(/\{\{/g, "{").replace(/\}\}/g, "}")
-            const buttonData = JSON.parse(cleanJsonStr)
-
-            content = data.response.replace(buttonMatch[0], "")
+            const buttonData = JSON.parse(widgetButtonsMatch[1])
+            content = content.replace(widgetButtonsMatch[0], "").trim()
             buttons = {
               options: buttonData.opciones,
-              context: buttonData.contexto,
-              callback_id: buttonData.callback_id,
+              context: buttonData.contexto || "",
+              callback_id: buttonData.callback_id || "default_callback",
             }
-
-            console.log("[WIDGET-CHAT] ✅ Botones extraídos del patrón:", buttons)
+            console.log("[WIDGET-CHAT] ✅ Botones extraídos del marcador especial:", buttons)
           } catch (e) {
-            console.error("[WIDGET-CHAT] ❌ Error al parsear botones del patrón:", e)
+            console.error("[WIDGET-CHAT] ❌ Error al parsear botones del marcador especial:", e)
+          }
+        }
+
+        // Método 1: Buscar el patrón de función de botones
+        if (!buttons) {
+          const buttonMatch =
+            content.match(/Ejecutar función: crear_botones_opciones\$\$\{(.*?)\}\$\$/s) ||
+            content.match(/crear_botones_opciones\$\$\{(.*?)\}\$\$/s)
+
+          if (buttonMatch) {
+            console.log("[WIDGET-CHAT] ✅ Patrón de función encontrado:", buttonMatch[0])
+            try {
+              const jsonStr = buttonMatch[1]
+              const cleanJsonStr = jsonStr.replace(/\{\{/g, "{").replace(/\}\}/g, "}")
+              const buttonData = JSON.parse(cleanJsonStr)
+
+              content = content.replace(buttonMatch[0], "")
+              buttons = {
+                options: buttonData.opciones,
+                context: buttonData.contexto,
+                callback_id: buttonData.callback_id,
+              }
+
+              console.log("[WIDGET-CHAT] ✅ Botones extraídos del patrón:", buttons)
+            } catch (e) {
+              console.error("[WIDGET-CHAT] ❌ Error al parsear botones del patrón:", e)
+            }
           }
         }
 
@@ -178,6 +198,10 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
               }
               // Si encontramos una línea vacía o que no parece opción, paramos
               else if (line.length === 0 || (!line.startsWith("-") && !line.startsWith("•") && !/^\d/.test(line))) {
+                // Seguir buscando si hay más opciones después
+                if (i < lines.length - 1 && /^\s*[-•\d]\s+/.test(lines[i + 1].trim())) {
+                  continue
+                }
                 break
               }
             }
@@ -191,24 +215,71 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
               }
             }
           }
+        }
 
-          // Método 3: Buscar opciones específicas conocidas
-          if (!buttons) {
-            const knownOptions = [
+        // Método 3: Buscar opciones específicas conocidas
+        if (!buttons) {
+          const knownOptions = [
+            "Con un médico oftalmólogo en particular",
+            "Por especialidad",
+            "Consulta general con cualquier oftalmólogo",
+          ]
+
+          // Buscar opciones conocidas en el texto completo
+          const foundOptions = []
+          for (const option of knownOptions) {
+            if (content.includes(option)) {
+              foundOptions.push(option)
+            }
+          }
+
+          if (foundOptions.length >= 2) {
+            console.log("[WIDGET-CHAT] ✅ Opciones conocidas encontradas:", foundOptions)
+            buttons = {
+              options: foundOptions,
+              context: "Selecciona una opción:",
+              callback_id: "known_options",
+            }
+          }
+        }
+
+        // Método 4: Buscar patrones de listas numeradas o con viñetas
+        if (!buttons) {
+          const listPattern = /(?:^|\n)(?:\d+[.)]\s+|-\s+|•\s+)(.+?)(?=\n(?:\d+[.)]\s+|-\s+|•\s+)|$)/gs
+          const matches = [...content.matchAll(listPattern)]
+
+          if (matches.length >= 2) {
+            const options = matches.map((match) => match[1].trim())
+            console.log("[WIDGET-CHAT] ✅ Lista de opciones detectada:", options)
+            buttons = {
+              options: options,
+              context: "Selecciona una opción:",
+              callback_id: "list_options",
+            }
+          }
+        }
+
+        // Método 5: Buscar opciones en el texto actual
+        if (!buttons && content.includes("oftalmólogo")) {
+          const optionsText = content.toLowerCase()
+
+          // Buscar patrones específicos para este caso
+          if (
+            optionsText.includes("cómo deseas solicitar") ||
+            optionsText.includes("elige una de estas opciones") ||
+            optionsText.includes("elegí una de estas opciones")
+          ) {
+            const options = [
               "Con un médico oftalmólogo en particular",
               "Por especialidad",
               "Consulta general con cualquier oftalmólogo",
             ]
 
-            const foundOptions = knownOptions.filter((option) => content.toLowerCase().includes(option.toLowerCase()))
-
-            if (foundOptions.length >= 2) {
-              console.log("[WIDGET-CHAT] ✅ Opciones conocidas encontradas:", foundOptions)
-              buttons = {
-                options: foundOptions,
-                context: "Selecciona una opción:",
-                callback_id: "known_options",
-              }
+            console.log("[WIDGET-CHAT] ✅ Opciones específicas detectadas por contexto")
+            buttons = {
+              options: options,
+              context: "Selecciona una opción:",
+              callback_id: "context_options",
             }
           }
         }
