@@ -115,6 +115,7 @@ async function createWebThread(identifier: string): Promise<string> {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
         "OpenAI-Beta": "assistants=v2",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         metadata: {

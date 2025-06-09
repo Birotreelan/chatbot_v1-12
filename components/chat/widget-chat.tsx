@@ -62,18 +62,19 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const sendMessage = async (text: string) => {
-    if (!text.trim() || isLoading || !sessionId) return
+  const sendMessage = async (text?: string) => {
+    const messageText = text || inputValue.trim()
+    if (!messageText || isLoading || !sessionId) return
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: text.trim(),
+      content: messageText,
       isUser: true,
       timestamp: new Date(),
     }
 
     setMessages((prev) => [...prev, userMessage])
-    setInputValue("")
+    if (!text) setInputValue("") // Solo limpiar input si no es un botón
     setIsLoading(true)
 
     try {
@@ -89,7 +90,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          message: userMessage.content,
+          message: messageText,
           cliente_id: clienteId,
           session_id: sessionId,
         }),
@@ -103,7 +104,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
 
       if (data.success && data.response) {
         // Verificar si la respuesta contiene botones generados por la función
-        const buttonMatch = data.response.match(/Ejecutar función: crear_botones_opciones$$\{(.*?)\}$$/s)
+        const buttonMatch = data.response.match(/Ejecutar función: crear_botones_opciones\$\$\{(.*?)\}\$\$/s)
 
         let content = data.response
         let buttons = null
@@ -156,15 +157,6 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
     }
   }
 
-  const handleButtonClick = (option: string) => {
-    console.log("[WIDGET-CHAT] Opción seleccionada:", option)
-    sendMessage(option)
-  }
-
-  const handleSubmit = () => {
-    sendMessage(inputValue)
-  }
-
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
@@ -177,6 +169,15 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
       hour: "2-digit",
       minute: "2-digit",
     })
+  }
+
+  const handleButtonClick = (option: string) => {
+    console.log("[WIDGET-CHAT] Opción seleccionada:", option)
+    sendMessage(option)
+  }
+
+  const handleSubmit = () => {
+    sendMessage()
   }
 
   return (
@@ -200,7 +201,9 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
               }}
             >
               <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
-
+              <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
+                {formatTime(message.timestamp)}
+              </p>
               {/* Botones interactivos si existen */}
               {message.buttons && message.buttons.options.length > 0 && (
                 <div className="mt-3 space-y-2">
@@ -220,10 +223,6 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
                   ))}
                 </div>
               )}
-
-              <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
-                {formatTime(message.timestamp)}
-              </p>
             </div>
           </div>
         ))}
