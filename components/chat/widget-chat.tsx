@@ -61,42 +61,70 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
   const detectNumberedOptions = (
     text: string,
   ): { hasOptions: boolean; options: Array<{ number: string; text: string }>; cleanText: string } => {
-    // Regex más robusta para detectar patrones como "1. Texto" o "1- Texto" en cualquier parte del texto
-    const optionRegex = /(\d+)[.-]\s+([^.]*?)(?=\s+\d+[.-]|$)/g
-    const matches = [...text.matchAll(optionRegex)]
+    console.log("[WIDGET-CHAT] Analizando texto para opciones:", text)
 
-    if (!matches || matches.length < 2) {
+    // Intentar diferentes patrones de detección
+    // 1. Patrón para opciones en línea con punto: "1. Opción"
+    const pattern1 = /(\d+)\.\s+([^.]+?)(?=\s+\d+\.|$)/g
+    // 2. Patrón para opciones en línea con guión: "1- Opción"
+    const pattern2 = /(\d+)-\s+([^.]+?)(?=\s+\d+[-.]|$)/g
+
+    let matches: RegExpMatchArray[] = []
+    let pattern = ""
+
+    // Probar con el primer patrón
+    const matches1 = Array.from(text.matchAll(pattern1))
+    if (matches1 && matches1.length >= 2) {
+      matches = matches1
+      pattern = "pattern1"
+      console.log("[WIDGET-CHAT] Patrón detectado: punto (1.)")
+    } else {
+      // Si no funciona, probar con el segundo patrón
+      const matches2 = Array.from(text.matchAll(pattern2))
+      if (matches2 && matches2.length >= 2) {
+        matches = matches2
+        pattern = "pattern2"
+        console.log("[WIDGET-CHAT] Patrón detectado: guión (1-)")
+      }
+    }
+
+    console.log("[WIDGET-CHAT] Matches encontrados:", matches.length, "usando", pattern)
+
+    if (matches.length < 2) {
+      console.log("[WIDGET-CHAT] No se detectaron suficientes opciones numeradas")
       return { hasOptions: false, options: [], cleanText: text }
     }
 
     const options: Array<{ number: string; text: string }> = []
-    let cleanText = text
 
-    // Procesar las opciones encontradas
+    // Extraer las opciones encontradas
     matches.forEach((match) => {
       const [fullMatch, number, optionText] = match
-      // Limpiar el texto de la opción (remover puntos finales y espacios extra)
-      const cleanOptionText = optionText.trim().replace(/\.$/, "")
+      const cleanOptionText = optionText.trim()
       options.push({ number, text: cleanOptionText })
-
-      // Remover la opción completa del texto limpio
-      cleanText = cleanText.replace(fullMatch, "")
+      console.log("[WIDGET-CHAT] Opción detectada:", number, cleanOptionText)
     })
 
-    // Limpiar espacios extra y normalizar el texto
-    cleanText = cleanText.replace(/\s+/g, " ").trim()
-
-    // Si el texto limpio termina con "?" y hay texto después, mantener solo la parte antes de las opciones
-    const beforeOptionsMatch = text.match(/^(.*?\?)\s*\d+[.-]/)
-    if (beforeOptionsMatch) {
-      cleanText = beforeOptionsMatch[1]
+    // Intentar extraer el texto principal (antes de las opciones)
+    let cleanText = text
+    const questionMatch = text.match(/^(.*?\?)\s*\d+[.-]/)
+    if (questionMatch) {
+      cleanText = questionMatch[1].trim()
+      console.log("[WIDGET-CHAT] Texto principal extraído:", cleanText)
+    } else {
+      // Si no hay pregunta, intentar limpiar el texto de otra manera
+      cleanText = text.split(/\d+[.-]/)[0].trim()
+      console.log("[WIDGET-CHAT] Texto alternativo extraído:", cleanText)
     }
 
+    console.log("[WIDGET-CHAT] Opciones finales:", options)
     return { hasOptions: true, options, cleanText }
   }
 
   const handleOptionClick = async (optionNumber: string) => {
     if (isLoading) return
+
+    console.log("[WIDGET-CHAT] Opción seleccionada:", optionNumber)
 
     const optionMessage: Message = {
       id: Date.now().toString(),
@@ -249,7 +277,19 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => {
-          const { hasOptions, options, cleanText } = detectNumberedOptions(message.content)
+          // Solo procesar mensajes del bot (no del usuario)
+          const result = !message.isUser
+            ? detectNumberedOptions(message.content)
+            : { hasOptions: false, options: [], cleanText: message.content }
+          const { hasOptions, options, cleanText } = result
+
+          console.log("[WIDGET-CHAT] Mensaje procesado:", {
+            id: message.id,
+            isUser: message.isUser,
+            hasOptions,
+            optionsCount: options.length,
+            showButtons: !message.isUser && hasOptions && options.length > 0,
+          })
 
           return (
             <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
@@ -261,7 +301,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
                   }}
                 >
                   <p className="text-sm whitespace-pre-wrap text-left">
-                    {hasOptions && !message.isUser ? cleanText || message.content : message.content}
+                    {hasOptions && !message.isUser ? cleanText : message.content}
                   </p>
                   <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
                     {formatTime(message.timestamp)}
