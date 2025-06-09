@@ -7,11 +7,57 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Send } from "lucide-react"
 
+// First, update the Message interface to include a property for options
 interface Message {
   id: string
   content: string
   isUser: boolean
   timestamp: Date
+  options?: Array<{
+    number: string
+    text: string
+  }>
+}
+
+// Add a function to parse options from message content
+// Add this function before the WidgetChat component
+function parseOptionsFromMessage(content: string): {
+  textBeforeOptions: string
+  options: Array<{ number: string; text: string }>
+  textAfterOptions: string
+} {
+  // Regular expression to match numbered options like "1. Option text"
+  const optionRegex = /(\d+)\.\s+([^\n]+)/g
+  const matches = Array.from(content.matchAll(optionRegex))
+
+  if (matches.length === 0) {
+    return {
+      textBeforeOptions: content,
+      options: [],
+      textAfterOptions: "",
+    }
+  }
+
+  // Find the position of the first and last option
+  const firstOptionIndex = matches[0].index || 0
+  const lastOption = matches[matches.length - 1]
+  const lastOptionEndIndex = (lastOption.index || 0) + lastOption[0].length
+
+  // Extract text before options, options themselves, and text after options
+  const textBeforeOptions = content.substring(0, firstOptionIndex).trim()
+  const textAfterOptions = content.substring(lastOptionEndIndex).trim()
+
+  // Extract options
+  const options = matches.map((match) => ({
+    number: match[1],
+    text: match[2].trim(),
+  }))
+
+  return {
+    textBeforeOptions,
+    options,
+    textAfterOptions,
+  }
 }
 
 interface WidgetChatProps {
@@ -57,12 +103,15 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const sendMessage = async () => {
-    if (!inputValue.trim() || isLoading || !sessionId) return
+  // Update the sendMessage function to process options when receiving a message
+  const sendMessage = async (optionText?: string) => {
+    if ((!inputValue.trim() && !optionText) || isLoading || !sessionId) return
+
+    const messageContent = optionText || inputValue.trim()
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: inputValue.trim(),
+      content: messageContent,
       isUser: true,
       timestamp: new Date(),
     }
@@ -73,7 +122,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
 
     try {
       console.log("[WIDGET-CHAT] Enviando mensaje:", {
-        message: userMessage.content,
+        message: messageContent,
         cliente_id: clienteId,
         session_id: sessionId,
       })
@@ -84,7 +133,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          message: userMessage.content,
+          message: messageContent,
           cliente_id: clienteId,
           session_id: sessionId,
         }),
@@ -97,12 +146,17 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
       const data = await response.json()
 
       if (data.success && data.response) {
+        // Parse options from the response
+        const { textBeforeOptions, options, textAfterOptions } = parseOptionsFromMessage(data.response)
+
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
           content: data.response,
           isUser: false,
           timestamp: new Date(),
+          options: options.length > 0 ? options : undefined,
         }
+
         setMessages((prev) => [...prev, botMessage])
       } else {
         throw new Error(data.error || "Error desconocido")
@@ -119,6 +173,11 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Add a function to handle option selection
+  const handleOptionClick = (option: { number: string; text: string }) => {
+    sendMessage(option.number)
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -155,7 +214,42 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
                 backgroundColor: message.isUser ? config.widgetPrimaryColor || "#0ea5e9" : undefined,
               }}
             >
-              <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
+              {message.isUser ? (
+                <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
+              ) : (
+                <>
+                  {message.options && message.options.length > 0 ? (
+                    <div className="text-sm whitespace-pre-wrap text-left">
+                      {/* Parse and render the message with options as buttons */}
+                      {(() => {
+                        const { textBeforeOptions, options, textAfterOptions } = parseOptionsFromMessage(
+                          message.content,
+                        )
+                        return (
+                          <>
+                            <p>{textBeforeOptions}</p>
+                            <div className="flex flex-col space-y-2 my-2">
+                              {options.map((option, index) => (
+                                <button
+                                  key={index}
+                                  onClick={() => handleOptionClick(option)}
+                                  className="text-left px-3 py-2 rounded border border-gray-300 hover:bg-gray-200 transition-colors"
+                                  style={{ borderColor: config.widgetSecondaryColor || "#cbd5e1" }}
+                                >
+                                  {option.number}. {option.text}
+                                </button>
+                              ))}
+                            </div>
+                            {textAfterOptions && <p>{textAfterOptions}</p>}
+                          </>
+                        )
+                      })()}
+                    </div>
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
+                  )}
+                </>
+              )}
               <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
                 {formatTime(message.timestamp)}
               </p>
