@@ -104,7 +104,10 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
 
       if (data.success && data.response) {
         // Verificar si la respuesta contiene botones generados por la función
-        const buttonMatch = data.response.match(/Ejecutar función: crear_botones_opciones\$\$\{(.*?)\}\$\$/s)
+        // Patrón mejorado para detectar la función de botones
+        const buttonMatch =
+          data.response.match(/Ejecutar función: crear_botones_opciones\$\$\{(.*?)\}\$\$/s) ||
+          data.response.match(/crear_botones_opciones\$\$\{(.*?)\}\$\$/s)
 
         let content = data.response
         let buttons = null
@@ -128,6 +131,34 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
             console.log("[WIDGET-CHAT] Botones detectados:", buttons)
           } catch (e) {
             console.error("[WIDGET-CHAT] Error al parsear botones:", e)
+          }
+        } else {
+          // Detección alternativa basada en el contenido del mensaje
+          const lines = data.response.split("\n")
+          const optionsIndex = lines.findIndex(
+            (line) =>
+              line.includes("Por favor, elegí una de estas opciones:") ||
+              line.includes("Por favor, elegi una de estas opciones:") ||
+              line.includes("Por favor, elige una de estas opciones:"),
+          )
+
+          if (optionsIndex !== -1) {
+            // Buscar opciones que comienzan con guión o número
+            const options = lines
+              .slice(optionsIndex + 1)
+              .filter((line) => /^\s*[-\d•]\s+/.test(line.trim()))
+              .map((line) => line.trim().replace(/^\s*[-\d•]\s+/, ""))
+
+            if (options.length > 0) {
+              console.log("[WIDGET-CHAT] Opciones detectadas en el texto:", options)
+              buttons = {
+                options: options,
+                context: "Por favor, elige una opción:",
+                callback_id: "text_options",
+              }
+
+              // No eliminamos las opciones del texto para mantener el contexto
+            }
           }
         }
 
@@ -201,9 +232,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
               }}
             >
               <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
-              <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
-                {formatTime(message.timestamp)}
-              </p>
+
               {/* Botones interactivos si existen */}
               {message.buttons && message.buttons.options.length > 0 && (
                 <div className="mt-3 space-y-2">
@@ -223,6 +252,10 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
                   ))}
                 </div>
               )}
+
+              <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
+                {formatTime(message.timestamp)}
+              </p>
             </div>
           </div>
         ))}
@@ -267,7 +300,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
             style={{ backgroundColor: config.widgetPrimaryColor || "#0ea5e9" }}
             className="text-white hover:opacity-90"
           >
-            <Send className="w-4 h-4" />
+            <Send className="w-4 w-4" />
           </Button>
         </div>
       </div>
