@@ -4,7 +4,7 @@ import { getArgentinaDateTime } from "./utils/date-utils"
 interface WebChatConfig {
   id: string
   displayName: string
-  assistantId: string
+  widgetAssistantId: string
   enabled: boolean
   widgetEnabled: boolean
   cliente_id?: string
@@ -56,7 +56,7 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] ================================================`)
 
     // Validar parámetros
-    if (!sessionId || !message || !config?.assistantId) {
+    if (!sessionId || !message || !config?.widgetAssistantId) {
       throw new Error("Parámetros requeridos faltantes")
     }
 
@@ -95,7 +95,7 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(systemBlock)
 
     // Procesar mensaje
-    const response = await processMessageWithOpenAI(threadId, fullMessage, config.assistantId, clienteId)
+    const response = await processMessageWithOpenAI(threadId, fullMessage, config.widgetAssistantId, clienteId)
     console.log(`[WEB-CHAT-FINAL] ✅ Respuesta: ${response.length} caracteres`)
 
     return response
@@ -141,13 +141,13 @@ async function createWebThread(identifier: string): Promise<string> {
 async function processMessageWithOpenAI(
   threadId: string,
   message: string,
-  assistantId: string,
+  widgetAssistantId: string,
   clienteId: string,
 ): Promise<string> {
   try {
     console.log(`[WEB-CHAT-FINAL] ========== PROCESANDO CON OPENAI ==========`)
     console.log(`[WEB-CHAT-FINAL] Thread ID: ${threadId}`)
-    console.log(`[WEB-CHAT-FINAL] Assistant ID: ${assistantId}`)
+    console.log(`[WEB-CHAT-FINAL] Assistant ID: ${widgetAssistantId}`)
     console.log(`[WEB-CHAT-FINAL] Cliente ID: ${clienteId}`)
     console.log(`[WEB-CHAT-FINAL] ================================================`)
 
@@ -174,7 +174,7 @@ async function processMessageWithOpenAI(
     console.log(`[WEB-CHAT-FINAL] Mensaje añadido: ${messageData.id}`)
 
     // 2. Crear run
-    console.log(`[WEB-CHAT-FINAL] Creando run con assistant: ${assistantId}`)
+    console.log(`[WEB-CHAT-FINAL] Creando run con assistant: ${widgetAssistantId}`)
     const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
       method: "POST",
       headers: {
@@ -183,7 +183,7 @@ async function processMessageWithOpenAI(
         "OpenAI-Beta": "assistants=v2",
       },
       body: JSON.stringify({
-        assistant_id: assistantId,
+        assistant_id: widgetAssistantId,
         tools: [
           {
             type: "function",

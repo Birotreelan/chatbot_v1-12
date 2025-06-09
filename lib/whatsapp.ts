@@ -255,7 +255,7 @@ ${userMessage}`
     try {
       console.log(`[WHATSAPP] Llamando a getAssistantResponse...`)
       // Usar el ID de asistente específico para esta configuración y pasar el phoneNumberId
-      await getAssistantResponse(threadResult.threadId, messageToSend, phoneNumberId, config.assistantId)
+      await getAssistantResponse(threadResult.threadId, messageToSend, phoneNumberId, config.whatsappAssistantId)
 
       console.log(`[WHATSAPP] getAssistantResponse completado exitosamente`)
 
@@ -310,7 +310,7 @@ PacienteCelular: ${userPhoneNumber}
 ${userMessage}`
 
           console.log(`[WHATSAPP] Reintentando con nuevo thread...`)
-          await getAssistantResponse(newThread.id, messageToSend, phoneNumberId, config.assistantId)
+          await getAssistantResponse(newThread.id, messageToSend, phoneNumberId, config.whatsappAssistantId)
 
           // Actualizar estadísticas - mensaje procesado
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })

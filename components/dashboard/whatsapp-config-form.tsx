@@ -28,7 +28,11 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     displayName: config?.displayName || "",
     phoneNumberId: config?.phoneNumberId || "",
     wabaId: config?.wabaId || "",
-    assistantId: config?.assistantId || "",
+    // Reemplazar esta línea:
+    // assistantId: config?.assistantId || "",
+    // Con estas líneas:
+    whatsappAssistantId: config?.whatsappAssistantId || "",
+    widgetAssistantId: config?.widgetAssistantId || "",
     accessToken: config?.accessToken || "",
     verifyToken: config?.verifyToken || "",
     active: config?.active !== undefined ? config.active : true,
@@ -264,6 +268,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                   />
                 </div>
 
+                {/* Reemplazar este div completo:
                 <div className="space-y-2">
                   <Label htmlFor="assistantId">Assistant ID</Label>
                   <Input
@@ -272,6 +277,31 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                     value={formData.assistantId}
                     onChange={handleChange}
                     placeholder="asst_..."
+                    required
+                  />
+                </div>
+
+                // Con estos dos divs: */}
+                <div className="space-y-2">
+                  <Label htmlFor="whatsappAssistantId">Assistant ID para WhatsApp</Label>
+                  <Input
+                    id="whatsappAssistantId"
+                    name="whatsappAssistantId"
+                    value={formData.whatsappAssistantId}
+                    onChange={handleChange}
+                    placeholder="asst_... (para WhatsApp)"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetAssistantId">Assistant ID para Widget</Label>
+                  <Input
+                    id="widgetAssistantId"
+                    name="widgetAssistantId"
+                    value={formData.widgetAssistantId}
+                    onChange={handleChange}
+                    placeholder="asst_... (para Widget Web)"
                     required
                   />
                 </div>
