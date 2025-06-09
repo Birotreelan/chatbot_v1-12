@@ -104,6 +104,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
 
       let response: Response
       if (isNew) {
+        // Para crear una nueva configuración, usamos POST a /api/dashboard/configs
         response = await fetch("/api/dashboard/configs", {
           method: "POST",
           headers: {
@@ -111,8 +112,10 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
           },
           body: JSON.stringify(formData),
         })
+
+        console.log(`[FORM] Respuesta de creación:`, response.status, response.statusText)
       } else {
-        // Intentar primero con la ruta dinámica
+        // Para actualizar, primero intentamos con la ruta dinámica
         response = await fetch(`/api/dashboard/configs/${config?.id}`, {
           method: "PUT",
           headers: {
