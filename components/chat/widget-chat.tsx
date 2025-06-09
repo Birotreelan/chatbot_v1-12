@@ -57,85 +57,31 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  // Función para detectar opciones numeradas en el texto
-  const detectNumberedOptions = (
-    text: string,
-  ): { hasOptions: boolean; options: Array<{ number: string; text: string }>; cleanText: string } => {
-    console.log("[WIDGET-CHAT] ========== ANÁLISIS DE OPCIONES ==========")
-    console.log("[WIDGET-CHAT] Texto completo recibido:")
-    console.log(text)
-    console.log("[WIDGET-CHAT] Longitud del texto:", text.length)
-    console.log("[WIDGET-CHAT] ===============================================")
+  // Función simplificada para detectar opciones numeradas en el texto
+  const detectNumberedOptions = (text: string) => {
+    console.log("[WIDGET-CHAT] Analizando texto:", text)
 
-    // Intentar diferentes patrones de detección
-    // 1. Patrón para opciones en línea con punto: "1. Opción"
-    const pattern1 = /(\d+)\.\s+([^.]+?)(?=\s+\d+\.|$)/g
-    // 2. Patrón para opciones en línea con guión: "1- Opción"
-    const pattern2 = /(\d+)-\s+([^.]+?)(?=\s+\d+[-.]|$)/g
+    // Buscar patrones como "1. Opción" o "1- Opción" o "1) Opción"
+    // Esta expresión regular es más simple y robusta
+    const optionRegex = /(\d+)[\s]*[.)-][\s]+(.*?)(?=\s+\d+[\s]*[.)-]|$)/g
+    const matches = Array.from(text.matchAll(optionRegex))
 
-    let matches: RegExpMatchArray[] = []
-    let pattern = ""
-
-    // Probar con el primer patrón
-    const matches1 = Array.from(text.matchAll(pattern1))
-    console.log("[WIDGET-CHAT] Matches con patrón 1 (punto):", matches1.length)
-    if (matches1.length > 0) {
-      console.log("[WIDGET-CHAT] Matches encontrados con patrón 1:", matches1)
-    }
-
-    if (matches1 && matches1.length >= 2) {
-      matches = matches1
-      pattern = "pattern1"
-      console.log("[WIDGET-CHAT] ✅ Patrón detectado: punto (1.)")
-    } else {
-      // Si no funciona, probar con el segundo patrón
-      const matches2 = Array.from(text.matchAll(pattern2))
-      console.log("[WIDGET-CHAT] Matches con patrón 2 (guión):", matches2.length)
-      if (matches2.length > 0) {
-        console.log("[WIDGET-CHAT] Matches encontrados con patrón 2:", matches2)
-      }
-
-      if (matches2 && matches2.length >= 2) {
-        matches = matches2
-        pattern = "pattern2"
-        console.log("[WIDGET-CHAT] ✅ Patrón detectado: guión (1-)")
-      }
-    }
-
-    console.log("[WIDGET-CHAT] Total matches encontrados:", matches.length, "usando", pattern)
+    console.log("[WIDGET-CHAT] Matches encontrados:", matches.length)
 
     if (matches.length < 2) {
-      console.log("[WIDGET-CHAT] ❌ No se detectaron suficientes opciones numeradas (mínimo 2)")
       return { hasOptions: false, options: [], cleanText: text }
     }
 
-    const options: Array<{ number: string; text: string }> = []
+    const options = matches.map((match) => ({
+      number: match[1],
+      text: match[2].trim(),
+    }))
 
-    // Extraer las opciones encontradas
-    matches.forEach((match, index) => {
-      const [fullMatch, number, optionText] = match
-      const cleanOptionText = optionText.trim()
-      options.push({ number, text: cleanOptionText })
-      console.log(`[WIDGET-CHAT] Opción ${index + 1} detectada:`, number, "->", cleanOptionText)
-    })
+    console.log("[WIDGET-CHAT] Opciones detectadas:", options)
 
-    // Intentar extraer el texto principal (antes de las opciones)
-    let cleanText = text
-    const questionMatch = text.match(/^(.*?\?)\s*\d+[.-]/)
-    if (questionMatch) {
-      cleanText = questionMatch[1].trim()
-      console.log("[WIDGET-CHAT] ✅ Texto principal extraído:", cleanText)
-    } else {
-      // Si no hay pregunta, intentar limpiar el texto de otra manera
-      cleanText = text.split(/\d+[.-]/)[0].trim()
-      console.log("[WIDGET-CHAT] ⚠️ Texto alternativo extraído:", cleanText)
-    }
-
-    console.log("[WIDGET-CHAT] ========== RESULTADO FINAL ==========")
-    console.log("[WIDGET-CHAT] hasOptions:", true)
-    console.log("[WIDGET-CHAT] Opciones finales:", options)
-    console.log("[WIDGET-CHAT] Texto limpio:", cleanText)
-    console.log("[WIDGET-CHAT] =====================================")
+    // Extraer el texto principal (antes de las opciones)
+    const firstOptionIndex = text.indexOf(matches[0][0])
+    const cleanText = firstOptionIndex > 0 ? text.substring(0, firstOptionIndex).trim() : text
 
     return { hasOptions: true, options, cleanText }
   }
@@ -179,6 +125,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
       }
 
       const data = await response.json()
+      console.log("[WIDGET-CHAT] Respuesta recibida:", data)
 
       if (data.success && data.response) {
         const botMessage: Message = {
@@ -243,8 +190,11 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
       }
 
       const data = await response.json()
+      console.log("[WIDGET-CHAT] Respuesta recibida:", data)
 
       if (data.success && data.response) {
+        console.log("[WIDGET-CHAT] Contenido de la respuesta:", data.response)
+
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
           content: data.response,
