@@ -67,7 +67,11 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     if (typeof window !== "undefined") {
       setBaseUrl(window.location.origin)
     }
-  }, [])
+
+    // Debug logging
+    console.log("[FORM] Component mounted with props:", { isNew, configId: config?.id })
+    console.log("[FORM] Current URL:", typeof window !== "undefined" ? window.location.pathname : "SSR")
+  }, [isNew, config?.id])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target
@@ -97,28 +101,43 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     setIsLoading(true)
 
     try {
-      console.log(`[FORM] Enviando ${isNew ? "creación" : "actualización"} de configuración:`, formData)
-      console.log(`[FORM] isNew: ${isNew}, config?.id: ${config?.id}`)
+      console.log(`[FORM] === INICIO DEL SUBMIT ===`)
+      console.log(`[FORM] isNew: ${isNew}`)
+      console.log(`[FORM] config?.id: ${config?.id}`)
+      console.log(`[FORM] URL actual: ${typeof window !== "undefined" ? window.location.pathname : "SSR"}`)
+      console.log(`[FORM] Datos del formulario:`, formData)
 
       let response: Response
+      let requestUrl: string
+      let requestMethod: string
 
       if (isNew) {
-        // Para crear una nueva configuración, usamos POST a /api/dashboard/configs
-        console.log("[FORM] Enviando solicitud de creación a /api/dashboard/configs")
-        response = await fetch("/api/dashboard/configs", {
-          method: "POST",
+        // Para crear una nueva configuración
+        requestUrl = "/api/dashboard/configs"
+        requestMethod = "POST"
+
+        console.log(`[FORM] === CREANDO NUEVA CONFIGURACIÓN ===`)
+        console.log(`[FORM] URL: ${requestUrl}`)
+        console.log(`[FORM] Método: ${requestMethod}`)
+
+        response = await fetch(requestUrl, {
+          method: requestMethod,
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(formData),
         })
-
-        console.log(`[FORM] Respuesta de creación:`, response.status, response.statusText)
       } else {
-        // Para actualizar, primero intentamos con la ruta dinámica
-        console.log(`[FORM] Enviando solicitud de actualización a /api/dashboard/configs/${config?.id}`)
-        response = await fetch(`/api/dashboard/configs/${config?.id}`, {
-          method: "PUT",
+        // Para actualizar una configuración existente
+        requestUrl = `/api/dashboard/configs/${config?.id}`
+        requestMethod = "PUT"
+
+        console.log(`[FORM] === ACTUALIZANDO CONFIGURACIÓN EXISTENTE ===`)
+        console.log(`[FORM] URL: ${requestUrl}`)
+        console.log(`[FORM] Método: ${requestMethod}`)
+
+        response = await fetch(requestUrl, {
+          method: requestMethod,
           headers: {
             "Content-Type": "application/json",
           },
@@ -128,8 +147,11 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
         // Si falla con 405, intentar con la ruta alternativa
         if (response.status === 405) {
           console.log(`[FORM] Ruta dinámica falló, intentando ruta alternativa`)
-          response = await fetch(`/api/dashboard/configs/update`, {
-            method: "POST",
+          requestUrl = "/api/dashboard/configs/update"
+          requestMethod = "POST"
+
+          response = await fetch(requestUrl, {
+            method: requestMethod,
             headers: {
               "Content-Type": "application/json",
             },
@@ -138,7 +160,12 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
         }
       }
 
-      console.log(`[FORM] Respuesta del servidor:`, response.status, response.statusText)
+      console.log(`[FORM] Respuesta del servidor:`, {
+        status: response.status,
+        statusText: response.statusText,
+        url: requestUrl,
+        method: requestMethod,
+      })
 
       if (!response.ok) {
         let errorDetails = "Error desconocido"
@@ -247,7 +274,12 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{isNew ? "Nueva Configuración" : "Editar Configuración"}</CardTitle>
+        <CardTitle>
+          {isNew ? "Nueva Configuración" : "Editar Configuración"}
+          <span className="text-sm text-gray-500 ml-2">
+            (Debug: isNew={String(isNew)}, configId={config?.id || "undefined"})
+          </span>
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
