@@ -5,7 +5,7 @@
     return
   }
 
-  // Configuración por defecto que se sobrescribirá con la del servidor
+  // Configuración por defecto
   const defaultConfig = {
     position: "bottom-right",
     width: "380px",
@@ -43,12 +43,12 @@
   let chatButton = null
   let widgetContainer = null
   let buttonTextElement = null
-  let headerControls = null
   let widgetConfig = null
 
   // Función para obtener la configuración del widget
   async function fetchWidgetConfig() {
     try {
+      console.log(`[WIDGET] Obteniendo configuración para cliente_id: ${clienteId}`)
       const response = await fetch(
         `${window.location.protocol}//${window.location.host}/api/widget?cliente_id=${encodeURIComponent(clienteId)}&config_only=true`,
       )
@@ -57,6 +57,8 @@
         widgetConfig = config
         console.log("[WIDGET] Configuración obtenida:", config)
         return config
+      } else {
+        console.error("[WIDGET] Error al obtener configuración:", response.status, response.statusText)
       }
     } catch (error) {
       console.error("[WIDGET] Error al obtener configuración:", error)
@@ -102,13 +104,12 @@
     widgetContainer.style.left = config.position.includes("left") ? "0" : "auto"
     widgetContainer.style.zIndex = config.zIndex
     widgetContainer.style.pointerEvents = "none"
-    widgetContainer.style.width = "100%" // Asegurar que el contenedor ocupe todo el ancho
 
     document.body.appendChild(widgetContainer)
     return widgetContainer
   }
 
-  // Función para crear el texto del botón (al costado)
+  // Función para crear el texto del botón flotante
   function createButtonText() {
     if (!widgetConfig?.widgetShowFloatingText || !widgetConfig?.widgetFloatingButtonText) return null
 
@@ -116,11 +117,8 @@
 
     buttonTextElement = document.createElement("div")
     buttonTextElement.style.position = "fixed"
-
-    // Posicionar encima del botón para evitar interferencia con el chat
     buttonTextElement.style.bottom = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 15}px`
 
-    // Posicionar horizontalmente según la configuración
     if (config.position.includes("right")) {
       buttonTextElement.style.right = config.buttonPosition
       buttonTextElement.style.left = "auto"
@@ -145,7 +143,6 @@
     buttonTextElement.style.overflow = "hidden"
     buttonTextElement.style.textOverflow = "ellipsis"
 
-    // Animaciones si están habilitadas
     if (widgetConfig.widgetAnimation !== false) {
       buttonTextElement.style.transition = "opacity 0.3s ease, transform 0.3s ease"
       buttonTextElement.style.transform = "translateY(10px)"
@@ -153,11 +150,8 @@
     }
 
     buttonTextElement.textContent = widgetConfig.widgetFloatingButtonText
-
-    // Agregar evento de clic
     buttonTextElement.addEventListener("click", toggleChat)
 
-    // Mostrar con animación después de un delay
     setTimeout(() => {
       if (buttonTextElement && widgetConfig.widgetAnimation !== false) {
         buttonTextElement.style.opacity = "1"
@@ -192,22 +186,19 @@
     chatButton.style.display = "flex"
     chatButton.style.alignItems = "center"
     chatButton.style.justifyContent = "center"
-    chatButton.style.zIndex = config.zIndex // Asegurar que esté por encima del texto
+    chatButton.style.zIndex = config.zIndex
     chatButton.style.pointerEvents = "auto"
 
-    // Animaciones si están habilitadas
     if (widgetConfig?.widgetAnimation !== false) {
       chatButton.style.transition = "transform 0.3s ease, box-shadow 0.3s ease"
     }
 
-    // Icono del botón (usando SVG inline)
     chatButton.innerHTML = `
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${config.buttonIconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
       </svg>
     `
 
-    // Efectos hover si las animaciones están habilitadas
     if (widgetConfig?.widgetAnimation !== false) {
       chatButton.addEventListener("mouseenter", function () {
         this.style.transform = "scale(1.1)"
@@ -220,108 +211,14 @@
       })
     }
 
-    // Evento de clic
     chatButton.addEventListener("click", toggleChat)
-
     document.body.appendChild(chatButton)
     return chatButton
   }
 
-  // Función para crear los controles del header
-  function createHeaderControls() {
-    const config = getAppliedConfig()
-
-    headerControls = document.createElement("div")
-    headerControls.id = "treelan-chat-widget-controls"
-    headerControls.style.position = "absolute"
-    headerControls.style.top = "12px"
-    headerControls.style.right = "12px"
-    headerControls.style.display = "flex"
-    headerControls.style.gap = "6px"
-    headerControls.style.zIndex = (Number.parseInt(config.zIndex) + 10).toString()
-    headerControls.style.pointerEvents = "auto"
-
-    // Botón minimizar
-    const minimizeButton = document.createElement("button")
-    minimizeButton.id = "treelan-chat-widget-minimize"
-    minimizeButton.style.width = "32px"
-    minimizeButton.style.height = "32px"
-    minimizeButton.style.border = "none"
-    minimizeButton.style.borderRadius = "6px"
-    minimizeButton.style.backgroundColor = "rgba(255, 255, 255, 0.95)"
-    minimizeButton.style.backdropFilter = "blur(4px)"
-    minimizeButton.style.cursor = "pointer"
-    minimizeButton.style.display = "flex"
-    minimizeButton.style.alignItems = "center"
-    minimizeButton.style.justifyContent = "center"
-    minimizeButton.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)"
-    minimizeButton.style.transition = "background-color 0.2s ease, transform 0.1s ease"
-    minimizeButton.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="5" y1="12" x2="19" y2="12"></line>
-      </svg>
-    `
-
-    minimizeButton.addEventListener("click", (e) => {
-      e.stopPropagation()
-      minimizeChat()
-    })
-
-    minimizeButton.addEventListener("mouseenter", function () {
-      this.style.backgroundColor = "#f0f0f0"
-      this.style.transform = "scale(1.05)"
-    })
-
-    minimizeButton.addEventListener("mouseleave", function () {
-      this.style.backgroundColor = "rgba(255, 255, 255, 0.95)"
-      this.style.transform = "scale(1)"
-    })
-
-    // Botón cerrar
-    const closeButton = document.createElement("button")
-    closeButton.id = "treelan-chat-widget-close"
-    closeButton.style.width = "32px"
-    closeButton.style.height = "32px"
-    closeButton.style.border = "none"
-    closeButton.style.borderRadius = "6px"
-    closeButton.style.backgroundColor = "rgba(255, 255, 255, 0.95)"
-    closeButton.style.backdropFilter = "blur(4px)"
-    closeButton.style.cursor = "pointer"
-    closeButton.style.display = "flex"
-    closeButton.style.alignItems = "center"
-    closeButton.style.justifyContent = "center"
-    closeButton.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)"
-    closeButton.style.transition = "background-color 0.2s ease, transform 0.1s ease"
-    closeButton.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="18" y1="6" x2="6" y2="18"></line>
-        <line x1="6" y1="6" x2="18" y2="18"></line>
-      </svg>
-    `
-
-    closeButton.addEventListener("click", (e) => {
-      e.stopPropagation()
-      closeChat()
-    })
-
-    closeButton.addEventListener("mouseenter", function () {
-      this.style.backgroundColor = "#fee"
-      this.style.transform = "scale(1.05)"
-    })
-
-    closeButton.addEventListener("mouseleave", function () {
-      this.style.backgroundColor = "rgba(255, 255, 255, 0.95)"
-      this.style.transform = "scale(1)"
-    })
-
-    headerControls.appendChild(minimizeButton)
-    headerControls.appendChild(closeButton)
-
-    return headerControls
-  }
-
   // Función para alternar el chat
   function toggleChat() {
+    console.log(`[WIDGET] Toggle chat - isOpen: ${isOpen}`)
     if (isOpen) {
       closeChat()
     } else {
@@ -336,30 +233,14 @@
     isMinimized = !isMinimized
     const config = getAppliedConfig()
 
+    console.log(`[WIDGET] Minimizar chat - isMinimized: ${isMinimized}`)
+
     if (isMinimized) {
       iframe.style.height = "60px"
       iframe.style.overflow = "hidden"
-      // Actualizar el icono de minimizar para mostrar "restaurar"
-      const minimizeButton = headerControls?.querySelector("#treelan-chat-widget-minimize")
-      if (minimizeButton) {
-        minimizeButton.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="5" y="5" width="14" height="14" rx="2" ry="2"></rect>
-          </svg>
-        `
-      }
     } else {
       iframe.style.height = config.height
       iframe.style.overflow = "visible"
-      // Restaurar el icono de minimizar
-      const minimizeButton = headerControls?.querySelector("#treelan-chat-widget-minimize")
-      if (minimizeButton) {
-        minimizeButton.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-        `
-      }
     }
   }
 
@@ -371,7 +252,7 @@
 
     const config = getAppliedConfig()
 
-    // Ocultar el texto del botón con animación
+    // Ocultar el texto del botón
     if (buttonTextElement) {
       if (widgetConfig?.widgetAnimation !== false) {
         buttonTextElement.style.opacity = "0"
@@ -400,9 +281,9 @@
     iframe.style.boxShadow = config.boxShadow
     iframe.style.zIndex = config.zIndex - 1
     iframe.style.pointerEvents = "auto"
-    iframe.style.backgroundColor = "#ffffff" // Asegurar fondo blanco
+    iframe.style.backgroundColor = "#ffffff"
 
-    // Animaciones de apertura si están habilitadas
+    // Animaciones de apertura
     if (widgetConfig?.widgetAnimation !== false) {
       iframe.style.opacity = "0"
       iframe.style.transform = "translateY(20px)"
@@ -411,10 +292,6 @@
 
     const container = createWidgetContainer()
     container.appendChild(iframe)
-
-    // Agregar controles del header
-    const controls = createHeaderControls()
-    container.appendChild(controls)
 
     // Animar la apertura
     if (widgetConfig?.widgetAnimation !== false) {
@@ -428,17 +305,25 @@
       iframe.style.opacity = "1"
     }
 
+    // Manejar errores de carga del iframe
+    iframe.addEventListener("load", () => {
+      console.log("[WIDGET] Iframe cargado correctamente")
+    })
+
+    iframe.addEventListener("error", (e) => {
+      console.error("[WIDGET] Error cargando iframe:", e)
+    })
+
     isOpen = true
     isMinimized = false
   }
 
   // Función para cerrar el chat
   function closeChat() {
-    if (!isOpen || !iframe || !chatButton) return
+    if (!isOpen || !iframe) return
 
     console.log(`[WIDGET] Cerrando chat`)
 
-    // Animar el cierre si las animaciones están habilitadas
     if (widgetConfig?.widgetAnimation !== false) {
       iframe.style.opacity = "0"
       iframe.style.transform = "translateY(20px)"
@@ -450,11 +335,6 @@
           iframe.parentNode.removeChild(iframe)
           iframe = null
         }
-        // Remover controles del header
-        if (headerControls && headerControls.parentNode) {
-          headerControls.parentNode.removeChild(headerControls)
-          headerControls = null
-        }
       },
       widgetConfig?.widgetAnimation !== false ? 300 : 0,
     )
@@ -462,7 +342,7 @@
     isOpen = false
     isMinimized = false
 
-    // Recrear el texto del botón si está habilitado
+    // Recrear el texto del botón
     if (widgetConfig?.widgetShowFloatingText) {
       setTimeout(() => {
         createButtonText()
@@ -498,30 +378,34 @@
     isMinimized = false
   }
 
-  // Inicializar el widget cuando el DOM esté listo
+  // Inicializar el widget
   async function initWidget() {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", initWidget)
       return
     }
 
-    console.log(`[WIDGET] DOM listo, obteniendo configuración`)
+    console.log(`[WIDGET] DOM listo, inicializando widget`)
 
-    // Obtener configuración del widget
-    await fetchWidgetConfig()
+    try {
+      // Obtener configuración del widget
+      await fetchWidgetConfig()
 
-    console.log(`[WIDGET] Creando widget con configuración:`, getAppliedConfig())
+      console.log(`[WIDGET] Creando widget con configuración:`, getAppliedConfig())
 
-    // Crear el contenedor y el botón
-    createWidgetContainer()
-    createChatButton()
+      // Crear el contenedor y el botón
+      createWidgetContainer()
+      createChatButton()
 
-    // Crear texto del botón si está habilitado
-    if (widgetConfig?.widgetShowFloatingText) {
-      createButtonText()
+      // Crear texto del botón si está habilitado
+      if (widgetConfig?.widgetShowFloatingText) {
+        createButtonText()
+      }
+
+      console.log(`[WIDGET] Widget inicializado correctamente para cliente_id: ${clienteId}`)
+    } catch (error) {
+      console.error(`[WIDGET] Error inicializando widget:`, error)
     }
-
-    console.log(`[WIDGET] Widget inicializado correctamente para cliente_id: ${clienteId}`)
   }
 
   // Exponer API global del widget
@@ -540,5 +424,5 @@
   // Inicializar el widget
   initWidget()
 
-  console.log(`[WIDGET] Widget cargado y listo para cliente_id: ${clienteId}`)
+  console.log(`[WIDGET] Widget loader ejecutado para cliente_id: ${clienteId}`)
 })()
