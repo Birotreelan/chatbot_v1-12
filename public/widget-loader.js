@@ -143,29 +143,37 @@
     buttonTextElement.style.position = "fixed"
     buttonTextElement.style.bottom = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 15}px`
 
+    // Posicionar el texto siempre a la izquierda del botón
     if (config.position.includes("right")) {
-      buttonTextElement.style.right = config.buttonPosition
+      // Si el botón está a la derecha, el texto va a su izquierda
+      buttonTextElement.style.right = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 15}px`
       buttonTextElement.style.left = "auto"
     } else {
-      buttonTextElement.style.left = config.buttonPosition
+      // Si el botón está a la izquierda, el texto va a su derecha
+      buttonTextElement.style.left = `${Number.parseInt(config.buttonPosition) + Number.parseInt(config.buttonSize) + 15}px`
       buttonTextElement.style.right = "auto"
     }
 
     buttonTextElement.style.backgroundColor = config.buttonTextBackground
     buttonTextElement.style.color = config.buttonTextColor
-    buttonTextElement.style.padding = "8px 12px"
-    buttonTextElement.style.borderRadius = "8px"
-    buttonTextElement.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)"
+    buttonTextElement.style.padding = "12px 16px"
+    buttonTextElement.style.borderRadius = "12px"
+    buttonTextElement.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)"
     buttonTextElement.style.fontSize = "14px"
     buttonTextElement.style.fontFamily = "system-ui, -apple-system, sans-serif"
-    buttonTextElement.style.maxWidth = "200px"
+    buttonTextElement.style.maxWidth = "280px"
+    buttonTextElement.style.minWidth = "fit-content"
+    buttonTextElement.style.width = "auto"
     buttonTextElement.style.textAlign = "center"
     buttonTextElement.style.zIndex = config.zIndex - 1
     buttonTextElement.style.pointerEvents = "auto"
     buttonTextElement.style.cursor = "pointer"
     buttonTextElement.style.whiteSpace = "nowrap"
-    buttonTextElement.style.overflow = "hidden"
-    buttonTextElement.style.textOverflow = "ellipsis"
+    buttonTextElement.style.overflow = "visible"
+    buttonTextElement.style.textOverflow = "unset"
+    buttonTextElement.style.display = "flex"
+    buttonTextElement.style.alignItems = "center"
+    buttonTextElement.style.justifyContent = "center"
 
     if (widgetConfig.widgetAnimation !== false) {
       buttonTextElement.style.transition = "opacity 0.3s ease, transform 0.3s ease"
@@ -296,10 +304,21 @@
     const iframeUrl = `${widgetBaseUrl}/api/widget?cliente_id=${encodeURIComponent(clienteId)}`
     console.log(`[WIDGET] URL del iframe: ${iframeUrl}`)
     iframe.src = iframeUrl
+    // Posicionar el iframe al lado del botón, no encima
     iframe.style.position = "fixed"
     iframe.style.bottom = config.marginBottom
-    iframe.style.right = config.position.includes("right") ? config.marginSide : "auto"
-    iframe.style.left = config.position.includes("left") ? config.marginSide : "auto"
+
+    // Posicionar el chat siempre a la izquierda del botón
+    if (config.position.includes("right")) {
+      // Si el botón está a la derecha, el chat va a su izquierda
+      iframe.style.right = `${Number.parseInt(config.marginSide) + Number.parseInt(config.buttonSize) + 15}px`
+      iframe.style.left = "auto"
+    } else {
+      // Si el botón está a la izquierda, el chat va a su derecha
+      iframe.style.left = `${Number.parseInt(config.marginSide) + Number.parseInt(config.buttonSize) + 15}px`
+      iframe.style.right = "auto"
+    }
+
     iframe.style.width = config.width
     iframe.style.height = config.height
     iframe.style.border = "none"
