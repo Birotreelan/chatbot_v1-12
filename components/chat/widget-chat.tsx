@@ -250,14 +250,9 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
                     backgroundColor: message.isUser ? config.widgetPrimaryColor || "#0ea5e9" : undefined,
                   }}
                 >
-                  {/* Mostrar el texto limpio (sin las opciones numeradas) */}
-                  {cleanText && <p className="text-sm whitespace-pre-wrap text-left">{cleanText}</p>}
-
-                  {/* Mostrar las opciones originales si no hay botones */}
-                  {!hasOptions && message.content !== cleanText && (
-                    <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
-                  )}
-
+                  <p className="text-sm whitespace-pre-wrap text-left">
+                    {hasOptions && !message.isUser ? cleanText || message.content : message.content}
+                  </p>
                   <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
                     {formatTime(message.timestamp)}
                   </p>
@@ -271,7 +266,7 @@ export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
                         key={index}
                         onClick={() => handleOptionClick(option.number)}
                         disabled={isLoading}
-                        className="w-full text-left p-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="w-full text-left p-2 text-sm border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         style={{
                           borderColor: config.widgetPrimaryColor || "#0ea5e9",
                           color: config.widgetPrimaryColor || "#0ea5e9",
