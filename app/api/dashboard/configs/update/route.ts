@@ -1,34 +1,37 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { updateWhatsAppConfig } from "@/lib/db"
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const data = await request.json()
-    console.log("[API UPDATE] Iniciando actualización de configuración")
-    console.log("[API UPDATE] ID:", data.id, "Datos:", data)
+    console.log(`[API UPDATE] Iniciando actualización de configuración`)
 
-    if (!data.id) {
-      console.error("[API UPDATE] ID de configuración no proporcionado")
-      return NextResponse.json({ error: "ID de configuración no proporcionado" }, { status: 400 })
+    const { id, ...updates } = await request.json()
+    console.log(`[API UPDATE] ID: ${id}, Datos:`, updates)
+
+    if (!id) {
+      console.error(`[API UPDATE] ID de configuración no proporcionado`)
+      return NextResponse.json({ error: "ID de configuración requerido" }, { status: 400 })
     }
 
-    // Extraer el ID y pasar el resto como actualizaciones
-    const { id, ...updates } = data
-    const config = await updateWhatsAppConfig(id, updates)
+    const updatedConfig = await updateWhatsAppConfig(id, updates)
 
-    if (!config) {
-      console.error("[API UPDATE] Configuración no encontrada:", id)
+    if (!updatedConfig) {
+      console.error(`[API UPDATE] Configuración ${id} no encontrada`)
       return NextResponse.json({ error: "Configuración no encontrada" }, { status: 404 })
     }
 
-    console.log("[API UPDATE] Configuración actualizada exitosamente:", id)
-    return NextResponse.json(config)
+    console.log(`[API UPDATE] Configuración ${id} actualizada exitosamente`)
+    return NextResponse.json(updatedConfig)
   } catch (error) {
-    console.error("[API UPDATE] Error al actualizar configuración:", error)
+    console.error(`[API UPDATE] Error al actualizar configuración:`, error)
+
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+
     return NextResponse.json(
       {
-        error: "Error al actualizar la configuración",
-        details: error instanceof Error ? error.message : String(error),
+        error: "Error interno del servidor",
+        details: errorMessage,
+        timestamp: new Date().toISOString(),
       },
       { status: 500 },
     )

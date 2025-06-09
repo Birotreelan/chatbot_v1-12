@@ -28,9 +28,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     displayName: config?.displayName || "",
     phoneNumberId: config?.phoneNumberId || "",
     wabaId: config?.wabaId || "",
-    // Reemplazar esta línea:
-    // assistantId: config?.assistantId || "",
-    // Con estas líneas:
     whatsappAssistantId: config?.whatsappAssistantId || "",
     widgetAssistantId: config?.widgetAssistantId || "",
     accessToken: config?.accessToken || "",
@@ -101,10 +98,13 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
 
     try {
       console.log(`[FORM] Enviando ${isNew ? "creación" : "actualización"} de configuración:`, formData)
+      console.log(`[FORM] isNew: ${isNew}, config?.id: ${config?.id}`)
 
       let response: Response
+
       if (isNew) {
         // Para crear una nueva configuración, usamos POST a /api/dashboard/configs
+        console.log("[FORM] Enviando solicitud de creación a /api/dashboard/configs")
         response = await fetch("/api/dashboard/configs", {
           method: "POST",
           headers: {
@@ -116,6 +116,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
         console.log(`[FORM] Respuesta de creación:`, response.status, response.statusText)
       } else {
         // Para actualizar, primero intentamos con la ruta dinámica
+        console.log(`[FORM] Enviando solicitud de actualización a /api/dashboard/configs/${config?.id}`)
         response = await fetch(`/api/dashboard/configs/${config?.id}`, {
           method: "PUT",
           headers: {
@@ -162,6 +163,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
 
       if (isNew && result.id && mounted) {
         // Redirigir a la página de edición
+        console.log(`[FORM] Redirigiendo a /dashboard/config/${result.id}`)
         window.location.href = `/dashboard/config/${result.id}`
       }
     } catch (error) {
@@ -271,20 +273,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                   />
                 </div>
 
-                {/* Reemplazar este div completo:
-                <div className="space-y-2">
-                  <Label htmlFor="assistantId">Assistant ID</Label>
-                  <Input
-                    id="assistantId"
-                    name="assistantId"
-                    value={formData.assistantId}
-                    onChange={handleChange}
-                    placeholder="asst_..."
-                    required
-                  />
-                </div>
-
-                // Con estos dos divs: */}
                 <div className="space-y-2">
                   <Label htmlFor="whatsappAssistantId">Assistant ID para WhatsApp</Label>
                   <Input
@@ -353,7 +341,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                     value={formData.phoneNumberId}
                     onChange={handleChange}
                     placeholder="123456789012345"
-                    required
                   />
                 </div>
 
@@ -377,7 +364,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                     value={formData.accessToken}
                     onChange={handleChange}
                     placeholder="EAAxxxxx..."
-                    required
                   />
                 </div>
 
@@ -389,7 +375,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                     value={formData.verifyToken}
                     onChange={handleChange}
                     placeholder="mi_token_secreto"
-                    required
                   />
                 </div>
               </div>
