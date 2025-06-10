@@ -1,41 +1,48 @@
 "use client"
 
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { logout } from "@/app/actions"
+import { LayoutDashboard, Plus, Activity } from "lucide-react"
+
+const navigation = [
+  {
+    name: "Dashboard",
+    href: "/dashboard",
+    icon: LayoutDashboard,
+  },
+  {
+    name: "Nuevo Cliente",
+    href: "/dashboard/config/new",
+    icon: Plus,
+  },
+  {
+    name: "Monitoreo",
+    href: "/dashboard/monitoring",
+    icon: Activity,
+  },
+]
 
 export function DashboardNav() {
-  const router = useRouter()
-
-  async function handleLogout() {
-    await logout()
-    router.push("/login")
-    router.refresh()
-  }
+  const pathname = usePathname()
 
   return (
-    <header className="bg-background border-b">
-      <div className="container mx-auto flex h-16 items-center justify-between">
-        <div className="flex items-center gap-6">
-          <Link href="/dashboard" className="font-bold text-xl">
-            WhatsApp AI
+    <nav className="flex space-x-2 lg:flex-col lg:space-x-0 lg:space-y-1">
+      {navigation.map((item) => {
+        const isActive = pathname === item.href
+        return (
+          <Link key={item.name} href={item.href}>
+            <Button
+              variant={isActive ? "secondary" : "ghost"}
+              className={cn("w-full justify-start", isActive && "bg-muted font-medium")}
+            >
+              <item.icon className="mr-2 h-4 w-4" />
+              {item.name}
+            </Button>
           </Link>
-          <nav className="hidden md:flex gap-6">
-            <Link href="/dashboard" className="text-foreground/60 hover:text-foreground">
-              Dashboard
-            </Link>
-            <Link href="/dashboard/config/new" className="text-foreground/60 hover:text-foreground">
-              Nuevo Cliente
-            </Link>
-          </nav>
-        </div>
-        <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={handleLogout}>
-            Cerrar Sesión
-          </Button>
-        </div>
-      </div>
-    </header>
+        )
+      })}
+    </nav>
   )
 }
