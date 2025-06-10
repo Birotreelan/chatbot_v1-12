@@ -60,8 +60,8 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
       throw new Error("Parámetros requeridos faltantes")
     }
 
-    // Obtener cliente_id de la configuración - IMPORTANTE: Usar el cliente_id específico si existe
-    const clienteId = config.cliente_id || ""
+    // Obtener cliente_id de la configuración
+    const clienteId = config.cliente_id || config.id
 
     if (!clienteId) {
       console.error(`[WEB-CHAT-FINAL] ❌ Cliente ID faltante en configuración`)
@@ -290,36 +290,6 @@ async function processMessageWithOpenAI(
               },
             },
           },
-          {
-            type: "function",
-            function: {
-              name: "crear_botones_opciones",
-              description:
-                "Genera una lista de botones interactivos numerados para que el usuario pueda elegir una opción entre varias.",
-              parameters: {
-                type: "object",
-                properties: {
-                  opciones: {
-                    type: "array",
-                    description:
-                      "Lista de opciones que el usuario puede elegir. Cada opción se presentará como un botón numerado.",
-                    items: {
-                      type: "string",
-                    },
-                  },
-                  contexto: {
-                    type: "string",
-                    description: "Breve explicación o título que contextualiza la elección para el usuario.",
-                  },
-                  callback_id: {
-                    type: "string",
-                    description: "Identificador único para esta selección de botones.",
-                  },
-                },
-                required: ["opciones"],
-              },
-            },
-          },
         ],
       }),
     })
@@ -339,9 +309,6 @@ async function processMessageWithOpenAI(
     throw error
   }
 }
-
-// Variable global para almacenar botones generados
-let lastGeneratedButtons: any = null
 
 async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
   let attempts = 0
@@ -392,16 +359,8 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
         if (messages.data.length > 0) {
           const lastMessage = messages.data[0]
           if (lastMessage.content[0]?.type === "text") {
-            let response = lastMessage.content[0].text.value
-
-            // Si se generaron botones, agregar el marcador especial
-            if (lastGeneratedButtons) {
-              console.log(`[WEB-CHAT-FINAL] 🔘 Agregando marcador de botones a la respuesta`)
-              response += `\n\n__WIDGET_BUTTONS__${JSON.stringify(lastGeneratedButtons)}__END_BUTTONS__`
-              lastGeneratedButtons = null // Limpiar después de usar
-            }
-
-            console.log(`[WEB-CHAT-FINAL] ✅ Respuesta final: ${response.length} caracteres`)
+            const response = lastMessage.content[0].text.value
+            console.log(`[WEB-CHAT-FINAL] ✅ Respuesta obtenida: ${response.length} caracteres`)
             return response
           }
         }
@@ -498,28 +457,6 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
             )
             console.log(`[WEB-CHAT-FINAL] 📋 Resultado reserva:`, reserveResult)
             output = JSON.stringify(reserveResult)
-            break
-
-          case "crear_botones_opciones":
-            console.log(`[WEB-CHAT-FINAL] 🔘 Generando botones con opciones`)
-            console.log(`[WEB-CHAT-FINAL] 📋 Opciones:`, args.opciones)
-
-            // Guardar los botones para agregarlos a la respuesta final
-            lastGeneratedButtons = {
-              opciones: args.opciones,
-              contexto: args.contexto || "",
-              callback_id: args.callback_id || "default_callback",
-            }
-
-            console.log(`[WEB-CHAT-FINAL] 💾 Botones guardados para la respuesta:`, lastGeneratedButtons)
-
-            // Devolver los datos de los botones para que el frontend los muestre
-            output = JSON.stringify({
-              success: true,
-              opciones: args.opciones,
-              contexto: args.contexto || "",
-              callback_id: args.callback_id || "default_callback",
-            })
             break
 
           default:

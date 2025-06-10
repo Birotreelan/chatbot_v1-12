@@ -12,11 +12,6 @@ interface Message {
   content: string
   isUser: boolean
   timestamp: Date
-  buttons?: {
-    options: string[]
-    context?: string
-    callback_id?: string
-  }
 }
 
 interface WidgetChatProps {
@@ -29,10 +24,9 @@ interface WidgetChatProps {
     widgetPrimaryColor?: string
     widgetSecondaryColor?: string
   }
-  hideHeader?: boolean
 }
 
-export default function WidgetChat({ clienteId, config, hideHeader = false }: WidgetChatProps) {
+export default function WidgetChat({ clienteId, config }: WidgetChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -63,19 +57,18 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const sendMessage = async (text?: string) => {
-    const messageText = text || inputValue.trim()
-    if (!messageText || isLoading || !sessionId) return
+  const sendMessage = async () => {
+    if (!inputValue.trim() || isLoading || !sessionId) return
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: messageText,
+      content: inputValue.trim(),
       isUser: true,
       timestamp: new Date(),
     }
 
     setMessages((prev) => [...prev, userMessage])
-    if (!text) setInputValue("") // Solo limpiar input si no es un botón
+    setInputValue("")
     setIsLoading(true)
 
     try {
@@ -91,7 +84,7 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          message: messageText,
+          message: userMessage.content,
           cliente_id: clienteId,
           session_id: sessionId,
         }),
@@ -102,203 +95,14 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
       }
 
       const data = await response.json()
-      console.log("[WIDGET-CHAT] Respuesta completa del servidor:", data)
 
       if (data.success && data.response) {
-        let content = data.response
-        let buttons = null
-
-        console.log("[WIDGET-CHAT] Analizando respuesta para botones...")
-        console.log("[WIDGET-CHAT] Contenido de la respuesta:", content)
-
-        // Método 0: Buscar el marcador especial de botones
-        const widgetButtonsMatch = content.match(/__WIDGET_BUTTONS__(.+?)__END_BUTTONS__/s)
-        if (widgetButtonsMatch) {
-          console.log("[WIDGET-CHAT] ✅ Marcador especial de botones encontrado")
-          try {
-            const buttonData = JSON.parse(widgetButtonsMatch[1])
-            content = content.replace(widgetButtonsMatch[0], "").trim()
-            buttons = {
-              options: buttonData.opciones,
-              context: buttonData.contexto || "",
-              callback_id: buttonData.callback_id || "default_callback",
-            }
-            console.log("[WIDGET-CHAT] ✅ Botones extraídos del marcador especial:", buttons)
-          } catch (e) {
-            console.error("[WIDGET-CHAT] ❌ Error al parsear botones del marcador especial:", e)
-          }
-        }
-
-        // Método 1: Buscar el patrón de función de botones
-        if (!buttons) {
-          const buttonMatch =
-            content.match(/Ejecutar función: crear_botones_opciones\$\$\{(.*?)\}\$\$/s) ||
-            content.match(/crear_botones_opciones\$\$\{(.*?)\}\$\$/s)
-
-          if (buttonMatch) {
-            console.log("[WIDGET-CHAT] ✅ Patrón de función encontrado:", buttonMatch[0])
-            try {
-              const jsonStr = buttonMatch[1]
-              const cleanJsonStr = jsonStr.replace(/\{\{/g, "{").replace(/\}\}/g, "}")
-              const buttonData = JSON.parse(cleanJsonStr)
-
-              content = content.replace(buttonMatch[0], "")
-              buttons = {
-                options: buttonData.opciones,
-                context: buttonData.contexto,
-                callback_id: buttonData.callback_id,
-              }
-
-              console.log("[WIDGET-CHAT] ✅ Botones extraídos del patrón:", buttons)
-            } catch (e) {
-              console.error("[WIDGET-CHAT] ❌ Error al parsear botones del patrón:", e)
-            }
-          }
-        }
-
-        // Método 2: Detección basada en contenido de texto común
-        if (!buttons) {
-          console.log("[WIDGET-CHAT] 🔍 Buscando opciones en el texto...")
-
-          // Buscar frases que indican opciones
-          const optionIndicators = [
-            "Por favor, elegí una de estas opciones:",
-            "Por favor, elegi una de estas opciones:",
-            "Por favor, elige una de estas opciones:",
-            "Selecciona una opción:",
-            "¿Cómo deseas solicitar tu turno?",
-            "Podés también indicar preferencias",
-          ]
-
-          const lines = content.split("\n")
-          let optionsStartIndex = -1
-
-          // Buscar el índice donde empiezan las opciones
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].toLowerCase()
-            if (optionIndicators.some((indicator) => line.includes(indicator.toLowerCase()))) {
-              optionsStartIndex = i
-              break
-            }
-          }
-
-          if (optionsStartIndex !== -1) {
-            console.log("[WIDGET-CHAT] 📍 Indicador de opciones encontrado en línea:", optionsStartIndex)
-
-            // Extraer opciones que siguen al indicador
-            const options = []
-            for (let i = optionsStartIndex + 1; i < lines.length; i++) {
-              const line = lines[i].trim()
-
-              // Buscar líneas que parecen opciones (empiezan con -, •, número, etc.)
-              if (/^\s*[-•\d]\s+/.test(line) && line.length > 3) {
-                const cleanOption = line.replace(/^\s*[-•\d]+\s*/, "").trim()
-                if (cleanOption.length > 0) {
-                  options.push(cleanOption)
-                }
-              }
-              // Si encontramos una línea vacía o que no parece opción, paramos
-              else if (line.length === 0 || (!line.startsWith("-") && !line.startsWith("•") && !/^\d/.test(line))) {
-                // Seguir buscando si hay más opciones después
-                if (i < lines.length - 1 && /^\s*[-•\d]\s+/.test(lines[i + 1].trim())) {
-                  continue
-                }
-                break
-              }
-            }
-
-            if (options.length > 0) {
-              console.log("[WIDGET-CHAT] ✅ Opciones extraídas del texto:", options)
-              buttons = {
-                options: options,
-                context: "Selecciona una opción:",
-                callback_id: "text_options",
-              }
-            }
-          }
-        }
-
-        // Método 3: Buscar opciones específicas conocidas
-        if (!buttons) {
-          const knownOptions = [
-            "Con un médico oftalmólogo en particular",
-            "Por especialidad",
-            "Consulta general con cualquier oftalmólogo",
-          ]
-
-          // Buscar opciones conocidas en el texto completo
-          const foundOptions = []
-          for (const option of knownOptions) {
-            if (content.includes(option)) {
-              foundOptions.push(option)
-            }
-          }
-
-          if (foundOptions.length >= 2) {
-            console.log("[WIDGET-CHAT] ✅ Opciones conocidas encontradas:", foundOptions)
-            buttons = {
-              options: foundOptions,
-              context: "Selecciona una opción:",
-              callback_id: "known_options",
-            }
-          }
-        }
-
-        // Método 4: Buscar patrones de listas numeradas o con viñetas
-        if (!buttons) {
-          const listPattern = /(?:^|\n)(?:\d+[.)]\s+|-\s+|•\s+)(.+?)(?=\n(?:\d+[.)]\s+|-\s+|•\s+)|$)/gs
-          const matches = [...content.matchAll(listPattern)]
-
-          if (matches.length >= 2) {
-            const options = matches.map((match) => match[1].trim())
-            console.log("[WIDGET-CHAT] ✅ Lista de opciones detectada:", options)
-            buttons = {
-              options: options,
-              context: "Selecciona una opción:",
-              callback_id: "list_options",
-            }
-          }
-        }
-
-        // Método 5: Buscar opciones en el texto actual
-        if (!buttons && content.includes("oftalmólogo")) {
-          const optionsText = content.toLowerCase()
-
-          // Buscar patrones específicos para este caso
-          if (
-            optionsText.includes("cómo deseas solicitar") ||
-            optionsText.includes("elige una de estas opciones") ||
-            optionsText.includes("elegí una de estas opciones")
-          ) {
-            const options = [
-              "Con un médico oftalmólogo en particular",
-              "Por especialidad",
-              "Consulta general con cualquier oftalmólogo",
-            ]
-
-            console.log("[WIDGET-CHAT] ✅ Opciones específicas detectadas por contexto")
-            buttons = {
-              options: options,
-              context: "Selecciona una opción:",
-              callback_id: "context_options",
-            }
-          }
-        }
-
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: content.trim(),
+          content: data.response,
           isUser: false,
           timestamp: new Date(),
-          buttons: buttons,
         }
-
-        console.log("[WIDGET-CHAT] 📨 Mensaje final a mostrar:", {
-          content: botMessage.content,
-          hasButtons: !!botMessage.buttons,
-          buttons: botMessage.buttons,
-        })
-
         setMessages((prev) => [...prev, botMessage])
       } else {
         throw new Error(data.error || "Error desconocido")
@@ -320,7 +124,7 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      handleSubmit()
+      sendMessage()
     }
   }
 
@@ -331,26 +135,15 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
     })
   }
 
-  const handleButtonClick = (option: string) => {
-    console.log("[WIDGET-CHAT] 🔘 Opción seleccionada:", option)
-    sendMessage(option)
-  }
-
-  const handleSubmit = () => {
-    sendMessage()
-  }
-
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header - solo mostrar si hideHeader es false */}
-      {!hideHeader && (
-        <div className="p-4 text-white relative" style={{ backgroundColor: config.widgetPrimaryColor || "#0ea5e9" }}>
-          <div className="text-left">
-            <h3 className="font-semibold text-lg">{config.widgetTitle || "Asistente Virtual"}</h3>
-            <p className="text-sm opacity-90">{config.widgetSubtitle || "Estamos aquí para ayudarte"}</p>
-          </div>
+      {/* Header */}
+      <div className="p-4 text-white relative" style={{ backgroundColor: config.widgetPrimaryColor || "#0ea5e9" }}>
+        <div className="text-left">
+          <h3 className="font-semibold text-lg">{config.widgetTitle || "Asistente Virtual"}</h3>
+          <p className="text-sm opacity-90">{config.widgetSubtitle || "Estamos aquí para ayudarte"}</p>
         </div>
-      )}
+      </div>
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -363,29 +156,6 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
               }}
             >
               <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
-
-              {/* Botones interactivos si existen */}
-              {message.buttons && message.buttons.options.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {message.buttons.context && (
-                    <p className="text-xs font-medium mb-2 text-gray-600">{message.buttons.context}</p>
-                  )}
-                  {message.buttons.options.map((option, index) => (
-                    <button
-                      key={index}
-                      onClick={() => handleButtonClick(option)}
-                      className="w-full text-left text-sm py-2 px-3 rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors shadow-sm"
-                      style={{
-                        borderColor: config.widgetPrimaryColor || "#0ea5e9",
-                        color: config.widgetPrimaryColor || "#0ea5e9",
-                      }}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              )}
-
               <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
                 {formatTime(message.timestamp)}
               </p>
@@ -427,7 +197,7 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
             className="flex-1"
           />
           <Button
-            onClick={handleSubmit}
+            onClick={sendMessage}
             disabled={!inputValue.trim() || isLoading}
             size="sm"
             style={{ backgroundColor: config.widgetPrimaryColor || "#0ea5e9" }}
