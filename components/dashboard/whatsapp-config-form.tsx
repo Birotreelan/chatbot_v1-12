@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/hooks/use-toast"
-import { Copy } from "lucide-react"
+import { Copy, Eye, ExternalLink } from "lucide-react"
 import type { WhatsAppConfig } from "@/lib/types"
 
 interface WhatsAppConfigFormProps {
@@ -58,8 +58,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     // Nuevos campos para el botón flotante
     widgetFloatingButtonText: config?.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual",
     widgetShowFloatingText: config?.widgetShowFloatingText !== undefined ? config.widgetShowFloatingText : true,
-    // Nuevos campos para habilitar/deshabilitar servicios
-    whatsappEnabled: config?.whatsappEnabled !== undefined ? config.whatsappEnabled : false,
   })
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
@@ -69,7 +67,11 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     if (typeof window !== "undefined") {
       setBaseUrl(window.location.origin)
     }
-  }, [])
+
+    // Debug logging
+    console.log("[FORM] Component mounted with props:", { isNew, configId: config?.id })
+    console.log("[FORM] Current URL:", typeof window !== "undefined" ? window.location.pathname : "SSR")
+  }, [isNew, config?.id])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target
@@ -99,7 +101,11 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     setIsLoading(true)
 
     try {
-      console.log(`[FORM] Enviando ${isNew ? "creación" : "actualización"} de configuración:`, formData)
+      console.log(`[FORM] === INICIO DEL SUBMIT ===`)
+      console.log(`[FORM] isNew: ${isNew}`)
+      console.log(`[FORM] config?.id: ${config?.id}`)
+      console.log(`[FORM] URL actual: ${typeof window !== "undefined" ? window.location.pathname : "SSR"}`)
+      console.log(`[FORM] Datos del formulario:`, formData)
 
       let response: Response
       let requestUrl: string
@@ -268,27 +274,57 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{isNew ? "Nuevo Cliente" : "Editar Cliente"}</CardTitle>
+        <CardTitle>
+          {isNew ? "Nueva Configuración" : "Editar Configuración"}
+          <span className="text-sm text-gray-500 ml-2">
+            (Debug: isNew={String(isNew)}, configId={config?.id || "undefined"})
+          </span>
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
           <Tabs defaultValue="general" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="general">General</TabsTrigger>
               <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
               <TabsTrigger value="widget">Widget</TabsTrigger>
+              <TabsTrigger value="integration">Integración</TabsTrigger>
             </TabsList>
 
             <TabsContent value="general" className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="displayName">Nombre del cliente</Label>
+                  <Label htmlFor="displayName">Nombre de la configuración</Label>
                   <Input
                     id="displayName"
                     name="displayName"
                     value={formData.displayName}
                     onChange={handleChange}
-                    placeholder="Nombre del cliente"
+                    placeholder="Mi WhatsApp Bot"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="whatsappAssistantId">Assistant ID para WhatsApp</Label>
+                  <Input
+                    id="whatsappAssistantId"
+                    name="whatsappAssistantId"
+                    value={formData.whatsappAssistantId}
+                    onChange={handleChange}
+                    placeholder="asst_... (para WhatsApp)"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetAssistantId">Assistant ID para Widget</Label>
+                  <Input
+                    id="widgetAssistantId"
+                    name="widgetAssistantId"
+                    value={formData.widgetAssistantId}
+                    onChange={handleChange}
+                    placeholder="asst_... (para Widget Web)"
                     required
                   />
                 </div>
@@ -322,7 +358,304 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                     checked={formData.active}
                     onCheckedChange={(checked) => handleSwitchChange("active", checked)}
                   />
-                  <Label htmlFor="active">Cliente activo</Label>
+                  <Label htmlFor="active">Configuración activa</Label>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="whatsapp" className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phoneNumberId">Phone Number ID</Label>
+                  <Input
+                    id="phoneNumberId"
+                    name="phoneNumberId"
+                    value={formData.phoneNumberId}
+                    onChange={handleChange}
+                    placeholder="123456789012345"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="wabaId">WABA ID</Label>
+                  <Input
+                    id="wabaId"
+                    name="wabaId"
+                    value={formData.wabaId}
+                    onChange={handleChange}
+                    placeholder="123456789012345"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="accessToken">Access Token</Label>
+                  <Input
+                    id="accessToken"
+                    name="accessToken"
+                    type="password"
+                    value={formData.accessToken}
+                    onChange={handleChange}
+                    placeholder="EAAxxxxx..."
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="verifyToken">Verify Token</Label>
+                  <Input
+                    id="verifyToken"
+                    name="verifyToken"
+                    value={formData.verifyToken}
+                    onChange={handleChange}
+                    placeholder="mi_token_secreto"
+                  />
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="widget" className="space-y-6">
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="widgetEnabled"
+                  checked={formData.widgetEnabled}
+                  onCheckedChange={(checked) => handleSwitchChange("widgetEnabled", checked)}
+                />
+                <Label htmlFor="widgetEnabled">Habilitar Widget Web</Label>
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="widgetTitle">Título del Widget</Label>
+                  <Input
+                    id="widgetTitle"
+                    name="widgetTitle"
+                    value={formData.widgetTitle}
+                    onChange={handleChange}
+                    placeholder="Asistente Virtual"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetHeaderText">Texto del Header</Label>
+                  <Input
+                    id="widgetHeaderText"
+                    name="widgetHeaderText"
+                    value={formData.widgetHeaderText}
+                    onChange={handleChange}
+                    placeholder="Chat en vivo"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetSubtitle">Subtítulo</Label>
+                  <Input
+                    id="widgetSubtitle"
+                    name="widgetSubtitle"
+                    value={formData.widgetSubtitle}
+                    onChange={handleChange}
+                    placeholder="Estamos aquí para ayudarte"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetButtonText">Texto del Botón</Label>
+                  <Input
+                    id="widgetButtonText"
+                    name="widgetButtonText"
+                    value={formData.widgetButtonText}
+                    onChange={handleChange}
+                    placeholder="Enviar"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetPlaceholder">Placeholder del Input</Label>
+                  <Input
+                    id="widgetPlaceholder"
+                    name="widgetPlaceholder"
+                    value={formData.widgetPlaceholder}
+                    onChange={handleChange}
+                    placeholder="Escribe tu mensaje..."
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetTheme">Tema</Label>
+                  <Select
+                    value={formData.widgetTheme}
+                    onValueChange={(value) => handleSelectChange("widgetTheme", value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="light">Claro</SelectItem>
+                      <SelectItem value="dark">Oscuro</SelectItem>
+                      <SelectItem value="auto">Automático</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="widgetWelcomeMessage">Mensaje de Bienvenida</Label>
+                <Textarea
+                  id="widgetWelcomeMessage"
+                  name="widgetWelcomeMessage"
+                  value={formData.widgetWelcomeMessage}
+                  onChange={handleChange}
+                  placeholder="¡Hola! ¿En qué puedo ayudarte hoy?"
+                  rows={3}
+                />
+              </div>
+
+              <Separator />
+
+              {/* Sección del Botón Flotante */}
+              <div className="space-y-4">
+                <h4 className="text-lg font-medium">Configuración del Botón Flotante</h4>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="widgetShowFloatingText"
+                    checked={formData.widgetShowFloatingText}
+                    onCheckedChange={(checked) => handleSwitchChange("widgetShowFloatingText", checked)}
+                  />
+                  <Label htmlFor="widgetShowFloatingText">Mostrar texto junto al botón flotante</Label>
+                </div>
+
+                {formData.widgetShowFloatingText && (
+                  <div className="space-y-2">
+                    <Label htmlFor="widgetFloatingButtonText">Texto del Botón Flotante</Label>
+                    <Input
+                      id="widgetFloatingButtonText"
+                      name="widgetFloatingButtonText"
+                      value={formData.widgetFloatingButtonText}
+                      onChange={handleChange}
+                      placeholder="Obtené tu turno con nuestro asistente virtual"
+                    />
+                    <p className="text-sm text-gray-500">
+                      Este texto aparecerá junto al botón flotante para invitar a los usuarios a interactuar
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="widgetPrimaryColor">Color Primario</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="color"
+                      value={formData.widgetPrimaryColor}
+                      onChange={(e) =>
+                        handleChange({
+                          target: { name: "widgetPrimaryColor", value: e.target.value, type: "text" },
+                        } as any)
+                      }
+                      className="w-12 h-10 p-1"
+                    />
+                    <Input
+                      type="text"
+                      value={formData.widgetPrimaryColor}
+                      onChange={(e) =>
+                        handleChange({
+                          target: { name: "widgetPrimaryColor", value: e.target.value, type: "text" },
+                        } as any)
+                      }
+                      className="flex-1"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetSecondaryColor">Color Secundario</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="color"
+                      value={formData.widgetSecondaryColor}
+                      onChange={(e) =>
+                        handleChange({
+                          target: { name: "widgetSecondaryColor", value: e.target.value, type: "text" },
+                        } as any)
+                      }
+                      className="w-12 h-10 p-1"
+                    />
+                    <Input
+                      type="text"
+                      value={formData.widgetSecondaryColor}
+                      onChange={(e) =>
+                        handleChange({
+                          target: { name: "widgetSecondaryColor", value: e.target.value, type: "text" },
+                        } as any)
+                      }
+                      className="flex-1"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Posición del Widget</Label>
+                  <RadioGroup
+                    value={formData.widgetPosition}
+                    onValueChange={(value) => handleSelectChange("widgetPosition", value)}
+                    className="flex gap-4"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="bottom-right" id="bottom-right" />
+                      <Label htmlFor="bottom-right">Inferior Derecha</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="bottom-left" id="bottom-left" />
+                      <Label htmlFor="bottom-left">Inferior Izquierda</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="widgetMaxWidth">Ancho Máximo (px)</Label>
+                  <Input
+                    id="widgetMaxWidth"
+                    name="widgetMaxWidth"
+                    type="number"
+                    value={formData.widgetMaxWidth}
+                    onChange={handleChange}
+                    min="300"
+                    max="800"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetMaxHeight">Alto Máximo (px)</Label>
+                  <Input
+                    id="widgetMaxHeight"
+                    name="widgetMaxHeight"
+                    type="number"
+                    value={formData.widgetMaxHeight}
+                    onChange={handleChange}
+                    min="400"
+                    max="800"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="widgetBorderRadius">Radio del Borde (px)</Label>
+                  <Input
+                    id="widgetBorderRadius"
+                    name="widgetBorderRadius"
+                    type="number"
+                    value={formData.widgetBorderRadius}
+                    onChange={handleChange}
+                    min="0"
+                    max="50"
+                  />
                 </div>
               </div>
 
@@ -331,464 +664,169 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex items-center space-x-2">
                   <Switch
-                    id="whatsappEnabled"
-                    checked={formData.whatsappEnabled}
-                    onCheckedChange={(checked) => handleSwitchChange("whatsappEnabled", checked)}
+                    id="widgetShadow"
+                    checked={formData.widgetShadow}
+                    onCheckedChange={(checked) => handleSwitchChange("widgetShadow", checked)}
                   />
-                  <Label htmlFor="whatsappEnabled">Habilitar servicio de WhatsApp</Label>
+                  <Label htmlFor="widgetShadow">Mostrar Sombra</Label>
                 </div>
 
                 <div className="flex items-center space-x-2">
                   <Switch
-                    id="widgetEnabled"
-                    checked={formData.widgetEnabled}
-                    onCheckedChange={(checked) => handleSwitchChange("widgetEnabled", checked)}
+                    id="widgetAnimation"
+                    checked={formData.widgetAnimation}
+                    onCheckedChange={(checked) => handleSwitchChange("widgetAnimation", checked)}
                   />
-                  <Label htmlFor="widgetEnabled">Habilitar servicio de Widget Web</Label>
+                  <Label htmlFor="widgetAnimation">Habilitar Animaciones</Label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="widgetSoundEnabled"
+                    checked={formData.widgetSoundEnabled}
+                    onCheckedChange={(checked) => handleSwitchChange("widgetSoundEnabled", checked)}
+                  />
+                  <Label htmlFor="widgetSoundEnabled">Sonidos de Notificación</Label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="widgetBrandingEnabled"
+                    checked={formData.widgetBrandingEnabled}
+                    onCheckedChange={(checked) => handleSwitchChange("widgetBrandingEnabled", checked)}
+                  />
+                  <Label htmlFor="widgetBrandingEnabled">Mostrar Branding</Label>
                 </div>
               </div>
-            </TabsContent>
 
-            <TabsContent value="whatsapp" className="space-y-4">
-              {formData.whatsappEnabled ? (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="whatsappAssistantId">Assistant ID para WhatsApp</Label>
-                    <Input
-                      id="whatsappAssistantId"
-                      name="whatsappAssistantId"
-                      value={formData.whatsappAssistantId}
-                      onChange={handleChange}
-                      placeholder="asst_... (para WhatsApp)"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="phoneNumberId">Phone Number ID</Label>
-                      <Input
-                        id="phoneNumberId"
-                        name="phoneNumberId"
-                        value={formData.phoneNumberId}
-                        onChange={handleChange}
-                        placeholder="123456789012345"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="wabaId">WABA ID</Label>
-                      <Input
-                        id="wabaId"
-                        name="wabaId"
-                        value={formData.wabaId}
-                        onChange={handleChange}
-                        placeholder="123456789012345"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="accessToken">Access Token</Label>
-                      <Input
-                        id="accessToken"
-                        name="accessToken"
-                        type="password"
-                        value={formData.accessToken}
-                        onChange={handleChange}
-                        placeholder="EAAxxxxx..."
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="verifyToken">Verify Token</Label>
-                      <Input
-                        id="verifyToken"
-                        name="verifyToken"
-                        value={formData.verifyToken}
-                        onChange={handleChange}
-                        placeholder="mi_token_secreto"
-                      />
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
-                  <p className="text-gray-600">
-                    El servicio de WhatsApp está desactivado para este cliente. Actívalo en la pestaña General para
-                    configurar los parámetros de WhatsApp.
-                  </p>
+              {formData.widgetBrandingEnabled && (
+                <div className="space-y-2">
+                  <Label htmlFor="widgetBrandingText">Texto del Branding</Label>
+                  <Input
+                    id="widgetBrandingText"
+                    name="widgetBrandingText"
+                    value={formData.widgetBrandingText}
+                    onChange={handleChange}
+                    placeholder="Powered by AI Assistant"
+                  />
                 </div>
               )}
             </TabsContent>
 
-            <TabsContent value="widget" className="space-y-6">
-              {formData.widgetEnabled ? (
+            <TabsContent value="integration" className="space-y-6">
+              {!isNew && config?.id && baseUrl && (
                 <>
-                  <div className="space-y-2">
-                    <Label htmlFor="widgetAssistantId">Assistant ID para Widget</Label>
-                    <Input
-                      id="widgetAssistantId"
-                      name="widgetAssistantId"
-                      value={formData.widgetAssistantId}
-                      onChange={handleChange}
-                      placeholder="asst_... (para Widget Web)"
-                    />
-                  </div>
-
-                  <Separator />
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetTitle">Título del Widget</Label>
-                      <Input
-                        id="widgetTitle"
-                        name="widgetTitle"
-                        value={formData.widgetTitle}
-                        onChange={handleChange}
-                        placeholder="Asistente Virtual"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetHeaderText">Texto del Header</Label>
-                      <Input
-                        id="widgetHeaderText"
-                        name="widgetHeaderText"
-                        value={formData.widgetHeaderText}
-                        onChange={handleChange}
-                        placeholder="Chat en vivo"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetSubtitle">Subtítulo</Label>
-                      <Input
-                        id="widgetSubtitle"
-                        name="widgetSubtitle"
-                        value={formData.widgetSubtitle}
-                        onChange={handleChange}
-                        placeholder="Estamos aquí para ayudarte"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetButtonText">Texto del Botón</Label>
-                      <Input
-                        id="widgetButtonText"
-                        name="widgetButtonText"
-                        value={formData.widgetButtonText}
-                        onChange={handleChange}
-                        placeholder="Enviar"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetPlaceholder">Placeholder del Input</Label>
-                      <Input
-                        id="widgetPlaceholder"
-                        name="widgetPlaceholder"
-                        value={formData.widgetPlaceholder}
-                        onChange={handleChange}
-                        placeholder="Escribe tu mensaje..."
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetTheme">Tema</Label>
-                      <Select
-                        value={formData.widgetTheme}
-                        onValueChange={(value) => handleSelectChange("widgetTheme", value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="light">Claro</SelectItem>
-                          <SelectItem value="dark">Oscuro</SelectItem>
-                          <SelectItem value="auto">Automático</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="widgetWelcomeMessage">Mensaje de Bienvenida</Label>
-                    <Textarea
-                      id="widgetWelcomeMessage"
-                      name="widgetWelcomeMessage"
-                      value={formData.widgetWelcomeMessage}
-                      onChange={handleChange}
-                      placeholder="¡Hola! ¿En qué puedo ayudarte hoy?"
-                      rows={3}
-                    />
-                  </div>
-
-                  <Separator />
-
-                  {/* Sección del Botón Flotante */}
                   <div className="space-y-4">
-                    <h4 className="text-lg font-medium">Configuración del Botón Flotante</h4>
+                    <h3 className="text-lg font-semibold">URLs del Widget</h3>
 
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="widgetShowFloatingText"
-                        checked={formData.widgetShowFloatingText}
-                        onCheckedChange={(checked) => handleSwitchChange("widgetShowFloatingText", checked)}
-                      />
-                      <Label htmlFor="widgetShowFloatingText">Mostrar texto junto al botón flotante</Label>
-                    </div>
-
-                    {formData.widgetShowFloatingText && (
-                      <div className="space-y-2">
-                        <Label htmlFor="widgetFloatingButtonText">Texto del Botón Flotante</Label>
-                        <Input
-                          id="widgetFloatingButtonText"
-                          name="widgetFloatingButtonText"
-                          value={formData.widgetFloatingButtonText}
-                          onChange={handleChange}
-                          placeholder="Obtené tu turno con nuestro asistente virtual"
-                        />
-                        <p className="text-sm text-gray-500">
-                          Este texto aparecerá junto al botón flotante para invitar a los usuarios a interactuar
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  <Separator />
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetPrimaryColor">Color Primario</Label>
-                      <div className="flex gap-2">
-                        <Input
-                          type="color"
-                          value={formData.widgetPrimaryColor}
-                          onChange={(e) =>
-                            handleChange({
-                              target: { name: "widgetPrimaryColor", value: e.target.value, type: "text" },
-                            } as any)
-                          }
-                          className="w-12 h-10 p-1"
-                        />
-                        <Input
-                          type="text"
-                          value={formData.widgetPrimaryColor}
-                          onChange={(e) =>
-                            handleChange({
-                              target: { name: "widgetPrimaryColor", value: e.target.value, type: "text" },
-                            } as any)
-                          }
-                          className="flex-1"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetSecondaryColor">Color Secundario</Label>
-                      <div className="flex gap-2">
-                        <Input
-                          type="color"
-                          value={formData.widgetSecondaryColor}
-                          onChange={(e) =>
-                            handleChange({
-                              target: { name: "widgetSecondaryColor", value: e.target.value, type: "text" },
-                            } as any)
-                          }
-                          className="w-12 h-10 p-1"
-                        />
-                        <Input
-                          type="text"
-                          value={formData.widgetSecondaryColor}
-                          onChange={(e) =>
-                            handleChange({
-                              target: { name: "widgetSecondaryColor", value: e.target.value, type: "text" },
-                            } as any)
-                          }
-                          className="flex-1"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Posición del Widget</Label>
-                      <RadioGroup
-                        value={formData.widgetPosition}
-                        onValueChange={(value) => handleSelectChange("widgetPosition", value)}
-                        className="flex gap-4"
-                      >
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="bottom-right" id="bottom-right" />
-                          <Label htmlFor="bottom-right">Inferior Derecha</Label>
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-sm font-medium">URL del Widget</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input value={getWidgetUrl()} readOnly className="flex-1" />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(getWidgetUrl())}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openInNewTab(getWidgetUrl())}
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="bottom-left" id="bottom-left" />
-                          <Label htmlFor="bottom-left">Inferior Izquierda</Label>
+                      </div>
+
+                      <div>
+                        <Label className="text-sm font-medium">Página de Demostración</Label>
+                        <div className="flex gap-2 mt-1">
+                          <Input value={getChatUrl()} readOnly className="flex-1" />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyToClipboard(getChatUrl())}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" onClick={() => openInNewTab(getChatUrl())}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
                         </div>
-                      </RadioGroup>
+                      </div>
                     </div>
                   </div>
 
                   <Separator />
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetMaxWidth">Ancho Máximo (px)</Label>
-                      <Input
-                        id="widgetMaxWidth"
-                        name="widgetMaxWidth"
-                        type="number"
-                        value={formData.widgetMaxWidth}
-                        onChange={handleChange}
-                        min="300"
-                        max="800"
-                      />
-                    </div>
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold">Código de Integración</h3>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetMaxHeight">Alto Máximo (px)</Label>
-                      <Input
-                        id="widgetMaxHeight"
-                        name="widgetMaxHeight"
-                        type="number"
-                        value={formData.widgetMaxHeight}
-                        onChange={handleChange}
-                        min="400"
-                        max="800"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetBorderRadius">Radio del Borde (px)</Label>
-                      <Input
-                        id="widgetBorderRadius"
-                        name="widgetBorderRadius"
-                        type="number"
-                        value={formData.widgetBorderRadius}
-                        onChange={handleChange}
-                        min="0"
-                        max="50"
-                      />
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="widgetShadow"
-                        checked={formData.widgetShadow}
-                        onCheckedChange={(checked) => handleSwitchChange("widgetShadow", checked)}
-                      />
-                      <Label htmlFor="widgetShadow">Mostrar Sombra</Label>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="widgetAnimation"
-                        checked={formData.widgetAnimation}
-                        onCheckedChange={(checked) => handleSwitchChange("widgetAnimation", checked)}
-                      />
-                      <Label htmlFor="widgetAnimation">Habilitar Animaciones</Label>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="widgetSoundEnabled"
-                        checked={formData.widgetSoundEnabled}
-                        onCheckedChange={(checked) => handleSwitchChange("widgetSoundEnabled", checked)}
-                      />
-                      <Label htmlFor="widgetSoundEnabled">Sonidos de Notificación</Label>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="widgetBrandingEnabled"
-                        checked={formData.widgetBrandingEnabled}
-                        onCheckedChange={(checked) => handleSwitchChange("widgetBrandingEnabled", checked)}
-                      />
-                      <Label htmlFor="widgetBrandingEnabled">Mostrar Branding</Label>
-                    </div>
-                  </div>
-
-                  {formData.widgetBrandingEnabled && (
-                    <div className="space-y-2">
-                      <Label htmlFor="widgetBrandingText">Texto del Branding</Label>
-                      <Input
-                        id="widgetBrandingText"
-                        name="widgetBrandingText"
-                        value={formData.widgetBrandingText}
-                        onChange={handleChange}
-                        placeholder="Powered by AI Assistant"
-                      />
-                    </div>
-                  )}
-
-                  {!isNew && config?.id && baseUrl && (
-                    <>
-                      <Separator />
-
-                      <div className="space-y-4">
-                        <h3 className="text-lg font-semibold">Código de Integración</h3>
-
-                        <div className="space-y-4">
-                          <div>
-                            <Label className="text-sm font-medium">Código HTML (iframe)</Label>
-                            <div className="mt-2">
-                              <Textarea value={getEmbedCode()} readOnly rows={3} className="font-mono text-sm" />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="mt-2"
-                                onClick={() => copyToClipboard(getEmbedCode())}
-                              >
-                                <Copy className="h-4 w-4 mr-2" />
-                                Copiar Código HTML
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div>
-                            <Label className="text-sm font-medium">Código JavaScript</Label>
-                            <div className="mt-2">
-                              <Textarea value={getJavaScriptCode()} readOnly rows={8} className="font-mono text-sm" />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="mt-2"
-                                onClick={() => copyToClipboard(getJavaScriptCode())}
-                              >
-                                <Copy className="h-4 w-4 mr-2" />
-                                Copiar Código JavaScript
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                          <h4 className="font-medium text-blue-900 mb-2">Instrucciones de Integración</h4>
-                          <ul className="text-sm text-blue-800 space-y-1">
-                            <li>• Para integrar como iframe: Copia y pega el código HTML en tu sitio web</li>
-                            <li>
-                              • Para integrar como widget flotante: Copia y pega el código JavaScript antes del cierre
-                              del tag &lt;/body&gt;
-                            </li>
-                            <li>• El widget se posicionará automáticamente según la configuración seleccionada</li>
-                            <li>• Puedes personalizar todos los aspectos visuales desde la pestaña "Widget"</li>
-                            <li>• El texto del botón flotante aparecerá automáticamente si está habilitado</li>
-                          </ul>
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-sm font-medium">Código HTML (iframe)</Label>
+                        <div className="mt-2">
+                          <Textarea value={getEmbedCode()} readOnly rows={3} className="font-mono text-sm" />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => copyToClipboard(getEmbedCode())}
+                          >
+                            <Copy className="h-4 w-4 mr-2" />
+                            Copiar Código HTML
+                          </Button>
                         </div>
                       </div>
-                    </>
-                  )}
+
+                      <div>
+                        <Label className="text-sm font-medium">Código JavaScript</Label>
+                        <div className="mt-2">
+                          <Textarea value={getJavaScriptCode()} readOnly rows={8} className="font-mono text-sm" />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => copyToClipboard(getJavaScriptCode())}
+                          >
+                            <Copy className="h-4 w-4 mr-2" />
+                            Copiar Código JavaScript
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 className="font-medium text-blue-900 mb-2">Instrucciones de Integración</h4>
+                    <ul className="text-sm text-blue-800 space-y-1">
+                      <li>• Para integrar como iframe: Copia y pega el código HTML en tu sitio web</li>
+                      <li>
+                        • Para integrar como widget flotante: Copia y pega el código JavaScript antes del cierre del tag
+                        &lt;/body&gt;
+                      </li>
+                      <li>• El widget se posicionará automáticamente según la configuración seleccionada</li>
+                      <li>• Puedes personalizar todos los aspectos visuales desde la pestaña "Widget"</li>
+                      <li>• El texto del botón flotante aparecerá automáticamente si está habilitado</li>
+                    </ul>
+                  </div>
                 </>
-              ) : (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center">
+              )}
+
+              {(isNew || !config?.id || !baseUrl) && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
                   <p className="text-gray-600">
-                    El servicio de Widget Web está desactivado para este cliente. Actívalo en la pestaña General para
-                    configurar los parámetros del Widget.
+                    {isNew
+                      ? "Los códigos de integración estarán disponibles después de guardar la configuración."
+                      : "Cargando códigos de integración..."}
                   </p>
                 </div>
               )}
@@ -797,7 +835,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
 
           <div className="flex justify-end">
             <Button type="submit" disabled={isLoading} className="min-w-[120px]">
-              {isLoading ? "Guardando..." : isNew ? "Crear Cliente" : "Actualizar Cliente"}
+              {isLoading ? "Guardando..." : isNew ? "Crear Configuración" : "Actualizar Configuración"}
             </Button>
           </div>
         </form>
