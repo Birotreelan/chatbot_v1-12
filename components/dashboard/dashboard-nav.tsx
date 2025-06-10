@@ -26,15 +26,7 @@ export function DashboardNav() {
               Dashboard
             </Link>
             <Link href="/dashboard/config/new" className="text-foreground/60 hover:text-foreground">
-              Nuevo Número
-            </Link>
-            <Link
-              href="/demo"
-              className="text-foreground/60 hover:text-foreground"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Demo Widget
+              Nuevo Cliente
             </Link>
           </nav>
         </div>
