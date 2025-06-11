@@ -9,5 +9,7 @@ interface WhatsAppConfigFormWrapperProps {
 }
 
 export function WhatsAppConfigFormWrapper({ config, isNew = false }: WhatsAppConfigFormWrapperProps) {
+  console.log("[WRAPPER] isNew:", isNew, "config:", config?.id || "undefined")
+
   return <WhatsAppConfigForm config={config} isNew={isNew} />
 }
