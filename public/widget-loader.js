@@ -30,7 +30,8 @@
 
   const config = {
     position: scriptElement.getAttribute("data-position") || "bottom-right",
-    widgetUrl: scriptElement.getAttribute("data-widget-url") || `${baseUrl}/demo`,
+    // Cambiar a la URL correcta del widget de chat
+    widgetUrl: scriptElement.getAttribute("data-widget-url") || `${baseUrl}/widget/${clienteId}`,
     clienteId: clienteId,
   }
 
@@ -138,7 +139,8 @@
         iframe.style.right = "20px"
     }
 
-    iframe.src = `${config.widgetUrl}?clienteId=${config.clienteId}&position=${config.position}&embedded=true`
+    // URL corregida para apuntar directamente al widget de chat
+    iframe.src = `${config.widgetUrl}?embedded=true`
 
     console.log("[WIDGET-LOADER] Widget iframe creado:", {
       src: iframe.src,

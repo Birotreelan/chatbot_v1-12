@@ -260,12 +260,17 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
   data-position="${formData.widgetPosition || "bottom-right"}">
 </script>
 
-<!-- Configuración opcional adicional:
+<!-- 
+Configuración opcional adicional:
+- data-position: "bottom-right", "bottom-left", "top-right", "top-left"
+- data-widget-url: URL personalizada del widget (opcional)
+
+Ejemplo con configuración personalizada:
 <script 
   src="${baseUrl}/widget-loader.js" 
   data-cliente-id="${clienteId}"
   data-position="bottom-right"
-  data-widget-url="${baseUrl}/demo">
+  data-widget-url="${baseUrl}/widget/${config.id}">
 </script>
 -->`
   }
@@ -738,7 +743,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
 
                     <div className="space-y-3">
                       <div>
-                        <Label className="text-sm font-medium">URL del Widget</Label>
+                        <Label className="text-sm font-medium">URL del Widget de Chat</Label>
                         <div className="flex gap-2 mt-1">
                           <Input value={getWidgetUrl()} readOnly className="flex-1" />
                           <Button
@@ -804,9 +809,11 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                       </div>
 
                       <div>
-                        <Label className="text-sm font-medium">Código JavaScript</Label>
+                        <Label className="text-sm font-medium">
+                          Código JavaScript (Widget Flotante) - ¡RECOMENDADO!
+                        </Label>
                         <div className="mt-2">
-                          <Textarea value={getJavaScriptCode()} readOnly rows={12} className="font-mono text-sm" />
+                          <Textarea value={getJavaScriptCode()} readOnly rows={15} className="font-mono text-sm" />
                           <Button
                             type="button"
                             variant="outline"
@@ -822,15 +829,15 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                     </div>
                   </div>
 
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h4 className="font-medium text-blue-900 mb-2">Instrucciones de Integración</h4>
-                    <ul className="text-sm text-blue-800 space-y-1">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <h4 className="font-medium text-green-900 mb-2">✅ Instrucciones de Integración</h4>
+                    <ul className="text-sm text-green-800 space-y-1">
                       <li>
-                        • <strong>Para iframe:</strong> Copia y pega el código HTML en tu sitio web
+                        • <strong>Widget Flotante (Recomendado):</strong> Copia el código JavaScript y pégalo antes del
+                        cierre del tag &lt;/body&gt;
                       </li>
                       <li>
-                        • <strong>Para widget flotante:</strong> Copia y pega el código JavaScript antes del cierre del
-                        tag &lt;/body&gt;
+                        • <strong>Iframe:</strong> Copia el código HTML para integrar como iframe fijo
                       </li>
                       <li>
                         • <strong>Cliente ID:</strong> {config?.cliente_id || config?.id || "No configurado"}
@@ -838,8 +845,8 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                       <li>
                         • <strong>Posición:</strong> {formData.widgetPosition}
                       </li>
-                      <li>• El widget aparecerá automáticamente cuando se cargue la página</li>
-                      <li>• Puedes personalizar la posición usando: bottom-right, bottom-left, top-right, top-left</li>
+                      <li>• El widget aparecerá como un botón flotante que abre el chat al hacer click</li>
+                      <li>• El chat se carga directamente, sin páginas intermedias</li>
                     </ul>
                   </div>
                 </>
