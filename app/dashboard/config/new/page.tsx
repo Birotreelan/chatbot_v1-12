@@ -1,14 +1,13 @@
-import { WhatsAppConfigFormWrapper } from "@/components/dashboard/whatsapp-config-form-wrapper"
+import { WhatsAppConfigForm } from "@/components/dashboard/whatsapp-config-form"
 
-export default function NewConfigPage() {
+export default function NewWhatsAppConfigPage() {
   return (
-    <div className="container mx-auto py-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Nueva Configuración</h1>
-        <p className="text-gray-600">Crea una nueva configuración de WhatsApp Bot</p>
-      </div>
-
-      <WhatsAppConfigFormWrapper isNew={true} />
+    <div className="container mx-auto py-8">
+      <h1 className="text-3xl font-bold mb-8">Nueva Configuración de WhatsApp</h1>
+      <WhatsAppConfigForm />
     </div>
   )
 }
+
+// Desactivamos la generación estática para esta página
+export const dynamic = "force-dynamic"

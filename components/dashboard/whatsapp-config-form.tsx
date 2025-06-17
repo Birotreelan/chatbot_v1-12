@@ -28,6 +28,9 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     displayName: config?.displayName || "",
     phoneNumberId: config?.phoneNumberId || "",
     wabaId: config?.wabaId || "",
+    // Reemplazar esta línea:
+    // assistantId: config?.assistantId || "",
+    // Con estas líneas:
     whatsappAssistantId: config?.whatsappAssistantId || "",
     widgetAssistantId: config?.widgetAssistantId || "",
     accessToken: config?.accessToken || "",
@@ -67,11 +70,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     if (typeof window !== "undefined") {
       setBaseUrl(window.location.origin)
     }
-
-    // Debug logging
-    console.log("[FORM] Component mounted with props:", { isNew, configId: config?.id })
-    console.log("[FORM] Current URL:", typeof window !== "undefined" ? window.location.pathname : "SSR")
-  }, [isNew, config?.id])
+  }, [])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target
@@ -101,43 +100,21 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     setIsLoading(true)
 
     try {
-      console.log(`[FORM] === INICIO DEL SUBMIT ===`)
-      console.log(`[FORM] isNew: ${isNew}`)
-      console.log(`[FORM] config?.id: ${config?.id}`)
-      console.log(`[FORM] URL actual: ${typeof window !== "undefined" ? window.location.pathname : "SSR"}`)
-      console.log(`[FORM] Datos del formulario:`, formData)
+      console.log(`[FORM] Enviando ${isNew ? "creación" : "actualización"} de configuración:`, formData)
 
       let response: Response
-      let requestUrl: string
-      let requestMethod: string
-
       if (isNew) {
-        // Para crear una nueva configuración
-        requestUrl = "/api/dashboard/configs"
-        requestMethod = "POST"
-
-        console.log(`[FORM] === CREANDO NUEVA CONFIGURACIÓN ===`)
-        console.log(`[FORM] URL: ${requestUrl}`)
-        console.log(`[FORM] Método: ${requestMethod}`)
-
-        response = await fetch(requestUrl, {
-          method: requestMethod,
+        response = await fetch("/api/dashboard/configs", {
+          method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(formData),
         })
       } else {
-        // Para actualizar una configuración existente
-        requestUrl = `/api/dashboard/configs/${config?.id}`
-        requestMethod = "PUT"
-
-        console.log(`[FORM] === ACTUALIZANDO CONFIGURACIÓN EXISTENTE ===`)
-        console.log(`[FORM] URL: ${requestUrl}`)
-        console.log(`[FORM] Método: ${requestMethod}`)
-
-        response = await fetch(requestUrl, {
-          method: requestMethod,
+        // Intentar primero con la ruta dinámica
+        response = await fetch(`/api/dashboard/configs/${config?.id}`, {
+          method: "PUT",
           headers: {
             "Content-Type": "application/json",
           },
@@ -147,11 +124,8 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
         // Si falla con 405, intentar con la ruta alternativa
         if (response.status === 405) {
           console.log(`[FORM] Ruta dinámica falló, intentando ruta alternativa`)
-          requestUrl = "/api/dashboard/configs/update"
-          requestMethod = "POST"
-
-          response = await fetch(requestUrl, {
-            method: requestMethod,
+          response = await fetch(`/api/dashboard/configs/update`, {
+            method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
@@ -160,12 +134,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
         }
       }
 
-      console.log(`[FORM] Respuesta del servidor:`, {
-        status: response.status,
-        statusText: response.statusText,
-        url: requestUrl,
-        method: requestMethod,
-      })
+      console.log(`[FORM] Respuesta del servidor:`, response.status, response.statusText)
 
       if (!response.ok) {
         let errorDetails = "Error desconocido"
@@ -190,7 +159,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
 
       if (isNew && result.id && mounted) {
         // Redirigir a la página de edición
-        console.log(`[FORM] Redirigiendo a /dashboard/config/${result.id}`)
         window.location.href = `/dashboard/config/${result.id}`
       }
     } catch (error) {
@@ -248,31 +216,9 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
   }
 
   const getJavaScriptCode = () => {
-    if (!config?.id || !baseUrl) return "// Se requiere configuración válida para generar el código"
+    if (!config?.id || !config?.cliente_id || !baseUrl) return "// Se requiere cliente_id para generar el código"
 
-    // Usar cliente_id si está disponible, sino usar el id de la configuración
-    const clienteId = config?.cliente_id || config.id
-
-    return `<!-- Widget de Chat AI - Insertar antes del cierre de </body> -->
-<script 
-  src="${baseUrl}/widget-loader.js" 
-  data-cliente-id="${clienteId}"
-  data-position="${formData.widgetPosition || "bottom-right"}">
-</script>
-
-<!-- 
-Configuración opcional adicional:
-- data-position: "bottom-right", "bottom-left", "top-right", "top-left"
-- data-widget-url: URL personalizada del widget (opcional)
-
-Ejemplo con configuración personalizada:
-<script 
-  src="${baseUrl}/widget-loader.js" 
-  data-cliente-id="${clienteId}"
-  data-position="bottom-right"
-  data-widget-url="${baseUrl}/widget/${config.id}">
-</script>
--->`
+    return `<script src="${baseUrl}/widget-loader.js" data-client-id="${config.cliente_id}"></script>`
   }
 
   // Mostrar loading hasta que el componente esté montado
@@ -296,12 +242,7 @@ Ejemplo con configuración personalizada:
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
-          {isNew ? "Nueva Configuración" : "Editar Configuración"}
-          <span className="text-sm text-gray-500 ml-2">
-            (Debug: isNew={String(isNew)}, configId={config?.id || "undefined"})
-          </span>
-        </CardTitle>
+        <CardTitle>{isNew ? "Nueva Configuración" : "Editar Configuración"}</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -327,6 +268,20 @@ Ejemplo con configuración personalizada:
                   />
                 </div>
 
+                {/* Reemplazar este div completo:
+                <div className="space-y-2">
+                  <Label htmlFor="assistantId">Assistant ID</Label>
+                  <Input
+                    id="assistantId"
+                    name="assistantId"
+                    value={formData.assistantId}
+                    onChange={handleChange}
+                    placeholder="asst_..."
+                    required
+                  />
+                </div>
+
+                // Con estos dos divs: */}
                 <div className="space-y-2">
                   <Label htmlFor="whatsappAssistantId">Assistant ID para WhatsApp</Label>
                   <Input
@@ -395,6 +350,7 @@ Ejemplo con configuración personalizada:
                     value={formData.phoneNumberId}
                     onChange={handleChange}
                     placeholder="123456789012345"
+                    required
                   />
                 </div>
 
@@ -418,6 +374,7 @@ Ejemplo con configuración personalizada:
                     value={formData.accessToken}
                     onChange={handleChange}
                     placeholder="EAAxxxxx..."
+                    required
                   />
                 </div>
 
@@ -429,6 +386,7 @@ Ejemplo con configuración personalizada:
                     value={formData.verifyToken}
                     onChange={handleChange}
                     placeholder="mi_token_secreto"
+                    required
                   />
                 </div>
               </div>
@@ -743,7 +701,7 @@ Ejemplo con configuración personalizada:
 
                     <div className="space-y-3">
                       <div>
-                        <Label className="text-sm font-medium">URL del Widget de Chat</Label>
+                        <Label className="text-sm font-medium">URL del Widget</Label>
                         <div className="flex gap-2 mt-1">
                           <Input value={getWidgetUrl()} readOnly className="flex-1" />
                           <Button
@@ -809,11 +767,9 @@ Ejemplo con configuración personalizada:
                       </div>
 
                       <div>
-                        <Label className="text-sm font-medium">
-                          Código JavaScript (Widget Flotante) - ¡RECOMENDADO!
-                        </Label>
+                        <Label className="text-sm font-medium">Código JavaScript</Label>
                         <div className="mt-2">
-                          <Textarea value={getJavaScriptCode()} readOnly rows={15} className="font-mono text-sm" />
+                          <Textarea value={getJavaScriptCode()} readOnly rows={8} className="font-mono text-sm" />
                           <Button
                             type="button"
                             variant="outline"
@@ -829,24 +785,17 @@ Ejemplo con configuración personalizada:
                     </div>
                   </div>
 
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                    <h4 className="font-medium text-green-900 mb-2">✅ Instrucciones de Integración</h4>
-                    <ul className="text-sm text-green-800 space-y-1">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 className="font-medium text-blue-900 mb-2">Instrucciones de Integración</h4>
+                    <ul className="text-sm text-blue-800 space-y-1">
+                      <li>• Para integrar como iframe: Copia y pega el código HTML en tu sitio web</li>
                       <li>
-                        • <strong>Widget Flotante (Recomendado):</strong> Copia el código JavaScript y pégalo antes del
-                        cierre del tag &lt;/body&gt;
+                        • Para integrar como widget flotante: Copia y pega el código JavaScript antes del cierre del tag
+                        &lt;/body&gt;
                       </li>
-                      <li>
-                        • <strong>Iframe:</strong> Copia el código HTML para integrar como iframe fijo
-                      </li>
-                      <li>
-                        • <strong>Cliente ID:</strong> {config?.cliente_id || config?.id || "No configurado"}
-                      </li>
-                      <li>
-                        • <strong>Posición:</strong> {formData.widgetPosition}
-                      </li>
-                      <li>• El widget aparecerá como un botón flotante que abre el chat al hacer click</li>
-                      <li>• El chat se carga directamente, sin páginas intermedias</li>
+                      <li>• El widget se posicionará automáticamente según la configuración seleccionada</li>
+                      <li>• Puedes personalizar todos los aspectos visuales desde la pestaña "Widget"</li>
+                      <li>• El texto del botón flotante aparecerá automáticamente si está habilitado</li>
                     </ul>
                   </div>
                 </>
