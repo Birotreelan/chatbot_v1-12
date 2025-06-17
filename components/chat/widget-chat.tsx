@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Send } from "lucide-react"
@@ -37,9 +37,10 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string>("")
   const [mounted, setMounted] = useState(false)
+  const [initialized, setInitialized] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  console.log("[WIDGET-CHAT] 🔄 Componente inicializándose con clienteId:", clienteId)
+  console.log("[WIDGET-CHAT] 🔄 Render con clienteId:", clienteId, "initialized:", initialized)
 
   // Configuración por defecto (igual que en el dashboard)
   const defaultConfig = {
@@ -53,11 +54,14 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
     ...config,
   }
 
-  console.log("[WIDGET-CHAT] 📋 Configuración aplicada:", defaultConfig)
-
-  // Efecto de montaje
+  // Efecto de inicialización (solo una vez)
   useEffect(() => {
-    console.log("[WIDGET-CHAT] 🔄 Efecto de montaje ejecutándose...")
+    if (initialized) {
+      console.log("[WIDGET-CHAT] ⚠️ Ya inicializado, saltando...")
+      return
+    }
+
+    console.log("[WIDGET-CHAT] 🔄 Inicializando por primera vez...")
 
     // Generar session_id único
     const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -77,162 +81,172 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
     }
 
     setMounted(true)
-    console.log("[WIDGET-CHAT] ✅ Componente montado correctamente")
-  }, [])
+    setInitialized(true)
+    console.log("[WIDGET-CHAT] ✅ Inicialización completada")
+  }, [clienteId, initialized]) // Dependencias mínimas
 
   // Scroll automático
   useEffect(() => {
-    if (mounted && messagesEndRef.current) {
+    if (mounted && messagesEndRef.current && messages.length > 0) {
       console.log("[WIDGET-CHAT] 📜 Haciendo scroll automático")
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
     }
   }, [messages, mounted])
 
-  const sendMessage = async (text?: string) => {
-    if (!mounted) {
-      console.log("[WIDGET-CHAT] ⚠️ Componente no montado, cancelando envío")
-      return
-    }
+  const sendMessage = useCallback(
+    async (text?: string) => {
+      if (!mounted || !initialized) {
+        console.log("[WIDGET-CHAT] ⚠️ Componente no listo, cancelando envío")
+        return
+      }
 
-    const messageText = text || inputValue.trim()
-    if (!messageText || isLoading || !sessionId) {
-      console.log("[WIDGET-CHAT] ⚠️ Condiciones no cumplidas para envío:", {
-        messageText: !!messageText,
-        isLoading,
-        sessionId: !!sessionId,
-      })
-      return
-    }
+      const messageText = text || inputValue.trim()
+      if (!messageText || isLoading || !sessionId) {
+        console.log("[WIDGET-CHAT] ⚠️ Condiciones no cumplidas para envío:", {
+          messageText: !!messageText,
+          isLoading,
+          sessionId: !!sessionId,
+        })
+        return
+      }
 
-    console.log("[WIDGET-CHAT] 📤 Enviando mensaje:", messageText)
+      console.log("[WIDGET-CHAT] 📤 Enviando mensaje:", messageText)
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: messageText,
-      isUser: true,
-      timestamp: new Date(),
-    }
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        content: messageText,
+        isUser: true,
+        timestamp: new Date(),
+      }
 
-    setMessages((prev) => {
-      console.log("[WIDGET-CHAT] 📝 Agregando mensaje del usuario")
-      return [...prev, userMessage]
-    })
-
-    if (!text) setInputValue("")
-    setIsLoading(true)
-
-    try {
-      console.log("[WIDGET-CHAT] 🌐 Haciendo petición a /api/chat con:", {
-        message: messageText,
-        cliente_id: clienteId,
-        session_id: sessionId,
-        source: "widget",
+      setMessages((prev) => {
+        console.log("[WIDGET-CHAT] 📝 Agregando mensaje del usuario")
+        return [...prev, userMessage]
       })
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      if (!text) setInputValue("")
+      setIsLoading(true)
+
+      try {
+        console.log("[WIDGET-CHAT] 🌐 Haciendo petición a /api/chat con:", {
           message: messageText,
           cliente_id: clienteId,
           session_id: sessionId,
           source: "widget",
-        }),
-      })
+        })
 
-      console.log("[WIDGET-CHAT] 📡 Respuesta del servidor:", {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-      })
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: messageText,
+            cliente_id: clienteId,
+            session_id: sessionId,
+            source: "widget",
+          }),
+        })
 
-      if (!response.ok) {
-        throw new Error(`Error ${response.status}: ${response.statusText}`)
-      }
+        console.log("[WIDGET-CHAT] 📡 Respuesta del servidor:", {
+          status: response.status,
+          statusText: response.statusText,
+          ok: response.ok,
+        })
 
-      const data = await response.json()
-      console.log("[WIDGET-CHAT] 📋 Datos completos recibidos:", data)
-
-      if (data.success && data.response) {
-        let content = data.response
-        let buttons = null
-
-        console.log("[WIDGET-CHAT] 🔍 Analizando respuesta para botones...")
-        console.log("[WIDGET-CHAT] 📄 Contenido original:", content)
-
-        // Buscar botones en la respuesta
-        const widgetButtonsMatch = content.match(/__WIDGET_BUTTONS__(.+?)__END_BUTTONS__/s)
-        if (widgetButtonsMatch) {
-          console.log("[WIDGET-CHAT] 🔘 Marcador de botones encontrado")
-          try {
-            const buttonData = JSON.parse(widgetButtonsMatch[1])
-            content = content.replace(widgetButtonsMatch[0], "").trim()
-            buttons = {
-              options: buttonData.opciones,
-              context: buttonData.contexto || "",
-              callback_id: buttonData.callback_id || "default_callback",
-            }
-            console.log("[WIDGET-CHAT] ✅ Botones extraídos:", buttons)
-          } catch (e) {
-            console.error("[WIDGET-CHAT] ❌ Error parseando botones:", e)
-          }
+        if (!response.ok) {
+          throw new Error(`Error ${response.status}: ${response.statusText}`)
         }
 
-        const botMessage: Message = {
+        const data = await response.json()
+        console.log("[WIDGET-CHAT] 📋 Datos completos recibidos:", data)
+
+        if (data.success && data.response) {
+          let content = data.response
+          let buttons = null
+
+          console.log("[WIDGET-CHAT] 🔍 Analizando respuesta para botones...")
+          console.log("[WIDGET-CHAT] 📄 Contenido original:", content)
+
+          // Buscar botones en la respuesta
+          const widgetButtonsMatch = content.match(/__WIDGET_BUTTONS__(.+?)__END_BUTTONS__/s)
+          if (widgetButtonsMatch) {
+            console.log("[WIDGET-CHAT] 🔘 Marcador de botones encontrado")
+            try {
+              const buttonData = JSON.parse(widgetButtonsMatch[1])
+              content = content.replace(widgetButtonsMatch[0], "").trim()
+              buttons = {
+                options: buttonData.opciones,
+                context: buttonData.contexto || "",
+                callback_id: buttonData.callback_id || "default_callback",
+              }
+              console.log("[WIDGET-CHAT] ✅ Botones extraídos:", buttons)
+            } catch (e) {
+              console.error("[WIDGET-CHAT] ❌ Error parseando botones:", e)
+            }
+          }
+
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            content: content.trim(),
+            isUser: false,
+            timestamp: new Date(),
+            buttons: buttons,
+          }
+
+          console.log("[WIDGET-CHAT] 🤖 Mensaje del bot a agregar:", {
+            content: botMessage.content,
+            hasButtons: !!botMessage.buttons,
+            buttonsCount: botMessage.buttons?.options?.length || 0,
+          })
+
+          setMessages((prev) => {
+            console.log("[WIDGET-CHAT] 📝 Agregando mensaje del bot")
+            return [...prev, botMessage]
+          })
+        } else {
+          throw new Error(data.error || "Error desconocido en la respuesta")
+        }
+      } catch (error) {
+        console.error("[WIDGET-CHAT] ❌ Error enviando mensaje:", error)
+        const errorMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: content.trim(),
+          content: "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente.",
           isUser: false,
           timestamp: new Date(),
-          buttons: buttons,
         }
-
-        console.log("[WIDGET-CHAT] 🤖 Mensaje del bot a agregar:", {
-          content: botMessage.content,
-          hasButtons: !!botMessage.buttons,
-          buttonsCount: botMessage.buttons?.options?.length || 0,
-        })
-
-        setMessages((prev) => {
-          console.log("[WIDGET-CHAT] 📝 Agregando mensaje del bot")
-          return [...prev, botMessage]
-        })
-      } else {
-        throw new Error(data.error || "Error desconocido en la respuesta")
+        setMessages((prev) => [...prev, errorMessage])
+      } finally {
+        setIsLoading(false)
+        console.log("[WIDGET-CHAT] ✅ Proceso de envío completado")
       }
-    } catch (error) {
-      console.error("[WIDGET-CHAT] ❌ Error enviando mensaje:", error)
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente.",
-        isUser: false,
-        timestamp: new Date(),
+    },
+    [mounted, initialized, inputValue, isLoading, sessionId, clienteId],
+  )
+
+  const handleKeyPress = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault()
+        console.log("[WIDGET-CHAT] ⌨️ Enter presionado, enviando mensaje")
+        sendMessage()
       }
-      setMessages((prev) => [...prev, errorMessage])
-    } finally {
-      setIsLoading(false)
-      console.log("[WIDGET-CHAT] ✅ Proceso de envío completado")
-    }
-  }
+    },
+    [sendMessage],
+  )
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      console.log("[WIDGET-CHAT] ⌨️ Enter presionado, enviando mensaje")
-      sendMessage()
-    }
-  }
+  const handleButtonClick = useCallback(
+    (option: string) => {
+      console.log("[WIDGET-CHAT] 🔘 Botón clickeado:", option)
+      sendMessage(option)
+    },
+    [sendMessage],
+  )
 
-  const handleButtonClick = (option: string) => {
-    console.log("[WIDGET-CHAT] 🔘 Botón clickeado:", option)
-    sendMessage(option)
-  }
-
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(() => {
     console.log("[WIDGET-CHAT] 📤 Submit button clicked")
     sendMessage()
-  }
+  }, [sendMessage])
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString("es-ES", {
@@ -242,7 +256,7 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
   }
 
   // Loading state
-  if (!mounted) {
+  if (!mounted || !initialized) {
     console.log("[WIDGET-CHAT] ⏳ Mostrando loading state")
     return (
       <div
