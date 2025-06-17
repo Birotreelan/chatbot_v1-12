@@ -248,9 +248,26 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
   }
 
   const getJavaScriptCode = () => {
-    if (!config?.id || !config?.cliente_id || !baseUrl) return "// Se requiere cliente_id para generar el código"
+    if (!config?.id || !baseUrl) return "// Se requiere configuración válida para generar el código"
 
-    return `<script src="${baseUrl}/widget-loader.js" data-client-id="${config.cliente_id}"></script>`
+    // Usar cliente_id si está disponible, sino usar el id de la configuración
+    const clienteId = config?.cliente_id || config.id
+
+    return `<!-- Widget de Chat AI - Insertar antes del cierre de </body> -->
+<script 
+  src="${baseUrl}/widget-loader.js" 
+  data-cliente-id="${clienteId}"
+  data-position="${formData.widgetPosition || "bottom-right"}">
+</script>
+
+<!-- Configuración opcional adicional:
+<script 
+  src="${baseUrl}/widget-loader.js" 
+  data-cliente-id="${clienteId}"
+  data-position="bottom-right"
+  data-widget-url="${baseUrl}/demo">
+</script>
+-->`
   }
 
   // Mostrar loading hasta que el componente esté montado
@@ -789,7 +806,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                       <div>
                         <Label className="text-sm font-medium">Código JavaScript</Label>
                         <div className="mt-2">
-                          <Textarea value={getJavaScriptCode()} readOnly rows={8} className="font-mono text-sm" />
+                          <Textarea value={getJavaScriptCode()} readOnly rows={12} className="font-mono text-sm" />
                           <Button
                             type="button"
                             variant="outline"
@@ -808,14 +825,21 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <h4 className="font-medium text-blue-900 mb-2">Instrucciones de Integración</h4>
                     <ul className="text-sm text-blue-800 space-y-1">
-                      <li>• Para integrar como iframe: Copia y pega el código HTML en tu sitio web</li>
                       <li>
-                        • Para integrar como widget flotante: Copia y pega el código JavaScript antes del cierre del tag
-                        &lt;/body&gt;
+                        • <strong>Para iframe:</strong> Copia y pega el código HTML en tu sitio web
                       </li>
-                      <li>• El widget se posicionará automáticamente según la configuración seleccionada</li>
-                      <li>• Puedes personalizar todos los aspectos visuales desde la pestaña "Widget"</li>
-                      <li>• El texto del botón flotante aparecerá automáticamente si está habilitado</li>
+                      <li>
+                        • <strong>Para widget flotante:</strong> Copia y pega el código JavaScript antes del cierre del
+                        tag &lt;/body&gt;
+                      </li>
+                      <li>
+                        • <strong>Cliente ID:</strong> {config?.cliente_id || config?.id || "No configurado"}
+                      </li>
+                      <li>
+                        • <strong>Posición:</strong> {formData.widgetPosition}
+                      </li>
+                      <li>• El widget aparecerá automáticamente cuando se cargue la página</li>
+                      <li>• Puedes personalizar la posición usando: bottom-right, bottom-left, top-right, top-left</li>
                     </ul>
                   </div>
                 </>
