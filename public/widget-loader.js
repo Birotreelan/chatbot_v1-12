@@ -1,9 +1,10 @@
 ;(() => {
   const scriptElement = document.currentScript
-  const clienteId = scriptElement.getAttribute("data-cliente-id")
+  // Buscar tanto data-cliente-id como data-client-id para compatibilidad
+  const clienteId = scriptElement.getAttribute("data-cliente-id") || scriptElement.getAttribute("data-client-id")
 
   if (!clienteId) {
-    console.error("[WIDGET-LOADER] Error: data-cliente-id es requerido")
+    console.error("[WIDGET-LOADER] Error: data-cliente-id o data-client-id es requerido")
     return
   }
 
@@ -16,15 +17,22 @@
 
   const config = {
     position: scriptElement.getAttribute("data-position") || "bottom-right",
-    widgetUrl: scriptElement.getAttribute("data-widget-url") || `${baseUrl}/widget`,
+    widgetUrl: `${baseUrl}/widget`,
   }
 
   console.log("[WIDGET-LOADER] Configuración:", config)
 
   let isWidgetVisible = false
   let widgetContainer = null
+  let floatingButton = null
 
   function createFloatingButton() {
+    // Verificar si ya existe
+    if (document.getElementById("chat-widget-button")) {
+      console.log("[WIDGET-LOADER] Botón ya existe")
+      return document.getElementById("chat-widget-button")
+    }
+
     const button = document.createElement("div")
     button.id = "chat-widget-button"
     button.style.cssText = `
@@ -60,10 +68,17 @@
     })
 
     document.body.appendChild(button)
+    console.log("[WIDGET-LOADER] Botón flotante creado")
     return button
   }
 
   function createWidget() {
+    // Verificar si ya existe
+    if (document.getElementById("chat-widget-container")) {
+      console.log("[WIDGET-LOADER] Container ya existe")
+      return document.getElementById("chat-widget-container")
+    }
+
     const container = document.createElement("div")
     container.id = "chat-widget-container"
     container.style.cssText = `
@@ -88,37 +103,40 @@
       border: none;
       border-radius: 12px;
     `
-    iframe.src = `${config.widgetUrl}?clienteId=${clienteId}&position=${config.position}&embedded=true`
 
-    // Manejar errores de carga del iframe
-    iframe.onerror = () => {
-      console.error("[WIDGET-LOADER] Error cargando el widget")
-      container.innerHTML = `
-        <div style="padding: 20px; text-align: center; color: #666; height: 100%; display: flex; flex-direction: column; justify-content: center;">
-          <p style="margin-bottom: 10px;">Error cargando el chat</p>
-          <p style="font-size: 12px;">Intenta recargar la página</p>
-        </div>
-      `
+    // URL del widget con parámetros correctos
+    const widgetUrl = `${config.widgetUrl}?clienteId=${encodeURIComponent(clienteId)}&position=${encodeURIComponent(config.position)}&embedded=true`
+    iframe.src = widgetUrl
+
+    console.log("[WIDGET-LOADER] URL del iframe:", widgetUrl)
+
+    // Manejar carga exitosa
+    iframe.onload = () => {
+      console.log("[WIDGET-LOADER] ✅ Widget cargado exitosamente")
     }
 
-    // Agregar evento de carga exitosa
-    iframe.onload = () => {
-      console.log("[WIDGET-LOADER] Widget cargado exitosamente")
+    // Manejar errores de carga
+    iframe.onerror = (error) => {
+      console.error("[WIDGET-LOADER] ❌ Error cargando el widget:", error)
+      container.innerHTML = `
+        <div style="padding: 20px; text-align: center; color: #666; height: 100%; display: flex; flex-direction: column; justify-content: center; font-family: Arial, sans-serif;">
+          <p style="margin-bottom: 10px; font-size: 14px;">Error cargando el chat</p>
+          <p style="font-size: 12px; color: #999;">Intenta recargar la página</p>
+          <p style="font-size: 10px; color: #ccc; margin-top: 10px;">ID: ${clienteId}</p>
+        </div>
+      `
     }
 
     container.appendChild(iframe)
     document.body.appendChild(container)
 
-    console.log("[WIDGET-LOADER] Widget creado:", {
-      src: iframe.src,
-      clienteId: clienteId,
-      position: config.position,
-    })
-
+    console.log("[WIDGET-LOADER] Widget container creado")
     return container
   }
 
   function toggleWidget() {
+    console.log("[WIDGET-LOADER] Toggle widget, visible:", isWidgetVisible)
+
     if (!widgetContainer) {
       widgetContainer = createWidget()
     }
@@ -126,24 +144,21 @@
     if (isWidgetVisible) {
       widgetContainer.style.display = "none"
       isWidgetVisible = false
+      console.log("[WIDGET-LOADER] Widget ocultado")
     } else {
       widgetContainer.style.display = "block"
       isWidgetVisible = true
+      console.log("[WIDGET-LOADER] Widget mostrado")
     }
   }
 
   function initWidget() {
     try {
-      // Verificar si ya existe un botón del widget
-      if (document.getElementById("chat-widget-button")) {
-        console.log("[WIDGET-LOADER] Widget ya existe, omitiendo inicialización")
-        return
-      }
-
-      createFloatingButton()
-      console.log("[WIDGET-LOADER] Widget inicializado correctamente")
+      console.log("[WIDGET-LOADER] Inicializando widget...")
+      floatingButton = createFloatingButton()
+      console.log("[WIDGET-LOADER] ✅ Widget inicializado correctamente")
     } catch (error) {
-      console.error("[WIDGET-LOADER] Error inicializando widget:", error)
+      console.error("[WIDGET-LOADER] ❌ Error inicializando widget:", error)
     }
   }
 

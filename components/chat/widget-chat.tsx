@@ -5,8 +5,7 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { Send, Minimize2 } from "lucide-react"
+import { Send } from "lucide-react"
 
 interface Message {
   id: string
@@ -25,8 +24,9 @@ export default function WidgetChat({ clienteId, position = "bottom-right", embed
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [isMinimized, setIsMinimized] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  console.log("[WIDGET-CHAT] Componente montado con:", { clienteId, position, embedded })
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -40,7 +40,7 @@ export default function WidgetChat({ clienteId, position = "bottom-right", embed
     // Mensaje de bienvenida
     setMessages([
       {
-        id: "1",
+        id: "welcome",
         content:
           "¡Hola! Soy el asistente virtual del Instituto Oftalmológico Saravia Olmos. ¿En qué puedo ayudarte hoy?",
         role: "assistant",
@@ -65,6 +65,8 @@ export default function WidgetChat({ clienteId, position = "bottom-right", embed
     setIsLoading(true)
 
     try {
+      console.log("[WIDGET-CHAT] Enviando mensaje:", input.trim())
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -72,27 +74,32 @@ export default function WidgetChat({ clienteId, position = "bottom-right", embed
         },
         body: JSON.stringify({
           message: input.trim(),
-          clienteId: clienteId,
+          cliente_id: clienteId,
+          session_id: `widget_${clienteId}_${Date.now()}`,
           source: "widget",
         }),
       })
 
+      console.log("[WIDGET-CHAT] Respuesta del servidor:", response.status, response.statusText)
+
       if (!response.ok) {
-        throw new Error("Error en la respuesta del servidor")
+        throw new Error(`Error ${response.status}: ${response.statusText}`)
       }
 
       const data = await response.json()
+      console.log("[WIDGET-CHAT] Datos recibidos:", data)
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: data.response || "Lo siento, no pude procesar tu mensaje. Por favor, intenta de nuevo.",
+        content:
+          data.response || data.message || "Lo siento, no pude procesar tu mensaje. Por favor, intenta de nuevo.",
         role: "assistant",
         timestamp: new Date(),
       }
 
       setMessages((prev) => [...prev, assistantMessage])
     } catch (error) {
-      console.error("Error sending message:", error)
+      console.error("[WIDGET-CHAT] Error enviando mensaje:", error)
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         content: "Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde.",
@@ -105,98 +112,75 @@ export default function WidgetChat({ clienteId, position = "bottom-right", embed
     }
   }
 
-  if (isMinimized) {
-    return (
-      <div className="fixed bottom-4 right-4 z-50">
-        <Button
-          onClick={() => setIsMinimized(false)}
-          className="rounded-full w-12 h-12 bg-green-600 hover:bg-green-700 shadow-lg"
-        >
-          💬
-        </Button>
-      </div>
-    )
-  }
-
   return (
-    <div className={`${embedded ? "h-full w-full" : "fixed bottom-4 right-4 z-50"}`}>
-      <Card className={`${embedded ? "h-full border-0 rounded-none" : "w-80 h-96"} shadow-xl`}>
-        <CardHeader className="bg-green-600 text-white p-3 flex flex-row items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-sm">Asistente Virtual</h3>
-            <p className="text-xs opacity-90">Instituto Oftalmológico</p>
-          </div>
-          {!embedded && (
-            <div className="flex gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsMinimized(true)}
-                className="text-white hover:bg-green-700 p-1 h-6 w-6"
-              >
-                <Minimize2 className="h-3 w-3" />
-              </Button>
+    <div className="flex flex-col h-full bg-white">
+      {/* Header */}
+      <div className="bg-green-600 text-white p-4">
+        <h3 className="font-semibold text-lg">Asistente Virtual</h3>
+        <p className="text-sm opacity-90">Instituto Oftalmológico Saravia Olmos</p>
+      </div>
+
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.map((message) => (
+          <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div
+              className={`max-w-[80%] p-3 rounded-lg text-sm ${
+                message.role === "user" ? "bg-green-600 text-white" : "bg-gray-100 text-gray-800"
+              }`}
+            >
+              <p className="whitespace-pre-wrap">{message.content}</p>
+              <p className={`text-xs mt-1 ${message.role === "user" ? "text-green-100" : "text-gray-500"}`}>
+                {message.timestamp.toLocaleTimeString("es-ES", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </p>
             </div>
-          )}
-        </CardHeader>
+          </div>
+        ))}
 
-        <CardContent className="p-0 flex flex-col h-full">
-          <div className={`flex-1 overflow-y-auto p-3 space-y-3 ${embedded ? "h-0" : "max-h-64"}`}>
-            {messages.map((message) => (
-              <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="bg-gray-100 p-3 rounded-lg">
+              <div className="flex space-x-1">
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
                 <div
-                  className={`max-w-[80%] p-2 rounded-lg text-sm ${
-                    message.role === "user" ? "bg-green-600 text-white" : "bg-gray-100 text-gray-800"
-                  }`}
-                >
-                  {message.content}
-                </div>
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "0.1s" }}
+                ></div>
+                <div
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "0.2s" }}
+                ></div>
               </div>
-            ))}
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-gray-100 p-2 rounded-lg text-sm">
-                  <div className="flex space-x-1">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                    <div
-                      className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "0.1s" }}
-                    ></div>
-                    <div
-                      className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "0.2s" }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
+            </div>
           </div>
+        )}
 
-          <div className="border-t p-3">
-            <form onSubmit={handleSubmit} className="flex gap-2">
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Escribe tu mensaje..."
-                disabled={isLoading}
-                className="flex-1 text-sm"
-              />
-              <Button
-                type="submit"
-                disabled={isLoading || !input.trim()}
-                size="sm"
-                className="bg-green-600 hover:bg-green-700"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
-            </form>
-          </div>
-        </CardContent>
-      </Card>
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input Area */}
+      <div className="border-t p-4">
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <Input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Escribe tu mensaje..."
+            disabled={isLoading}
+            className="flex-1"
+          />
+          <Button type="submit" disabled={isLoading || !input.trim()} className="bg-green-600 hover:bg-green-700">
+            <Send className="h-4 w-4" />
+          </Button>
+        </form>
+      </div>
+
+      {/* Footer */}
+      <div className="p-2 text-center border-t">
+        <p className="text-xs text-gray-500">Powered by Treelan</p>
+      </div>
     </div>
   )
 }
-
-// También exportar como exportación nombrada para compatibilidad
-export { WidgetChat }
