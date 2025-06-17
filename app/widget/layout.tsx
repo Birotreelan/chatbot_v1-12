@@ -1,11 +1,5 @@
 import type React from "react"
-import type { Metadata } from "next"
 import "../globals.css"
-
-export const metadata: Metadata = {
-  title: "Widget Chat - Treelan",
-  description: "Asistente virtual para Instituto Oftalmológico",
-}
 
 export default function WidgetLayout({
   children,
@@ -16,19 +10,28 @@ export default function WidgetLayout({
     <html lang="es">
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <style>{`
-          * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-          }
-          html, body {
-            height: 100%;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          }
-        `}</style>
+        <title>Widget Chat - Treelan</title>
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+            html, body {
+              height: 100%;
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `,
+          }}
+        />
       </head>
-      <body>{children}</body>
+      <body style={{ height: "100vh", margin: 0, padding: 0 }}>{children}</body>
     </html>
   )
 }
