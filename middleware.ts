@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
-import { verifyAuth } from "@/lib/auth"
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Permitir CORS para rutas del widget
-  if (pathname.startsWith("/api/widget") || pathname.startsWith("/widget") || pathname.startsWith("/api/chat")) {
+  if (pathname.startsWith("/widget") || pathname.startsWith("/api/chat") || pathname.startsWith("/api/widget")) {
     const response = NextResponse.next()
 
     // Agregar headers CORS
@@ -17,15 +16,6 @@ export function middleware(request: NextRequest) {
     response.headers.set("Content-Security-Policy", "frame-ancestors *")
 
     return response
-  }
-
-  // Rutas protegidas del dashboard
-  if (pathname.startsWith("/dashboard")) {
-    const token = request.cookies.get("auth-token")?.value
-
-    if (!token || !verifyAuth(token)) {
-      return NextResponse.redirect(new URL("/login", request.url))
-    }
   }
 
   // Si es una solicitud a la API de webhook, permitir
@@ -45,5 +35,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/api/widget/:path*", "/widget/:path*", "/api/chat/:path*"],
+  matcher: ["/api/:path*", "/widget/:path*"],
 }

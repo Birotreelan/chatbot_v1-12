@@ -94,11 +94,16 @@
     iframe.onerror = () => {
       console.error("[WIDGET-LOADER] Error cargando el widget")
       container.innerHTML = `
-        <div style="padding: 20px; text-align: center; color: #666;">
-          <p>Error cargando el chat</p>
+        <div style="padding: 20px; text-align: center; color: #666; height: 100%; display: flex; flex-direction: column; justify-content: center;">
+          <p style="margin-bottom: 10px;">Error cargando el chat</p>
           <p style="font-size: 12px;">Intenta recargar la página</p>
         </div>
       `
+    }
+
+    // Agregar evento de carga exitosa
+    iframe.onload = () => {
+      console.log("[WIDGET-LOADER] Widget cargado exitosamente")
     }
 
     container.appendChild(iframe)
@@ -129,6 +134,12 @@
 
   function initWidget() {
     try {
+      // Verificar si ya existe un botón del widget
+      if (document.getElementById("chat-widget-button")) {
+        console.log("[WIDGET-LOADER] Widget ya existe, omitiendo inicialización")
+        return
+      }
+
       createFloatingButton()
       console.log("[WIDGET-LOADER] Widget inicializado correctamente")
     } catch (error) {

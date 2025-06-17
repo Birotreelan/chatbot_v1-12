@@ -90,8 +90,3 @@ export async function requireAuth() {
 
   return session
 }
-
-// Verificar autenticación (alias para requireAuth)
-export async function verifyAuth() {
-  return await requireAuth()
-}
