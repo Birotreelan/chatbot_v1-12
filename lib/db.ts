@@ -1,6 +1,8 @@
 import { Redis } from "@upstash/redis"
+import { kv } from "@vercel/kv"
 import type { WhatsAppConfig, ThreadInfo, SystemStats } from "./types"
 import { nanoid } from "nanoid"
+import OpenAI from "openai"
 
 // Inicializar el cliente de Redis
 let redis: Redis | null = null
@@ -476,7 +478,7 @@ export async function getThreadForUser(
 
   // Crear un nuevo thread
   console.log(`[DB] 📝 No se encontró thread existente, creando uno nuevo`)
-  const openai = new (await import("openai")).default({
+  const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   })
 
@@ -518,7 +520,7 @@ export async function resetThreadForUser(
 
   try {
     // 1. CREAR UN THREAD COMPLETAMENTE NUEVO EN OPENAI
-    const openai = new (await import("openai")).default({
+    const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     })
 
@@ -664,6 +666,77 @@ export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig 
   return getWhatsAppConfig(id)
 }
 
-// Export alias for compatibility
+// Funciones para Vercel KV
+
+export async function saveConfig(config: WhatsAppConfig): Promise<void> {
+  try {
+    await kv.hset("whatsapp_configs", { [config.id]: config })
+    console.log("[DB] Configuración guardada:", config.id)
+  } catch (error) {
+    console.error("[DB] Error al guardar configuración:", error)
+    throw error
+  }
+}
+
+export async function deleteConfig(id: string): Promise<void> {
+  try {
+    await kv.hdel("whatsapp_configs", id)
+    console.log("[DB] Configuración eliminada:", id)
+  } catch (error) {
+    console.error("[DB] Error al eliminar configuración:", error)
+    throw error
+  }
+}
+
+// Export aliases for compatibility
 export const getWhatsappConfigByClienteId = getConfigByClienteId
-export const getConfigById = getWhatsAppConfig // Alias para compatibilidad
+
+// Función para obtener configuración por ID (usando KV como fallback)
+export async function getConfigById(id: string): Promise<WhatsAppConfig | null> {
+  try {
+    console.log("[DB] 🔍 Buscando configuración por ID:", id)
+
+    // Primero intentar con el método principal
+    let config = await getWhatsAppConfig(id)
+
+    if (!config) {
+      // Fallback a Vercel KV
+      try {
+        config = (await kv.hget("whatsapp_configs", id)) as WhatsAppConfig | null
+        console.log("[DB] Configuración encontrada en KV:", !!config)
+      } catch (kvError) {
+        console.error("[DB] Error al buscar en KV:", kvError)
+      }
+    }
+
+    return config
+  } catch (error) {
+    console.error("[DB] Error al buscar configuración por ID:", error)
+    return null
+  }
+}
+
+// Función para obtener todas las configuraciones (usando KV como fallback)
+export async function getAllConfigs(): Promise<WhatsAppConfig[]> {
+  try {
+    // Primero intentar con el método principal
+    let configs = await getAllWhatsAppConfigs()
+
+    if (configs.length === 0) {
+      // Fallback a Vercel KV
+      try {
+        const kvConfigs = await kv.hgetall("whatsapp_configs")
+        if (kvConfigs) {
+          configs = Object.values(kvConfigs) as WhatsAppConfig[]
+        }
+      } catch (kvError) {
+        console.error("[DB] Error al obtener configuraciones de KV:", kvError)
+      }
+    }
+
+    return configs
+  } catch (error) {
+    console.error("[DB] Error al obtener todas las configuraciones:", error)
+    return []
+  }
+}
