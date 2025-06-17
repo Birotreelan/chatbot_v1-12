@@ -28,9 +28,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     displayName: config?.displayName || "",
     phoneNumberId: config?.phoneNumberId || "",
     wabaId: config?.wabaId || "",
-    // Reemplazar esta línea:
-    // assistantId: config?.assistantId || "",
-    // Con estas líneas:
     whatsappAssistantId: config?.whatsappAssistantId || "",
     widgetAssistantId: config?.widgetAssistantId || "",
     accessToken: config?.accessToken || "",
@@ -268,20 +265,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                   />
                 </div>
 
-                {/* Reemplazar este div completo:
-                <div className="space-y-2">
-                  <Label htmlFor="assistantId">Assistant ID</Label>
-                  <Input
-                    id="assistantId"
-                    name="assistantId"
-                    value={formData.assistantId}
-                    onChange={handleChange}
-                    placeholder="asst_..."
-                    required
-                  />
-                </div>
-
-                // Con estos dos divs: */}
                 <div className="space-y-2">
                   <Label htmlFor="whatsappAssistantId">Assistant ID para WhatsApp</Label>
                   <Input
@@ -823,3 +806,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     </Card>
   )
 }
+
+// Exportación por defecto y nombrada
+export default WhatsAppConfigForm
