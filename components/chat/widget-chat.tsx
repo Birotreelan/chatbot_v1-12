@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,7 +39,9 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
   const [mounted, setMounted] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Configuración por defecto
+  console.log("[WIDGET-CHAT] 🔄 Componente inicializándose con clienteId:", clienteId)
+
+  // Configuración por defecto (igual que en el dashboard)
   const defaultConfig = {
     widgetTitle: "Asistente Virtual",
     widgetSubtitle: "Instituto Oftalmológico Saravia Olmos",
@@ -52,44 +53,58 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
     ...config,
   }
 
-  // Marcar como montado para evitar problemas de hidratación
+  console.log("[WIDGET-CHAT] 📋 Configuración aplicada:", defaultConfig)
+
+  // Efecto de montaje
   useEffect(() => {
+    console.log("[WIDGET-CHAT] 🔄 Efecto de montaje ejecutándose...")
+
+    // Generar session_id único
+    const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    setSessionId(newSessionId)
+    console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
+
+    // Agregar mensaje de bienvenida
+    if (defaultConfig.widgetWelcomeMessage) {
+      const welcomeMessage: Message = {
+        id: "welcome",
+        content: defaultConfig.widgetWelcomeMessage,
+        isUser: false,
+        timestamp: new Date(),
+      }
+      setMessages([welcomeMessage])
+      console.log("[WIDGET-CHAT] 👋 Mensaje de bienvenida agregado")
+    }
+
     setMounted(true)
+    console.log("[WIDGET-CHAT] ✅ Componente montado correctamente")
   }, [])
 
-  // Generar session_id único al montar el componente
+  // Scroll automático
   useEffect(() => {
-    if (mounted) {
-      const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      setSessionId(newSessionId)
-      console.log("[WIDGET-CHAT] Session ID generado:", newSessionId)
-
-      // Agregar mensaje de bienvenida
-      if (defaultConfig.widgetWelcomeMessage) {
-        setMessages([
-          {
-            id: "welcome",
-            content: defaultConfig.widgetWelcomeMessage,
-            isUser: false,
-            timestamp: new Date(),
-          },
-        ])
-      }
-    }
-  }, [mounted, defaultConfig.widgetWelcomeMessage])
-
-  // Scroll automático al final
-  useEffect(() => {
-    if (mounted) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (mounted && messagesEndRef.current) {
+      console.log("[WIDGET-CHAT] 📜 Haciendo scroll automático")
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
     }
   }, [messages, mounted])
 
   const sendMessage = async (text?: string) => {
-    if (!mounted) return
+    if (!mounted) {
+      console.log("[WIDGET-CHAT] ⚠️ Componente no montado, cancelando envío")
+      return
+    }
 
     const messageText = text || inputValue.trim()
-    if (!messageText || isLoading || !sessionId) return
+    if (!messageText || isLoading || !sessionId) {
+      console.log("[WIDGET-CHAT] ⚠️ Condiciones no cumplidas para envío:", {
+        messageText: !!messageText,
+        isLoading,
+        sessionId: !!sessionId,
+      })
+      return
+    }
+
+    console.log("[WIDGET-CHAT] 📤 Enviando mensaje:", messageText)
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -98,15 +113,20 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
       timestamp: new Date(),
     }
 
-    setMessages((prev) => [...prev, userMessage])
-    if (!text) setInputValue("") // Solo limpiar input si no es un botón
+    setMessages((prev) => {
+      console.log("[WIDGET-CHAT] 📝 Agregando mensaje del usuario")
+      return [...prev, userMessage]
+    })
+
+    if (!text) setInputValue("")
     setIsLoading(true)
 
     try {
-      console.log("[WIDGET-CHAT] Enviando mensaje:", {
-        message: userMessage.content,
+      console.log("[WIDGET-CHAT] 🌐 Haciendo petición a /api/chat con:", {
+        message: messageText,
         cliente_id: clienteId,
         session_id: sessionId,
+        source: "widget",
       })
 
       const response = await fetch("/api/chat", {
@@ -118,7 +138,14 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
           message: messageText,
           cliente_id: clienteId,
           session_id: sessionId,
+          source: "widget",
         }),
+      })
+
+      console.log("[WIDGET-CHAT] 📡 Respuesta del servidor:", {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
       })
 
       if (!response.ok) {
@@ -126,19 +153,19 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
       }
 
       const data = await response.json()
-      console.log("[WIDGET-CHAT] Respuesta completa del servidor:", data)
+      console.log("[WIDGET-CHAT] 📋 Datos completos recibidos:", data)
 
       if (data.success && data.response) {
         let content = data.response
         let buttons = null
 
-        console.log("[WIDGET-CHAT] Analizando respuesta para botones...")
-        console.log("[WIDGET-CHAT] Contenido de la respuesta:", content)
+        console.log("[WIDGET-CHAT] 🔍 Analizando respuesta para botones...")
+        console.log("[WIDGET-CHAT] 📄 Contenido original:", content)
 
-        // Método 0: Buscar el marcador especial de botones
+        // Buscar botones en la respuesta
         const widgetButtonsMatch = content.match(/__WIDGET_BUTTONS__(.+?)__END_BUTTONS__/s)
         if (widgetButtonsMatch) {
-          console.log("[WIDGET-CHAT] ✅ Marcador especial de botones encontrado")
+          console.log("[WIDGET-CHAT] 🔘 Marcador de botones encontrado")
           try {
             const buttonData = JSON.parse(widgetButtonsMatch[1])
             content = content.replace(widgetButtonsMatch[0], "").trim()
@@ -147,36 +174,9 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
               context: buttonData.contexto || "",
               callback_id: buttonData.callback_id || "default_callback",
             }
-            console.log("[WIDGET-CHAT] ✅ Botones extraídos del marcador especial:", buttons)
+            console.log("[WIDGET-CHAT] ✅ Botones extraídos:", buttons)
           } catch (e) {
-            console.error("[WIDGET-CHAT] ❌ Error al parsear botones del marcador especial:", e)
-          }
-        }
-
-        // Método 1: Buscar el patrón de función de botones
-        if (!buttons) {
-          const buttonMatch =
-            content.match(/Ejecutar función: crear_botones_opciones\$\$\{(.*?)\}\$\$/s) ||
-            content.match(/crear_botones_opciones\$\$\{(.*?)\}\$\$/s)
-
-          if (buttonMatch) {
-            console.log("[WIDGET-CHAT] ✅ Patrón de función encontrado:", buttonMatch[0])
-            try {
-              const jsonStr = buttonMatch[1]
-              const cleanJsonStr = jsonStr.replace(/\{\{/g, "{").replace(/\}\}/g, "}")
-              const buttonData = JSON.parse(cleanJsonStr)
-
-              content = content.replace(buttonMatch[0], "")
-              buttons = {
-                options: buttonData.opciones,
-                context: buttonData.contexto,
-                callback_id: buttonData.callback_id,
-              }
-
-              console.log("[WIDGET-CHAT] ✅ Botones extraídos del patrón:", buttons)
-            } catch (e) {
-              console.error("[WIDGET-CHAT] ❌ Error al parsear botones del patrón:", e)
-            }
+            console.error("[WIDGET-CHAT] ❌ Error parseando botones:", e)
           }
         }
 
@@ -188,18 +188,21 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
           buttons: buttons,
         }
 
-        console.log("[WIDGET-CHAT] 📨 Mensaje final a mostrar:", {
+        console.log("[WIDGET-CHAT] 🤖 Mensaje del bot a agregar:", {
           content: botMessage.content,
           hasButtons: !!botMessage.buttons,
-          buttons: botMessage.buttons,
+          buttonsCount: botMessage.buttons?.options?.length || 0,
         })
 
-        setMessages((prev) => [...prev, botMessage])
+        setMessages((prev) => {
+          console.log("[WIDGET-CHAT] 📝 Agregando mensaje del bot")
+          return [...prev, botMessage]
+        })
       } else {
-        throw new Error(data.error || "Error desconocido")
+        throw new Error(data.error || "Error desconocido en la respuesta")
       }
     } catch (error) {
-      console.error("[WIDGET-CHAT] Error enviando mensaje:", error)
+      console.error("[WIDGET-CHAT] ❌ Error enviando mensaje:", error)
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         content: "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente.",
@@ -209,14 +212,26 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
       setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
+      console.log("[WIDGET-CHAT] ✅ Proceso de envío completado")
     }
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
+      console.log("[WIDGET-CHAT] ⌨️ Enter presionado, enviando mensaje")
       sendMessage()
     }
+  }
+
+  const handleButtonClick = (option: string) => {
+    console.log("[WIDGET-CHAT] 🔘 Botón clickeado:", option)
+    sendMessage(option)
+  }
+
+  const handleSubmit = () => {
+    console.log("[WIDGET-CHAT] 📤 Submit button clicked")
+    sendMessage()
   }
 
   const formatTime = (date: Date) => {
@@ -226,24 +241,16 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
     })
   }
 
-  const handleButtonClick = (option: string) => {
-    console.log("[WIDGET-CHAT] 🔘 Opción seleccionada:", option)
-    sendMessage(option)
-  }
-
-  const handleSubmit = () => {
-    sendMessage()
-  }
-
-  // No renderizar hasta que esté montado
+  // Loading state
   if (!mounted) {
+    console.log("[WIDGET-CHAT] ⏳ Mostrando loading state")
     return (
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          height: "100vh",
+          height: "100%",
           backgroundColor: "#f9fafb",
         }}
       >
@@ -253,46 +260,45 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
               width: "32px",
               height: "32px",
               border: "2px solid #e5e7eb",
-              borderTop: "2px solid #3b82f6",
+              borderTop: "2px solid #0ea5e9",
               borderRadius: "50%",
               animation: "spin 1s linear infinite",
               margin: "0 auto 16px",
             }}
           ></div>
-          <p style={{ color: "#6b7280" }}>Cargando widget...</p>
+          <p style={{ color: "#6b7280", fontSize: "14px" }}>Cargando chat...</p>
         </div>
       </div>
     )
   }
 
+  console.log("[WIDGET-CHAT] 🎨 Renderizando interfaz completa")
+
   return (
-    <div className="flex flex-col h-full bg-white">
-      {/* Header - solo mostrar si hideHeader es false */}
+    <div className="flex flex-col h-full bg-white" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      {/* Header */}
       {!hideHeader && (
-        <div
-          className="p-4 text-white relative"
-          style={{ backgroundColor: defaultConfig.widgetPrimaryColor || "#0ea5e9" }}
-        >
+        <div className="p-4 text-white" style={{ backgroundColor: defaultConfig.widgetPrimaryColor }}>
           <div className="text-left">
-            <h3 className="font-semibold text-lg">{defaultConfig.widgetTitle || "Asistente Virtual"}</h3>
-            <p className="text-sm opacity-90">{defaultConfig.widgetSubtitle || "Estamos aquí para ayudarte"}</p>
+            <h3 className="font-semibold text-lg">{defaultConfig.widgetTitle}</h3>
+            <p className="text-sm opacity-90">{defaultConfig.widgetSubtitle}</p>
           </div>
         </div>
       )}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ maxHeight: "calc(100% - 140px)" }}>
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
             <div
               className={`max-w-[80%] rounded-lg p-3 ${message.isUser ? "text-white" : "bg-gray-100 text-gray-800"}`}
               style={{
-                backgroundColor: message.isUser ? defaultConfig.widgetPrimaryColor || "#0ea5e9" : undefined,
+                backgroundColor: message.isUser ? defaultConfig.widgetPrimaryColor : undefined,
               }}
             >
               <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
 
-              {/* Botones interactivos si existen */}
+              {/* Botones interactivos */}
               {message.buttons && message.buttons.options.length > 0 && (
                 <div className="mt-3 space-y-2">
                   {message.buttons.context && (
@@ -302,10 +308,10 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
                     <button
                       key={index}
                       onClick={() => handleButtonClick(option)}
-                      className="w-full text-left text-sm py-2 px-3 rounded-md border border-gray-300 bg-white hover:bg-gray-50 transition-colors shadow-sm"
+                      className="w-full text-left text-sm py-2 px-3 rounded-md border bg-white hover:bg-gray-50 transition-colors shadow-sm"
                       style={{
-                        borderColor: defaultConfig.widgetPrimaryColor || "#0ea5e9",
-                        color: defaultConfig.widgetPrimaryColor || "#0ea5e9",
+                        borderColor: defaultConfig.widgetPrimaryColor,
+                        color: defaultConfig.widgetPrimaryColor,
                       }}
                     >
                       {option}
@@ -350,7 +356,7 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder={defaultConfig.widgetPlaceholder || "Escribe tu mensaje..."}
+            placeholder={defaultConfig.widgetPlaceholder}
             disabled={isLoading}
             className="flex-1"
           />
@@ -358,7 +364,7 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
             onClick={handleSubmit}
             disabled={!inputValue.trim() || isLoading}
             size="sm"
-            style={{ backgroundColor: defaultConfig.widgetPrimaryColor || "#0ea5e9" }}
+            style={{ backgroundColor: defaultConfig.widgetPrimaryColor }}
             className="text-white hover:opacity-90"
           >
             <Send className="w-4 h-4" />
@@ -367,7 +373,7 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
       </div>
 
       {/* Footer */}
-      <div className="p-2 text-center">
+      <div className="p-2 text-center border-t">
         <p className="text-xs text-gray-500">Powered by Treelan</p>
       </div>
     </div>

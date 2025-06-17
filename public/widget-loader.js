@@ -1,10 +1,26 @@
 ;(() => {
+  console.log("[WIDGET-LOADER] 🚀 === INICIANDO WIDGET LOADER ===")
+  console.log("[WIDGET-LOADER] 📅 Timestamp:", new Date().toISOString())
+  console.log("[WIDGET-LOADER] 🌐 URL actual:", window.location.href)
+  console.log("[WIDGET-LOADER] 📋 User Agent:", navigator.userAgent)
+
   const scriptElement = document.currentScript
+  console.log("[WIDGET-LOADER] 📜 Script element:", scriptElement)
+
   // Buscar tanto data-cliente-id como data-client-id para compatibilidad
   const clienteId = scriptElement.getAttribute("data-cliente-id") || scriptElement.getAttribute("data-client-id")
+  console.log("[WIDGET-LOADER] 🔍 Atributos del script:")
+  console.log("[WIDGET-LOADER] - data-cliente-id:", scriptElement.getAttribute("data-cliente-id"))
+  console.log("[WIDGET-LOADER] - data-client-id:", scriptElement.getAttribute("data-client-id"))
+  console.log("[WIDGET-LOADER] - clienteId final:", clienteId)
 
   if (!clienteId) {
-    console.error("[WIDGET-LOADER] Error: data-cliente-id o data-client-id es requerido")
+    console.error("[WIDGET-LOADER] ❌ Error: data-cliente-id o data-client-id es requerido")
+    console.error("[WIDGET-LOADER] 📋 Todos los atributos disponibles:")
+    for (let i = 0; i < scriptElement.attributes.length; i++) {
+      const attr = scriptElement.attributes[i]
+      console.error(`[WIDGET-LOADER] - ${attr.name}: ${attr.value}`)
+    }
     return
   }
 
