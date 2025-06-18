@@ -21,14 +21,7 @@ interface Message {
 
 interface WidgetChatProps {
   clienteId: string
-  config?: {
-    widgetTitle?: string
-    widgetSubtitle?: string
-    widgetWelcomeMessage?: string
-    widgetPlaceholder?: string
-    widgetPrimaryColor?: string
-    widgetSecondaryColor?: string
-  }
+  config?: any
   hideHeader?: boolean
 }
 
@@ -37,13 +30,12 @@ export default function WidgetChat({ clienteId, config = {}, hideHeader = false 
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string>("")
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   console.log("[WIDGET-CHAT] 🚀 === COMPONENTE INICIALIZADO ===")
   console.log("[WIDGET-CHAT] 📅 Timestamp:", new Date().toISOString())
   console.log("[WIDGET-CHAT] 🆔 Cliente ID:", clienteId)
-  console.log("[WIDGET-CHAT] ⚙️ Config:", config)
-  console.log("[WIDGET-CHAT] 🌐 URL actual:", typeof window !== "undefined" ? window.location.href : "SSR")
 
   // Configuración por defecto
   const defaultConfig = {
@@ -141,7 +133,6 @@ export default function WidgetChat({ clienteId, config = {}, hideHeader = false 
       console.log("[WIDGET-CHAT] - Status:", response.status)
       console.log("[WIDGET-CHAT] - Status Text:", response.statusText)
       console.log("[WIDGET-CHAT] - OK:", response.ok)
-      console.log("[WIDGET-CHAT] - Headers:", Object.fromEntries(response.headers.entries()))
 
       if (!response.ok) {
         const errorText = await response.text()
@@ -229,27 +220,29 @@ export default function WidgetChat({ clienteId, config = {}, hideHeader = false 
   console.log("[WIDGET-CHAT] 🎨 Renderizando interfaz con", messages.length, "mensajes")
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full bg-white shadow-lg rounded-lg overflow-hidden">
       {/* Header */}
       {!hideHeader && (
-        <div className="bg-green-600 text-white p-4 flex items-center space-x-3">
-          <MessageCircle className="h-6 w-6" />
-          <div>
-            <h3 className="font-semibold text-lg">{defaultConfig.widgetTitle}</h3>
-            <p className="text-sm opacity-90">{defaultConfig.widgetSubtitle}</p>
+        <div className="px-4 py-3 bg-blue-600 text-white">
+          <div className="flex items-center space-x-3">
+            <MessageCircle className="h-6 w-6" />
+            <div>
+              <h3 className="font-semibold text-base">{defaultConfig.widgetTitle}</h3>
+              <p className="text-sm opacity-90">{defaultConfig.widgetSubtitle}</p>
+            </div>
           </div>
         </div>
       )}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[85%] ${message.isUser ? "order-2" : "order-1"}`}>
               <div
-                className={`rounded-2xl px-4 py-3 ${
+                className={`rounded-2xl px-4 py-2 ${
                   message.isUser
-                    ? "bg-green-600 text-white rounded-br-md"
+                    ? "bg-blue-600 text-white rounded-br-md"
                     : "bg-white text-gray-800 rounded-bl-md shadow-sm border"
                 }`}
               >
@@ -266,7 +259,7 @@ export default function WidgetChat({ clienteId, config = {}, hideHeader = false 
                         <button
                           key={index}
                           onClick={() => handleButtonClick(option)}
-                          className="text-left text-sm py-2 px-3 rounded-lg border-2 border-green-600 bg-white text-green-600 hover:bg-green-50 transition-all duration-200 shadow-sm hover:shadow-md"
+                          className="text-left text-sm py-2 px-3 rounded-lg border-2 border-blue-600 bg-white text-blue-600 hover:bg-blue-50 transition-all duration-200 shadow-sm hover:shadow-md"
                         >
                           {option}
                         </button>
@@ -316,12 +309,12 @@ export default function WidgetChat({ clienteId, config = {}, hideHeader = false 
             onKeyPress={handleKeyPress}
             placeholder={defaultConfig.widgetPlaceholder}
             disabled={isLoading}
-            className="flex-1 rounded-full border-gray-300 focus:border-green-500 focus:ring-green-500"
+            className="flex-1 rounded-full border-gray-300 focus:border-blue-500 focus:ring-blue-500"
           />
           <Button
             onClick={() => sendMessage()}
             disabled={!inputValue.trim() || isLoading}
-            className="rounded-full bg-green-600 hover:bg-green-700 text-white px-4"
+            className="rounded-full bg-blue-600 hover:bg-blue-700 text-white px-4"
           >
             <Send className="h-4 w-4" />
           </Button>
