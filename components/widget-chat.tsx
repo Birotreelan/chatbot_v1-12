@@ -25,6 +25,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string>("")
+  const [widgetConfig, setWidgetConfig] = useState<any>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -32,30 +33,62 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   console.log("[WIDGET-CHAT] 📅 Timestamp:", new Date().toISOString())
   console.log("[WIDGET-CHAT] 🆔 Cliente ID:", clienteId)
 
-  // Configuración por defecto - usar los valores del config prop
-  const defaultConfig = {
-    widgetTitle: config?.widgetTitle || "Asistente Virtual",
-    widgetSubtitle: config?.widgetSubtitle || "Estamos aquí para ayudarte",
-    widgetWelcomeMessage: config?.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
-    widgetPlaceholder: config?.widgetPlaceholder || "Escribe tu mensaje...",
-    widgetPrimaryColor: config?.widgetPrimaryColor || "#0ea5e9",
-    widgetSecondaryColor: config?.widgetSecondaryColor || "#f0f9ff",
+  // Función para obtener la configuración actualizada
+  const fetchWidgetConfig = async () => {
+    try {
+      console.log("[WIDGET-CHAT] 🔄 Obteniendo configuración actualizada...")
+      const response = await fetch(`/api/widget?cliente_id=${encodeURIComponent(clienteId)}`)
+
+      if (response.ok) {
+        const fetchedConfig = await response.json()
+        console.log("[WIDGET-CHAT] ✅ Configuración obtenida:", fetchedConfig)
+        setWidgetConfig(fetchedConfig)
+        return fetchedConfig
+      } else {
+        console.warn("[WIDGET-CHAT] ⚠️ No se pudo obtener la configuración:", response.status)
+        return null
+      }
+    } catch (error) {
+      console.error("[WIDGET-CHAT] ❌ Error obteniendo configuración:", error)
+      return null
+    }
   }
 
-  console.log("[WIDGET-CHAT] 📋 Config recibido:", config)
+  // Usar la configuración obtenida o la pasada por props
+  const activeConfig = widgetConfig || config
+
+  // Configuración por defecto - usar los valores del config activo
+  const defaultConfig = {
+    widgetTitle: activeConfig?.widgetTitle || "Asistente Virtual",
+    widgetSubtitle: activeConfig?.widgetSubtitle || "Estamos aquí para ayudarte",
+    widgetWelcomeMessage: activeConfig?.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
+    widgetPlaceholder: activeConfig?.widgetPlaceholder || "Escribe tu mensaje...",
+    widgetPrimaryColor: activeConfig?.widgetPrimaryColor || "#0ea5e9",
+    widgetSecondaryColor: activeConfig?.widgetSecondaryColor || "#f0f9ff",
+  }
+
+  console.log("[WIDGET-CHAT] 📋 Config recibido por props:", config)
+  console.log("[WIDGET-CHAT] 📋 Config obtenido de API:", widgetConfig)
   console.log("[WIDGET-CHAT] 📋 Configuración final:", defaultConfig)
 
   // Inicialización
   useEffect(() => {
     console.log("[WIDGET-CHAT] 🔄 useEffect de inicialización ejecutándose...")
 
+    // Obtener configuración actualizada
+    fetchWidgetConfig()
+
     // Generar session_id único
     const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     setSessionId(newSessionId)
     console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
 
-    // Agregar mensaje de bienvenida
-    if (defaultConfig.widgetWelcomeMessage) {
+    console.log("[WIDGET-CHAT] ✅ Inicialización completada")
+  }, [clienteId])
+
+  // Agregar mensaje de bienvenida cuando la configuración esté lista
+  useEffect(() => {
+    if (defaultConfig.widgetWelcomeMessage && messages.length === 0) {
       const welcomeMessage: Message = {
         id: "welcome",
         content: defaultConfig.widgetWelcomeMessage,
@@ -65,9 +98,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
       setMessages([welcomeMessage])
       console.log("[WIDGET-CHAT] 👋 Mensaje de bienvenida agregado:", welcomeMessage)
     }
-
-    console.log("[WIDGET-CHAT] ✅ Inicialización completada")
-  }, [clienteId])
+  }, [defaultConfig.widgetWelcomeMessage])
 
   // Auto-scroll
   useEffect(() => {
@@ -195,10 +226,10 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   })
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full bg-white max-h-screen">
       {/* Header */}
       {!hideHeader && (
-        <div className="bg-sky-600 text-white p-4 flex items-center space-x-3">
+        <div className="bg-sky-600 text-white p-4 flex items-center space-x-3 flex-shrink-0">
           <MessageCircle className="h-6 w-6" />
           <div>
             <h3 className="font-semibold text-lg">{defaultConfig.widgetTitle}</h3>
@@ -208,7 +239,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
       )}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 min-h-0">
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[85%] ${message.isUser ? "order-2" : "order-1"}`}>
@@ -254,7 +285,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
       </div>
 
       {/* Input Area */}
-      <div className="p-4 bg-white border-t">
+      <div className="p-4 bg-white border-t flex-shrink-0">
         <div className="flex space-x-2">
           <Input
             value={inputValue}
@@ -275,7 +306,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 bg-gray-50 border-t">
+      <div className="px-4 py-2 bg-gray-50 border-t flex-shrink-0">
         <p className="text-xs text-gray-500 text-center">Powered by Treelan</p>
       </div>
     </div>
