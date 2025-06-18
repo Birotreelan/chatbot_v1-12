@@ -94,28 +94,34 @@
     const button = document.createElement("div")
     button.id = "chat-widget-button"
     button.style.cssText = `
-      position: fixed;
-      z-index: 9998;
-      height: 50px;
-      padding: 0 20px;
-      border-radius: 25px;
-      background: linear-gradient(135deg, #0ea5e9, #0284c7);
-      cursor: pointer;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      transition: all 0.3s ease;
-      ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
-      bottom: 20px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      color: white;
-      font-size: 14px;
-      font-weight: 500;
-      white-space: nowrap;
-      max-width: 320px;
-    `
+  position: fixed;
+  z-index: 9998;
+  min-height: 56px;
+  padding: 12px 24px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  cursor: pointer;
+  box-shadow: 0 8px 32px rgba(14, 165, 233, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
+  bottom: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  max-width: 340px;
+  border: 0;
+  outline: none;
+  text-decoration: none;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+`
 
     // Contenido del botón con icono y texto personalizado
     button.innerHTML = `
@@ -127,12 +133,12 @@
 
     button.addEventListener("click", toggleWidget)
     button.addEventListener("mouseenter", () => {
-      button.style.transform = "scale(1.05)"
-      button.style.boxShadow = "0 6px 25px rgba(0, 0, 0, 0.2)"
+      button.style.transform = "translateY(-2px) scale(1.02)"
+      button.style.boxShadow = "0 12px 40px rgba(14, 165, 233, 0.4)"
     })
     button.addEventListener("mouseleave", () => {
-      button.style.transform = "scale(1)"
-      button.style.boxShadow = "0 4px 20px rgba(0, 0, 0, 0.15)"
+      button.style.transform = "translateY(0) scale(1)"
+      button.style.boxShadow = "0 8px 32px rgba(14, 165, 233, 0.3)"
     })
 
     document.body.appendChild(button)
