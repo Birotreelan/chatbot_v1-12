@@ -1,64 +1,76 @@
-"use client"
+import type { Metadata } from "next"
+import { notFound } from "next/navigation"
+import { WidgetChat } from "@/components/widget-chat"
+import { getConfigByClienteId } from "@/lib/db"
 
-import { useEffect, useState } from "react"
-import WidgetChat from "@/components/chat/widget-chat"
-
-export default function WidgetPage() {
-  const [params, setParams] = useState<{
+interface Props {
+  searchParams: {
     clienteId: string
-    position: string
-    embedded: string
-  } | null>(null)
+    embedded?: string
+  }
+}
 
-  useEffect(() => {
-    console.log("[WIDGET-PAGE] 🚀 === PÁGINA WIDGET CARGANDO ===")
-    console.log("[WIDGET-PAGE] 📅 Timestamp:", new Date().toISOString())
-    console.log("[WIDGET-PAGE] 🌐 URL:", window.location.href)
+export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
+  const { clienteId, embedded } = searchParams
 
-    const urlParams = new URLSearchParams(window.location.search)
-    const clienteId = urlParams.get("clienteId") || ""
-    const position = urlParams.get("position") || "bottom-right"
-    const embedded = urlParams.get("embedded") || "false"
+  if (!clienteId) {
+    return {
+      title: "Widget",
+    }
+  }
 
-    console.log("[WIDGET-PAGE] 📋 Parámetros extraídos:")
-    console.log("[WIDGET-PAGE] - clienteId:", clienteId)
-    console.log("[WIDGET-PAGE] - position:", position)
-    console.log("[WIDGET-PAGE] - embedded:", embedded)
+  return {
+    title: `Widget - ${clienteId}`,
+  }
+}
 
-    setParams({ clienteId, position, embedded })
-    console.log("[WIDGET-PAGE] ✅ Parámetros establecidos")
-  }, [])
+// Obtener configuración del widget
+async function getWidgetConfig(clienteId: string) {
+  try {
+    console.log("[WIDGET-PAGE] 🔍 Obteniendo configuración para cliente:", clienteId)
 
-  if (!params) {
-    console.log("[WIDGET-PAGE] ⏳ Cargando parámetros...")
+    // Usar la función de la base de datos para obtener la configuración
+    const config = await getConfigByClienteId(clienteId)
+
+    if (!config) {
+      console.log("[WIDGET-PAGE] ❌ No se encontró configuración para cliente:", clienteId)
+      return null
+    }
+
+    console.log("[WIDGET-PAGE] ✅ Configuración encontrada:", {
+      widgetTitle: config.widgetTitle,
+      widgetSubtitle: config.widgetSubtitle,
+      widgetFloatingButtonText: config.widgetFloatingButtonText,
+    })
+
+    return config
+  } catch (error) {
+    console.error("[WIDGET-PAGE] ❌ Error obteniendo configuración:", error)
+    return null
+  }
+}
+
+export default async function Page({ searchParams }: Props) {
+  const { clienteId, embedded } = searchParams
+
+  if (!clienteId) {
+    notFound()
+  }
+
+  const widgetConfig = await getWidgetConfig(clienteId)
+
+  if (!widgetConfig) {
+    console.log("[WIDGET-PAGE] ❌ No se renderizará el widget por falta de configuración")
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sky-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Cargando widget...</p>
-        </div>
+      <div>
+        <p>No se puede mostrar el widget porque no hay configuración para este cliente.</p>
       </div>
     )
   }
 
-  if (!params.clienteId) {
-    console.log("[WIDGET-PAGE] ❌ Error: clienteId faltante")
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
-        <div className="text-center p-6 bg-white rounded-lg shadow-md max-w-md">
-          <div className="text-red-500 text-4xl mb-4">⚠️</div>
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Widget no configurado</h2>
-          <p className="text-gray-600 mb-4">Se requiere un clienteId válido.</p>
-          <div className="text-xs text-gray-400 bg-gray-100 p-2 rounded font-mono">URL: {window.location.href}</div>
-        </div>
-      </div>
-    )
-  }
-
-  console.log("[WIDGET-PAGE] 🎨 Renderizando WidgetChat")
   return (
-    <div className="h-screen w-full">
-      <WidgetChat clienteId={params.clienteId} />
-    </div>
+    <>
+      <WidgetChat clienteId={clienteId} config={widgetConfig} hideHeader={embedded === "true"} />
+    </>
   )
 }

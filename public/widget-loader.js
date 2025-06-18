@@ -84,7 +84,7 @@
     }
   }
 
-  function createFloatingButton(buttonText = "Obtené tu turno con nuestro asistente virtual") {
+  function createFloatingButton(buttonText = "Agendá tu turno con nuestro asistente virtual") {
     // Verificar si ya existe
     if (document.getElementById("chat-widget-button")) {
       console.log("[WIDGET-LOADER] Botón ya existe")
@@ -255,14 +255,14 @@
       }
 
       // Usar el texto personalizado o el por defecto
-      const buttonText = widgetConfig?.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual"
+      const buttonText = widgetConfig?.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual"
 
       floatingButton = createFloatingButton(buttonText)
       console.log("[WIDGET-LOADER] ✅ Widget inicializado correctamente")
     } catch (error) {
       console.error("[WIDGET-LOADER] ❌ Error inicializando widget:", error)
       // En caso de error, crear el botón con texto por defecto
-      floatingButton = createFloatingButton("Obtené tu turno con nuestro asistente virtual")
+      floatingButton = createFloatingButton()
     }
   }
 
