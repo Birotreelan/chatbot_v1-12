@@ -68,16 +68,22 @@
     }
   }
 
+  function updateFloatingButtonText(buttonText) {
+    if (floatingButton) {
+      const textSpan = floatingButton.querySelector("span")
+      if (textSpan) {
+        textSpan.textContent = buttonText
+        console.log("[WIDGET-LOADER] 🔄 Texto del botón actualizado a:", buttonText)
+      }
+    }
+  }
+
   function createFloatingButton(buttonText = "Agendá tu turno con nuestro asistente virtual") {
     // Verificar si ya existe
     if (document.getElementById("chat-widget-button")) {
       console.log("[WIDGET-LOADER] Botón ya existe, actualizando texto...")
       const existingButton = document.getElementById("chat-widget-button")
-      const textSpan = existingButton.querySelector("span")
-      if (textSpan) {
-        textSpan.textContent = buttonText
-        console.log("[WIDGET-LOADER] Texto del botón actualizado:", buttonText)
-      }
+      updateFloatingButtonText(buttonText)
       return existingButton
     }
 
@@ -231,24 +237,13 @@
     }
   }
 
-  // Función para actualizar el texto del botón
-  function updateFloatingButtonText() {
-    if (widgetConfig && floatingButton) {
-      const buttonText = widgetConfig.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual"
-      const textSpan = floatingButton.querySelector("span")
-      if (textSpan && textSpan.textContent !== buttonText) {
-        textSpan.textContent = buttonText
-        console.log("[WIDGET-LOADER] 🔄 Texto del botón actualizado:", buttonText)
-      }
-    }
-  }
-
   async function initWidget() {
     try {
       console.log("[WIDGET-LOADER] Inicializando widget...")
 
-      // Obtener configuración del servidor
+      // Obtener configuración del servidor PRIMERO
       widgetConfig = await fetchWidgetConfig()
+      console.log("[WIDGET-LOADER] 📋 Configuración inicial obtenida:", widgetConfig)
 
       // Verificar si el widget está habilitado
       if (widgetConfig && widgetConfig.widgetEnabled === false) {
@@ -256,20 +251,31 @@
         return
       }
 
-      // Usar el texto personalizado o el por defecto
+      // Usar el texto personalizado de la configuración obtenida
       const buttonText = widgetConfig?.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual"
+      console.log("[WIDGET-LOADER] 🔤 Texto del botón a usar:", buttonText)
 
+      // Crear el botón con el texto correcto
       floatingButton = createFloatingButton(buttonText)
 
-      // Actualizar el texto del botón periódicamente para reflejar cambios
-      setInterval(() => {
-        fetchWidgetConfig().then((newConfig) => {
-          if (newConfig) {
+      // Configurar actualización periódica para cambios futuros
+      setInterval(async () => {
+        try {
+          const newConfig = await fetchWidgetConfig()
+          if (newConfig && newConfig.widgetFloatingButtonText !== widgetConfig?.widgetFloatingButtonText) {
+            console.log("[WIDGET-LOADER] 🔄 Detectado cambio en el texto del botón")
+            console.log("[WIDGET-LOADER] - Anterior:", widgetConfig?.widgetFloatingButtonText)
+            console.log("[WIDGET-LOADER] - Nuevo:", newConfig.widgetFloatingButtonText)
+
             widgetConfig = newConfig
-            updateFloatingButtonText()
+            updateFloatingButtonText(
+              newConfig.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual",
+            )
           }
-        })
-      }, 30000) // Actualizar cada 30 segundos
+        } catch (error) {
+          console.error("[WIDGET-LOADER] ❌ Error en actualización periódica:", error)
+        }
+      }, 10000) // Actualizar cada 10 segundos para ser más responsivo
 
       console.log("[WIDGET-LOADER] ✅ Widget inicializado correctamente")
     } catch (error) {
