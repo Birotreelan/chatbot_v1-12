@@ -4,113 +4,62 @@ import { useEffect, useState } from "react"
 import WidgetChat from "@/components/chat/widget-chat"
 
 export default function WidgetPage() {
-  const [mounted, setMounted] = useState(false)
-  const [clienteId, setClienteId] = useState<string>("")
-  const [position, setPosition] = useState<string>("bottom-right")
-  const [embedded, setEmbedded] = useState<boolean>(false)
+  const [params, setParams] = useState<{
+    clienteId: string
+    position: string
+    embedded: string
+  } | null>(null)
 
   useEffect(() => {
-    // Solo ejecutar en el cliente
+    console.log("[WIDGET-PAGE] 🚀 === PÁGINA WIDGET CARGANDO ===")
+    console.log("[WIDGET-PAGE] 📅 Timestamp:", new Date().toISOString())
+    console.log("[WIDGET-PAGE] 🌐 URL:", window.location.href)
+    console.log("[WIDGET-PAGE] 🔍 Search:", window.location.search)
+
     const urlParams = new URLSearchParams(window.location.search)
-    const clienteIdParam = urlParams.get("clienteId") || ""
-    const positionParam = urlParams.get("position") || "bottom-right"
-    const embeddedParam = urlParams.get("embedded") === "true"
+    const clienteId = urlParams.get("clienteId") || ""
+    const position = urlParams.get("position") || "bottom-right"
+    const embedded = urlParams.get("embedded") || "false"
 
-    console.log("[WIDGET-PAGE] 📋 Parámetros de URL:", {
-      clienteId: clienteIdParam,
-      position: positionParam,
-      embedded: embeddedParam,
-    })
+    console.log("[WIDGET-PAGE] 📋 Parámetros extraídos:")
+    console.log("[WIDGET-PAGE] - clienteId:", clienteId)
+    console.log("[WIDGET-PAGE] - position:", position)
+    console.log("[WIDGET-PAGE] - embedded:", embedded)
 
-    setClienteId(clienteIdParam)
-    setPosition(positionParam)
-    setEmbedded(embeddedParam)
-    setMounted(true)
-    console.log("[WIDGET-PAGE] ✅ Componente montado correctamente")
+    setParams({ clienteId, position, embedded })
+    console.log("[WIDGET-PAGE] ✅ Parámetros establecidos")
   }, [])
 
-  if (!mounted) {
-    console.log("[WIDGET-PAGE] ⏳ Mostrando loading...")
+  if (!params) {
+    console.log("[WIDGET-PAGE] ⏳ Cargando parámetros...")
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100vh",
-          backgroundColor: "#f9fafb",
-          fontFamily: "system-ui, -apple-system, sans-serif",
-        }}
-      >
-        <div style={{ textAlign: "center" }}>
-          <div
-            style={{
-              width: "32px",
-              height: "32px",
-              border: "2px solid #e5e7eb",
-              borderTop: "2px solid #16a34a",
-              borderRadius: "50%",
-              animation: "spin 1s linear infinite",
-              margin: "0 auto 16px",
-            }}
-          ></div>
-          <p style={{ color: "#6b7280" }}>Cargando widget...</p>
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Cargando widget...</p>
         </div>
       </div>
     )
   }
 
-  if (!clienteId) {
-    console.log("[WIDGET-PAGE] ❌ Error: No clienteId")
+  if (!params.clienteId) {
+    console.log("[WIDGET-PAGE] ❌ Error: clienteId faltante")
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100vh",
-          backgroundColor: "#f9fafb",
-          fontFamily: "system-ui, -apple-system, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            textAlign: "center",
-            padding: "24px",
-            backgroundColor: "white",
-            borderRadius: "8px",
-            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-            maxWidth: "400px",
-          }}
-        >
-          <div style={{ fontSize: "48px", marginBottom: "16px" }}>⚠️</div>
-          <h2 style={{ fontSize: "20px", fontWeight: "600", color: "#1f2937", marginBottom: "8px" }}>
-            Widget no configurado
-          </h2>
-          <p style={{ color: "#6b7280", marginBottom: "16px" }}>
-            Se requiere un clienteId válido para cargar el widget.
-          </p>
-          <div
-            style={{
-              fontSize: "12px",
-              color: "#9ca3af",
-              backgroundColor: "#f3f4f6",
-              padding: "8px",
-              borderRadius: "4px",
-              fontFamily: "monospace",
-            }}
-          >
-            URL: {typeof window !== "undefined" ? window.location.href : "N/A"}
-          </div>
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="text-center p-6 bg-white rounded-lg shadow-md max-w-md">
+          <div className="text-red-500 text-4xl mb-4">⚠️</div>
+          <h2 className="text-xl font-semibold text-gray-800 mb-2">Widget no configurado</h2>
+          <p className="text-gray-600 mb-4">Se requiere un clienteId válido.</p>
+          <div className="text-xs text-gray-400 bg-gray-100 p-2 rounded font-mono">URL: {window.location.href}</div>
         </div>
       </div>
     )
   }
 
-  console.log("[WIDGET-PAGE] 🚀 Renderizando WidgetChat con:", { clienteId, position, embedded })
+  console.log("[WIDGET-PAGE] 🎨 Renderizando WidgetChat")
   return (
-    <div style={{ height: "100vh", width: "100vw", margin: 0, padding: 0 }}>
-      <WidgetChat clienteId={clienteId} config={{}} hideHeader={false} />
+    <div className="h-screen w-full">
+      <WidgetChat clienteId={params.clienteId} />
     </div>
   )
 }

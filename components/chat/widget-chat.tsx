@@ -1,8 +1,11 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef, useCallback } from "react"
-import { Send } from "lucide-react"
+
+import { useState, useEffect, useRef } from "react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Send, MessageCircle } from "lucide-react"
 
 interface Message {
   id: string
@@ -18,7 +21,7 @@ interface Message {
 
 interface WidgetChatProps {
   clienteId: string
-  config: {
+  config?: {
     widgetTitle?: string
     widgetSubtitle?: string
     widgetWelcomeMessage?: string
@@ -29,16 +32,18 @@ interface WidgetChatProps {
   hideHeader?: boolean
 }
 
-export default function WidgetChat({ clienteId, config, hideHeader = false }: WidgetChatProps) {
+export default function WidgetChat({ clienteId, config = {}, hideHeader = false }: WidgetChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string>("")
-  const [mounted, setMounted] = useState(false)
-  const [initialized, setInitialized] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  console.log("[WIDGET-CHAT] 🔄 Render con clienteId:", clienteId, "initialized:", initialized)
+  console.log("[WIDGET-CHAT] 🚀 === COMPONENTE INICIALIZADO ===")
+  console.log("[WIDGET-CHAT] 📅 Timestamp:", new Date().toISOString())
+  console.log("[WIDGET-CHAT] 🆔 Cliente ID:", clienteId)
+  console.log("[WIDGET-CHAT] ⚙️ Config:", config)
+  console.log("[WIDGET-CHAT] 🌐 URL actual:", typeof window !== "undefined" ? window.location.href : "SSR")
 
   // Configuración por defecto
   const defaultConfig = {
@@ -52,14 +57,11 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
     ...config,
   }
 
-  // Efecto de inicialización (solo una vez)
-  useEffect(() => {
-    if (initialized) {
-      console.log("[WIDGET-CHAT] ⚠️ Ya inicializado, saltando...")
-      return
-    }
+  console.log("[WIDGET-CHAT] 📋 Configuración final:", defaultConfig)
 
-    console.log("[WIDGET-CHAT] 🔄 Inicializando por primera vez...")
+  // Inicialización
+  useEffect(() => {
+    console.log("[WIDGET-CHAT] 🔄 useEffect de inicialización ejecutándose...")
 
     // Generar session_id único
     const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -75,176 +77,147 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
         timestamp: new Date(),
       }
       setMessages([welcomeMessage])
-      console.log("[WIDGET-CHAT] 👋 Mensaje de bienvenida agregado")
+      console.log("[WIDGET-CHAT] 👋 Mensaje de bienvenida agregado:", welcomeMessage)
     }
 
-    setMounted(true)
-    setInitialized(true)
     console.log("[WIDGET-CHAT] ✅ Inicialización completada")
-  }, [clienteId, initialized])
+  }, [clienteId])
 
-  // Scroll automático
+  // Auto-scroll
   useEffect(() => {
-    if (mounted && messagesEndRef.current && messages.length > 0) {
+    if (messagesEndRef.current) {
       console.log("[WIDGET-CHAT] 📜 Haciendo scroll automático")
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
     }
-  }, [messages, mounted])
+  }, [messages])
 
-  const sendMessage = useCallback(
-    async (text?: string) => {
-      if (!mounted || !initialized) {
-        console.log("[WIDGET-CHAT] ⚠️ Componente no listo, cancelando envío")
-        return
+  const sendMessage = async (text?: string) => {
+    const messageText = text || inputValue.trim()
+    if (!messageText || isLoading || !sessionId) {
+      console.log("[WIDGET-CHAT] ⚠️ Condiciones no cumplidas:", {
+        messageText: !!messageText,
+        isLoading,
+        sessionId: !!sessionId,
+      })
+      return
+    }
+
+    console.log("[WIDGET-CHAT] 📤 === ENVIANDO MENSAJE ===")
+    console.log("[WIDGET-CHAT] 📝 Texto:", messageText)
+    console.log("[WIDGET-CHAT] 🆔 Cliente ID:", clienteId)
+    console.log("[WIDGET-CHAT] 🔗 Session ID:", sessionId)
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content: messageText,
+      isUser: true,
+      timestamp: new Date(),
+    }
+
+    setMessages((prev) => [...prev, userMessage])
+    if (!text) setInputValue("")
+    setIsLoading(true)
+
+    try {
+      const requestBody = {
+        message: messageText,
+        cliente_id: clienteId,
+        session_id: sessionId,
+        source: "widget",
       }
 
-      const messageText = text || inputValue.trim()
-      if (!messageText || isLoading || !sessionId) {
-        console.log("[WIDGET-CHAT] ⚠️ Condiciones no cumplidas para envío:", {
-          messageText: !!messageText,
-          isLoading,
-          sessionId: !!sessionId,
-        })
-        return
-      }
+      console.log("[WIDGET-CHAT] 🌐 Enviando petición a /api/chat:")
+      console.log("[WIDGET-CHAT] 📦 Body:", JSON.stringify(requestBody, null, 2))
 
-      console.log("[WIDGET-CHAT] 📤 Enviando mensaje:", messageText)
-
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        content: messageText,
-        isUser: true,
-        timestamp: new Date(),
-      }
-
-      setMessages((prev) => {
-        console.log("[WIDGET-CHAT] 📝 Agregando mensaje del usuario")
-        return [...prev, userMessage]
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
       })
 
-      if (!text) setInputValue("")
-      setIsLoading(true)
+      console.log("[WIDGET-CHAT] 📡 Respuesta recibida:")
+      console.log("[WIDGET-CHAT] - Status:", response.status)
+      console.log("[WIDGET-CHAT] - Status Text:", response.statusText)
+      console.log("[WIDGET-CHAT] - OK:", response.ok)
+      console.log("[WIDGET-CHAT] - Headers:", Object.fromEntries(response.headers.entries()))
 
-      try {
-        console.log("[WIDGET-CHAT] 🌐 Haciendo petición a /api/chat con:", {
-          message: messageText,
-          cliente_id: clienteId,
-          session_id: sessionId,
-          source: "widget",
-        })
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("[WIDGET-CHAT] ❌ Error response body:", errorText)
+        throw new Error(`Error ${response.status}: ${response.statusText}`)
+      }
 
-        const response = await fetch("/api/chat", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            message: messageText,
-            cliente_id: clienteId,
-            session_id: sessionId,
-            source: "widget",
-          }),
-        })
+      const data = await response.json()
+      console.log("[WIDGET-CHAT] 📋 Datos JSON recibidos:", JSON.stringify(data, null, 2))
 
-        console.log("[WIDGET-CHAT] 📡 Respuesta del servidor:", {
-          status: response.status,
-          statusText: response.statusText,
-          ok: response.ok,
-        })
+      if (data.success && data.response) {
+        let content = data.response
+        let buttons = null
 
-        if (!response.ok) {
-          throw new Error(`Error ${response.status}: ${response.statusText}`)
-        }
+        console.log("[WIDGET-CHAT] 🔍 Procesando respuesta...")
+        console.log("[WIDGET-CHAT] 📄 Contenido original:", content)
 
-        const data = await response.json()
-        console.log("[WIDGET-CHAT] 📋 Datos completos recibidos:", data)
-
-        if (data.success && data.response) {
-          let content = data.response
-          let buttons = null
-
-          console.log("[WIDGET-CHAT] 🔍 Analizando respuesta para botones...")
-          console.log("[WIDGET-CHAT] 📄 Contenido original:", content)
-
-          // Buscar botones en la respuesta
-          const widgetButtonsMatch = content.match(/__WIDGET_BUTTONS__(.+?)__END_BUTTONS__/s)
-          if (widgetButtonsMatch) {
-            console.log("[WIDGET-CHAT] 🔘 Marcador de botones encontrado")
-            try {
-              const buttonData = JSON.parse(widgetButtonsMatch[1])
-              content = content.replace(widgetButtonsMatch[0], "").trim()
-              buttons = {
-                options: buttonData.opciones,
-                context: buttonData.contexto || "",
-                callback_id: buttonData.callback_id || "default_callback",
-              }
-              console.log("[WIDGET-CHAT] ✅ Botones extraídos:", buttons)
-            } catch (e) {
-              console.error("[WIDGET-CHAT] ❌ Error parseando botones:", e)
+        // Buscar botones en la respuesta
+        const widgetButtonsMatch = content.match(/__WIDGET_BUTTONS__(.+?)__END_BUTTONS__/s)
+        if (widgetButtonsMatch) {
+          console.log("[WIDGET-CHAT] 🔘 Marcador de botones encontrado:", widgetButtonsMatch[1])
+          try {
+            const buttonData = JSON.parse(widgetButtonsMatch[1])
+            content = content.replace(widgetButtonsMatch[0], "").trim()
+            buttons = {
+              options: buttonData.opciones || [],
+              context: buttonData.contexto || "",
+              callback_id: buttonData.callback_id || "default_callback",
             }
+            console.log("[WIDGET-CHAT] ✅ Botones extraídos:", buttons)
+          } catch (e) {
+            console.error("[WIDGET-CHAT] ❌ Error parseando botones:", e)
           }
-
-          const botMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            content: content.trim(),
-            isUser: false,
-            timestamp: new Date(),
-            buttons: buttons,
-          }
-
-          console.log("[WIDGET-CHAT] 🤖 Mensaje del bot a agregar:", {
-            content: botMessage.content,
-            hasButtons: !!botMessage.buttons,
-            buttonsCount: botMessage.buttons?.options?.length || 0,
-          })
-
-          setMessages((prev) => {
-            console.log("[WIDGET-CHAT] 📝 Agregando mensaje del bot")
-            return [...prev, botMessage]
-          })
-        } else {
-          throw new Error(data.error || "Error desconocido en la respuesta")
         }
-      } catch (error) {
-        console.error("[WIDGET-CHAT] ❌ Error enviando mensaje:", error)
-        const errorMessage: Message = {
+
+        const botMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente.",
+          content: content.trim(),
           isUser: false,
           timestamp: new Date(),
+          buttons: buttons,
         }
-        setMessages((prev) => [...prev, errorMessage])
-      } finally {
-        setIsLoading(false)
-        console.log("[WIDGET-CHAT] ✅ Proceso de envío completado")
+
+        console.log("[WIDGET-CHAT] 🤖 Agregando mensaje del bot:", botMessage)
+        setMessages((prev) => [...prev, botMessage])
+      } else {
+        console.error("[WIDGET-CHAT] ❌ Respuesta inválida:", data)
+        throw new Error(data.error || "Error desconocido en la respuesta")
       }
-    },
-    [mounted, initialized, inputValue, isLoading, sessionId, clienteId],
-  )
-
-  const handleKeyPress = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault()
-        console.log("[WIDGET-CHAT] ⌨️ Enter presionado, enviando mensaje")
-        sendMessage()
+    } catch (error) {
+      console.error("[WIDGET-CHAT] 💥 Error completo:", error)
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente.",
+        isUser: false,
+        timestamp: new Date(),
       }
-    },
-    [sendMessage],
-  )
+      setMessages((prev) => [...prev, errorMessage])
+    } finally {
+      setIsLoading(false)
+      console.log("[WIDGET-CHAT] ✅ Proceso de envío completado")
+    }
+  }
 
-  const handleButtonClick = useCallback(
-    (option: string) => {
-      console.log("[WIDGET-CHAT] 🔘 Botón clickeado:", option)
-      sendMessage(option)
-    },
-    [sendMessage],
-  )
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      console.log("[WIDGET-CHAT] ⌨️ Enter presionado")
+      sendMessage()
+    }
+  }
 
-  const handleSubmit = useCallback(() => {
-    console.log("[WIDGET-CHAT] 📤 Submit button clicked")
-    sendMessage()
-  }, [sendMessage])
+  const handleButtonClick = (option: string) => {
+    console.log("[WIDGET-CHAT] 🔘 Botón clickeado:", option)
+    sendMessage(option)
+  }
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString("es-ES", {
@@ -253,167 +226,58 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
     })
   }
 
-  // Loading state
-  if (!mounted || !initialized) {
-    console.log("[WIDGET-CHAT] ⏳ Mostrando loading state")
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100vh",
-          backgroundColor: "#f9fafb",
-          fontFamily: "system-ui, -apple-system, sans-serif",
-        }}
-      >
-        <div style={{ textAlign: "center" }}>
-          <div
-            style={{
-              width: "32px",
-              height: "32px",
-              border: "2px solid #e5e7eb",
-              borderTop: "2px solid #16a34a",
-              borderRadius: "50%",
-              animation: "spin 1s linear infinite",
-              margin: "0 auto 16px",
-            }}
-          ></div>
-          <p style={{ color: "#6b7280", fontSize: "14px" }}>Cargando chat...</p>
-        </div>
-      </div>
-    )
-  }
-
-  console.log("[WIDGET-CHAT] 🎨 Renderizando interfaz completa")
+  console.log("[WIDGET-CHAT] 🎨 Renderizando interfaz con", messages.length, "mensajes")
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        backgroundColor: "white",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        border: "none",
-        margin: 0,
-        padding: 0,
-      }}
-    >
+    <div className="flex flex-col h-full bg-white">
       {/* Header */}
       {!hideHeader && (
-        <div
-          style={{
-            padding: "16px",
-            color: "white",
-            backgroundColor: defaultConfig.widgetPrimaryColor,
-            borderTopLeftRadius: "12px",
-            borderTopRightRadius: "12px",
-          }}
-        >
-          <div style={{ textAlign: "left" }}>
-            <h3 style={{ fontSize: "18px", fontWeight: "600", margin: "0 0 4px 0" }}>{defaultConfig.widgetTitle}</h3>
-            <p style={{ fontSize: "14px", opacity: 0.9, margin: 0 }}>{defaultConfig.widgetSubtitle}</p>
+        <div className="bg-green-600 text-white p-4 flex items-center space-x-3">
+          <MessageCircle className="h-6 w-6" />
+          <div>
+            <h3 className="font-semibold text-lg">{defaultConfig.widgetTitle}</h3>
+            <p className="text-sm opacity-90">{defaultConfig.widgetSubtitle}</p>
           </div>
         </div>
       )}
 
       {/* Messages Area */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "16px",
-          backgroundColor: "#f9fafb",
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px",
-        }}
-      >
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
         {messages.map((message) => (
-          <div
-            key={message.id}
-            style={{
-              display: "flex",
-              justifyContent: message.isUser ? "flex-end" : "flex-start",
-            }}
-          >
-            <div
-              style={{
-                maxWidth: "80%",
-                padding: "12px",
-                borderRadius: "12px",
-                backgroundColor: message.isUser ? defaultConfig.widgetPrimaryColor : "white",
-                color: message.isUser ? "white" : "#374151",
-                boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
-                border: message.isUser ? "none" : "1px solid #e5e7eb",
-              }}
-            >
-              <p
-                style={{
-                  fontSize: "14px",
-                  lineHeight: "1.5",
-                  margin: 0,
-                  whiteSpace: "pre-wrap",
-                  textAlign: "left",
-                }}
+          <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[85%] ${message.isUser ? "order-2" : "order-1"}`}>
+              <div
+                className={`rounded-2xl px-4 py-3 ${
+                  message.isUser
+                    ? "bg-green-600 text-white rounded-br-md"
+                    : "bg-white text-gray-800 rounded-bl-md shadow-sm border"
+                }`}
               >
-                {message.content}
-              </p>
+                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
 
-              {/* Botones interactivos */}
-              {message.buttons && message.buttons.options.length > 0 && (
-                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  {message.buttons.context && (
-                    <p
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        margin: "0 0 8px 0",
-                        color: "#6b7280",
-                      }}
-                    >
-                      {message.buttons.context}
-                    </p>
-                  )}
-                  {message.buttons.options.map((option, index) => (
-                    <button
-                      key={index}
-                      onClick={() => handleButtonClick(option)}
-                      style={{
-                        width: "100%",
-                        textAlign: "left",
-                        fontSize: "14px",
-                        padding: "8px 12px",
-                        borderRadius: "8px",
-                        border: `2px solid ${defaultConfig.widgetPrimaryColor}`,
-                        backgroundColor: "white",
-                        color: defaultConfig.widgetPrimaryColor,
-                        cursor: "pointer",
-                        transition: "all 0.2s",
-                        boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = "#f9fafb"
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = "white"
-                      }}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              )}
+                {/* Botones interactivos */}
+                {message.buttons && message.buttons.options.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {message.buttons.context && (
+                      <p className="text-xs font-medium text-gray-600 mb-2">{message.buttons.context}</p>
+                    )}
+                    <div className="grid gap-2">
+                      {message.buttons.options.map((option, index) => (
+                        <button
+                          key={index}
+                          onClick={() => handleButtonClick(option)}
+                          className="text-left text-sm py-2 px-3 rounded-lg border-2 border-green-600 bg-white text-green-600 hover:bg-green-50 transition-all duration-200 shadow-sm hover:shadow-md"
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <p
-                style={{
-                  fontSize: "12px",
-                  marginTop: "8px",
-                  margin: "8px 0 0 0",
-                  opacity: message.isUser ? 0.7 : 0.6,
-                  color: message.isUser ? "white" : "#6b7280",
-                }}
+                className={`text-xs mt-1 px-1 ${message.isUser ? "text-right text-gray-500" : "text-left text-gray-500"}`}
               >
                 {formatTime(message.timestamp)}
               </p>
@@ -423,45 +287,17 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
 
         {/* Loading indicator */}
         {isLoading && (
-          <div style={{ display: "flex", justifyContent: "flex-start" }}>
-            <div
-              style={{
-                backgroundColor: "white",
-                borderRadius: "12px",
-                padding: "12px",
-                boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
-                border: "1px solid #e5e7eb",
-              }}
-            >
-              <div style={{ display: "flex", gap: "4px" }}>
+          <div className="flex justify-start">
+            <div className="bg-white rounded-2xl rounded-bl-md px-4 py-3 shadow-sm border">
+              <div className="flex space-x-1">
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
                 <div
-                  style={{
-                    width: "8px",
-                    height: "8px",
-                    backgroundColor: "#9ca3af",
-                    borderRadius: "50%",
-                    animation: "bounce 1.4s infinite ease-in-out both",
-                  }}
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "0.1s" }}
                 ></div>
                 <div
-                  style={{
-                    width: "8px",
-                    height: "8px",
-                    backgroundColor: "#9ca3af",
-                    borderRadius: "50%",
-                    animation: "bounce 1.4s infinite ease-in-out both",
-                    animationDelay: "0.16s",
-                  }}
-                ></div>
-                <div
-                  style={{
-                    width: "8px",
-                    height: "8px",
-                    backgroundColor: "#9ca3af",
-                    borderRadius: "50%",
-                    animation: "bounce 1.4s infinite ease-in-out both",
-                    animationDelay: "0.32s",
-                  }}
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "0.2s" }}
                 ></div>
               </div>
             </div>
@@ -472,98 +308,30 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
       </div>
 
       {/* Input Area */}
-      <div
-        style={{
-          padding: "16px",
-          backgroundColor: "white",
-          borderTop: "1px solid #e5e7eb",
-          borderBottomLeftRadius: "12px",
-          borderBottomRightRadius: "12px",
-        }}
-      >
-        <div style={{ display: "flex", gap: "8px" }}>
-          <input
-            type="text"
+      <div className="p-4 bg-white border-t">
+        <div className="flex space-x-2">
+          <Input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder={defaultConfig.widgetPlaceholder}
             disabled={isLoading}
-            style={{
-              flex: 1,
-              padding: "12px",
-              border: "1px solid #d1d5db",
-              borderRadius: "24px",
-              fontSize: "14px",
-              outline: "none",
-              fontFamily: "inherit",
-            }}
-            onFocus={(e) => {
-              e.target.style.borderColor = defaultConfig.widgetPrimaryColor
-              e.target.style.boxShadow = `0 0 0 3px ${defaultConfig.widgetPrimaryColor}20`
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = "#d1d5db"
-              e.target.style.boxShadow = "none"
-            }}
+            className="flex-1 rounded-full border-gray-300 focus:border-green-500 focus:ring-green-500"
           />
-          <button
-            onClick={handleSubmit}
+          <Button
+            onClick={() => sendMessage()}
             disabled={!inputValue.trim() || isLoading}
-            style={{
-              padding: "12px",
-              backgroundColor: defaultConfig.widgetPrimaryColor,
-              color: "white",
-              border: "none",
-              borderRadius: "50%",
-              cursor: inputValue.trim() && !isLoading ? "pointer" : "not-allowed",
-              opacity: inputValue.trim() && !isLoading ? 1 : 0.5,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "48px",
-              height: "48px",
-              transition: "opacity 0.2s",
-            }}
+            className="rounded-full bg-green-600 hover:bg-green-700 text-white px-4"
           >
-            <Send size={20} />
-          </button>
+            <Send className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
       {/* Footer */}
-      <div
-        style={{
-          padding: "8px",
-          textAlign: "center",
-          backgroundColor: "#f9fafb",
-          borderTop: "1px solid #e5e7eb",
-        }}
-      >
-        <p style={{ fontSize: "12px", color: "#6b7280", margin: 0 }}>Powered by Treelan</p>
+      <div className="px-4 py-2 bg-gray-50 border-t">
+        <p className="text-xs text-gray-500 text-center">Powered by Treelan</p>
       </div>
-
-      {/* CSS Animations */}
-      <style jsx>{`
-        @keyframes spin {
-          0% {
-            transform: rotate(0deg);
-          }
-          100% {
-            transform: rotate(360deg);
-          }
-        }
-        @keyframes bounce {
-          0%,
-          80%,
-          100% {
-            transform: scale(0);
-          }
-          40% {
-            transform: scale(1);
-          }
-        }
-      `}</style>
     </div>
   )
 }

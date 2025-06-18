@@ -6,28 +6,33 @@ export async function POST(request: NextRequest) {
   console.log("[API-CHAT] 🚀 === NUEVA PETICIÓN DE CHAT ===")
   console.log("[API-CHAT] 📅 Timestamp:", new Date().toISOString())
   console.log("[API-CHAT] 🌐 URL:", request.url)
-  console.log("[API-CHAT] 📋 Headers:", Object.fromEntries(request.headers.entries()))
+  console.log("[API-CHAT] 🌍 Origin:", request.headers.get("origin"))
+  console.log("[API-CHAT] 🔗 Referer:", request.headers.get("referer"))
+  console.log("[API-CHAT] 👤 User-Agent:", request.headers.get("user-agent"))
+  console.log("[API-CHAT] 📋 Todos los headers:")
+  request.headers.forEach((value, key) => {
+    console.log(`[API-CHAT] - ${key}: ${value}`)
+  })
 
   try {
     const body = await request.json()
-    console.log("[API-CHAT] 📦 Body completo recibido:", JSON.stringify(body, null, 2))
+    console.log("[API-CHAT] 📦 Body recibido:", JSON.stringify(body, null, 2))
 
     const { message, cliente_id, session_id, source } = body
 
-    console.log("[API-CHAT] 🔍 Parámetros extraídos:")
+    console.log("[API-CHAT] 🔍 Parámetros validados:")
     console.log("[API-CHAT] - message:", message)
     console.log("[API-CHAT] - cliente_id:", cliente_id)
     console.log("[API-CHAT] - session_id:", session_id)
     console.log("[API-CHAT] - source:", source)
 
     // Validar parámetros requeridos
-    const missingParams = {
-      message: !message,
-      cliente_id: !cliente_id,
-      session_id: !session_id,
-    }
-
-    if (missingParams.message || missingParams.cliente_id || missingParams.session_id) {
+    if (!message || !cliente_id || !session_id) {
+      const missingParams = {
+        message: !message,
+        cliente_id: !cliente_id,
+        session_id: !session_id,
+      }
       console.log("[API-CHAT] ❌ Parámetros faltantes:", missingParams)
       return NextResponse.json(
         {
@@ -54,7 +59,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log("[API-CHAT] ✅ Configuración encontrada:", config.displayName)
+    console.log("[API-CHAT] ✅ Configuración encontrada:")
+    console.log("[API-CHAT] - ID:", config.id)
+    console.log("[API-CHAT] - Display Name:", config.displayName)
+    console.log("[API-CHAT] - Assistant ID:", config.assistantId)
 
     // Procesar mensaje con web chat
     console.log("[API-CHAT] 🤖 Procesando mensaje con web chat...")
@@ -65,15 +73,23 @@ export async function POST(request: NextRequest) {
       ip: request.ip || "unknown",
     })
 
-    console.log("[API-CHAT] ✅ Respuesta generada:", response.length, "caracteres")
-    console.log("[API-CHAT] 📄 Respuesta completa:", response)
+    console.log("[API-CHAT] ✅ Respuesta generada:")
+    console.log("[API-CHAT] - Longitud:", response.length, "caracteres")
+    console.log("[API-CHAT] - Contenido:", response.substring(0, 200) + "...")
 
-    return NextResponse.json({
+    const responseData = {
       success: true,
       response: response,
-    })
+    }
+
+    console.log("[API-CHAT] 📤 Enviando respuesta:", JSON.stringify(responseData, null, 2))
+
+    return NextResponse.json(responseData)
   } catch (error) {
-    console.error("[API-CHAT] 💥 Error procesando solicitud:", error)
+    console.error("[API-CHAT] 💥 Error procesando solicitud:")
+    console.error("[API-CHAT] - Error:", error)
+    console.error("[API-CHAT] - Stack:", error instanceof Error ? error.stack : "No stack")
+
     return NextResponse.json(
       {
         success: false,

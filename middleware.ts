@@ -4,46 +4,42 @@ import type { NextRequest } from "next/server"
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  console.log("[MIDDLEWARE] Procesando ruta:", pathname)
+  // Log extensivo para rutas del widget
+  if (pathname.startsWith("/widget") || pathname.includes("widget")) {
+    console.log("[MIDDLEWARE] 🚀 === PETICIÓN WIDGET ===")
+    console.log("[MIDDLEWARE] 📅 Timestamp:", new Date().toISOString())
+    console.log("[MIDDLEWARE] 🌐 URL completa:", request.url)
+    console.log("[MIDDLEWARE] 📍 Pathname:", pathname)
+    console.log("[MIDDLEWARE] 🔍 Search params:", request.nextUrl.searchParams.toString())
+    console.log("[MIDDLEWARE] 📋 Headers:")
+    request.headers.forEach((value, key) => {
+      console.log(`[MIDDLEWARE] - ${key}: ${value}`)
+    })
+    console.log("[MIDDLEWARE] 🌍 Origin:", request.headers.get("origin"))
+    console.log("[MIDDLEWARE] 🔗 Referer:", request.headers.get("referer"))
+    console.log("[MIDDLEWARE] 👤 User-Agent:", request.headers.get("user-agent"))
+    console.log("[MIDDLEWARE] ===============================")
+  }
 
-  // Permitir CORS y embedding para rutas del widget
-  if (pathname.startsWith("/widget") || pathname.startsWith("/api/chat") || pathname.startsWith("/api/widget")) {
+  // Aplicar CORS para todas las rutas del widget
+  if (pathname.startsWith("/widget") || pathname.startsWith("/api/chat")) {
     const response = NextResponse.next()
 
-    // Headers CORS permisivos
+    // Headers CORS completos
     response.headers.set("Access-Control-Allow-Origin", "*")
     response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
     response.headers.set("Access-Control-Allow-Credentials", "false")
-
-    // Headers para permitir embedding en iframes
     response.headers.set("X-Frame-Options", "ALLOWALL")
     response.headers.set("Content-Security-Policy", "frame-ancestors *")
 
-    // Headers adicionales para compatibilidad
-    response.headers.set("X-Content-Type-Options", "nosniff")
-    response.headers.set("Referrer-Policy", "no-referrer-when-downgrade")
-
-    console.log("[MIDDLEWARE] Headers CORS aplicados para:", pathname)
+    console.log("[MIDDLEWARE] ✅ Headers CORS aplicados para:", pathname)
     return response
   }
 
-  // Manejar preflight requests
-  if (request.method === "OPTIONS") {
-    return new NextResponse(null, {
-      status: 200,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
-      },
-    })
-  }
-
-  // Para otras rutas, continuar normalmente
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ["/widget/:path*", "/api/chat/:path*", "/api/widget/:path*", "/widget-loader.js"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 }
