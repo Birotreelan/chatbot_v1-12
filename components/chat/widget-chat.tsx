@@ -34,13 +34,12 @@ export default function WidgetChat({ clienteId, config = {}, hideHeader = false 
 
   // Configuración por defecto
   const defaultConfig = {
-    widgetTitle: "Asistente Virtual",
-    widgetSubtitle: "Instituto Oftalmológico Saravia Olmos",
-    widgetWelcomeMessage:
-      "¡Hola! Soy el asistente virtual del Instituto Oftalmológico Saravia Olmos. ¿En qué puedo ayudarte hoy?",
-    widgetPlaceholder: "Escribe tu mensaje...",
-    widgetPrimaryColor: "#0ea5e9",
-    widgetSecondaryColor: "#f0f9ff",
+    widgetTitle: config?.widgetTitle || "Asistente Virtual",
+    widgetSubtitle: config?.widgetSubtitle || "Instituto Oftalmológico Saravia Olmos",
+    widgetWelcomeMessage: config?.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
+    widgetPlaceholder: config?.widgetPlaceholder || "Escribe tu mensaje...",
+    widgetPrimaryColor: config?.widgetPrimaryColor || "#0ea5e9",
+    widgetSecondaryColor: config?.widgetSecondaryColor || "#f0f9ff",
     ...config,
   }
 

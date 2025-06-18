@@ -1,39 +1,102 @@
 import { NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { v4 as uuidv4 } from "uuid"
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const cliente_id = searchParams.get("cliente_id")
+// In-memory storage for widget configurations (replace with a database in a real application)
+const widgetConfigs: { [id: string]: any } = {}
 
-  console.log("[WIDGET-API] Solicitud recibida con parámetros:", {
-    cliente_id: searchParams.get("cliente_id"),
-    url: request.url,
-  })
-
-  if (!cliente_id) {
-    return NextResponse.json({ error: "Missing cliente_id parameter" }, { status: 400 })
-  }
-
+export async function POST(request: Request) {
   try {
-    const config = await prisma.widgetConfig.findUnique({
-      where: {
-        clienteId: cliente_id,
-      },
-    })
+    const body = await request.json()
 
-    console.log("[WIDGET-API] Configuración encontrada:", {
-      id: config?.id,
-      displayName: config?.displayName,
-      widgetEnabled: config?.widgetEnabled,
+    // Validate the request body (add more validation as needed)
+    if (!body.displayName) {
+      return new NextResponse("Display name is required", { status: 400 })
+    }
+
+    // Generate a unique ID for the widget
+    const id = uuidv4()
+
+    // Create a new widget configuration
+    const config = {
+      id,
+      displayName: body.displayName,
+      widgetEnabled: body.widgetEnabled || true,
+      widgetTitle: body.widgetTitle || "Welcome!",
+      widgetSubtitle: body.widgetSubtitle || "How can we help you?",
+      widgetWelcomeMessage: body.widgetWelcomeMessage || "Hello there!",
+      widgetPlaceholder: body.widgetPlaceholder || "Type your message...",
+      widgetPrimaryColor: body.widgetPrimaryColor || "#007bff",
+      widgetSecondaryColor: body.widgetSecondaryColor || "#ffffff",
+      widgetPosition: body.widgetPosition || "bottom-right",
+      widgetButtonText: body.widgetButtonText || "Chat with us",
+      widgetHeaderText: body.widgetHeaderText || "Live Chat",
+      widgetBrandingEnabled: body.widgetBrandingEnabled || true,
+      widgetBrandingText: body.widgetBrandingText || "Powered by Your Brand",
+      widgetMaxHeight: body.widgetMaxHeight || 400,
+      widgetMaxWidth: body.widgetMaxWidth || 300,
+      widgetBorderRadius: body.widgetBorderRadius || 8,
+      widgetShadow: body.widgetShadow || true,
+      widgetAnimation: body.widgetAnimation || "slide-in",
+      widgetSoundEnabled: body.widgetSoundEnabled || false,
+      widgetTheme: body.widgetTheme || "light",
+      widgetFloatingButtonText: body.widgetFloatingButtonText || "?",
+      widgetShowFloatingText: body.widgetShowFloatingText || true,
+    }
+
+    // Store the widget configuration
+    widgetConfigs[id] = config
+
+    // En la respuesta exitosa, asegurar que se incluyan todos los campos:
+    return NextResponse.json({
+      success: true,
+      id: config.id,
+      displayName: config.displayName,
+      widgetEnabled: config.widgetEnabled,
+      widgetTitle: config.widgetTitle,
+      widgetSubtitle: config.widgetSubtitle,
+      widgetWelcomeMessage: config.widgetWelcomeMessage,
+      widgetPlaceholder: config.widgetPlaceholder,
+      widgetPrimaryColor: config.widgetPrimaryColor,
+      widgetSecondaryColor: config.widgetSecondaryColor,
+      widgetPosition: config.widgetPosition,
+      widgetButtonText: config.widgetButtonText,
+      widgetHeaderText: config.widgetHeaderText,
+      widgetBrandingEnabled: config.widgetBrandingEnabled,
+      widgetBrandingText: config.widgetBrandingText,
+      widgetMaxHeight: config.widgetMaxHeight,
+      widgetMaxWidth: config.widgetMaxWidth,
+      widgetBorderRadius: config.widgetBorderRadius,
+      widgetShadow: config.widgetShadow,
+      widgetAnimation: config.widgetAnimation,
+      widgetSoundEnabled: config.widgetSoundEnabled,
+      widgetTheme: config.widgetTheme,
+      widgetFloatingButtonText: config.widgetFloatingButtonText,
+      widgetShowFloatingText: config.widgetShowFloatingText,
     })
+  } catch (error) {
+    console.error("[WIDGET_POST]", error)
+    return new NextResponse("Internal error", { status: 500 })
+  }
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url)
+    const id = searchParams.get("id")
+
+    if (!id) {
+      return new NextResponse("Widget ID is required", { status: 400 })
+    }
+
+    const config = widgetConfigs[id]
 
     if (!config) {
-      return NextResponse.json({ error: "Widget configuration not found" }, { status: 404 })
+      return new NextResponse("Widget not found", { status: 404 })
     }
 
     return NextResponse.json(config)
   } catch (error) {
-    console.error("Error fetching widget configuration:", error)
-    return NextResponse.json({ error: "Failed to fetch widget configuration" }, { status: 500 })
+    console.log("[WIDGET_GET]", error)
+    return new NextResponse("Internal error", { status: 500 })
   }
 }

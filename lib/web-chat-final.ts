@@ -203,35 +203,6 @@ async function processMessageWithOpenAI(
           {
             type: "function",
             function: {
-              name: "obtener_subespecialidades",
-              description: "Lista las subespecialidades disponibles",
-              parameters: {
-                type: "object",
-                properties: {},
-                required: [],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "buscar_profesionales",
-              description: "Busca profesionales por nombre o especialidad",
-              parameters: {
-                type: "object",
-                properties: {
-                  busqueda: {
-                    type: "string",
-                    description: "Texto para buscar profesionales por nombre o especialidad",
-                  },
-                },
-                required: ["busqueda"],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
               name: "search_turnos",
               description:
                 "Busca turnos disponibles. Si no se especifica rangoFechas, usa fechas actuales automáticamente.",
@@ -452,47 +423,6 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
                 success: false,
                 error:
                   "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para gestionar tu turno.",
-                fallback: true,
-              })
-            }
-            break
-
-          case "obtener_subespecialidades":
-            console.log(`[WEB-CHAT-FINAL] 📋 Obteniendo subespecialidades con cliente: ${clienteId}`)
-
-            try {
-              // Importar la función desde api-tools
-              const { obtenerSubespecialidades } = await import("@/lib/api-tools/api-functions")
-              const subespecialidadesResult = await obtenerSubespecialidades(clienteId)
-              console.log(`[WEB-CHAT-FINAL] 📋 Resultado subespecialidades:`, subespecialidadesResult)
-              output = JSON.stringify(subespecialidadesResult)
-            } catch (error) {
-              console.error(`[WEB-CHAT-FINAL] ❌ Error obteniendo subespecialidades:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar especialidades.",
-                fallback: true,
-              })
-            }
-            break
-
-          case "buscar_profesionales":
-            console.log(`[WEB-CHAT-FINAL] 👨‍⚕️ Buscando profesionales con cliente: ${clienteId}`)
-            console.log(`[WEB-CHAT-FINAL] 📋 Búsqueda: ${args.busqueda}`)
-
-            try {
-              // Importar la función desde api-tools
-              const { buscarProfesionales } = await import("@/lib/api-tools/api-functions")
-              const profesionalesResult = await buscarProfesionales(clienteId, args.busqueda || "")
-              console.log(`[WEB-CHAT-FINAL] 📋 Resultado profesionales:`, profesionalesResult)
-              output = JSON.stringify(profesionalesResult)
-            } catch (error) {
-              console.error(`[WEB-CHAT-FINAL] ❌ Error buscando profesionales:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar profesionales.",
                 fallback: true,
               })
             }
