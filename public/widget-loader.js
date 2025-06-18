@@ -57,7 +57,7 @@
       width: 60px;
       height: 60px;
       border-radius: 50%;
-      background: linear-gradient(135deg, #25D366, #128C7E);
+      background: linear-gradient(135deg, #0ea5e9, #0284c7);
       cursor: pointer;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
       display: flex;
@@ -126,19 +126,34 @@
 
     console.log("[WIDGET-LOADER] URL del iframe:", widgetUrl)
 
+    // Timeout para detectar problemas de carga
+    const loadTimeout = setTimeout(() => {
+      console.error("[WIDGET-LOADER] ⏰ Timeout: Widget tardó más de 10 segundos en cargar")
+      container.innerHTML = `
+        <div style="padding: 20px; text-align: center; color: #666; height: 100%; display: flex; flex-direction: column; justify-content: center; font-family: Arial, sans-serif;">
+          <p style="margin-bottom: 10px; font-size: 14px;">⏰ Timeout cargando el chat</p>
+          <p style="font-size: 12px; color: #999;">El widget tardó demasiado en cargar</p>
+          <button onclick="window.location.reload()" style="margin-top: 10px; padding: 8px 16px; background: #0ea5e9; color: white; border: none; border-radius: 4px; cursor: pointer;">Reintentar</button>
+        </div>
+      `
+    }, 10000)
+
     // Manejar carga exitosa
     iframe.onload = () => {
+      clearTimeout(loadTimeout)
       console.log("[WIDGET-LOADER] ✅ Widget cargado exitosamente")
     }
 
     // Manejar errores de carga
     iframe.onerror = (error) => {
+      clearTimeout(loadTimeout)
       console.error("[WIDGET-LOADER] ❌ Error cargando el widget:", error)
       container.innerHTML = `
         <div style="padding: 20px; text-align: center; color: #666; height: 100%; display: flex; flex-direction: column; justify-content: center; font-family: Arial, sans-serif;">
-          <p style="margin-bottom: 10px; font-size: 14px;">Error cargando el chat</p>
+          <p style="margin-bottom: 10px; font-size: 14px;">❌ Error cargando el chat</p>
           <p style="font-size: 12px; color: #999;">Intenta recargar la página</p>
           <p style="font-size: 10px; color: #ccc; margin-top: 10px;">ID: ${clienteId}</p>
+          <button onclick="window.location.reload()" style="margin-top: 10px; padding: 8px 16px; background: #0ea5e9; color: white; border: none; border-radius: 4px; cursor: pointer;">Reintentar</button>
         </div>
       `
     }

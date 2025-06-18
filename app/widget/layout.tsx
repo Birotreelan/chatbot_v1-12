@@ -2,6 +2,8 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "../globals.css"
+import { ThemeProvider } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/toaster"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -139,9 +141,10 @@ export default function WidgetLayout({
         />
       </head>
       <body className="h-full">
-        <div id="__next" className="h-full">
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           {children}
-        </div>
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   )
