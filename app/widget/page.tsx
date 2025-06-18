@@ -3,38 +3,32 @@
 import { useEffect, useState } from "react"
 import WidgetChat from "@/components/chat/widget-chat"
 
-interface SearchParams {
-  clienteId?: string
-  position?: string
-  embedded?: string
-}
-
-interface WidgetPageProps {
-  searchParams: SearchParams
-}
-
-export default function WidgetPage({ searchParams }: WidgetPageProps) {
+export default function WidgetPage() {
   const [mounted, setMounted] = useState(false)
-  const [params, setParams] = useState<SearchParams>({})
+  const [clienteId, setClienteId] = useState<string>("")
+  const [position, setPosition] = useState<string>("bottom-right")
+  const [embedded, setEmbedded] = useState<boolean>(false)
 
   useEffect(() => {
-    console.log("[WIDGET-PAGE] 🔄 Componente montándose...")
-
-    // Obtener parámetros de la URL en el cliente
+    // Solo ejecutar en el cliente
     const urlParams = new URLSearchParams(window.location.search)
-    const clientParams = {
-      clienteId: urlParams.get("clienteId") || undefined,
-      position: urlParams.get("position") || "bottom-right",
-      embedded: urlParams.get("embedded") || "false",
-    }
+    const clienteIdParam = urlParams.get("clienteId") || ""
+    const positionParam = urlParams.get("position") || "bottom-right"
+    const embeddedParam = urlParams.get("embedded") === "true"
 
-    console.log("[WIDGET-PAGE] 📋 Parámetros de URL:", clientParams)
-    setParams(clientParams)
+    console.log("[WIDGET-PAGE] 📋 Parámetros de URL:", {
+      clienteId: clienteIdParam,
+      position: positionParam,
+      embedded: embeddedParam,
+    })
+
+    setClienteId(clienteIdParam)
+    setPosition(positionParam)
+    setEmbedded(embeddedParam)
     setMounted(true)
     console.log("[WIDGET-PAGE] ✅ Componente montado correctamente")
   }, [])
 
-  // Loading state mientras se monta
   if (!mounted) {
     console.log("[WIDGET-PAGE] ⏳ Mostrando loading...")
     return (
@@ -54,7 +48,7 @@ export default function WidgetPage({ searchParams }: WidgetPageProps) {
               width: "32px",
               height: "32px",
               border: "2px solid #e5e7eb",
-              borderTop: "2px solid #0ea5e9",
+              borderTop: "2px solid #16a34a",
               borderRadius: "50%",
               animation: "spin 1s linear infinite",
               margin: "0 auto 16px",
@@ -66,8 +60,7 @@ export default function WidgetPage({ searchParams }: WidgetPageProps) {
     )
   }
 
-  // Error state si no hay clienteId
-  if (!params.clienteId) {
+  if (!clienteId) {
     console.log("[WIDGET-PAGE] ❌ Error: No clienteId")
     return (
       <div
@@ -114,10 +107,10 @@ export default function WidgetPage({ searchParams }: WidgetPageProps) {
     )
   }
 
-  console.log("[WIDGET-PAGE] 🚀 Renderizando WidgetChat con:", params)
+  console.log("[WIDGET-PAGE] 🚀 Renderizando WidgetChat con:", { clienteId, position, embedded })
   return (
-    <div style={{ height: "100vh", width: "100%" }}>
-      <WidgetChat clienteId={params.clienteId} config={{}} hideHeader={false} />
+    <div style={{ height: "100vh", width: "100vw", margin: 0, padding: 0 }}>
+      <WidgetChat clienteId={clienteId} config={{}} hideHeader={false} />
     </div>
   )
 }

@@ -2,8 +2,6 @@
 
 import type React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Send } from "lucide-react"
 
 interface Message {
@@ -42,15 +40,15 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
 
   console.log("[WIDGET-CHAT] 🔄 Render con clienteId:", clienteId, "initialized:", initialized)
 
-  // Configuración por defecto (igual que en el dashboard)
+  // Configuración por defecto
   const defaultConfig = {
     widgetTitle: "Asistente Virtual",
     widgetSubtitle: "Instituto Oftalmológico Saravia Olmos",
     widgetWelcomeMessage:
       "¡Hola! Soy el asistente virtual del Instituto Oftalmológico Saravia Olmos. ¿En qué puedo ayudarte hoy?",
     widgetPlaceholder: "Escribe tu mensaje...",
-    widgetPrimaryColor: "#0ea5e9",
-    widgetSecondaryColor: "#f0f9ff",
+    widgetPrimaryColor: "#16a34a",
+    widgetSecondaryColor: "#f0fdf4",
     ...config,
   }
 
@@ -83,7 +81,7 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
     setMounted(true)
     setInitialized(true)
     console.log("[WIDGET-CHAT] ✅ Inicialización completada")
-  }, [clienteId, initialized]) // Dependencias mínimas
+  }, [clienteId, initialized])
 
   // Scroll automático
   useEffect(() => {
@@ -264,8 +262,9 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          height: "100%",
+          height: "100vh",
           backgroundColor: "#f9fafb",
+          fontFamily: "system-ui, -apple-system, sans-serif",
         }}
       >
         <div style={{ textAlign: "center" }}>
@@ -274,7 +273,7 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
               width: "32px",
               height: "32px",
               border: "2px solid #e5e7eb",
-              borderTop: "2px solid #0ea5e9",
+              borderTop: "2px solid #16a34a",
               borderRadius: "50%",
               animation: "spin 1s linear infinite",
               margin: "0 auto 16px",
@@ -289,43 +288,116 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
   console.log("[WIDGET-CHAT] 🎨 Renderizando interfaz completa")
 
   return (
-    <div className="flex flex-col h-full bg-white" style={{ fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        backgroundColor: "white",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        border: "none",
+        margin: 0,
+        padding: 0,
+      }}
+    >
       {/* Header */}
       {!hideHeader && (
-        <div className="p-4 text-white" style={{ backgroundColor: defaultConfig.widgetPrimaryColor }}>
-          <div className="text-left">
-            <h3 className="font-semibold text-lg">{defaultConfig.widgetTitle}</h3>
-            <p className="text-sm opacity-90">{defaultConfig.widgetSubtitle}</p>
+        <div
+          style={{
+            padding: "16px",
+            color: "white",
+            backgroundColor: defaultConfig.widgetPrimaryColor,
+            borderTopLeftRadius: "12px",
+            borderTopRightRadius: "12px",
+          }}
+        >
+          <div style={{ textAlign: "left" }}>
+            <h3 style={{ fontSize: "18px", fontWeight: "600", margin: "0 0 4px 0" }}>{defaultConfig.widgetTitle}</h3>
+            <p style={{ fontSize: "14px", opacity: 0.9, margin: 0 }}>{defaultConfig.widgetSubtitle}</p>
           </div>
         </div>
       )}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ maxHeight: "calc(100% - 140px)" }}>
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "16px",
+          backgroundColor: "#f9fafb",
+          display: "flex",
+          flexDirection: "column",
+          gap: "12px",
+        }}
+      >
         {messages.map((message) => (
-          <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
+          <div
+            key={message.id}
+            style={{
+              display: "flex",
+              justifyContent: message.isUser ? "flex-end" : "flex-start",
+            }}
+          >
             <div
-              className={`max-w-[80%] rounded-lg p-3 ${message.isUser ? "text-white" : "bg-gray-100 text-gray-800"}`}
               style={{
-                backgroundColor: message.isUser ? defaultConfig.widgetPrimaryColor : undefined,
+                maxWidth: "80%",
+                padding: "12px",
+                borderRadius: "12px",
+                backgroundColor: message.isUser ? defaultConfig.widgetPrimaryColor : "white",
+                color: message.isUser ? "white" : "#374151",
+                boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
+                border: message.isUser ? "none" : "1px solid #e5e7eb",
               }}
             >
-              <p className="text-sm whitespace-pre-wrap text-left">{message.content}</p>
+              <p
+                style={{
+                  fontSize: "14px",
+                  lineHeight: "1.5",
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  textAlign: "left",
+                }}
+              >
+                {message.content}
+              </p>
 
               {/* Botones interactivos */}
               {message.buttons && message.buttons.options.length > 0 && (
-                <div className="mt-3 space-y-2">
+                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
                   {message.buttons.context && (
-                    <p className="text-xs font-medium mb-2 text-gray-600">{message.buttons.context}</p>
+                    <p
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: "500",
+                        margin: "0 0 8px 0",
+                        color: "#6b7280",
+                      }}
+                    >
+                      {message.buttons.context}
+                    </p>
                   )}
                   {message.buttons.options.map((option, index) => (
                     <button
                       key={index}
                       onClick={() => handleButtonClick(option)}
-                      className="w-full text-left text-sm py-2 px-3 rounded-md border bg-white hover:bg-gray-50 transition-colors shadow-sm"
                       style={{
-                        borderColor: defaultConfig.widgetPrimaryColor,
+                        width: "100%",
+                        textAlign: "left",
+                        fontSize: "14px",
+                        padding: "8px 12px",
+                        borderRadius: "8px",
+                        border: `2px solid ${defaultConfig.widgetPrimaryColor}`,
+                        backgroundColor: "white",
                         color: defaultConfig.widgetPrimaryColor,
+                        cursor: "pointer",
+                        transition: "all 0.2s",
+                        boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#f9fafb"
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "white"
                       }}
                     >
                       {option}
@@ -334,7 +406,15 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
                 </div>
               )}
 
-              <p className={`text-xs mt-1 ${message.isUser ? "text-white/70" : "text-gray-500"}`}>
+              <p
+                style={{
+                  fontSize: "12px",
+                  marginTop: "8px",
+                  margin: "8px 0 0 0",
+                  opacity: message.isUser ? 0.7 : 0.6,
+                  color: message.isUser ? "white" : "#6b7280",
+                }}
+              >
                 {formatTime(message.timestamp)}
               </p>
             </div>
@@ -343,17 +423,45 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
 
         {/* Loading indicator */}
         {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-gray-100 rounded-lg p-3">
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+            <div
+              style={{
+                backgroundColor: "white",
+                borderRadius: "12px",
+                padding: "12px",
+                boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
+                border: "1px solid #e5e7eb",
+              }}
+            >
+              <div style={{ display: "flex", gap: "4px" }}>
                 <div
-                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "0.1s" }}
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    backgroundColor: "#9ca3af",
+                    borderRadius: "50%",
+                    animation: "bounce 1.4s infinite ease-in-out both",
+                  }}
                 ></div>
                 <div
-                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "0.2s" }}
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    backgroundColor: "#9ca3af",
+                    borderRadius: "50%",
+                    animation: "bounce 1.4s infinite ease-in-out both",
+                    animationDelay: "0.16s",
+                  }}
+                ></div>
+                <div
+                  style={{
+                    width: "8px",
+                    height: "8px",
+                    backgroundColor: "#9ca3af",
+                    borderRadius: "50%",
+                    animation: "bounce 1.4s infinite ease-in-out both",
+                    animationDelay: "0.32s",
+                  }}
                 ></div>
               </div>
             </div>
@@ -364,32 +472,98 @@ export default function WidgetChat({ clienteId, config, hideHeader = false }: Wi
       </div>
 
       {/* Input Area */}
-      <div className="p-4 border-t border-gray-200">
-        <div className="flex space-x-2">
-          <Input
+      <div
+        style={{
+          padding: "16px",
+          backgroundColor: "white",
+          borderTop: "1px solid #e5e7eb",
+          borderBottomLeftRadius: "12px",
+          borderBottomRightRadius: "12px",
+        }}
+      >
+        <div style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder={defaultConfig.widgetPlaceholder}
             disabled={isLoading}
-            className="flex-1"
+            style={{
+              flex: 1,
+              padding: "12px",
+              border: "1px solid #d1d5db",
+              borderRadius: "24px",
+              fontSize: "14px",
+              outline: "none",
+              fontFamily: "inherit",
+            }}
+            onFocus={(e) => {
+              e.target.style.borderColor = defaultConfig.widgetPrimaryColor
+              e.target.style.boxShadow = `0 0 0 3px ${defaultConfig.widgetPrimaryColor}20`
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = "#d1d5db"
+              e.target.style.boxShadow = "none"
+            }}
           />
-          <Button
+          <button
             onClick={handleSubmit}
             disabled={!inputValue.trim() || isLoading}
-            size="sm"
-            style={{ backgroundColor: defaultConfig.widgetPrimaryColor }}
-            className="text-white hover:opacity-90"
+            style={{
+              padding: "12px",
+              backgroundColor: defaultConfig.widgetPrimaryColor,
+              color: "white",
+              border: "none",
+              borderRadius: "50%",
+              cursor: inputValue.trim() && !isLoading ? "pointer" : "not-allowed",
+              opacity: inputValue.trim() && !isLoading ? 1 : 0.5,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "48px",
+              height: "48px",
+              transition: "opacity 0.2s",
+            }}
           >
-            <Send className="w-4 h-4" />
-          </Button>
+            <Send size={20} />
+          </button>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="p-2 text-center border-t">
-        <p className="text-xs text-gray-500">Powered by Treelan</p>
+      <div
+        style={{
+          padding: "8px",
+          textAlign: "center",
+          backgroundColor: "#f9fafb",
+          borderTop: "1px solid #e5e7eb",
+        }}
+      >
+        <p style={{ fontSize: "12px", color: "#6b7280", margin: 0 }}>Powered by Treelan</p>
       </div>
+
+      {/* CSS Animations */}
+      <style jsx>{`
+        @keyframes spin {
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
+        }
+        @keyframes bounce {
+          0%,
+          80%,
+          100% {
+            transform: scale(0);
+          }
+          40% {
+            transform: scale(1);
+          }
+        }
+      `}</style>
     </div>
   )
 }
