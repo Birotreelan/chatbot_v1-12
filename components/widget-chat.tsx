@@ -219,14 +219,8 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
 
   console.log("[WIDGET-CHAT] 🎨 Renderizando interfaz con", messages.length, "mensajes")
 
-  console.log("[WIDGET-CHAT] 🎨 Header config:", {
-    hideHeader,
-    widgetTitle: defaultConfig.widgetTitle,
-    widgetSubtitle: defaultConfig.widgetSubtitle,
-  })
-
   return (
-    <div className="flex flex-col h-full bg-white max-h-screen">
+    <div className="flex flex-col h-screen bg-white">
       {/* Header */}
       {!hideHeader && (
         <div className="bg-sky-600 text-white p-4 flex items-center space-x-3 flex-shrink-0">
@@ -239,7 +233,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
       )}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 min-h-0">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[85%] ${message.isUser ? "order-2" : "order-1"}`}>

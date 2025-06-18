@@ -14,22 +14,6 @@
   console.log("[WIDGET-LOADER] - data-client-id:", scriptElement.getAttribute("data-client-id"))
   console.log("[WIDGET-LOADER] - clienteId final:", clienteId)
 
-  // Agregar verificación de interferencias
-  console.log("[WIDGET-LOADER] 🔍 Verificando interferencias...")
-  const existingStyles = document.querySelectorAll("style")
-  existingStyles.forEach((style, index) => {
-    if (style.textContent.includes("iframe") && style.textContent.includes("widget")) {
-      console.warn(`[WIDGET-LOADER] ⚠️ Estilo ${index} puede interferir:`, style.textContent.substring(0, 100))
-    }
-  })
-
-  const existingScripts = document.querySelectorAll("script")
-  existingScripts.forEach((script, index) => {
-    if (script.textContent.includes("iframe") && script.textContent.includes("widget")) {
-      console.warn(`[WIDGET-LOADER] ⚠️ Script ${index} puede interferir con iframes`)
-    }
-  })
-
   if (!clienteId) {
     console.error("[WIDGET-LOADER] ❌ Error: data-cliente-id o data-client-id es requerido")
     console.error("[WIDGET-LOADER] 📋 Todos los atributos disponibles:")
@@ -87,8 +71,14 @@
   function createFloatingButton(buttonText = "Agendá tu turno con nuestro asistente virtual") {
     // Verificar si ya existe
     if (document.getElementById("chat-widget-button")) {
-      console.log("[WIDGET-LOADER] Botón ya existe")
-      return document.getElementById("chat-widget-button")
+      console.log("[WIDGET-LOADER] Botón ya existe, actualizando texto...")
+      const existingButton = document.getElementById("chat-widget-button")
+      const textSpan = existingButton.querySelector("span")
+      if (textSpan) {
+        textSpan.textContent = buttonText
+        console.log("[WIDGET-LOADER] Texto del botón actualizado:", buttonText)
+      }
+      return existingButton
     }
 
     const button = document.createElement("div")
@@ -241,6 +231,18 @@
     }
   }
 
+  // Función para actualizar el texto del botón
+  function updateFloatingButtonText() {
+    if (widgetConfig && floatingButton) {
+      const buttonText = widgetConfig.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual"
+      const textSpan = floatingButton.querySelector("span")
+      if (textSpan && textSpan.textContent !== buttonText) {
+        textSpan.textContent = buttonText
+        console.log("[WIDGET-LOADER] 🔄 Texto del botón actualizado:", buttonText)
+      }
+    }
+  }
+
   async function initWidget() {
     try {
       console.log("[WIDGET-LOADER] Inicializando widget...")
@@ -258,6 +260,17 @@
       const buttonText = widgetConfig?.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual"
 
       floatingButton = createFloatingButton(buttonText)
+
+      // Actualizar el texto del botón periódicamente para reflejar cambios
+      setInterval(() => {
+        fetchWidgetConfig().then((newConfig) => {
+          if (newConfig) {
+            widgetConfig = newConfig
+            updateFloatingButtonText()
+          }
+        })
+      }, 30000) // Actualizar cada 30 segundos
+
       console.log("[WIDGET-LOADER] ✅ Widget inicializado correctamente")
     } catch (error) {
       console.error("[WIDGET-LOADER] ❌ Error inicializando widget:", error)
