@@ -78,20 +78,60 @@
   }
 
   function updateFloatingButtonText(buttonText) {
+    console.log("[WIDGET-LOADER] 🔄 === ACTUALIZANDO TEXTO DEL BOTÓN ===")
+    console.log("[WIDGET-LOADER] 📝 Texto recibido:", `"${buttonText}"`)
+    console.log("[WIDGET-LOADER] 📏 Longitud:", buttonText.length)
+    console.log("[WIDGET-LOADER] 🔤 Últimos 5 caracteres:", buttonText.slice(-5))
+
     if (floatingButton) {
       const textSpan = floatingButton.querySelector("span")
       if (textSpan) {
         const oldText = textSpan.textContent
-        textSpan.textContent = buttonText
+
+        // Forzar la actualización del texto
+        textSpan.innerHTML = "" // Limpiar primero
+        textSpan.textContent = buttonText // Asignar nuevo texto
+
         console.log("[WIDGET-LOADER] 🔄 Texto del botón actualizado:")
         console.log("[WIDGET-LOADER] - Anterior:", `"${oldText}"`)
-        console.log("[WIDGET-LOADER] - Nuevo:", `"${buttonText}"`)
+        console.log("[WIDGET-LOADER] - Nuevo:", `"${textSpan.textContent}"`)
+        console.log("[WIDGET-LOADER] - Verificación innerHTML:", `"${textSpan.innerHTML}"`)
+
+        // Verificar que el cambio se aplicó correctamente
+        if (textSpan.textContent === buttonText) {
+          console.log("[WIDGET-LOADER] ✅ Actualización exitosa")
+        } else {
+          console.error("[WIDGET-LOADER] ❌ Error en actualización")
+          console.error("[WIDGET-LOADER] - Esperado:", `"${buttonText}"`)
+          console.error("[WIDGET-LOADER] - Actual:", `"${textSpan.textContent}"`)
+
+          // Intentar recrear el botón si la actualización falló
+          console.log("[WIDGET-LOADER] 🔄 Recreando botón por fallo en actualización...")
+          floatingButton = createFloatingButton(buttonText)
+        }
+      } else {
+        console.error("[WIDGET-LOADER] ❌ No se encontró el span del texto")
+        // Recrear el botón si no se encuentra el span
+        floatingButton = createFloatingButton(buttonText)
       }
+    } else {
+      console.error("[WIDGET-LOADER] ❌ No existe floatingButton")
+      // Crear el botón si no existe
+      floatingButton = createFloatingButton(buttonText)
     }
   }
 
   function createFloatingButton(buttonText) {
-    console.log("[WIDGET-LOADER] 🎨 Creando botón flotante con texto:", `"${buttonText}"`)
+    console.log("[WIDGET-LOADER] 🎨 === CREANDO BOTÓN FLOTANTE ===")
+    console.log("[WIDGET-LOADER] 📝 Texto a usar:", `"${buttonText}"`)
+    console.log("[WIDGET-LOADER] 📏 Longitud del texto:", buttonText.length)
+    console.log(
+      "[WIDGET-LOADER] 🔤 Caracteres finales:",
+      buttonText
+        .slice(-5)
+        .split("")
+        .map((c) => `${c}(${c.charCodeAt(0)})`),
+    )
 
     // Verificar si ya existe y eliminarlo para recrearlo
     const existingButton = document.getElementById("chat-widget-button")
@@ -103,42 +143,48 @@
     const button = document.createElement("div")
     button.id = "chat-widget-button"
     button.style.cssText = `
-  position: fixed;
-  z-index: 9998;
-  min-height: 56px;
-  padding: 12px 24px;
-  border-radius: 28px;
-  background: linear-gradient(135deg, #0ea5e9, #0284c7);
-  cursor: pointer;
-  box-shadow: 0 8px 32px rgba(14, 165, 233, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
-  bottom: 20px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  color: white;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.2;
-  max-width: 340px;
-  border: 0;
-  outline: none;
-  text-decoration: none;
-  user-select: none;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+position: fixed;
+z-index: 9998;
+min-height: 56px;
+padding: 12px 24px;
+border-radius: 28px;
+background: linear-gradient(135deg, #0ea5e9, #0284c7);
+cursor: pointer;
+box-shadow: 0 8px 32px rgba(14, 165, 233, 0.3);
+display: flex;
+align-items: center;
+justify-content: center;
+gap: 12px;
+transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
+bottom: 20px;
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+color: white;
+font-size: 15px;
+font-weight: 600;
+line-height: 1.2;
+max-width: 340px;
+border: 0;
+outline: none;
+text-decoration: none;
+user-select: none;
+-webkit-font-smoothing: antialiased;
+-moz-osx-font-smoothing: grayscale;
 `
+
+    // Crear el span del texto por separado para mejor control
+    const textSpan = document.createElement("span")
+    textSpan.textContent = buttonText
 
     // Contenido del botón con icono y texto personalizado
     button.innerHTML = `
       <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style="flex-shrink: 0;">
         <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4l4 4 4-4h4c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
-      </svg>
-      <span>${buttonText}</span>
+    </svg>
     `
+
+    // Agregar el span del texto
+    button.appendChild(textSpan)
 
     button.addEventListener("click", toggleWidget)
     button.addEventListener("mouseenter", () => {
@@ -151,7 +197,18 @@
     })
 
     document.body.appendChild(button)
-    console.log("[WIDGET-LOADER] ✅ Botón flotante creado exitosamente con texto:", `"${buttonText}"`)
+
+    // Verificar que el texto se aplicó correctamente
+    const finalText = textSpan.textContent
+    console.log("[WIDGET-LOADER] ✅ Botón creado con texto final:", `"${finalText}"`)
+    console.log("[WIDGET-LOADER] 🔍 Verificación - coincide:", finalText === buttonText)
+
+    if (finalText !== buttonText) {
+      console.error("[WIDGET-LOADER] ❌ Error: el texto no coincide")
+      console.error("[WIDGET-LOADER] - Esperado:", `"${buttonText}"`)
+      console.error("[WIDGET-LOADER] - Obtenido:", `"${finalText}"`)
+    }
+
     return button
   }
 
@@ -292,22 +349,33 @@
       console.log("[WIDGET-LOADER] ⏰ Configurando actualización periódica...")
       setInterval(async () => {
         try {
+          console.log("[WIDGET-LOADER] ⏰ === VERIFICACIÓN PERIÓDICA ===")
           const newConfig = await fetchWidgetConfig()
-          if (newConfig && newConfig.widgetFloatingButtonText !== widgetConfig?.widgetFloatingButtonText) {
-            console.log("[WIDGET-LOADER] 🔄 Detectado cambio en el texto del botón")
-            console.log("[WIDGET-LOADER] - Anterior:", `"${widgetConfig?.widgetFloatingButtonText}"`)
-            console.log("[WIDGET-LOADER] - Nuevo:", `"${newConfig.widgetFloatingButtonText}"`)
 
-            widgetConfig = newConfig
+          if (newConfig) {
+            const oldButtonText = widgetConfig?.widgetFloatingButtonText
+            const newButtonText = newConfig.widgetFloatingButtonText
 
-            // Recrear el botón completamente para asegurar la actualización
-            const newButtonText = newConfig.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual"
-            floatingButton = createFloatingButton(newButtonText)
+            console.log("[WIDGET-LOADER] 📋 Comparando textos:")
+            console.log("[WIDGET-LOADER] - Anterior:", `"${oldButtonText}"`)
+            console.log("[WIDGET-LOADER] - Nuevo:", `"${newButtonText}"`)
+            console.log("[WIDGET-LOADER] - Son diferentes:", oldButtonText !== newButtonText)
+
+            if (newButtonText && newButtonText !== oldButtonText) {
+              console.log("[WIDGET-LOADER] 🔄 Detectado cambio en el texto del botón")
+
+              widgetConfig = newConfig
+
+              // Siempre recrear el botón para garantizar la actualización
+              const finalButtonText = newButtonText || "Agendá tu turno con nuestro asistente virtual"
+              console.log("[WIDGET-LOADER] 🎨 Recreando botón con texto:", `"${finalButtonText}"`)
+              floatingButton = createFloatingButton(finalButtonText)
+            }
           }
         } catch (error) {
           console.error("[WIDGET-LOADER] ❌ Error en actualización periódica:", error)
         }
-      }, 5000) // Actualizar cada 5 segundos para ser más responsivo
+      }, 5000)
 
       console.log("[WIDGET-LOADER] ✅ Widget inicializado correctamente")
     } catch (error) {
