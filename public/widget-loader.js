@@ -43,11 +43,23 @@
   let floatingButton = null
   let widgetConfig = null
 
-  // Función para obtener la configuración del widget
+  // Función para obtener la configuración del widget con cache busting
   async function fetchWidgetConfig() {
     try {
       console.log("[WIDGET-LOADER] 🔄 Obteniendo configuración del widget...")
-      const response = await fetch(`${baseUrl}/api/widget?cliente_id=${encodeURIComponent(clienteId)}`)
+
+      // Agregar timestamp para evitar caché
+      const timestamp = Date.now()
+      const url = `${baseUrl}/api/widget?cliente_id=${encodeURIComponent(clienteId)}&_t=${timestamp}`
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      })
 
       if (!response.ok) {
         console.warn("[WIDGET-LOADER] ⚠️ No se pudo obtener la configuración:", response.status)
@@ -56,7 +68,7 @@
 
       const config = await response.json()
       console.log("[WIDGET-LOADER] ✅ Configuración obtenida completa:", config)
-      console.log("[WIDGET-LOADER] 🔤 Texto del botón flotante recibido:", config.widgetFloatingButtonText)
+      console.log("[WIDGET-LOADER] 🔤 Texto del botón flotante recibido:", `"${config.widgetFloatingButtonText}"`)
 
       return config
     } catch (error) {
@@ -72,14 +84,14 @@
         const oldText = textSpan.textContent
         textSpan.textContent = buttonText
         console.log("[WIDGET-LOADER] 🔄 Texto del botón actualizado:")
-        console.log("[WIDGET-LOADER] - Anterior:", oldText)
-        console.log("[WIDGET-LOADER] - Nuevo:", buttonText)
+        console.log("[WIDGET-LOADER] - Anterior:", `"${oldText}"`)
+        console.log("[WIDGET-LOADER] - Nuevo:", `"${buttonText}"`)
       }
     }
   }
 
   function createFloatingButton(buttonText) {
-    console.log("[WIDGET-LOADER] 🎨 Creando botón flotante con texto:", buttonText)
+    console.log("[WIDGET-LOADER] 🎨 Creando botón flotante con texto:", `"${buttonText}"`)
 
     // Verificar si ya existe y eliminarlo para recrearlo
     const existingButton = document.getElementById("chat-widget-button")
@@ -139,7 +151,7 @@
     })
 
     document.body.appendChild(button)
-    console.log("[WIDGET-LOADER] ✅ Botón flotante creado exitosamente con texto:", buttonText)
+    console.log("[WIDGET-LOADER] ✅ Botón flotante creado exitosamente con texto:", `"${buttonText}"`)
     return button
   }
 
@@ -175,8 +187,9 @@
       border-radius: 12px;
     `
 
-    // URL del widget con parámetros correctos
-    const widgetUrl = `${config.widgetUrl}?clienteId=${encodeURIComponent(clienteId)}&position=${encodeURIComponent(config.position)}&embedded=true`
+    // URL del widget con parámetros correctos y cache busting
+    const timestamp = Date.now()
+    const widgetUrl = `${config.widgetUrl}?clienteId=${encodeURIComponent(clienteId)}&position=${encodeURIComponent(config.position)}&embedded=true&_t=${timestamp}`
     iframe.src = widgetUrl
 
     console.log("[WIDGET-LOADER] URL del iframe:", widgetUrl)
@@ -265,30 +278,36 @@
       // PASO 3: Extraer el texto del botón de la configuración
       const buttonText = widgetConfig.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual"
       console.log("[WIDGET-LOADER] 🔤 Texto final del botón a usar:", `"${buttonText}"`)
+      console.log("[WIDGET-LOADER] 🔤 Longitud del texto:", buttonText.length)
+      console.log(
+        "[WIDGET-LOADER] 🔤 Caracteres especiales:",
+        buttonText.split("").map((c) => c.charCodeAt(0)),
+      )
 
       // PASO 4: Crear el botón con el texto correcto
       console.log("[WIDGET-LOADER] 🎨 Paso 4: Creando botón flotante...")
       floatingButton = createFloatingButton(buttonText)
 
-      // PASO 5: Configurar actualización periódica
+      // PASO 5: Configurar actualización periódica más agresiva
       console.log("[WIDGET-LOADER] ⏰ Configurando actualización periódica...")
       setInterval(async () => {
         try {
           const newConfig = await fetchWidgetConfig()
           if (newConfig && newConfig.widgetFloatingButtonText !== widgetConfig?.widgetFloatingButtonText) {
             console.log("[WIDGET-LOADER] 🔄 Detectado cambio en el texto del botón")
-            console.log("[WIDGET-LOADER] - Anterior:", widgetConfig?.widgetFloatingButtonText)
-            console.log("[WIDGET-LOADER] - Nuevo:", newConfig.widgetFloatingButtonText)
+            console.log("[WIDGET-LOADER] - Anterior:", `"${widgetConfig?.widgetFloatingButtonText}"`)
+            console.log("[WIDGET-LOADER] - Nuevo:", `"${newConfig.widgetFloatingButtonText}"`)
 
             widgetConfig = newConfig
-            updateFloatingButtonText(
-              newConfig.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual",
-            )
+
+            // Recrear el botón completamente para asegurar la actualización
+            const newButtonText = newConfig.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual"
+            floatingButton = createFloatingButton(newButtonText)
           }
         } catch (error) {
           console.error("[WIDGET-LOADER] ❌ Error en actualización periódica:", error)
         }
-      }, 10000)
+      }, 5000) // Actualizar cada 5 segundos para ser más responsivo
 
       console.log("[WIDGET-LOADER] ✅ Widget inicializado correctamente")
     } catch (error) {

@@ -33,11 +33,23 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   console.log("[WIDGET-CHAT] 📅 Timestamp:", new Date().toISOString())
   console.log("[WIDGET-CHAT] 🆔 Cliente ID:", clienteId)
 
-  // Función para obtener la configuración actualizada
+  // Función para obtener la configuración actualizada con cache busting
   const fetchWidgetConfig = async () => {
     try {
       console.log("[WIDGET-CHAT] 🔄 Obteniendo configuración actualizada...")
-      const response = await fetch(`/api/widget?cliente_id=${encodeURIComponent(clienteId)}`)
+
+      // Agregar timestamp para evitar caché
+      const timestamp = Date.now()
+      const url = `/api/widget?cliente_id=${encodeURIComponent(clienteId)}&_t=${timestamp}`
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      })
 
       if (response.ok) {
         const fetchedConfig = await response.json()
@@ -83,12 +95,23 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     setSessionId(newSessionId)
     console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
 
+    // Configurar actualización periódica de la configuración
+    const configInterval = setInterval(() => {
+      console.log("[WIDGET-CHAT] 🔄 Actualizando configuración periódicamente...")
+      fetchWidgetConfig()
+    }, 5000) // Actualizar cada 5 segundos
+
     console.log("[WIDGET-CHAT] ✅ Inicialización completada")
+
+    return () => {
+      clearInterval(configInterval)
+    }
   }, [clienteId])
 
   // Agregar mensaje de bienvenida cuando la configuración esté lista
   useEffect(() => {
-    if (defaultConfig.widgetWelcomeMessage && messages.length === 0) {
+    if (defaultConfig.widgetWelcomeMessage) {
+      // Limpiar mensajes anteriores y agregar el nuevo mensaje de bienvenida
       const welcomeMessage: Message = {
         id: "welcome",
         content: defaultConfig.widgetWelcomeMessage,
@@ -96,7 +119,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
         timestamp: new Date(),
       }
       setMessages([welcomeMessage])
-      console.log("[WIDGET-CHAT] 👋 Mensaje de bienvenida agregado:", welcomeMessage)
+      console.log("[WIDGET-CHAT] 👋 Mensaje de bienvenida actualizado:", welcomeMessage)
     }
   }, [defaultConfig.widgetWelcomeMessage])
 
