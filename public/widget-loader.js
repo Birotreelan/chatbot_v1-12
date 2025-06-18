@@ -14,6 +14,22 @@
   console.log("[WIDGET-LOADER] - data-client-id:", scriptElement.getAttribute("data-client-id"))
   console.log("[WIDGET-LOADER] - clienteId final:", clienteId)
 
+  // Agregar verificación de interferencias
+  console.log("[WIDGET-LOADER] 🔍 Verificando interferencias...")
+  const existingStyles = document.querySelectorAll("style")
+  existingStyles.forEach((style, index) => {
+    if (style.textContent.includes("iframe") && style.textContent.includes("widget")) {
+      console.warn(`[WIDGET-LOADER] ⚠️ Estilo ${index} puede interferir:`, style.textContent.substring(0, 100))
+    }
+  })
+
+  const existingScripts = document.querySelectorAll("script")
+  existingScripts.forEach((script, index) => {
+    if (script.textContent.includes("iframe") && script.textContent.includes("widget")) {
+      console.warn(`[WIDGET-LOADER] ⚠️ Script ${index} puede interferir con iframes`)
+    }
+  })
+
   if (!clienteId) {
     console.error("[WIDGET-LOADER] ❌ Error: data-cliente-id o data-client-id es requerido")
     console.error("[WIDGET-LOADER] 📋 Todos los atributos disponibles:")

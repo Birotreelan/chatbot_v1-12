@@ -115,6 +115,7 @@ async function createWebThread(identifier: string): Promise<string> {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
         "OpenAI-Beta": "assistants=v2",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         metadata: {
@@ -290,36 +291,6 @@ async function processMessageWithOpenAI(
               },
             },
           },
-          {
-            type: "function",
-            function: {
-              name: "crear_botones_opciones",
-              description:
-                "Genera una lista de botones interactivos numerados para que el usuario pueda elegir una opción entre varias.",
-              parameters: {
-                type: "object",
-                properties: {
-                  opciones: {
-                    type: "array",
-                    description:
-                      "Lista de opciones que el usuario puede elegir. Cada opción se presentará como un botón numerado.",
-                    items: {
-                      type: "string",
-                    },
-                  },
-                  contexto: {
-                    type: "string",
-                    description: "Breve explicación o título que contextualiza la elección para el usuario.",
-                  },
-                  callback_id: {
-                    type: "string",
-                    description: "Identificador único para esta selección de botones.",
-                  },
-                },
-                required: ["opciones"],
-              },
-            },
-          },
         ],
       }),
     })
@@ -339,9 +310,6 @@ async function processMessageWithOpenAI(
     throw error
   }
 }
-
-// Variable global para almacenar botones generados
-let lastGeneratedButtons: any = null
 
 async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
   let attempts = 0
@@ -392,14 +360,7 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
         if (messages.data.length > 0) {
           const lastMessage = messages.data[0]
           if (lastMessage.content[0]?.type === "text") {
-            let response = lastMessage.content[0].text.value
-
-            // Si se generaron botones, agregar el marcador especial
-            if (lastGeneratedButtons) {
-              console.log(`[WEB-CHAT-FINAL] 🔘 Agregando marcador de botones a la respuesta`)
-              response += `\n\n__WIDGET_BUTTONS__${JSON.stringify(lastGeneratedButtons)}__END_BUTTONS__`
-              lastGeneratedButtons = null // Limpiar después de usar
-            }
+            const response = lastMessage.content[0].text.value
 
             console.log(`[WEB-CHAT-FINAL] ✅ Respuesta final: ${response.length} caracteres`)
             return response
@@ -449,77 +410,88 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
         switch (toolCall.function.name) {
           case "validate_dni":
             console.log(`[WEB-CHAT-FINAL] 🔍 Validando DNI: ${args.dni} con cliente: ${clienteId}`)
-            const dniResult = await validateDNI(args.dni, clienteId)
-            console.log(`[WEB-CHAT-FINAL] 📋 Resultado DNI:`, dniResult)
-            output = JSON.stringify(dniResult)
+
+            // Verificar si la API externa está disponible
+            try {
+              const dniResult = await validateDNI(args.dni, clienteId)
+              console.log(`[WEB-CHAT-FINAL] 📋 Resultado DNI:`, dniResult)
+              output = JSON.stringify(dniResult)
+            } catch (error) {
+              console.error(`[WEB-CHAT-FINAL] ❌ Error validando DNI:`, error)
+              // Respuesta de fallback cuando la API externa no está disponible
+              output = JSON.stringify({
+                success: false,
+                error:
+                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para gestionar tu turno.",
+                fallback: true,
+              })
+            }
             break
 
           case "search_turnos":
             console.log(`[WEB-CHAT-FINAL] 📅 Buscando turnos con cliente: ${clienteId}`)
             console.log(`[WEB-CHAT-FINAL] 📋 Parámetros:`, args)
 
-            // Si no hay rangoFechas o es una fecha del pasado, usar fechas dinámicas
-            let rangoFechas = args.rangoFechas
-            if (!rangoFechas || rangoFechas.includes("2024-01-08") || rangoFechas === "hoy a hoy") {
-              rangoFechas = getDefaultDateRange()
-              console.log(`[WEB-CHAT-FINAL] 📅 Usando fechas dinámicas: ${rangoFechas}`)
-            }
+            try {
+              // Si no hay rangoFechas o es una fecha del pasado, usar fechas dinámicas
+              let rangoFechas = args.rangoFechas
+              if (!rangoFechas || rangoFechas.includes("2024-01-08") || rangoFechas === "hoy a hoy") {
+                rangoFechas = getDefaultDateRange()
+                console.log(`[WEB-CHAT-FINAL] 📅 Usando fechas dinámicas: ${rangoFechas}`)
+              }
 
-            const turnosResult = await searchTurnos(
-              {
-                rangoFechas: rangoFechas,
-                profesional: args.profesional,
-                especialidad: args.especialidad,
-                profesionalId: args.profesionalId,
-              },
-              clienteId,
-            )
-            console.log(`[WEB-CHAT-FINAL] 📋 Resultado turnos:`, turnosResult)
-            output = JSON.stringify(turnosResult)
+              const turnosResult = await searchTurnos(
+                {
+                  rangoFechas: rangoFechas,
+                  profesional: args.profesional,
+                  especialidad: args.especialidad,
+                  profesionalId: args.profesionalId,
+                },
+                clienteId,
+              )
+              console.log(`[WEB-CHAT-FINAL] 📋 Resultado turnos:`, turnosResult)
+              output = JSON.stringify(turnosResult)
+            } catch (error) {
+              console.error(`[WEB-CHAT-FINAL] ❌ Error buscando turnos:`, error)
+              output = JSON.stringify({
+                success: false,
+                error:
+                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar turnos disponibles.",
+                fallback: true,
+              })
+            }
             break
 
           case "reserve_turno":
             console.log(`[WEB-CHAT-FINAL] 🎯 Reservando turno con cliente: ${clienteId}`)
             console.log(`[WEB-CHAT-FINAL] 📋 Datos de reserva:`, args)
 
-            const reserveResult = await reserveTurno(
-              {
-                agendaId: args.agendaId,
-                dni: args.dni,
-                nombre: args.nombre,
-                apellido: args.apellido,
-                telefono: args.telefono,
-                email: args.email,
-                fecha: args.fecha,
-                hora: args.hora,
-                profesional: args.profesional,
-              },
-              clienteId,
-            )
-            console.log(`[WEB-CHAT-FINAL] 📋 Resultado reserva:`, reserveResult)
-            output = JSON.stringify(reserveResult)
-            break
-
-          case "crear_botones_opciones":
-            console.log(`[WEB-CHAT-FINAL] 🔘 Generando botones con opciones`)
-            console.log(`[WEB-CHAT-FINAL] 📋 Opciones:`, args.opciones)
-
-            // Guardar los botones para agregarlos a la respuesta final
-            lastGeneratedButtons = {
-              opciones: args.opciones,
-              contexto: args.contexto || "",
-              callback_id: args.callback_id || "default_callback",
+            try {
+              const reserveResult = await reserveTurno(
+                {
+                  agendaId: args.agendaId,
+                  dni: args.dni,
+                  nombre: args.nombre,
+                  apellido: args.apellido,
+                  telefono: args.telefono,
+                  email: args.email,
+                  fecha: args.fecha,
+                  hora: args.hora,
+                  profesional: args.profesional,
+                },
+                clienteId,
+              )
+              console.log(`[WEB-CHAT-FINAL] 📋 Resultado reserva:`, reserveResult)
+              output = JSON.stringify(reserveResult)
+            } catch (error) {
+              console.error(`[WEB-CHAT-FINAL] ❌ Error reservando turno:`, error)
+              output = JSON.stringify({
+                success: false,
+                error:
+                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para reservar tu turno.",
+                fallback: true,
+              })
             }
-
-            console.log(`[WEB-CHAT-FINAL] 💾 Botones guardados para la respuesta:`, lastGeneratedButtons)
-
-            // Devolver los datos de los botones para que el frontend los muestre
-            output = JSON.stringify({
-              success: true,
-              opciones: args.opciones,
-              contexto: args.contexto || "",
-              callback_id: args.callback_id || "default_callback",
-            })
             break
 
           default:
@@ -537,7 +509,10 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
         console.error(`[WEB-CHAT-FINAL] ❌ Error en tool call ${toolCall.function.name}:`, error)
         toolOutputs.push({
           tool_call_id: toolCall.id,
-          output: JSON.stringify({ error: "Error procesando la solicitud" }),
+          output: JSON.stringify({
+            error: "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica.",
+            fallback: true,
+          }),
         })
       }
     }

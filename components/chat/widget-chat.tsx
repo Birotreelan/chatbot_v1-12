@@ -12,11 +12,6 @@ interface Message {
   content: string
   isUser: boolean
   timestamp: Date
-  buttons?: {
-    options: string[]
-    context?: string
-    callback_id?: string
-  }
 }
 
 interface WidgetChatProps {
@@ -144,36 +139,16 @@ export default function WidgetChat({ clienteId, config = {}, hideHeader = false 
       console.log("[WIDGET-CHAT] 📋 Datos JSON recibidos:", JSON.stringify(data, null, 2))
 
       if (data.success && data.response) {
-        let content = data.response
-        let buttons = null
+        const content = data.response
 
         console.log("[WIDGET-CHAT] 🔍 Procesando respuesta...")
         console.log("[WIDGET-CHAT] 📄 Contenido original:", content)
-
-        // Buscar botones en la respuesta
-        const widgetButtonsMatch = content.match(/__WIDGET_BUTTONS__(.+?)__END_BUTTONS__/s)
-        if (widgetButtonsMatch) {
-          console.log("[WIDGET-CHAT] 🔘 Marcador de botones encontrado:", widgetButtonsMatch[1])
-          try {
-            const buttonData = JSON.parse(widgetButtonsMatch[1])
-            content = content.replace(widgetButtonsMatch[0], "").trim()
-            buttons = {
-              options: buttonData.opciones || [],
-              context: buttonData.contexto || "",
-              callback_id: buttonData.callback_id || "default_callback",
-            }
-            console.log("[WIDGET-CHAT] ✅ Botones extraídos:", buttons)
-          } catch (e) {
-            console.error("[WIDGET-CHAT] ❌ Error parseando botones:", e)
-          }
-        }
 
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
           content: content.trim(),
           isUser: false,
           timestamp: new Date(),
-          buttons: buttons,
         }
 
         console.log("[WIDGET-CHAT] 🤖 Agregando mensaje del bot:", botMessage)
@@ -203,11 +178,6 @@ export default function WidgetChat({ clienteId, config = {}, hideHeader = false 
       console.log("[WIDGET-CHAT] ⌨️ Enter presionado")
       sendMessage()
     }
-  }
-
-  const handleButtonClick = (option: string) => {
-    console.log("[WIDGET-CHAT] 🔘 Botón clickeado:", option)
-    sendMessage(option)
   }
 
   const formatTime = (date: Date) => {
@@ -245,26 +215,6 @@ export default function WidgetChat({ clienteId, config = {}, hideHeader = false 
                 }`}
               >
                 <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-
-                {/* Botones interactivos */}
-                {message.buttons && message.buttons.options.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {message.buttons.context && (
-                      <p className="text-xs font-medium text-gray-600 mb-2">{message.buttons.context}</p>
-                    )}
-                    <div className="grid gap-2">
-                      {message.buttons.options.map((option, index) => (
-                        <button
-                          key={index}
-                          onClick={() => handleButtonClick(option)}
-                          className="text-left text-sm py-2 px-3 rounded-lg border-2 border-sky-600 bg-white text-sky-600 hover:bg-sky-50 transition-all duration-200 shadow-sm hover:shadow-md"
-                        >
-                          {option}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
 
               <p
