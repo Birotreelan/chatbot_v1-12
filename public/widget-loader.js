@@ -57,8 +57,34 @@
   let isWidgetVisible = false
   let widgetContainer = null
   let floatingButton = null
+  let widgetConfig = null
 
-  function createFloatingButton() {
+  // Función para obtener la configuración del widget
+  async function fetchWidgetConfig() {
+    try {
+      console.log("[WIDGET-LOADER] 🔄 Obteniendo configuración del widget...")
+      const response = await fetch(`${baseUrl}/api/widget?cliente_id=${encodeURIComponent(clienteId)}`)
+
+      if (!response.ok) {
+        console.warn("[WIDGET-LOADER] ⚠️ No se pudo obtener la configuración:", response.status)
+        return null
+      }
+
+      const config = await response.json()
+      console.log("[WIDGET-LOADER] ✅ Configuración obtenida:", {
+        displayName: config.displayName,
+        widgetFloatingButtonText: config.widgetFloatingButtonText,
+        widgetEnabled: config.widgetEnabled,
+      })
+
+      return config
+    } catch (error) {
+      console.warn("[WIDGET-LOADER] ⚠️ Error obteniendo configuración:", error)
+      return null
+    }
+  }
+
+  function createFloatingButton(buttonText = "Agendá tu turno con nuestro asistente virtual") {
     // Verificar si ya existe
     if (document.getElementById("chat-widget-button")) {
       console.log("[WIDGET-LOADER] Botón ya existe")
@@ -70,37 +96,47 @@
     button.style.cssText = `
       position: fixed;
       z-index: 9998;
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
+      height: 50px;
+      padding: 0 20px;
+      border-radius: 25px;
       background: linear-gradient(135deg, #0ea5e9, #0284c7);
       cursor: pointer;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
       display: flex;
       align-items: center;
       justify-content: center;
+      gap: 10px;
       transition: all 0.3s ease;
       ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
       bottom: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: white;
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      max-width: 320px;
     `
 
-    // Icono de chat
+    // Contenido del botón con icono y texto personalizado
     button.innerHTML = `
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style="flex-shrink: 0;">
         <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4l4 4 4-4h4c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
       </svg>
+      <span>${buttonText}</span>
     `
 
     button.addEventListener("click", toggleWidget)
     button.addEventListener("mouseenter", () => {
-      button.style.transform = "scale(1.1)"
+      button.style.transform = "scale(1.05)"
+      button.style.boxShadow = "0 6px 25px rgba(0, 0, 0, 0.2)"
     })
     button.addEventListener("mouseleave", () => {
       button.style.transform = "scale(1)"
+      button.style.boxShadow = "0 4px 20px rgba(0, 0, 0, 0.15)"
     })
 
     document.body.appendChild(button)
-    console.log("[WIDGET-LOADER] Botón flotante creado")
+    console.log("[WIDGET-LOADER] Botón flotante creado con texto:", buttonText)
     return button
   }
 
@@ -199,13 +235,28 @@
     }
   }
 
-  function initWidget() {
+  async function initWidget() {
     try {
       console.log("[WIDGET-LOADER] Inicializando widget...")
-      floatingButton = createFloatingButton()
+
+      // Obtener configuración del servidor
+      widgetConfig = await fetchWidgetConfig()
+
+      // Verificar si el widget está habilitado
+      if (widgetConfig && widgetConfig.widgetEnabled === false) {
+        console.log("[WIDGET-LOADER] ⚠️ Widget deshabilitado en la configuración")
+        return
+      }
+
+      // Usar el texto personalizado o el por defecto
+      const buttonText = widgetConfig?.widgetFloatingButtonText || "Agendá tu turno con nuestro asistente virtual"
+
+      floatingButton = createFloatingButton(buttonText)
       console.log("[WIDGET-LOADER] ✅ Widget inicializado correctamente")
     } catch (error) {
       console.error("[WIDGET-LOADER] ❌ Error inicializando widget:", error)
+      // En caso de error, crear el botón con texto por defecto
+      floatingButton = createFloatingButton()
     }
   }
 
