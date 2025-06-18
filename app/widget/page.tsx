@@ -1,76 +1,34 @@
-import type { Metadata } from "next"
-import { notFound } from "next/navigation"
-import { WidgetChat } from "@/components/widget-chat"
-import { getConfigByClienteId } from "@/lib/db"
+import type React from "react"
+import WidgetChat from "@/components/widget-chat"
 
-interface Props {
+interface WidgetPageProps {
   searchParams: {
     clienteId: string
+    config: string
     embedded?: string
   }
 }
 
-export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
-  const { clienteId, embedded } = searchParams
+const WidgetPage: React.FC<WidgetPageProps> = ({ searchParams }) => {
+  const { clienteId, config, embedded } = searchParams
 
-  if (!clienteId) {
-    return {
-      title: "Widget",
-    }
-  }
-
-  return {
-    title: `Widget - ${clienteId}`,
-  }
-}
-
-// Obtener configuración del widget
-async function getWidgetConfig(clienteId: string) {
+  // Parse config string to JSON object
+  let parsedConfig = {}
   try {
-    console.log("[WIDGET-PAGE] 🔍 Obteniendo configuración para cliente:", clienteId)
-
-    // Usar la función de la base de datos para obtener la configuración
-    const config = await getConfigByClienteId(clienteId)
-
-    if (!config) {
-      console.log("[WIDGET-PAGE] ❌ No se encontró configuración para cliente:", clienteId)
-      return null
-    }
-
-    console.log("[WIDGET-PAGE] ✅ Configuración encontrada:", {
-      widgetTitle: config.widgetTitle,
-      widgetSubtitle: config.widgetSubtitle,
-      widgetFloatingButtonText: config.widgetFloatingButtonText,
-    })
-
-    return config
+    parsedConfig = JSON.parse(config)
   } catch (error) {
-    console.error("[WIDGET-PAGE] ❌ Error obteniendo configuración:", error)
-    return null
-  }
-}
-
-export default async function Page({ searchParams }: Props) {
-  const { clienteId, embedded } = searchParams
-
-  if (!clienteId) {
-    notFound()
-  }
-
-  const widgetConfig = await getWidgetConfig(clienteId)
-
-  if (!widgetConfig) {
-    console.log("[WIDGET-PAGE] ❌ No se renderizará el widget por falta de configuración")
-    return (
-      <div>
-        <p>No se puede mostrar el widget porque no hay configuración para este cliente.</p>
-      </div>
-    )
+    console.error("Error parsing config:", error)
   }
 
   return (
-    <>
-      <WidgetChat clienteId={clienteId} config={widgetConfig} hideHeader={embedded === "true"} />
-    </>
+    <div>
+      <WidgetChat
+        clienteId={clienteId}
+        config={parsedConfig}
+        hideHeader={false} // Asegurar que el header se muestre
+      />
+    </div>
   )
 }
+
+export default WidgetPage

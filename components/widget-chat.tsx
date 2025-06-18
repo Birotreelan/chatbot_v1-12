@@ -188,6 +188,12 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
 
   console.log("[WIDGET-CHAT] 🎨 Renderizando interfaz con", messages.length, "mensajes")
 
+  console.log("[WIDGET-CHAT] 🎨 Header config:", {
+    hideHeader,
+    widgetTitle: defaultConfig.widgetTitle,
+    widgetSubtitle: defaultConfig.widgetSubtitle,
+  })
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
