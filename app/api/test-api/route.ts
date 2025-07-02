@@ -30,8 +30,15 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Hardcodear la URL del proxy
-    const proxy = "https://treelan.net/managment/proxy_service/"
+    // Obtener la URL del proxy desde las variables de entorno
+    const proxy = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL
+
+    if (!proxy) {
+      return NextResponse.json(
+        { success: false, error: "PROXY_API_URL no está configurada en las variables de entorno" },
+        { status: 500 },
+      )
+    }
 
     // Ejecutar la prueba según el tipo
     let result

@@ -1,6 +1,15 @@
 import { Redis } from "@upstash/redis"
 import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse } from "./types"
 
+// Obtener la URL del proxy desde las variables de entorno
+function getProxyUrl(): string {
+  const proxyUrl = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL
+  if (!proxyUrl) {
+    throw new Error("PROXY_API_URL o CLINIC_PROXY_URL debe estar configurada en las variables de entorno")
+  }
+  return proxyUrl
+}
+
 // Prefijo para las claves de caché
 const CACHE_PREFIX = "api_cache:"
 // TTL para la caché (en segundos)
@@ -43,9 +52,9 @@ async function fetchProxyApi<T>(
 
   try {
     // Usar la URL hardcodeada en lugar del parámetro
-    const hardcodedProxyUrl = "https://treelan.net/managment/proxy_service/"
+    const proxyUrl = getProxyUrl()
 
-    console.log(`Realizando petición POST a: ${hardcodedProxyUrl}`)
+    console.log(`Realizando petición POST a: ${proxyUrl}`)
     console.log(`Action: ${action}, Cliente_Id: ${clienteId}`)
     console.log(`Parámetros:`, params)
 
@@ -59,7 +68,7 @@ async function fetchProxyApi<T>(
     console.log(`Cuerpo de la solicitud: ${JSON.stringify(requestBody)}`)
 
     // Hacer la petición POST
-    const response = await fetch(hardcodedProxyUrl, {
+    const response = await fetch(proxyUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

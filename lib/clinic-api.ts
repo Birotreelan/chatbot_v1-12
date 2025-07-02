@@ -15,11 +15,16 @@ function getDefaultDateRange(): string {
 
 // Clase ClinicAPI para interactuar con el middleware proxy
 export class ClinicAPI {
-  private proxyUrl = "https://treelan.net/managment/proxy_service/"
+  private proxyUrl: string
   private clienteId: string
 
   constructor(clienteId: string) {
     this.clienteId = clienteId
+    this.proxyUrl = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL || ""
+
+    if (!this.proxyUrl) {
+      throw new Error("PROXY_API_URL o CLINIC_PROXY_URL debe estar configurada en las variables de entorno")
+    }
   }
 
   /**
