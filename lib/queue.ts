@@ -1,62 +1,48 @@
 import { Client } from "@upstash/qstash"
 
-let qstashClient: Client | null = null
+const qstash = new Client({
+  token: process.env.QSTASH_TOKEN!,
+})
 
-// Inicializar el cliente de QStash
-function getQStashClient() {
-  if (qstashClient) return qstashClient
-
-  const token = process.env.QSTASH_TOKEN
-  const currentSigningKey = process.env.QSTASH_CURRENT_SIGNING_KEY
-  const nextSigningKey = process.env.QSTASH_NEXT_SIGNING_KEY
-
-  if (!token) {
-    console.warn("QStash token no configurado")
-    return null
-  }
-
-  if (!currentSigningKey || !nextSigningKey) {
-    console.warn("QStash signing keys no configuradas")
-    return null
-  }
-
+export async function enqueueMessage(messageData: any) {
   try {
-    qstashClient = new Client({ token })
-    return qstashClient
+    const targetUrl = `${process.env.APP_URL || process.env.VERCEL_URL}/api/process-message`
+
+    const delay = process.env.QSTASH_DELAY ? Number.parseInt(process.env.QSTASH_DELAY, 10) : 0
+
+    const result = await qstash.publishJSON({
+      url: targetUrl,
+      body: messageData,
+      delay: delay,
+    })
+
+    return {
+      success: true,
+      messageId: result.messageId,
+    }
   } catch (error) {
-    console.error("Error al inicializar QStash:", error)
-    return null
+    console.error("[QUEUE] Error encolando mensaje:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
   }
 }
 
-// Encolar un mensaje para procesamiento asíncrono
-export async function enqueueMessage(messageData: any): Promise<{ messageId: string | null; success: boolean }> {
-  const client = getQStashClient()
-  if (!client) {
-    console.error("[QUEUE] Cliente QStash no disponible")
-    return { messageId: null, success: false }
-  }
-
+export async function getQueueStatus() {
   try {
-    // Usar explícitamente la URL de producción
-    const baseUrl = "https://treelan-bot.vercel.app"
-
-    console.log(`[QUEUE] Enviando mensaje a: ${baseUrl}/api/process-message`)
-
-    // Enviar el mensaje a la cola
-    const response = await client.publishJSON({
-      url: `${baseUrl}/api/process-message`,
-      body: messageData,
-      // Configurar reintentos en caso de fallo
-      retries: Number(process.env.MAX_RETRIES || 3),
-      // Configurar un delay entre reintentos
-      delay: Number(process.env.QSTASH_DELAY || 0),
-    })
-
-    console.log(`[QUEUE] Mensaje encolado exitosamente con ID: ${response.messageId}`)
-    return { messageId: response.messageId, success: true }
+    // QStash no tiene una API directa para obtener el estado de la cola
+    // Pero podemos devolver información básica
+    return {
+      success: true,
+      status: "operational",
+      timestamp: new Date().toISOString(),
+    }
   } catch (error) {
-    console.error("[QUEUE] Error al encolar mensaje:", error)
-    return { messageId: null, success: false }
+    console.error("[QUEUE] Error obteniendo estado de cola:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
   }
 }

@@ -144,20 +144,15 @@ export async function processIndividualMessage(
   userPhoneNumber: string,
   assistantId?: string,
 ) {
-  console.log(`[OPENAI-TOOLS] Procesando mensaje individual para ${userPhoneNumber}`)
-
   try {
-    // Obtener la configuración
     const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
     if (!config) {
       throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
     }
 
-    // Crear o obtener thread
     const { getThread } = await import("@/lib/thread-manager")
     const thread = await getThread(userPhoneNumber, config.id)
 
-    // Procesar con el asistente
     const result = await getAssistantResponse(
       thread.id,
       message,
@@ -177,27 +172,15 @@ export async function processIndividualMessage(
 function truncateToolResponse(response: any, maxLength = 1000): any {
   const responseStr = JSON.stringify(response)
   const originalLength = responseStr.length
-  const originalTokens = Math.ceil(originalLength / 4)
-
-  console.log(`[OPENAI-TOOLS] ========== TRUNCANDO RESPUESTA ==========`)
-  console.log(`[OPENAI-TOOLS] Tamaño original: ${originalLength} caracteres (${originalTokens} tokens estimados)`)
-  console.log(`[OPENAI-TOOLS] Límite máximo: ${maxLength} caracteres`)
 
   if (responseStr.length <= maxLength) {
-    console.log(`[OPENAI-TOOLS] ✅ Respuesta dentro del límite, no se requiere truncamiento`)
-    console.log(`[OPENAI-TOOLS] ================================================`)
     return response
   }
 
-  console.log(`[OPENAI-TOOLS] ⚠️ Respuesta excede el límite, aplicando truncamiento...`)
-
-  // Si es un objeto con datos, truncar los datos
   if (response.exito && response.datos) {
     if (Array.isArray(response.datos)) {
       const originalCount = response.datos.length
-      // Si es un array, limitar a los primeros elementos
-      // Modificado: Ahora permite hasta 18 elementos en lugar de 5
-      const truncatedData = response.datos.slice(0, 40) // Permitir hasta 40 elementos (5 días x 8 turnos)
+      const truncatedData = response.datos.slice(0, 40)
       const truncatedResponse = {
         ...response,
         datos: truncatedData,
@@ -205,19 +188,8 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
         _originalLength: response.datos.length,
       }
 
-      const newLength = JSON.stringify(truncatedResponse).length
-      const newTokens = Math.ceil(newLength / 4)
-
-      console.log(`[OPENAI-TOOLS] Array truncado de ${originalCount} a ${truncatedData.length} elementos`)
-      console.log(`[OPENAI-TOOLS] Nuevo tamaño: ${newLength} caracteres (${newTokens} tokens estimados)`)
-      console.log(
-        `[OPENAI-TOOLS] Reducción: ${originalLength - newLength} caracteres (${originalTokens - newTokens} tokens)`,
-      )
-      console.log(`[OPENAI-TOOLS] ================================================`)
-
       return truncatedResponse
     } else if (typeof response.datos === "object") {
-      // Si es un objeto, mantener solo campos esenciales
       const truncatedData = {
         ...response.datos,
         _truncated: true,
@@ -227,21 +199,10 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
         datos: truncatedData,
       }
 
-      const newLength = JSON.stringify(truncatedResponse).length
-      const newTokens = Math.ceil(newLength / 4)
-
-      console.log(`[OPENAI-TOOLS] Objeto truncado manteniendo campos esenciales`)
-      console.log(`[OPENAI-TOOLS] Nuevo tamaño: ${newLength} caracteres (${newTokens} tokens estimados)`)
-      console.log(
-        `[OPENAI-TOOLS] Reducción: ${originalLength - newLength} caracteres (${originalTokens - newTokens} tokens)`,
-      )
-      console.log(`[OPENAI-TOOLS] ================================================`)
-
       return truncatedResponse
     }
   }
 
-  // Fallback: truncar el string completo
   const truncatedString = responseStr.substring(0, maxLength - 100) + "... [TRUNCADO]"
   const fallbackResponse = {
     exito: response.exito || false,
@@ -250,21 +211,10 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
     _originalLength: originalLength,
   }
 
-  const newLength = JSON.stringify(fallbackResponse).length
-  const newTokens = Math.ceil(newLength / 4)
-
-  console.log(`[OPENAI-TOOLS] Aplicado truncamiento de string fallback`)
-  console.log(`[OPENAI-TOOLS] Nuevo tamaño: ${newLength} caracteres (${newTokens} tokens estimados)`)
-  console.log(
-    `[OPENAI-TOOLS] Reducción: ${originalLength - newLength} caracteres (${originalTokens - newTokens} tokens)`,
-  )
-  console.log(`[OPENAI-TOOLS] ================================================`)
-
   return fallbackResponse
 }
 
 // Implementación directa de todas las funciones
-// Simplificar logs - solo conversaciones y APIs
 export async function executeOpenAITool(
   toolName: string,
   toolArgs: Record<string, any>,
@@ -285,8 +235,8 @@ export async function executeOpenAITool(
   const proxyUrl = proxy.endsWith("/") ? proxy : `${proxy}/`
 
   try {
-    console.log(`[API-CALL] 🔧 ${toolName} | Cliente: ${clienteId}`)
-    console.log(`[API-CALL] 📋 Args:`, JSON.stringify(toolArgs, null, 2))
+    console.log(`[PROXY] 🔧 ${toolName} | Cliente: ${clienteId}`)
+    console.log(`[PROXY] 📋 Args:`, JSON.stringify(toolArgs, null, 2))
 
     let requestBody: Record<string, any> = {
       Cliente_Id: clienteId.trim(),
@@ -567,7 +517,7 @@ export async function executeOpenAITool(
         }
     }
 
-    console.log(`[API-REQUEST] ${toolName}:`, JSON.stringify(requestBody, null, 2))
+    console.log(`[PROXY] 📤 Request:`, JSON.stringify(requestBody, null, 2))
 
     // Hacer petición con reintentos
     let lastError = null
@@ -598,7 +548,7 @@ export async function executeOpenAITool(
     }
 
     const responseText = await response.text()
-    console.log(`[API-RESPONSE] ${toolName}:`, responseText)
+    console.log(`[PROXY] 📥 Response:`, responseText)
 
     try {
       const data = JSON.parse(responseText)
@@ -800,7 +750,7 @@ export async function executeOpenAITool(
           }
       }
     } catch (e) {
-      console.error(`[API-PARSE-ERROR] ${toolName}:`, e.message)
+      console.error(`[PROXY] ❌ Parse error:`, e.message)
       return {
         exito: false,
         error: {
@@ -810,7 +760,7 @@ export async function executeOpenAITool(
       }
     }
   } catch (error) {
-    console.error(`[API-ERROR] ${toolName}:`, error.message)
+    console.error(`[PROXY] ❌ Error:`, error.message)
     return {
       exito: false,
       error: {
@@ -828,33 +778,20 @@ export async function processWebOnlyMessage(
   assistantId: string,
   clienteId: string,
 ): Promise<string> {
-  console.log(`[OPENAI-WEB] 🌐 PROCESANDO MENSAJE WEB ÚNICAMENTE`)
-  console.log(`[OPENAI-WEB] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
-  console.log(`[OPENAI-WEB] Thread ID: ${threadId}`)
-  console.log(`[OPENAI-WEB] Assistant ID: ${assistantId}`)
-
   const openai = getOpenAIClient()
 
   try {
-    // Añadir el mensaje al thread
     const messageResponse = await openai.beta.threads.messages.create(threadId, {
       role: "user",
       content: message,
     })
 
-    console.log(`[OPENAI-WEB] Mensaje añadido al thread: ${messageResponse.id}`)
-
-    // Crear un run con el asistente
     const run = await openai.beta.threads.runs.create(threadId, {
       assistant_id: assistantId,
     })
 
-    console.log(`[OPENAI-WEB] Run creado: ${run.id}`)
-
-    // Procesar el run SIN enviar a WhatsApp
     await processWebRunOnly(openai, threadId, run.id, clienteId)
 
-    // Obtener la respuesta
     const messages = await openai.beta.threads.messages.list(threadId, {
       order: "desc",
       limit: 1,
@@ -871,9 +808,6 @@ export async function processWebOnlyMessage(
       }
     }
 
-    console.log(`[OPENAI-WEB] ✅ Respuesta obtenida: ${messageContent.length} caracteres`)
-    console.log(`[OPENAI-WEB] ✅ CONFIRMADO: No se envió nada a WhatsApp`)
-
     return messageContent
   } catch (error) {
     console.error("[OPENAI-WEB] Error:", error)
@@ -883,8 +817,6 @@ export async function processWebOnlyMessage(
 
 // Función para procesar run web sin enviar a WhatsApp
 async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string, clienteId: string): Promise<void> {
-  console.log(`[OPENAI-WEB] Procesando run web: ${runId}`)
-
   let run = await openai.beta.threads.runs.retrieve(threadId, runId)
 
   while (run.status === "queued" || run.status === "in_progress") {
@@ -901,8 +833,6 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         const functionName = toolCall.function.name
         const functionArgs = JSON.parse(toolCall.function.arguments)
 
-        console.log(`[OPENAI-WEB] 🔧 Ejecutando herramienta: ${functionName}`)
-
         const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
 
         toolOutputs.push({
@@ -915,37 +845,25 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         tool_outputs: toolOutputs,
       })
 
-      // Continuar procesando
       await processWebRunOnly(openai, threadId, runId, clienteId)
     }
   } else if (run.status === "failed") {
     throw new Error(`Run falló: ${run.last_error?.message}`)
   }
-
-  console.log(`[OPENAI-WEB] ✅ Run web completado sin enviar a WhatsApp`)
 }
 
-// Tiempo máximo de espera para la respuesta de OpenAI (en milisegundos)
 const OPENAI_TIMEOUT = Number.parseInt(process.env.OPENAI_TIMEOUT || "60000", 10)
-
-// Número máximo de reintentos
 const MAX_RETRIES = Number.parseInt(process.env.MAX_RETRIES || "3", 10)
-
-// Tiempo de espera entre reintentos (en milisegundos)
 const RETRY_DELAY = Number.parseInt(process.env.RETRY_DELAY || "2000", 10)
 
-// Función para obtener una instancia de OpenAI
 function getOpenAIClient() {
   return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   })
 }
 
-// Función para esperar un tiempo determinado
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-// Agregar logging detallado al inicio de getAssistantResponse
-// Simplificar getAssistantResponse
 export async function getAssistantResponse(
   threadId: string,
   message: string,
@@ -989,14 +907,12 @@ export async function getAssistantResponse(
 
     return { success: true }
   } catch (error) {
-    console.error("[CONVERSATION-ERROR]", error.message)
+    console.error("[CONVERSATION] ❌ Error:", error.message)
     await logError("openai", error instanceof Error ? error : new Error(String(error)))
     throw error
   }
 }
 
-// Agregar logging detallado en processRunWithCorrectFlow
-// Simplificar processRunWithCorrectFlow
 async function processRunWithCorrectFlow(
   openai: OpenAI,
   threadId: string,
@@ -1142,8 +1058,6 @@ async function processRunWithCorrectFlow(
   }
 }
 
-// Agregar logging detallado en waitForRunCompletionOrAction
-// Simplificar waitForRunCompletionOrAction
 async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, runId: string) {
   if (!threadId || threadId === "undefined") {
     throw new Error(`threadId inválido: "${threadId}"`)

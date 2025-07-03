@@ -12,7 +12,6 @@ import { getArgentinaDateTime } from "@/lib/utils/date-utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 
-// Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): string {
   switch (message.type) {
     case "text":
@@ -31,7 +30,6 @@ function extractMessageContent(message: any): string {
   }
 }
 
-// Simplificar logs de WhatsApp - solo conversaciones importantes
 export async function handleMessage(value: WhatsAppValue) {
   try {
     if (!value.messages || value.messages.length === 0) {
@@ -47,7 +45,7 @@ export async function handleMessage(value: WhatsAppValue) {
     const config = await getWhatsAppConfigByPhoneId(value.metadata.phone_number_id)
 
     if (!config) {
-      console.error(`[WHATSAPP] ❌ Config no encontrada: ${value.metadata.phone_number_id}`)
+      console.error(`[WHATSAPP] ❌ Config no encontrada: ${value.metadata.phone_number_id.slice(-4)}`)
       return
     }
 
@@ -72,7 +70,8 @@ export async function handleMessage(value: WhatsAppValue) {
           ...value,
         }
 
-        console.log(`[WHATSAPP] 📤 Enviando al proxy: ${config.proxy}`)
+        console.log(`[PROXY] 📤 Enviando respuesta de botón`)
+        console.log(`[PROXY] 📋 Payload:`, JSON.stringify(proxyPayload, null, 2))
 
         const response = await fetch(`${config.proxy}`, {
           method: "POST",
@@ -82,7 +81,7 @@ export async function handleMessage(value: WhatsAppValue) {
 
         if (response.ok) {
           const responseText = await response.text()
-          console.log(`[WHATSAPP] 📥 Respuesta proxy: ${responseText}`)
+          console.log(`[PROXY] 📥 Respuesta:`, responseText)
 
           try {
             proxyResponse = JSON.parse(responseText)
@@ -91,11 +90,11 @@ export async function handleMessage(value: WhatsAppValue) {
           }
         } else {
           const errorText = await response.text()
-          console.error(`[WHATSAPP] ❌ Error proxy: ${response.status} - ${errorText}`)
+          console.error(`[PROXY] ❌ Error: ${response.status} - ${errorText}`)
           proxyResponse = { success: false, error: "PROXY_ERROR", status: response.status, message: errorText }
         }
       } catch (error) {
-        console.error(`[WHATSAPP] ❌ Error red proxy:`, error.message)
+        console.error(`[PROXY] ❌ Error red:`, error.message)
         proxyResponse = { success: false, error: "NETWORK_ERROR", message: error.message }
       }
 
@@ -111,7 +110,6 @@ export async function handleMessage(value: WhatsAppValue) {
         console.log(`[WHATSAPP] 🔄 Reset para ${userPhoneNumber.slice(-4)}`)
 
         const resetResult = await resetThreadForUser(userPhoneNumber, config.id)
-        console.log(`[WHATSAPP] ✅ Thread reseteado: ${resetResult.threadId}`)
 
         await sendWhatsAppMessage(
           value.metadata.phone_number_id,
@@ -138,21 +136,17 @@ export async function handleMessage(value: WhatsAppValue) {
     }
 
     // Encolar mensaje
-    console.log(`[WHATSAPP] 📋 Encolando mensaje para ${userPhoneNumber.slice(-4)}`)
     await enqueueUserMessage(userPhoneNumber, {
       userMessage,
       messageType: message.type,
       phoneNumberId: value.metadata.phone_number_id,
       config,
     })
-
-    console.log(`[WHATSAPP] ✅ Mensaje encolado`)
   } catch (error) {
     console.error("[WHATSAPP] ❌ Error:", error.message)
   }
 }
 
-// Simplificar processIndividualMessage
 export async function processIndividualMessage(
   userMessage: string,
   phoneNumberId: string,
@@ -166,7 +160,6 @@ export async function processIndividualMessage(
     let threadResult
     try {
       threadResult = await getThreadForUser(userPhoneNumber, config.id)
-      console.log(`[WHATSAPP] 🧵 Thread: ${threadResult.threadId} (nuevo: ${threadResult.isNewThread})`)
     } catch (error) {
       console.error("[WHATSAPP] ❌ Error thread:", error.message)
       await sendWhatsAppMessage(
@@ -213,13 +206,11 @@ ${userMessage}`
 
       if (error.status === 404 && error.error?.type === "invalid_request_error") {
         try {
-          console.log("[WHATSAPP] 🔄 Creando nuevo thread...")
           const openai = new (await import("openai")).default({
             apiKey: process.env.OPENAI_API_KEY,
           })
 
           const newThread = await openai.beta.threads.create()
-          console.log(`[WHATSAPP] ✅ Nuevo thread: ${newThread.id}`)
 
           const key = `thread:${userPhoneNumber}:${config.id}`
           const redisClient = getRedisClient()
