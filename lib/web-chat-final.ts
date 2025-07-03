@@ -17,7 +17,7 @@ interface ProcessWebMessageParams {
   ip: string
 }
 
-// Cache simple para threads web
+// Cache simple para threads web - MEJORADO
 const webThreadsCache = new Map<string, string>()
 
 // Función helper para obtener fechas dinámicas
@@ -77,11 +77,17 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     const threadKey = `${cleanSessionId}_${config.id}`
     console.log(`[WEB-CHAT-FINAL] Thread key: ${threadKey}`)
 
-    // Obtener o crear thread
+    // MEJORAR: Obtener o crear thread con mejor logging
     let threadId = webThreadsCache.get(threadKey)
+    console.log(`[WEB-CHAT-FINAL] 🔍 Thread en cache: ${threadId ? threadId : "NO ENCONTRADO"}`)
+
     if (!threadId) {
+      console.log(`[WEB-CHAT-FINAL] 📝 Creando nuevo thread para: ${threadKey}`)
       threadId = await createWebThread(threadKey)
       webThreadsCache.set(threadKey, threadId)
+      console.log(`[WEB-CHAT-FINAL] ✅ Thread creado y guardado en cache: ${threadId}`)
+    } else {
+      console.log(`[WEB-CHAT-FINAL] ♻️ Reutilizando thread existente: ${threadId}`)
     }
 
     console.log(`[WEB-CHAT-FINAL] 🌐 Usando thread: ${threadId}`)
@@ -107,7 +113,14 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
 
 async function createWebThread(identifier: string): Promise<string> {
   try {
-    console.log(`[WEB-CHAT-FINAL] Creando thread para: ${identifier}`)
+    console.log(`[WEB-CHAT-FINAL] 🔧 Creando thread para: ${identifier}`)
+
+    // Verificar si ya existe en cache antes de crear
+    const existingThread = webThreadsCache.get(identifier)
+    if (existingThread) {
+      console.log(`[WEB-CHAT-FINAL] ⚠️ Thread ya existe en cache: ${existingThread}`)
+      return existingThread
+    }
 
     const response = await fetch("https://api.openai.com/v1/threads", {
       method: "POST",
@@ -115,7 +128,6 @@ async function createWebThread(identifier: string): Promise<string> {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
         "OpenAI-Beta": "assistants=v2",
-        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         metadata: {
@@ -131,10 +143,15 @@ async function createWebThread(identifier: string): Promise<string> {
     }
 
     const thread = await response.json()
-    console.log(`[WEB-CHAT-FINAL] Thread creado: ${thread.id}`)
+    console.log(`[WEB-CHAT-FINAL] ✅ Thread creado exitosamente: ${thread.id}`)
+
+    // Guardar inmediatamente en cache
+    webThreadsCache.set(identifier, thread.id)
+    console.log(`[WEB-CHAT-FINAL] 💾 Thread guardado en cache con key: ${identifier}`)
+
     return thread.id
   } catch (error) {
-    console.error("[WEB-CHAT-FINAL] Error creando thread:", error)
+    console.error("[WEB-CHAT-FINAL] ❌ Error creando thread:", error)
     throw error
   }
 }
