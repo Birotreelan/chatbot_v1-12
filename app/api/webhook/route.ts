@@ -8,7 +8,7 @@ import { rateLimit } from "@/lib/rate-limit"
 // Permitir que la función se ejecute durante más tiempo
 export const maxDuration = 60
 
-// Manejar la verificación del webhook (GET)
+// Simplificar logs del webhook
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url)
@@ -17,29 +17,25 @@ export async function GET(req: Request) {
     const challenge = url.searchParams.get("hub.challenge")
     const phoneNumberId = url.searchParams.get("phone_number_id")
 
-    console.log(
-      `[WEBHOOK] Verificación recibida: mode=${mode}, token=${token?.substring(0, 3)}***, phoneNumberId=${phoneNumberId}`,
-    )
+    console.log(`[WEBHOOK] 🔐 Verificación: ${phoneNumberId ? phoneNumberId.slice(-4) : "global"}`)
 
-    // Si se proporciona un phoneNumberId, verificar con la configuración específica
     if (phoneNumberId) {
       const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
       if (config && mode === "subscribe" && token === config.verifyToken) {
-        console.log(`[WEBHOOK] Verificación exitosa para phoneNumberId=${phoneNumberId}`)
+        console.log(`[WEBHOOK] ✅ Verificación exitosa: ${phoneNumberId.slice(-4)}`)
         return new Response(challenge, { status: 200 })
       }
     } else {
-      // Si no se proporciona phoneNumberId, verificar con el token global
       if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
-        console.log(`[WEBHOOK] Verificación exitosa con token global`)
+        console.log(`[WEBHOOK] ✅ Verificación global exitosa`)
         return new Response(challenge, { status: 200 })
       }
     }
 
-    console.log(`[WEBHOOK] Verificación fallida`)
+    console.log(`[WEBHOOK] ❌ Verificación fallida`)
     return new Response("Verification failed", { status: 403 })
   } catch (error) {
-    console.error("[WEBHOOK] Error en verificación:", error)
+    console.error("[WEBHOOK] ❌ Error verificación:", error.message)
     await logError("webhook_verification", error instanceof Error ? error : new Error(String(error)))
     return new Response("Error processing verification", { status: 500 })
   }
