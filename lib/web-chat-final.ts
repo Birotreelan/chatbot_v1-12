@@ -1,6 +1,5 @@
 import { validateDNI, searchTurnos, reserveTurno } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
-import { ENHANCED_OPENAI_TOOLS } from "./openai-tools-enhanced"
 
 interface WebChatConfig {
   id: string
@@ -192,7 +191,7 @@ async function processMessageWithOpenAI(
     const messageData = await messageResponse.json()
     console.log(`[WEB-CHAT-FINAL] Mensaje añadido: ${messageData.id}`)
 
-    // 2. Crear run con herramientas mejoradas
+    // 2. Crear run
     console.log(`[WEB-CHAT-FINAL] Creando run con assistant: ${widgetAssistantId}`)
     const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
       method: "POST",
@@ -203,7 +202,142 @@ async function processMessageWithOpenAI(
       },
       body: JSON.stringify({
         assistant_id: widgetAssistantId,
-        tools: ENHANCED_OPENAI_TOOLS,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "validate_dni",
+              description: "Valida un DNI y obtiene información del paciente",
+              parameters: {
+                type: "object",
+                properties: {
+                  dni: { type: "string", description: "DNI a validar" },
+                },
+                required: ["dni"],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "obtener_subespecialidades",
+              description: "Lista las subespecialidades disponibles",
+              parameters: {
+                type: "object",
+                properties: {},
+                required: [],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "buscar_profesionales",
+              description: "Busca profesionales por nombre o especialidad",
+              parameters: {
+                type: "object",
+                properties: {
+                  busqueda: {
+                    type: "string",
+                    description: "Texto para buscar profesionales por nombre o especialidad",
+                  },
+                },
+                required: ["busqueda"],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "search_turnos",
+              description:
+                "Busca turnos disponibles. Si no se especifica rangoFechas, usa fechas actuales automáticamente.",
+              parameters: {
+                type: "object",
+                properties: {
+                  rangoFechas: {
+                    type: "string",
+                    description:
+                      "Rango de fechas en formato YYYY-MM-DD a YYYY-MM-DD. Si no se especifica, usa fechas actuales.",
+                  },
+                  profesional: {
+                    type: "string",
+                    description: "Nombre del profesional (opcional)",
+                  },
+                  especialidad: {
+                    type: "string",
+                    description: "Nombre de la especialidad (opcional)",
+                  },
+                  profesionalId: {
+                    type: "string",
+                    description: "ID del profesional (opcional)",
+                  },
+                },
+                required: [],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "reserve_turno",
+              description:
+                "Reserva un turno específico para un paciente usando los datos recopilados durante la conversación",
+              parameters: {
+                type: "object",
+                properties: {
+                  dni: {
+                    type: "string",
+                    description: "DNI del paciente",
+                  },
+                  nombre: {
+                    type: "string",
+                    description: "Nombre del paciente recopilado durante la conversación",
+                  },
+                  apellido: {
+                    type: "string",
+                    description: "Apellido del paciente recopilado durante la conversación",
+                  },
+                  telefono: {
+                    type: "string",
+                    description: "Teléfono del paciente recopilado durante la conversación",
+                  },
+                  email: {
+                    type: "string",
+                    description: "Email del paciente recopilado durante la conversación",
+                  },
+                  fecha: {
+                    type: "string",
+                    description: "Fecha del turno en formato YYYY-MM-DD",
+                  },
+                  hora: {
+                    type: "string",
+                    description: "Hora del turno en formato HH:MM",
+                  },
+                  profesional: {
+                    type: "string",
+                    description: "Nombre del profesional",
+                  },
+                  agendaId: {
+                    type: "string",
+                    description: "ID del turno/agenda a reservar",
+                  },
+                },
+                required: [
+                  "dni",
+                  "nombre",
+                  "apellido",
+                  "telefono",
+                  "email",
+                  "fecha",
+                  "hora",
+                  "profesional",
+                  "agendaId",
+                ],
+              },
+            },
+          },
+        ],
       }),
     })
 
