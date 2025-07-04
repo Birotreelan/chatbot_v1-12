@@ -14,7 +14,7 @@ function getRedisClient() {
   }
 }
 
-// Simplificar el logging de métricas - solo errores críticos
+// Incrementar contador de métricas
 export async function incrementMetric(name: string, value = 1): Promise<void> {
   if (process.env.ENABLE_MONITORING !== "true") return
 
@@ -22,16 +22,20 @@ export async function incrementMetric(name: string, value = 1): Promise<void> {
   if (!redis) return
 
   const key = `${METRICS_PREFIX}${name}`
-  const date = new Date().toISOString().split("T")[0]
-  const hour = new Date().getHours().toString().padStart(2, "0")
+  const date = new Date().toISOString().split("T")[0] // YYYY-MM-DD
+  const hour = new Date().getHours().toString().padStart(2, "0") // HH
 
   try {
+    // Incrementar contador por hora (para análisis detallado)
     await redis.hincrby(`${key}:hourly`, `${date}:${hour}`, value)
+
+    // Incrementar contador diario
     await redis.hincrby(key, date, value)
+
+    // Incrementar contador total
     await redis.hincrby(key, "total", value)
   } catch (error) {
-    // Solo log de errores críticos
-    console.error(`[METRIC-ERROR] ${name}:`, error.message)
+    console.error(`Error al incrementar métrica ${name}:`, error)
   }
 }
 
@@ -40,41 +44,66 @@ export async function incrementStats(name: string, value = 1): Promise<void> {
   return incrementMetric(name, value)
 }
 
-// Simplificar el logging de errores
+// Registrar error
 export async function logError(category: string, error: Error | string): Promise<void> {
   const redis = getRedisClient()
-
-  // Siempre mostrar errores en consola de forma limpia
-  const errorMessage = error instanceof Error ? error.message : error
-  console.error(`[ERROR-${category.toUpperCase()}] ${errorMessage}`)
-
-  if (!redis) return
+  if (!redis) {
+    // Si no hay Redis, al menos logueamos en consola
+    console.error(`[ERROR][${category}]`, error)
+    return
+  }
 
   const key = `${ERROR_PREFIX}${category}`
   const timestamp = new Date().toISOString()
 
-  let serializedError: string
+  // Asegurarse de que el error sea serializable
+  let errorMessage: string
+  let errorStack = ""
+
   if (error instanceof Error) {
-    serializedError = JSON.stringify({
-      timestamp,
-      message: error.message,
-      stack: error.stack || "",
-    })
+    errorMessage = error.message
+    errorStack = error.stack || ""
+  } else if (typeof error === "string") {
+    errorMessage = error
   } else {
-    serializedError = JSON.stringify({
-      timestamp,
-      message: typeof error === "string" ? error : JSON.stringify(error),
-      stack: "",
-    })
+    // Si es otro tipo de objeto, convertirlo a string de forma segura
+    try {
+      errorMessage = JSON.stringify(error)
+    } catch (e) {
+      errorMessage = `[Error no serializable: ${typeof error}]`
+    }
   }
 
   try {
+    // Crear objeto de error serializable
+    const errorObject = {
+      timestamp,
+      message: errorMessage,
+      stack: errorStack,
+    }
+
+    // Serializar a JSON antes de guardar
+    const serializedError = JSON.stringify(errorObject)
+
+    // Guardar error con timestamp
     await redis.lpush(key, serializedError)
+
+    // Limitar la lista a 100 errores
     await redis.ltrim(key, 0, 99)
+
+    // Incrementar contador de errores
     await incrementMetric(`error:${category}`)
+
+    // Verificar si debemos enviar una alerta
+    const errorThreshold = Number(process.env.ALERT_ERROR_THRESHOLD || 10)
+    const recentErrorCount = await redis.llen(key)
+
+    if (recentErrorCount >= errorThreshold) {
+      // Aquí se podría implementar un sistema de alertas
+      console.error(`ALERTA: Se han detectado ${recentErrorCount} errores en la categoría ${category}`)
+    }
   } catch (e) {
-    // Solo log crítico
-    console.error(`[REDIS-ERROR] ${category}:`, e.message)
+    console.error(`Error al registrar error ${category}:`, e)
   }
 }
 

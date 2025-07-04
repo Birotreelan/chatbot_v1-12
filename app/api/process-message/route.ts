@@ -46,6 +46,9 @@ export async function POST(req: Request) {
     try {
       console.log("[PROCESS-MESSAGE] Verificando firma QStash...")
 
+      // Importar dinámicamente la función de verificación
+      const { verifySignature } = await import("@upstash/qstash/nextjs")
+
       // Obtener los headers necesarios
       const signature = req.headers.get("upstash-signature")
       const timestamp = req.headers.get("upstash-timestamp")
@@ -57,34 +60,29 @@ export async function POST(req: Request) {
 
       // Verificar la firma manualmente
       const body = await req.text()
+      const isValid = await verifySignature({
+        signature,
+        body,
+        timestamp,
+        signingKey: process.env.QSTASH_CURRENT_SIGNING_KEY!,
+        nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY!,
+      })
 
-      // Importar dinámicamente la función de verificación
-      const { verifySignatureAppRouter } = await import("@upstash/qstash/nextjs")
-
-      try {
-        // Usar verifySignatureAppRouter en lugar de verifySignature
-        await verifySignatureAppRouter({
-          signature,
-          body,
-          timestamp,
-          signingKey: process.env.QSTASH_CURRENT_SIGNING_KEY!,
-          nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY!,
-        })
-
-        console.log("[PROCESS-MESSAGE] Firma verificada exitosamente")
-
-        // Recrear el request con el body parseado
-        const newReq = new Request(req.url, {
-          method: req.method,
-          headers: req.headers,
-          body: body,
-        })
-
-        return processMessage(newReq)
-      } catch (verifyError) {
-        console.error("[PROCESS-MESSAGE] Firma QStash inválida:", verifyError)
+      if (!isValid) {
+        console.error("[PROCESS-MESSAGE] Firma QStash inválida")
         return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
       }
+
+      console.log("[PROCESS-MESSAGE] Firma verificada exitosamente")
+
+      // Recrear el request con el body parseado
+      const newReq = new Request(req.url, {
+        method: req.method,
+        headers: req.headers,
+        body: body,
+      })
+
+      return processMessage(newReq)
     } catch (error) {
       console.error("[PROCESS-MESSAGE] Error al verificar firma QStash:", error)
       console.log("[PROCESS-MESSAGE] Procesando mensaje sin verificación como fallback")

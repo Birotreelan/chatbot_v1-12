@@ -1,502 +1,669 @@
 import { Redis } from "@upstash/redis"
-import { v4 as generateId } from "uuid"
+import type { WhatsAppConfig, ThreadInfo, SystemStats } from "./types"
+import { nanoid } from "nanoid"
 
-// Tipos
-interface WhatsAppConfig {
-  id: string
-  phoneNumberId: string
-  displayName: string
-  assistantId: string
-  active: boolean
-  createdAt: string
-  updatedAt: string
-  verifyToken: string
-  accessToken: string
-  stats: {
-    messagesReceived: number
-    messagesProcessed: number
-    errors: number
-    lastMessageAt: string
-  }
-  apiBaseUrl?: string
-  lastUserPhoneNumber?: string
-  proxy?: string
-  cliente_id?: string
-  wabaId?: string
-  widgetEnabled?: boolean
-  widgetTitle?: string
-  widgetPrimaryColor?: string
-  widgetSecondaryColor?: string
-  widgetPosition?: string
-  widgetWelcomeMessage?: string
-  widgetPlaceholder?: string
-  widgetButtonText?: string
-  widgetHeaderText?: string
-  widgetSubtitle?: string
-  widgetBrandingEnabled?: boolean
-  widgetBrandingText?: string
-  widgetMaxHeight?: number
-  widgetMaxWidth?: number
-  widgetBorderRadius?: number
-  widgetShadow?: boolean
-  widgetAnimation?: boolean
-  widgetSoundEnabled?: boolean
-  widgetTheme?: string
-  widgetFloatingButtonText?: string
-  widgetShowFloatingText?: boolean
-  whatsappAssistantId?: string
-  widgetAssistantId?: string
-}
+// Inicializar el cliente de Redis
+let redis: Redis | null = null
 
-interface ThreadInfo {
-  threadId: string
-  phoneNumber: string
-  whatsappConfigId: string
-  lastMessageAt: string
-  messageCount: number
-  isNewThread?: boolean
-  isResetThread?: boolean
-}
-
-// Utilidades para claves
-const CONFIG_BY_ID = (id: string) => `whatsapp_config:${id}`
-const CONFIG_BY_PHONE = (phone: string) => `whatsapp_config_phone:${phone}`
-
-// Cliente Redis
+// Función para obtener el cliente de Redis
 function getRedisClient() {
+  if (redis) return redis
+
   try {
-    return Redis.fromEnv()
+    // Inicializar el cliente de Redis usando las variables de entorno de Upstash
+    redis = Redis.fromEnv()
+    console.log("[DB] ✅ Cliente Redis inicializado correctamente")
+    return redis
   } catch (error) {
-    console.warn("Redis no disponible:", error)
+    console.warn("[DB] ⚠️ Upstash Redis no está disponible:", error)
     return null
   }
 }
 
-// Obtener configuración por Phone Number ID
-export async function getWhatsAppConfigByPhoneId(phoneNumberId: string): Promise<WhatsAppConfig | null> {
-  const redis = getRedisClient()
-  if (!redis) return null
+// Almacenamiento en memoria como fallback
+const memoryStorage = {
+  configs: new Map<string, WhatsAppConfig>(),
+  phoneToConfig: new Map<string, string>(),
+  threads: new Map<string, ThreadInfo>(),
+  stats: null as SystemStats | null,
+}
 
-  try {
-    const key = `whatsapp_config:${phoneNumberId}`
-    const data = await redis.get(key)
+// Prefijos para las claves en Redis
+const CONFIG_PREFIX = "whatsapp_config:"
+const THREAD_PREFIX = "thread:"
+const PHONE_TO_CONFIG_PREFIX = "phone_to_config:"
+const STATS_KEY = "system_stats"
 
-    if (!data) {
+// Función auxiliar para manejar la serialización/deserialización segura
+function safeJsonParse(data: any): any {
+  if (typeof data === "string") {
+    try {
+      return JSON.parse(data)
+    } catch (error) {
+      console.error("[DB] Error al parsear JSON:", error)
       return null
     }
-
-    if (typeof data === "string") {
-      return JSON.parse(data)
-    }
-
-    return data as WhatsAppConfig
-  } catch (error) {
-    console.error("Error obteniendo configuración:", error)
-    return null
   }
+  return data // Si ya es un objeto, devolverlo tal cual
 }
 
-// Obtener configuración por ID
-export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig | null> {
-  const redis = getRedisClient()
-  if (!redis) return null
+// Funciones para la gestión de configuraciones de WhatsApp
 
-  try {
-    // Buscar en todas las configuraciones
-    const keys = await redis.keys("whatsapp_config:*")
-
-    for (const key of keys) {
-      const data = await redis.get(key)
-      let config: WhatsAppConfig
-
-      if (typeof data === "string") {
-        config = JSON.parse(data)
-      } else {
-        config = data as WhatsAppConfig
-      }
-
-      if (config && config.id === id) {
-        return config
-      }
-    }
-
-    return null
-  } catch (error) {
-    console.error("Error obteniendo configuración por ID:", error)
-    return null
-  }
-}
-
-// Alias principal (algunos módulos importan getWhatsAppConfig directamente)
-export async function getWhatsAppConfig(id: string) {
-  return getWhatsAppConfigById(id)
-}
-
-// Alias para compatibilidad
-export async function getConfigById(id: string): Promise<WhatsAppConfig | null> {
-  return getWhatsAppConfigById(id)
-}
-
-// Obtener configuración por Cliente ID
-export async function getWhatsappConfigByClienteId(clienteId: string): Promise<WhatsAppConfig | null> {
-  const redis = getRedisClient()
-  if (!redis) return null
-
-  try {
-    const keys = await redis.keys("whatsapp_config:*")
-
-    for (const key of keys) {
-      const data = await redis.get(key)
-      let config: WhatsAppConfig
-
-      if (typeof data === "string") {
-        config = JSON.parse(data)
-      } else {
-        config = data as WhatsAppConfig
-      }
-
-      if (config && config.cliente_id === clienteId) {
-        return config
-      }
-    }
-
-    return null
-  } catch (error) {
-    console.error("Error obteniendo configuración por cliente ID:", error)
-    return null
-  }
-}
-
-// Alias para compatibilidad
-export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppConfig | null> {
-  return getWhatsappConfigByClienteId(clienteId)
-}
-
-// Obtener todas las configuraciones
-export async function getAllWhatsAppConfigs(): Promise<WhatsAppConfig[]> {
-  const redis = getRedisClient()
-  if (!redis) return []
-
-  try {
-    const keys = await redis.keys("whatsapp_config:*")
-    const configs: WhatsAppConfig[] = []
-
-    for (const key of keys) {
-      const data = await redis.get(key)
-      let config: WhatsAppConfig
-
-      if (typeof data === "string") {
-        config = JSON.parse(data)
-      } else {
-        config = data as WhatsAppConfig
-      }
-
-      if (config) {
-        configs.push(config)
-      }
-    }
-
-    return configs
-  } catch (error) {
-    console.error("Error obteniendo todas las configuraciones:", error)
-    return []
-  }
-}
-
-/**
- * Crea una nueva configuración de WhatsApp y la persiste en Redis.
- * También genera un mapeo phoneNumberId ➜ id para búsquedas rápidas.
- */
-export async function createWhatsAppConfig(
-  config: Omit<Partial<WhatsAppConfig>, "id" | "createdAt" | "updatedAt" | "stats"> & {
-    phoneNumberId: string
-    displayName: string
-    assistantId: string
-  },
-): Promise<WhatsAppConfig> {
-  const redis = getRedisClient()
-  if (!redis) {
-    throw new Error("Redis no disponible")
-  }
-
-  const id = generateId()
+// Crear una nueva configuración
+export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Promise<WhatsAppConfig> {
+  const id = config.id || nanoid()
   const now = new Date().toISOString()
+
+  console.log(`[DB] 📝 Creando nueva configuración con ID: ${id}`)
 
   const newConfig: WhatsAppConfig = {
     id,
-    phoneNumberId: config.phoneNumberId,
-    displayName: config.displayName,
-    assistantId: config.assistantId,
-    active: config.active ?? true,
+    phoneNumberId: config.phoneNumberId || "",
+    wabaId: config.wabaId || "",
+    displayName: config.displayName || `WhatsApp ${id.slice(0, 6)}`,
+    whatsappAssistantId: config.whatsappAssistantId || process.env.OPENAI_ASSISTANT_ID || "",
+    widgetAssistantId: config.widgetAssistantId || process.env.OPENAI_ASSISTANT_ID || "",
+    active: config.active !== undefined ? config.active : true,
     createdAt: now,
     updatedAt: now,
-    verifyToken: config.verifyToken ?? generateId().slice(0, 16),
-    accessToken: config.accessToken ?? "",
+    verifyToken: config.verifyToken || nanoid(16),
+    accessToken: config.accessToken || "",
+    webhookUrl: config.webhookUrl,
+    cliente_id: config.cliente_id,
+    proxy: config.proxy,
+    // Añadir configuraciones por defecto del widget
+    widgetEnabled: config.widgetEnabled !== undefined ? config.widgetEnabled : true,
+    widgetTitle: config.widgetTitle || "Asistente Virtual",
+    widgetPrimaryColor: config.widgetPrimaryColor || "#0ea5e9",
+    widgetSecondaryColor: config.widgetSecondaryColor || "#f0f9ff",
+    widgetPosition: config.widgetPosition || "bottom-right",
+    widgetWelcomeMessage: config.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
+    widgetPlaceholder: config.widgetPlaceholder || "Escribe tu mensaje...",
+    widgetButtonText: config.widgetButtonText || "Enviar",
+    widgetHeaderText: config.widgetHeaderText || "Chat de Soporte",
+    widgetSubtitle: config.widgetSubtitle || "Estamos aquí para ayudarte",
+    widgetBrandingEnabled: config.widgetBrandingEnabled !== undefined ? config.widgetBrandingEnabled : true,
+    widgetBrandingText: config.widgetBrandingText || "Powered by AI",
+    widgetMaxHeight: config.widgetMaxHeight || 600,
+    widgetMaxWidth: config.widgetMaxWidth || 400,
+    widgetBorderRadius: config.widgetBorderRadius || 12,
+    widgetShadow: config.widgetShadow !== undefined ? config.widgetShadow : true,
+    widgetAnimation: config.widgetAnimation !== undefined ? config.widgetAnimation : true,
+    widgetSoundEnabled: config.widgetSoundEnabled !== undefined ? config.widgetSoundEnabled : true,
+    widgetTheme: config.widgetTheme || "light",
+    // Nuevos campos para el botón flotante
+    widgetFloatingButtonText: config.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual",
+    widgetShowFloatingText: config.widgetShowFloatingText !== undefined ? config.widgetShowFloatingText : true,
     stats: {
       messagesReceived: 0,
       messagesProcessed: 0,
       errors: 0,
-      lastMessageAt: now,
     },
-    ...config,
   }
 
-  await redis.mset({
-    [CONFIG_BY_ID(id)]: JSON.stringify(newConfig),
-    [CONFIG_BY_PHONE(newConfig.phoneNumberId)]: id,
-  })
+  const redisClient = getRedisClient()
 
+  if (redisClient) {
+    console.log(`[DB] 💾 Guardando configuración ${id} en Redis`)
+    // Guardar en Redis - siempre como cadena JSON
+    await redisClient.set(`${CONFIG_PREFIX}${id}`, JSON.stringify(newConfig))
+
+    // Mapear el número de teléfono al ID de configuración
+    if (newConfig.phoneNumberId) {
+      await redisClient.set(`${PHONE_TO_CONFIG_PREFIX}${newConfig.phoneNumberId}`, id)
+    }
+  } else {
+    console.log(`[DB] 💾 Guardando configuración ${id} en memoria`)
+    // Fallback a memoria
+    memoryStorage.configs.set(id, newConfig)
+    if (newConfig.phoneNumberId) {
+      memoryStorage.phoneToConfig.set(newConfig.phoneNumberId, id)
+    }
+  }
+
+  // Actualizar estadísticas
+  await updateSystemStats()
+
+  console.log(`[DB] ✅ Configuración ${id} creada exitosamente`)
   return newConfig
 }
 
-/**
- * Elimina una configuración existente (y su mapeo phoneNumberId ➜ id).
- */
+// Obtener una configuración por ID
+export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | null> {
+  try {
+    console.log(`[DB] 🔍 Obteniendo configuración ${id}`)
+
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      console.log(`[DB] 🔍 Buscando en Redis con clave: ${CONFIG_PREFIX}${id}`)
+      const configData = await redisClient.get(`${CONFIG_PREFIX}${id}`)
+
+      if (!configData) {
+        console.log(`[DB] ❌ Configuración ${id} no encontrada en Redis`)
+
+        // Intentar listar todas las claves para debug
+        try {
+          const allKeys = await redisClient.keys(`${CONFIG_PREFIX}*`)
+          console.log(`[DB] 🔍 Claves disponibles en Redis:`, allKeys)
+        } catch (keyError) {
+          console.error(`[DB] Error al listar claves:`, keyError)
+        }
+
+        return null
+      }
+
+      console.log(`[DB] 📄 Datos encontrados en Redis, deserializando...`)
+      // Usar la función auxiliar para manejar la deserialización
+      const config = safeJsonParse(configData)
+
+      if (!config) {
+        console.error(`[DB] ❌ Error al deserializar configuración ${id}`)
+        return null
+      }
+
+      console.log(`[DB] ✅ Configuración ${id} obtenida exitosamente`)
+      console.log(`[DB] - displayName: ${config.displayName}`)
+      console.log(`[DB] - cliente_id: ${config.cliente_id}`)
+      return config
+    } else {
+      console.log(`[DB] 🔍 Buscando en memoria`)
+      // Fallback a memoria
+      const config = memoryStorage.configs.get(id) || null
+      console.log(`[DB] Configuración ${id} obtenida de memoria:`, config ? "encontrada" : "no encontrada")
+
+      if (!config) {
+        console.log(`[DB] 🔍 Configuraciones disponibles en memoria:`, Array.from(memoryStorage.configs.keys()))
+      }
+
+      return config
+    }
+  } catch (error) {
+    console.error(`[DB] ❌ ERROR CRÍTICO al obtener configuración ${id}:`, error)
+    console.error(`[DB] Stack trace:`, error instanceof Error ? error.stack : "No stack trace available")
+    return null
+  }
+}
+
+// Obtener una configuración por ID de número de teléfono
+export async function getWhatsAppConfigByPhoneId(phoneNumberId: string): Promise<WhatsAppConfig | null> {
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    // Intentar obtener el ID de configuración directamente
+    const key = `${PHONE_TO_CONFIG_PREFIX}${phoneNumberId}`
+    const configId = await redisClient.get(key)
+
+    if (!configId) {
+      // Si no encontramos el ID, intentamos buscar manualmente
+      const allConfigs = await getAllWhatsAppConfigs()
+      const manualMatch = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
+
+      if (manualMatch) {
+        // Corregir el mapeo en Redis
+        await redisClient.set(key, manualMatch.id)
+        return manualMatch
+      }
+
+      return null
+    }
+
+    const config = await getWhatsAppConfig(configId as string)
+    return config
+  } else {
+    // Fallback a memoria
+    const configId = memoryStorage.phoneToConfig.get(phoneNumberId)
+
+    if (!configId) {
+      // Si no encontramos el ID, intentamos buscar manualmente
+      const allConfigs = Array.from(memoryStorage.configs.values())
+      const manualMatch = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
+
+      if (manualMatch) {
+        // Corregir el mapeo en memoria
+        memoryStorage.phoneToConfig.set(phoneNumberId, manualMatch.id)
+        return manualMatch
+      }
+
+      return null
+    }
+
+    return memoryStorage.configs.get(configId) || null
+  }
+}
+
+// Obtener todas las configuraciones
+export async function getAllWhatsAppConfigs(): Promise<WhatsAppConfig[]> {
+  try {
+    console.log(`[DB] 📋 Obteniendo todas las configuraciones`)
+
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      console.log(`[DB] 🔍 Buscando en Redis`)
+      const keys = await redisClient.keys(`${CONFIG_PREFIX}*`)
+      console.log(`[DB] 📊 Encontradas ${keys.length} claves en Redis`)
+
+      if (keys.length === 0) {
+        console.log(`[DB] ⚠️ No hay configuraciones en Redis`)
+        return []
+      }
+
+      const configs = await Promise.all(
+        keys.map(async (key) => {
+          console.log(`[DB] 📄 Procesando clave: ${key}`)
+          const configData = await redisClient.get(key)
+          // Usar la función auxiliar para manejar la deserialización
+          const config = safeJsonParse(configData)
+          if (config) {
+            console.log(`[DB] ✅ Configuración deserializada: ${config.displayName} (${config.id})`)
+          } else {
+            console.log(`[DB] ❌ Error al deserializar configuración de clave: ${key}`)
+          }
+          return config
+        }),
+      )
+
+      const validConfigs = configs.filter(Boolean) as WhatsAppConfig[]
+      console.log(`[DB] ✅ Total de configuraciones válidas: ${validConfigs.length}`)
+      return validConfigs
+    } else {
+      console.log(`[DB] 🔍 Buscando en memoria`)
+      // Fallback a memoria
+      const configs = Array.from(memoryStorage.configs.values())
+      console.log(`[DB] 📊 Encontradas ${configs.length} configuraciones en memoria`)
+      return configs
+    }
+  } catch (error) {
+    console.error(`[DB] ❌ ERROR CRÍTICO al obtener todas las configuraciones:`, error)
+    console.error(`[DB] Stack trace:`, error instanceof Error ? error.stack : "No stack trace available")
+    return []
+  }
+}
+
+// Actualizar una configuración
+export async function updateWhatsAppConfig(
+  id: string,
+  updates: Partial<WhatsAppConfig>,
+): Promise<WhatsAppConfig | null> {
+  try {
+    console.log(`[DB] 🔄 Actualizando configuración ${id} con:`, updates)
+
+    const config = await getWhatsAppConfig(id)
+    if (!config) {
+      console.log(`[DB] ❌ Configuración ${id} no encontrada`)
+      return null
+    }
+
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      // Si el phoneNumberId cambió, actualizar el mapeo
+      if (updates.phoneNumberId && updates.phoneNumberId !== config.phoneNumberId) {
+        if (config.phoneNumberId) {
+          await redisClient.del(`${PHONE_TO_CONFIG_PREFIX}${config.phoneNumberId}`)
+        }
+        await redisClient.set(`${PHONE_TO_CONFIG_PREFIX}${updates.phoneNumberId}`, id)
+      }
+
+      const updatedConfig: WhatsAppConfig = {
+        ...config,
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      }
+
+      // Guardar en Redis - siempre como cadena JSON
+      const serializedConfig = JSON.stringify(updatedConfig)
+      await redisClient.set(`${CONFIG_PREFIX}${id}`, serializedConfig)
+
+      console.log(`[DB] ✅ Configuración ${id} actualizada exitosamente`)
+      return updatedConfig
+    } else {
+      // Fallback a memoria
+      if (updates.phoneNumberId && updates.phoneNumberId !== config.phoneNumberId) {
+        if (config.phoneNumberId) {
+          memoryStorage.phoneToConfig.delete(config.phoneNumberId)
+        }
+        memoryStorage.phoneToConfig.set(updates.phoneNumberId, id)
+      }
+
+      const updatedConfig: WhatsAppConfig = {
+        ...config,
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      }
+
+      memoryStorage.configs.set(id, updatedConfig)
+      console.log(`[DB] ✅ Configuración ${id} actualizada en memoria`)
+      return updatedConfig
+    }
+  } catch (error) {
+    console.error(`[DB] ❌ Error al actualizar configuración ${id}:`, error)
+    throw error
+  }
+}
+
+// Eliminar una configuración
 export async function deleteWhatsAppConfig(id: string): Promise<boolean> {
-  const redis = getRedisClient()
-  if (!redis) return false
+  const config = await getWhatsAppConfig(id)
+  if (!config) return false
 
-  const cfg = await getWhatsAppConfigById(id)
-  if (!cfg) return false
+  const redisClient = getRedisClient()
 
-  await redis.del(CONFIG_BY_ID(id))
-  await redis.del(CONFIG_BY_PHONE(cfg.phoneNumberId))
+  if (redisClient) {
+    // Eliminar el mapeo de número de teléfono
+    if (config.phoneNumberId) {
+      await redisClient.del(`${PHONE_TO_CONFIG_PREFIX}${config.phoneNumberId}`)
+    }
+
+    // Eliminar la configuración
+    await redisClient.del(`${CONFIG_PREFIX}${id}`)
+  } else {
+    // Fallback a memoria
+    if (config.phoneNumberId) {
+      memoryStorage.phoneToConfig.delete(config.phoneNumberId)
+    }
+    memoryStorage.configs.delete(id)
+  }
+
+  // Actualizar estadísticas
+  await updateSystemStats()
 
   return true
 }
 
-// Actualizar estadísticas
-export async function updateWhatsAppStats(configId: string, stats: Partial<WhatsAppConfig["stats"]>): Promise<void> {
-  const redis = getRedisClient()
-  if (!redis) return
-
+// Función para obtener configuración por clienteId - NUEVA FUNCIÓN AGREGADA
+export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppConfig | null> {
   try {
-    // Buscar la configuración por ID
-    const keys = await redis.keys("whatsapp_config:*")
+    console.log(`[DB] 🔍 Buscando configuración para cliente_id: ${clienteId}`)
 
-    for (const key of keys) {
-      const data = await redis.get(key)
-      let config: WhatsAppConfig
+    const configs = await getAllWhatsAppConfigs()
+    console.log(`[DB] 📊 Total de configuraciones disponibles: ${configs.length}`)
 
-      if (typeof data === "string") {
-        config = JSON.parse(data)
-      } else {
-        config = data as WhatsAppConfig
-      }
-
-      if (config && config.id === configId) {
-        // Actualizar estadísticas
-        const updatedStats = {
-          ...config.stats,
-          ...stats,
-          lastMessageAt: new Date().toISOString(),
-        }
-
-        // Incrementar contadores si se proporcionan
-        if (stats.messagesReceived) {
-          updatedStats.messagesReceived = (config.stats.messagesReceived || 0) + stats.messagesReceived
-        }
-        if (stats.messagesProcessed) {
-          updatedStats.messagesProcessed = (config.stats.messagesProcessed || 0) + stats.messagesProcessed
-        }
-        if (stats.errors) {
-          updatedStats.errors = (config.stats.errors || 0) + stats.errors
-        }
-
-        const updatedConfig = {
-          ...config,
-          stats: updatedStats,
-          updatedAt: new Date().toISOString(),
-        }
-
-        await redis.set(key, JSON.stringify(updatedConfig))
-        break
-      }
+    if (configs.length > 0) {
+      console.log(`[DB] 🔍 IDs de configuraciones disponibles:`)
+      configs.forEach((config, index) => {
+        console.log(
+          `[DB]   ${index + 1}. ID: ${config.id}, cliente_id: ${config.cliente_id}, displayName: ${config.displayName}`,
+        )
+      })
     }
+
+    const config = configs.find((config) => config.cliente_id === clienteId)
+
+    if (config) {
+      console.log(`[DB] ✅ Configuración encontrada para cliente_id ${clienteId}:`)
+      console.log(`[DB] - ID: ${config.id}`)
+      console.log(`[DB] - displayName: ${config.displayName}`)
+      return config
+    }
+
+    console.log(`[DB] ❌ No se encontró configuración para cliente_id: ${clienteId}`)
+    return null
   } catch (error) {
-    console.error("Error actualizando estadísticas:", error)
+    console.error(`[DB] ❌ ERROR CRÍTICO al buscar configuración por cliente_id:`, error)
+    console.error(`[DB] Stack trace:`, error instanceof Error ? error.stack : "No stack trace available")
+    return null
   }
 }
 
-// Actualizar configuración
-export async function updateWhatsAppConfig(configId: string, updates: Partial<WhatsAppConfig>): Promise<void> {
-  const redis = getRedisClient()
-  if (!redis) return
+// Funciones para la gestión de threads
 
-  try {
-    const keys = await redis.keys("whatsapp_config:*")
-
-    for (const key of keys) {
-      const data = await redis.get(key)
-      let config: WhatsAppConfig
-
-      if (typeof data === "string") {
-        config = JSON.parse(data)
-      } else {
-        config = data as WhatsAppConfig
-      }
-
-      if (config && config.id === configId) {
-        const updatedConfig = {
-          ...config,
-          ...updates,
-          updatedAt: new Date().toISOString(),
-        }
-
-        await redis.set(key, JSON.stringify(updatedConfig))
-        break
-      }
-    }
-  } catch (error) {
-    console.error("Error actualizando configuración:", error)
-  }
-}
-
-// Obtener thread para usuario
+// Obtener o crear un thread para un usuario y configuración
 export async function getThreadForUser(
   phoneNumber: string,
-  configId: string,
-): Promise<ThreadInfo & { isNewThread: boolean; isResetThread: boolean }> {
-  const redis = getRedisClient()
+  whatsappConfigId: string,
+): Promise<{ threadId: string; isNewThread: boolean; isResetThread?: boolean }> {
+  const key = `${THREAD_PREFIX}${phoneNumber}:${whatsappConfigId}`
+  const redisClient = getRedisClient()
 
-  const key = `thread:${phoneNumber}:${configId}`
+  console.log(`[DB] 🔍 Obteniendo thread para ${phoneNumber} con config ${whatsappConfigId}`)
 
-  try {
-    if (redis) {
-      const data = await redis.get(key)
+  if (redisClient) {
+    // Intentar obtener el thread existente
+    const threadData = await redisClient.get(key)
+    const threadInfo = safeJsonParse(threadData)
 
-      if (data) {
-        let threadInfo: ThreadInfo
-        if (typeof data === "string") {
-          threadInfo = JSON.parse(data)
-        } else {
-          threadInfo = data as ThreadInfo
-        }
+    if (threadInfo) {
+      console.log(`[DB] ✅ Thread encontrado: ${threadInfo.threadId}`)
 
-        // Actualizar último mensaje
-        const updatedInfo = {
-          ...threadInfo,
-          lastMessageAt: new Date().toISOString(),
-          messageCount: (threadInfo.messageCount || 0) + 1,
-        }
+      // Verificar si es un thread reseteado
+      const isResetThread = threadInfo.isResetThread === true
 
-        await redis.set(key, JSON.stringify(updatedInfo))
+      // Actualizar la información del thread
+      const updatedThreadInfo = {
+        ...threadInfo,
+        lastMessageAt: new Date().toISOString(),
+        messageCount: (threadInfo.messageCount || 0) + 1,
+        // Limpiar el flag de reset después del primer uso
+        isResetThread: false,
+      }
 
-        return {
-          ...updatedInfo,
-          isNewThread: false,
-          isResetThread: threadInfo.isResetThread || false,
-        }
+      // Guardar en Redis - siempre como cadena JSON
+      await redisClient.set(key, JSON.stringify(updatedThreadInfo))
+
+      return {
+        threadId: threadInfo.threadId,
+        isNewThread: false,
+        isResetThread,
       }
     }
+  } else {
+    // Fallback a memoria con la misma lógica
+    const threadInfo = memoryStorage.threads.get(key)
 
-    // Crear nuevo thread
+    if (threadInfo) {
+      console.log(`[DB] ✅ Thread encontrado en memoria: ${threadInfo.threadId}`)
+
+      const isResetThread = threadInfo.isResetThread === true
+
+      const updatedThreadInfo = {
+        ...threadInfo,
+        lastMessageAt: new Date().toISOString(),
+        messageCount: (threadInfo.messageCount || 0) + 1,
+        isResetThread: false,
+      }
+
+      memoryStorage.threads.set(key, updatedThreadInfo)
+
+      return {
+        threadId: threadInfo.threadId,
+        isNewThread: false,
+        isResetThread,
+      }
+    }
+  }
+
+  // Crear un nuevo thread
+  console.log(`[DB] 📝 No se encontró thread existente, creando uno nuevo`)
+  const openai = new (await import("openai")).default({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+
+  const thread = await openai.beta.threads.create()
+  console.log(`[DB] ✅ Nuevo thread creado: ${thread.id}`)
+
+  // Guardar la información del thread
+  const newThreadInfo: ThreadInfo = {
+    threadId: thread.id,
+    phoneNumber,
+    whatsappConfigId,
+    lastMessageAt: new Date().toISOString(),
+    messageCount: 1,
+  }
+
+  if (redisClient) {
+    // Guardar en Redis - siempre como cadena JSON
+    await redisClient.set(key, JSON.stringify(newThreadInfo))
+  } else {
+    // Fallback a memoria
+    memoryStorage.threads.set(key, newThreadInfo)
+  }
+
+  // Actualizar estadísticas
+  await updateSystemStats()
+
+  return { threadId: thread.id, isNewThread: true }
+}
+
+// Resetear un thread para un usuario - OPTIMIZADO
+export async function resetThreadForUser(
+  phoneNumber: string,
+  whatsappConfigId: string,
+): Promise<{ threadId: string; isNewThread: boolean }> {
+  const key = `${THREAD_PREFIX}${phoneNumber}:${whatsappConfigId}`
+  const redisClient = getRedisClient()
+
+  console.log(`[DB] 🔄 RESETEANDO thread para ${phoneNumber} con config ${whatsappConfigId}`)
+
+  try {
+    // 1. CREAR UN THREAD COMPLETAMENTE NUEVO EN OPENAI
     const openai = new (await import("openai")).default({
       apiKey: process.env.OPENAI_API_KEY,
     })
 
-    const thread = await openai.beta.threads.create()
+    const newThread = await openai.beta.threads.create()
+    console.log(`[DB] ✅ NUEVO thread creado en OpenAI: ${newThread.id}`)
 
-    const threadInfo: ThreadInfo = {
-      threadId: thread.id,
+    // 2. ELIMINAR COMPLETAMENTE EL THREAD ANTERIOR
+    if (redisClient) {
+      await redisClient.del(key)
+      console.log(`[DB] ✅ Thread anterior eliminado de Redis`)
+    } else {
+      memoryStorage.threads.delete(key)
+      console.log(`[DB] ✅ Thread anterior eliminado de memoria`)
+    }
+
+    // 3. GUARDAR EL NUEVO THREAD CON FLAG DE RESET
+    const newThreadInfo: ThreadInfo = {
+      threadId: newThread.id,
       phoneNumber,
-      whatsappConfigId: configId,
+      whatsappConfigId,
       lastMessageAt: new Date().toISOString(),
-      messageCount: 1,
+      messageCount: 0, // Empezar en 0 para que se considere nuevo
+      isResetThread: true, // Flag para indicar que es un thread reseteado
+      createdAt: new Date().toISOString(),
     }
 
-    if (redis) {
-      await redis.set(key, JSON.stringify(threadInfo))
+    if (redisClient) {
+      await redisClient.set(key, JSON.stringify(newThreadInfo))
+      console.log(`[DB] ✅ Nuevo thread guardado en Redis: ${newThread.id}`)
+    } else {
+      memoryStorage.threads.set(key, newThreadInfo)
+      console.log(`[DB] ✅ Nuevo thread guardado en memoria: ${newThread.id}`)
     }
 
-    return {
-      ...threadInfo,
-      isNewThread: true,
-      isResetThread: false,
-    }
+    // 4. ACTUALIZAR ESTADÍSTICAS
+    await updateSystemStats()
+
+    console.log(`[DB] ✅ RESET COMPLETADO: ${newThread.id}`)
+    return { threadId: newThread.id, isNewThread: true }
   } catch (error) {
-    console.error("Error obteniendo thread:", error)
+    console.error(`[DB] ❌ Error al resetear thread:`, error)
     throw error
   }
 }
 
-// Reset thread para usuario
-export async function resetThreadForUser(phoneNumber: string, configId: string): Promise<{ threadId: string }> {
-  const redis = getRedisClient()
+// Obtener todos los threads
+export async function getAllThreads(): Promise<ThreadInfo[]> {
+  const redisClient = getRedisClient()
 
-  try {
-    const openai = new (await import("openai")).default({
-      apiKey: process.env.OPENAI_API_KEY,
-    })
+  if (redisClient) {
+    const keys = await redisClient.keys(`${THREAD_PREFIX}*`)
 
-    const thread = await openai.beta.threads.create()
+    if (keys.length === 0) return []
 
-    const key = `thread:${phoneNumber}:${configId}`
-    const threadInfo: ThreadInfo = {
-      threadId: thread.id,
-      phoneNumber,
-      whatsappConfigId: configId,
-      lastMessageAt: new Date().toISOString(),
-      messageCount: 1,
-      isResetThread: true,
-    }
+    const threads = await Promise.all(
+      keys.map(async (key) => {
+        const threadData = await redisClient.get(key)
+        // Usar la función auxiliar para manejar la deserialización
+        return safeJsonParse(threadData)
+      }),
+    )
 
-    if (redis) {
-      await redis.set(key, JSON.stringify(threadInfo))
-    }
-
-    return { threadId: thread.id }
-  } catch (error) {
-    console.error("Error reseteando thread:", error)
-    throw error
+    return threads.filter(Boolean) as ThreadInfo[]
+  } else {
+    // Fallback a memoria
+    return Array.from(memoryStorage.threads.values())
   }
+}
+
+// Funciones para estadísticas del sistema
+
+// Actualizar estadísticas del sistema
+export async function updateSystemStats(): Promise<SystemStats> {
+  const configs = await getAllWhatsAppConfigs()
+  const threads = await getAllThreads()
+
+  const stats: SystemStats = {
+    totalConfigs: configs.length,
+    activeConfigs: configs.filter((c) => c.active).length,
+    totalMessages: threads.reduce((sum, t) => sum + (t.messageCount || 0), 0),
+    totalThreads: threads.length,
+    lastUpdated: new Date().toISOString(),
+  }
+
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    // Guardar en Redis - siempre como cadena JSON
+    await redisClient.set(STATS_KEY, JSON.stringify(stats))
+  } else {
+    // Fallback a memoria
+    memoryStorage.stats = stats
+  }
+
+  return stats
 }
 
 // Obtener estadísticas del sistema
-export async function getSystemStats(): Promise<{
-  totalConfigs: number
-  activeConfigs: number
-  totalMessages: number
-  totalErrors: number
-}> {
-  const redis = getRedisClient()
-  if (!redis) {
-    return {
-      totalConfigs: 0,
-      activeConfigs: 0,
-      totalMessages: 0,
-      totalErrors: 0,
+export async function getSystemStats(): Promise<SystemStats> {
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    const statsData = await redisClient.get(STATS_KEY)
+    // Usar la función auxiliar para manejar la deserialización
+    const stats = safeJsonParse(statsData)
+
+    if (!stats) {
+      return updateSystemStats()
     }
-  }
-
-  try {
-    const configs = await getAllWhatsAppConfigs()
-
-    const stats = configs.reduce(
-      (acc, config) => {
-        return {
-          totalConfigs: acc.totalConfigs + 1,
-          activeConfigs: acc.activeConfigs + (config.active ? 1 : 0),
-          totalMessages: acc.totalMessages + (config.stats.messagesReceived || 0),
-          totalErrors: acc.totalErrors + (config.stats.errors || 0),
-        }
-      },
-      {
-        totalConfigs: 0,
-        activeConfigs: 0,
-        totalMessages: 0,
-        totalErrors: 0,
-      },
-    )
 
     return stats
-  } catch (error) {
-    console.error("Error obteniendo estadísticas del sistema:", error)
-    return {
-      totalConfigs: 0,
-      activeConfigs: 0,
-      totalMessages: 0,
-      totalErrors: 0,
+  } else {
+    // Fallback a memoria
+    if (!memoryStorage.stats) {
+      return updateSystemStats()
     }
+
+    return memoryStorage.stats
   }
 }
+
+// Actualizar estadísticas de un número de WhatsApp
+export async function updateWhatsAppStats(
+  configId: string,
+  updates: { messagesReceived?: number; messagesProcessed?: number; errors?: number },
+): Promise<void> {
+  const config = await getWhatsAppConfig(configId)
+  if (!config) return
+
+  const updatedStats = {
+    ...config.stats,
+    messagesReceived: (config.stats?.messagesReceived || 0) + (updates.messagesReceived || 0),
+    messagesProcessed: (config.stats?.messagesProcessed || 0) + (updates.messagesProcessed || 0),
+    errors: (config.stats?.errors || 0) + (updates.errors || 0),
+    lastMessageAt: updates.messagesReceived ? new Date().toISOString() : config.stats?.lastMessageAt,
+  }
+
+  await updateWhatsAppConfig(configId, { stats: updatedStats })
+}
+
+// Función adicional para obtener configuración por ID (alias para compatibilidad)
+export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig | null> {
+  return getWhatsAppConfig(id)
+}
+
+// Export alias for compatibility
+export const getWhatsappConfigByClienteId = getConfigByClienteId
+export const getConfigById = getWhatsAppConfig // Alias para compatibilidad
