@@ -127,14 +127,108 @@ export const openAITools = [
   },
 ]
 
-// Mensajes predefinidos para cada función
+// Sistema de mensajes variados para evitar robotización
+const MESSAGE_VARIATIONS = {
+  validar_dni: [
+    "Aguardá unos instantes mientras validamos tu DNI.",
+    "Verificando tu DNI, dame un momento por favor.",
+    "Consultando tu información en el sistema, aguardá...",
+    "Buscando tus datos con el DNI proporcionado.",
+    "Un momento mientras verifico tu DNI en nuestra base de datos.",
+    "Procesando tu DNI, esto tomará solo unos segundos.",
+    "Validando la información de tu documento...",
+  ],
+  buscar_turnos_disponibles: [
+    "Voy a buscar turnos disponibles, aguardá unos instantes.",
+    "Consultando la agenda para encontrar turnos libres...",
+    "Buscando turnos disponibles en las fechas solicitadas.",
+    "Revisando la disponibilidad de turnos, un momento.",
+    "Verificando qué turnos tenemos disponibles para vos.",
+    "Consultando los horarios disponibles, aguardá...",
+    "Buscando las mejores opciones de turnos disponibles.",
+    "Dame un momento mientras reviso la agenda médica.",
+  ],
+  reservar_turno: [
+    "Realizando reserva de turno. aguardá unos instantes.",
+    "Procesando tu reserva de turno, aguardá un momento.",
+    "Confirmando tu turno en el sistema, esto tomará solo unos segundos.",
+    "Registrando tu cita médica, aguardá por favor.",
+    "Finalizando la reserva de tu turno...",
+    "Guardando los datos de tu turno en el sistema.",
+    "Procesando la confirmación de tu cita médica.",
+    "Un momento mientras confirmo tu turno en la agenda.",
+  ],
+  obtener_subespecialidades: [
+    "Consultando las especialidades disponibles, aguardá unos instantes.",
+    "Verificando qué especialidades tenemos disponibles...",
+    "Buscando las especialidades que ofrecemos, un momento.",
+    "Consultando nuestro catálogo de especialidades médicas.",
+    "Revisando las especialidades disponibles en este momento.",
+    "Dame un segundo mientras consulto las especialidades.",
+    "Verificando las opciones de especialidades para vos.",
+  ],
+  buscar_profesionales: [
+    "Buscando profesionales, aguardá unos instantes.",
+    "Buscando profesionales disponibles, aguardá un momento.",
+    "Consultando nuestro equipo médico disponible...",
+    "Verificando qué doctores están disponibles.",
+    "Buscando los profesionales que coinciden con tu búsqueda.",
+    "Revisando nuestro staff médico, un momento por favor.",
+    "Consultando la disponibilidad de nuestros profesionales.",
+    "Dame un segundo mientras busco los doctores disponibles.",
+  ],
+  default: [
+    "Estoy procesando tu solicitud, dame un momento por favor.",
+    "Procesando tu consulta, aguardá un momento.",
+    "Dame unos segundos mientras proceso tu pedido.",
+    "Trabajando en tu consulta, un momento por favor.",
+    "Verificando la información solicitada...",
+    "Consultando el sistema, esto tomará solo unos instantes.",
+  ],
+}
+
+// Función para obtener un mensaje aleatorio
+function getRandomMessage(category: keyof typeof MESSAGE_VARIATIONS): string {
+  const variations = MESSAGE_VARIATIONS[category] || MESSAGE_VARIATIONS.default
+  const randomIndex = Math.floor(Math.random() * variations.length)
+  return variations[randomIndex]
+}
+
+// Cache para evitar repetir mensajes muy seguido
+const messageCache = new Map<string, string[]>()
+const MAX_CACHE_SIZE = 3
+
+function getVariedMessage(category: keyof typeof MESSAGE_VARIATIONS): string {
+  const recent = messageCache.get(category) || []
+  const variations = MESSAGE_VARIATIONS[category] || MESSAGE_VARIATIONS.default
+
+  // Filtrar mensajes que no se han usado recientemente
+  const availableMessages = variations.filter((msg) => !recent.includes(msg))
+
+  // Si todos los mensajes se usaron recientemente, usar cualquiera
+  const messagePool = availableMessages.length > 0 ? availableMessages : variations
+
+  const randomIndex = Math.floor(Math.random() * messagePool.length)
+  const selectedMessage = messagePool[randomIndex]
+
+  // Actualizar cache
+  recent.push(selectedMessage)
+  if (recent.length > MAX_CACHE_SIZE) {
+    recent.shift() // Remover el más antiguo
+  }
+  messageCache.set(category, recent)
+
+  return selectedMessage
+}
+
+// Mensajes predefinidos para cada función - AHORA CON VARIACIONES
 const FUNCTION_MESSAGES = {
-  validar_dni: "Aguardá unos instantes mientras validamos tu DNI.",
-  buscar_turnos_disponibles: "Voy a buscar turnos disponibles, aguardá unos instantes.",
-  reservar_turno: "Realizando reserva de turno. aguardá unos instantes.",
-  obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
-  buscar_profesionales: "Buscando profesionales, aguardá unos instantes.",
-  default: "Estoy procesando tu solicitud, dame un momento por favor.",
+  validar_dni: () => getVariedMessage("validar_dni"),
+  buscar_turnos_disponibles: () => getVariedMessage("buscar_turnos_disponibles"),
+  reservar_turno: () => getVariedMessage("reservar_turno"),
+  obtener_subespecialidades: () => getVariedMessage("obtener_subespecialidades"),
+  buscar_profesionales: () => getVariedMessage("buscar_profesionales"),
+  default: () => getVariedMessage("default"),
 }
 
 // Función para procesar mensajes individuales (para compatibilidad)
@@ -1450,7 +1544,10 @@ async function processRunWithCorrectFlow(
           )
 
           // Enviar mensaje de espera al usuario
-          const waitingMessage = FUNCTION_MESSAGES[functionName] || FUNCTION_MESSAGES.default
+          const waitingMessage =
+            typeof FUNCTION_MESSAGES[functionName] === "function"
+              ? FUNCTION_MESSAGES[functionName]()
+              : FUNCTION_MESSAGES[functionName] || FUNCTION_MESSAGES.default()
           console.log(`[OPENAI-TOOLS] Enviando mensaje de espera: "${waitingMessage}"`)
 
           try {
