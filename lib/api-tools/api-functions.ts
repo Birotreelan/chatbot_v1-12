@@ -286,6 +286,37 @@ export async function reservarTurno(
   return fetchProxyApi<any>(clienteId, "set_turno", params, useCache)
 }
 
+// Función para validar obra social
+export async function validarObraSocial(
+  clienteId: string,
+  busqueda: string,
+  useCache = true,
+): Promise<
+  ApiResponse<{
+    obras_sociales: Array<{
+      id: string
+      nombre: string
+      razon_social: string
+      permite_turnos_online: boolean
+      permite_turnos_online_texto: string
+    }>
+    total_encontradas: number
+    busqueda_realizada: string
+  }>
+> {
+  return fetchProxyApi<{
+    obras_sociales: Array<{
+      id: string
+      nombre: string
+      razon_social: string
+      permite_turnos_online: boolean
+      permite_turnos_online_texto: string
+    }>
+    total_encontradas: number
+    busqueda_realizada: string
+  }>(clienteId, "get_obras_sociales", { busqueda }, useCache)
+}
+
 // Funciones de compatibilidad con el código anterior
 
 // Compatibilidad: buscar paciente por DNI

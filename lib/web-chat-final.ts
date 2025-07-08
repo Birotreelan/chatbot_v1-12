@@ -249,6 +249,23 @@ async function processMessageWithOpenAI(
           {
             type: "function",
             function: {
+              name: "validar_obra_social",
+              description: "Valida si la obra social ingresada por el paciente existe y permite turnos online",
+              parameters: {
+                type: "object",
+                properties: {
+                  busqueda: {
+                    type: "string",
+                    description: "Nombre de la obra social ingresado por el paciente (ej: 'osde')",
+                  },
+                },
+                required: ["busqueda"],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
               name: "search_turnos",
               description:
                 "Busca turnos disponibles. Si no se especifica rangoFechas, usa fechas actuales automáticamente.",
@@ -510,6 +527,27 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
                 success: false,
                 error:
                   "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar profesionales.",
+                fallback: true,
+              })
+            }
+            break
+
+          case "validar_obra_social":
+            console.log(`[WEB-CHAT-FINAL] 🏥 Validando obra social con cliente: ${clienteId}`)
+            console.log(`[WEB-CHAT-FINAL] 📋 Búsqueda: ${args.busqueda}`)
+
+            try {
+              // Importar la función desde api-tools
+              const { validarObraSocial } = await import("@/lib/api-tools/api-functions")
+              const obraSocialResult = await validarObraSocial(clienteId, args.busqueda || "")
+              console.log(`[WEB-CHAT-FINAL] 📋 Resultado obra social:`, obraSocialResult)
+              output = JSON.stringify(obraSocialResult)
+            } catch (error) {
+              console.error(`[WEB-CHAT-FINAL] ❌ Error validando obra social:`, error)
+              output = JSON.stringify({
+                success: false,
+                error:
+                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar obras sociales.",
                 fallback: true,
               })
             }

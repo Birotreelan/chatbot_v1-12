@@ -125,6 +125,23 @@ export const openAITools = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "validar_obra_social",
+      description: "Valida si la obra social ingresada por el paciente existe y permite turnos online.",
+      parameters: {
+        type: "object",
+        properties: {
+          busqueda: {
+            type: "string",
+            description: "Nombre de la obra social ingresado por el paciente (ej: 'osde')",
+          },
+        },
+        required: ["busqueda"],
+      },
+    },
+  },
 ]
 
 // Mensajes predefinidos para cada función
@@ -134,6 +151,7 @@ const FUNCTION_MESSAGES = {
   reservar_turno: "Realizando reserva de turno. aguardá unos instantes.",
   obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
   buscar_profesionales: "Buscando profesionales, aguardá unos instantes.",
+  validar_obra_social: "Verificando la obra social, aguardá unos instantes.",
   default: "Estoy procesando tu solicitud, dame un momento por favor.",
 }
 
@@ -315,6 +333,11 @@ export async function executeOpenAITool(
 
       case "buscar_profesionales":
         requestBody.Action = "get_profesionales"
+        requestBody.busqueda = toolArgs.busqueda || ""
+        break
+
+      case "validar_obra_social":
+        requestBody.Action = "get_obras_sociales"
         requestBody.busqueda = toolArgs.busqueda || ""
         break
 
@@ -934,6 +957,53 @@ export async function executeOpenAITool(
             return {
               exito: true,
               datos: [],
+            }
+          }
+
+        case "validar_obra_social":
+          console.log(`[OPENAI-TOOLS] ========== PROCESANDO VALIDAR_OBRA_SOCIAL ==========`)
+
+          if (data.obras_sociales) {
+            console.log(`[OPENAI-TOOLS] Obras sociales encontradas:`, JSON.stringify(data.obras_sociales, null, 2))
+            console.log(`[OPENAI-TOOLS] Cantidad de obras sociales: ${data.obras_sociales.length}`)
+
+            const resultado = {
+              exito: true,
+              datos: {
+                obras_sociales: data.obras_sociales.slice(0, 5).map((os: any) => ({
+                  id: os.Id,
+                  nombre: os.Nombre,
+                  razon_social: os.Razon_Social,
+                  permite_turnos_online: os.Permite_Turnos_Online,
+                  permite_turnos_online_texto: os.Permite_Turnos_Online_Texto,
+                })),
+                total_encontradas: data.total_encontradas,
+                busqueda_realizada: data.busqueda_realizada,
+              },
+            }
+
+            const resultadoSize = JSON.stringify(resultado).length
+            console.log(`[OPENAI-TOOLS] Tamaño del resultado antes de truncar: ${resultadoSize} caracteres`)
+
+            return truncateToolResponse(resultado)
+          } else if (data.error) {
+            console.log(`[OPENAI-TOOLS] Error en validar_obra_social:`, data.error)
+            return {
+              exito: false,
+              error: {
+                codigo: "API_ERROR",
+                mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
+              },
+            }
+          } else {
+            console.log(`[OPENAI-TOOLS] No se encontraron obras sociales`)
+            return {
+              exito: true,
+              datos: {
+                obras_sociales: [],
+                total_encontradas: 0,
+                busqueda_realizada: toolArgs.busqueda || "",
+              },
             }
           }
 
