@@ -2,7 +2,6 @@ import OpenAI from "openai"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
 import { incrementMetric, logError } from "@/lib/monitoring"
-import { getSystemPromptForConfig } from "@/lib/system-prompts"
 
 // Definición de las herramientas
 export const openAITools = [
@@ -126,23 +125,6 @@ export const openAITools = [
       },
     },
   },
-  {
-    type: "function" as const,
-    function: {
-      name: "validar_obra_social",
-      description: "Valida si la obra social ingresada por el paciente existe y permite turnos online.",
-      parameters: {
-        type: "object",
-        properties: {
-          busqueda: {
-            type: "string",
-            description: "Nombre de la obra social ingresado por el paciente (ej: 'osde')",
-          },
-        },
-        required: ["busqueda"],
-      },
-    },
-  },
 ]
 
 // Mensajes predefinidos para cada función
@@ -152,7 +134,6 @@ const FUNCTION_MESSAGES = {
   reservar_turno: "Realizando reserva de turno. aguardá unos instantes.",
   obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
   buscar_profesionales: "Buscando profesionales, aguardá unos instantes.",
-  validar_obra_social: "Verificando tu obra social, aguardá unos instantes.",
   default: "Estoy procesando tu solicitud, dame un momento por favor.",
 }
 
@@ -181,7 +162,7 @@ export async function processIndividualMessage(
       thread.id,
       message,
       phoneNumberId,
-      assistantId || config.whatsappAssistantId || process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
+      assistantId || config.assistantId || process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
     )
 
     return result
@@ -526,6 +507,12 @@ export async function executeOpenAITool(
           const profesionalData = JSON.parse(profesionalResponseText)
           if (profesionalData.profesionales && profesionalData.profesionales.length > 0) {
             // Tomar el primer profesional que coincida con el nombre
+            // Cambiar esta línea:
+            // const profesional = profesionalData.profesionales.find((p: any) =>
+            //   p.Nombre.toLowerCase().includes(toolArgs.profesional.toLowerCase()),
+            // ) || profesionalData.profesionales[0]
+
+            // Por esta línea:
             const profesional =
               profesionalData.profesionales.find((p: any) =>
                 p.Nombre_Completo?.toLowerCase().includes(toolArgs.profesional.toLowerCase()),
@@ -703,11 +690,6 @@ export async function executeOpenAITool(
 
         console.log(`Preparando reserva con datos del usuario:`, JSON.stringify(requestBody, null, 2))
 
-        break
-
-      case "validar_obra_social":
-        requestBody.Action = "get_obras_sociales"
-        requestBody.busqueda = toolArgs.busqueda || ""
         break
 
       default:
@@ -1052,55 +1034,6 @@ export async function executeOpenAITool(
             }
           }
 
-        case "validar_obra_social":
-          console.log(`[OPENAI-TOOLS] ========== PROCESANDO VALIDAR_OBRA_SOCIAL ==========`)
-
-          if (data.obras_sociales) {
-            console.log(`[OPENAI-TOOLS] Obras sociales encontradas:`, JSON.stringify(data.obras_sociales, null, 2))
-            console.log(`[OPENAI-TOOLS] Cantidad de obras sociales: ${data.obras_sociales.length}`)
-
-            const resultado = {
-              exito: true,
-              datos: {
-                obras_sociales: data.obras_sociales.slice(0, 10).map((os: any) => ({
-                  id: os.Id,
-                  nombre: os.Nombre,
-                  razon_social: os.Razon_Social,
-                  permite_turnos_online: os.Permite_Turnos_Online,
-                  permite_turnos_online_texto: os.Permite_Turnos_Online_Texto,
-                })),
-                total_encontradas: data.total_encontradas,
-                busqueda_realizada: data.busqueda_realizada,
-              },
-            }
-
-            const resultadoSize = JSON.stringify(resultado).length
-            console.log(`[OPENAI-TOOLS] Tamaño del resultado antes de truncar: ${resultadoSize} caracteres`)
-            console.log(`[OPENAI-TOOLS] ========== RESULTADO FINAL VALIDAR_OBRA_SOCIAL ==========`)
-            console.log(`[OPENAI-TOOLS] Resultado que se enviará a OpenAI:`, JSON.stringify(resultado, null, 2))
-
-            return truncateToolResponse(resultado)
-          } else if (data.error) {
-            console.log(`[OPENAI-TOOLS] Error en validar_obra_social:`, data.error)
-            return {
-              exito: false,
-              error: {
-                codigo: "API_ERROR",
-                mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-              },
-            }
-          } else {
-            console.log(`[OPENAI-TOOLS] No se encontraron obras sociales`)
-            return {
-              exito: true,
-              datos: {
-                obras_sociales: [],
-                total_encontradas: 0,
-                busqueda_realizada: toolArgs.busqueda,
-              },
-            }
-          }
-
         default:
           if (data.error) {
             return {
@@ -1245,188 +1178,533 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
     throw new Error(`Run falló: ${run.last_error?.message}`)
   }
 
-  console.log(`[OPENAI-WEB] ✅ Run completado: ${run.status}`)
+  console.log(`[OPENAI-WEB] ✅ Run web completado sin enviar a WhatsApp`)
 }
 
-// Función principal para obtener respuesta del asistente
+// Tiempo máximo de espera para la respuesta de OpenAI (en milisegundos)
+const OPENAI_TIMEOUT = Number.parseInt(process.env.OPENAI_TIMEOUT || "60000", 10)
+
+// Número máximo de reintentos
+const MAX_RETRIES = Number.parseInt(process.env.MAX_RETRIES || "3", 10)
+
+// Tiempo de espera entre reintentos (en milisegundos)
+const RETRY_DELAY = Number.parseInt(process.env.RETRY_DELAY || "2000", 10)
+
+// Función para obtener una instancia de OpenAI
+function getOpenAIClient() {
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+}
+
+// Función para esperar un tiempo determinado
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Agregar logging detallado al inicio de getAssistantResponse
 export async function getAssistantResponse(
   threadId: string,
   message: string,
   phoneNumberId: string,
-  assistantId: string,
-): Promise<string> {
-  console.log(`[OPENAI-TOOLS] ========== INICIANDO PROCESAMIENTO ==========`)
+  assistantId: string = process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
+) {
+  console.log(`[OPENAI-TOOLS] ========== INICIANDO GETASSISTANTRESPONSE ==========`)
   console.log(`[OPENAI-TOOLS] Thread ID: ${threadId}`)
   console.log(`[OPENAI-TOOLS] Phone Number ID: ${phoneNumberId}`)
   console.log(`[OPENAI-TOOLS] Assistant ID: ${assistantId}`)
-  console.log(`[OPENAI-TOOLS] Mensaje: ${message}`)
-
-  // Validar que el threadId no sea undefined
-  if (!threadId || threadId === "undefined") {
-    throw new Error(`Thread ID inválido: ${threadId}`)
-  }
+  console.log(`[OPENAI-TOOLS] Mensaje original recibido (${message.length} caracteres):`)
+  console.log(`[OPENAI-TOOLS] "${message}"`)
+  console.log(`[OPENAI-TOOLS] ================================================`)
 
   const openai = getOpenAIClient()
 
   try {
-    // Obtener la configuración para el phoneNumberId
+    // Obtener la configuración de WhatsApp
+    console.log(`[OPENAI-TOOLS] Buscando configuración para phoneNumberId: ${phoneNumberId}`)
     const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
     if (!config) {
+      console.error(`[OPENAI-TOOLS] No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
       throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
     }
-
-    console.log(`[OPENAI-TOOLS] Configuración encontrada: ${config.id}`)
+    console.log(`[OPENAI-TOOLS] Configuración encontrada: ${config.displayName}`)
     console.log(`[OPENAI-TOOLS] Cliente ID: ${config.cliente_id}`)
 
-    // Obtener el system prompt personalizado
-    const systemPrompt = await getSystemPromptForConfig(config, "whatsapp")
-    console.log(`[OPENAI-TOOLS] System prompt obtenido (${systemPrompt.length} caracteres)`)
+    // NUEVO: Obtener información del thread ANTES de enviar el mensaje
+    console.log(`[OPENAI-TOOLS] ========== INFORMACIÓN DEL THREAD ANTES ==========`)
+    try {
+      const threadInfo = await openai.beta.threads.retrieve(threadId)
+      console.log(`[OPENAI-TOOLS] Thread ID: ${threadInfo.id}`)
+      console.log(`[OPENAI-TOOLS] Thread creado en: ${threadInfo.created_at}`)
+      console.log(`[OPENAI-TOOLS] Thread metadata:`, JSON.stringify(threadInfo.metadata, null, 2))
 
-    // Actualizar el asistente con el system prompt personalizado
-    await openai.beta.assistants.update(assistantId, {
-      instructions: systemPrompt,
-      tools: openAITools,
-    })
+      // Obtener mensajes existentes en el thread
+      const existingMessages = await openai.beta.threads.messages.list(threadId, {
+        order: "desc",
+        limit: 50, // Obtener los últimos 50 mensajes para ver el contexto
+      })
 
-    console.log(`[OPENAI-TOOLS] Asistente actualizado con system prompt personalizado`)
+      console.log(`[OPENAI-TOOLS] Mensajes existentes en el thread: ${existingMessages.data.length}`)
+      console.log(`[OPENAI-TOOLS] ========== HISTORIAL DE MENSAJES ==========`)
+
+      let totalTokensEstimated = 0
+      existingMessages.data.forEach((msg, index) => {
+        const content = msg.content.map((c) => (c.type === "text" ? c.text.value : `[${c.type}]`)).join(" ")
+        const estimatedTokens = Math.ceil(content.length / 4) // Estimación aproximada
+        totalTokensEstimated += estimatedTokens
+
+        console.log(
+          `[OPENAI-TOOLS] Mensaje ${index + 1} (${msg.role}): ${content.substring(0, 100)}... (${estimatedTokens} tokens estimados)`,
+        )
+      })
+
+      console.log(`[OPENAI-TOOLS] Total de tokens estimados en el historial: ${totalTokensEstimated}`)
+      console.log(`[OPENAI-TOOLS] ================================================`)
+    } catch (threadError) {
+      console.error(`[OPENAI-TOOLS] Error al obtener información del thread:`, threadError)
+    }
 
     // Añadir el mensaje al thread
+    console.log(`[OPENAI-TOOLS] ========== ENVIANDO MENSAJE A OPENAI ==========`)
+    console.log(`[OPENAI-TOOLS] Mensaje que se enviará a OpenAI (${message.length} caracteres):`)
+    console.log(`[OPENAI-TOOLS] "${message}"`)
+    console.log(`[OPENAI-TOOLS] Tokens estimados del mensaje: ${Math.ceil(message.length / 4)}`)
+    console.log(`[OPENAI-TOOLS] ================================================`)
+
     const messageResponse = await openai.beta.threads.messages.create(threadId, {
       role: "user",
       content: message,
     })
 
-    console.log(`[OPENAI-TOOLS] Mensaje añadido al thread: ${messageResponse.id}`)
+    console.log(`[OPENAI-TOOLS] Mensaje añadido al thread con ID: ${messageResponse.id}`)
 
     // Crear un run con el asistente
+    console.log(`[OPENAI-TOOLS] ========== CREANDO RUN ==========`)
+    console.log(`[OPENAI-TOOLS] Creando run con asistente ${assistantId}`)
+
+    const runStartTime = Date.now()
     const run = await openai.beta.threads.runs.create(threadId, {
       assistant_id: assistantId,
+      // Las herramientas y las instrucciones se toman del asistente configurado en OpenAI
     })
 
-    console.log(`[OPENAI-TOOLS] Run creado: ${run.id}`)
-
-    // Necesitamos extraer el número de teléfono del mensaje del sistema
-    const userPhoneNumberMatch = message.match(/PacienteCelular: (\d+)/)
-    const userPhoneNumber = userPhoneNumberMatch ? userPhoneNumberMatch[1] : undefined
-
-    // Procesar el run
-    await processRun(openai, threadId, run.id, phoneNumberId, config.cliente_id, userPhoneNumber)
-
-    // Obtener la respuesta
-    const messages = await openai.beta.threads.messages.list(threadId, {
-      order: "desc",
-      limit: 1,
-    })
-
-    if (messages.data.length === 0 || messages.data[0].role !== "assistant") {
-      throw new Error("No se pudo obtener respuesta del asistente")
-    }
-
-    let messageContent = ""
-    for (const content of messages.data[0].content) {
-      if (content.type === "text") {
-        messageContent += content.text.value
-      }
-    }
-
-    console.log(`[OPENAI-TOOLS] ========== RESPUESTA FINAL ==========`)
-    console.log(`[OPENAI-TOOLS] Respuesta obtenida: ${messageContent.length} caracteres`)
-    console.log(`[OPENAI-TOOLS] Contenido: ${messageContent}`)
+    console.log(`[OPENAI-TOOLS] Run creado con ID: ${run.id}`)
+    console.log(`[OPENAI-TOOLS] Run status inicial: ${run.status}`)
     console.log(`[OPENAI-TOOLS] ================================================`)
 
-    await incrementMetric("messages_processed")
-    return messageContent
+    // Procesar el run
+    console.log(`[OPENAI-TOOLS] ========== PROCESANDO RUN ==========`)
+    console.log(`[OPENAI-TOOLS] Procesando run ${run.id}`)
+    await processRunWithCorrectFlow(
+      openai,
+      threadId,
+      run.id,
+      config.accessToken,
+      phoneNumberId,
+      config.lastUserPhoneNumber || "",
+      config.cliente_id || "",
+    )
+
+    const runEndTime = Date.now()
+    const runDuration = runEndTime - runStartTime
+    console.log(`[OPENAI-TOOLS] Run procesado exitosamente en ${runDuration}ms`)
+    console.log(`[OPENAI-TOOLS] ================================================`)
+
+    return { success: true }
   } catch (error) {
-    console.error("[OPENAI-TOOLS] Error:", error)
-    await logError("get_assistant_response", error instanceof Error ? error : new Error(String(error)))
+    console.error("[OPENAI-TOOLS] Error en getAssistantResponse:", error)
+    await logError("openai", error instanceof Error ? error : new Error(String(error)))
     throw error
   }
 }
 
-// Función para procesar el run
-async function processRun(
+// Agregar logging detallado en processRunWithCorrectFlow
+async function processRunWithCorrectFlow(
   openai: OpenAI,
   threadId: string,
   runId: string,
+  accessToken: string,
   phoneNumberId: string,
-  clienteId?: string,
-  userPhoneNumber?: string,
-): Promise<void> {
-  console.log(`[OPENAI-TOOLS] Procesando run: ${runId}`)
-  console.log(`[OPENAI-TOOLS] Thread ID para run: ${threadId}`)
+  userPhoneNumber: string,
+  clienteId: string,
+  retryCount = 0,
+) {
+  console.log(`[OPENAI-TOOLS] ========== PROCESANDO RUN ${runId} ==========`)
+  console.log(`[OPENAI-TOOLS] Parámetros de entrada:`)
+  console.log(`[OPENAI-TOOLS] - threadId: "${threadId}" (tipo: ${typeof threadId})`)
+  console.log(`[OPENAI-TOOLS] - runId: "${runId}" (tipo: ${typeof runId})`)
+  console.log(`[OPENAI-TOOLS] - phoneNumberId: "${phoneNumberId}"`)
+  console.log(`[OPENAI-TOOLS] - userPhoneNumber: "${userPhoneNumber}"`)
+  console.log(`[OPENAI-TOOLS] - clienteId: "${clienteId}"`)
+  console.log(`[OPENAI-TOOLS] - retryCount: ${retryCount}`)
 
-  // Validar que el threadId no sea undefined
+  // Validar parámetros críticos
   if (!threadId || threadId === "undefined") {
-    throw new Error(`Thread ID inválido en processRun: ${threadId}`)
+    console.error(`[OPENAI-TOOLS] ❌ threadId inválido en processRunWithCorrectFlow: "${threadId}"`)
+    throw new Error(`threadId inválido en processRunWithCorrectFlow: "${threadId}"`)
   }
 
-  let run = await openai.beta.threads.runs.retrieve(threadId, runId)
-
-  while (run.status === "queued" || run.status === "in_progress") {
-    await wait(1000)
-    run = await openai.beta.threads.runs.retrieve(threadId, runId)
+  if (!runId || runId === "undefined") {
+    console.error(`[OPENAI-TOOLS] ❌ runId inválido en processRunWithCorrectFlow: "${runId}"`)
+    throw new Error(`runId inválido en processRunWithCorrectFlow: "${runId}"`)
   }
 
-  if (run.status === "requires_action") {
-    if (run.required_action?.type === "submit_tool_outputs") {
-      const toolCalls = run.required_action.submit_tool_outputs.tool_calls
-      const toolOutputs = []
+  console.log(
+    `[OPENAI-TOOLS] Iniciando processRunWithCorrectFlow para run ${runId}, intento ${retryCount + 1}/${MAX_RETRIES + 1}`,
+  )
 
-      for (const toolCall of toolCalls) {
-        const functionName = toolCall.function.name
-        const functionArgs = JSON.parse(toolCall.function.arguments)
+  try {
+    // Esperar a que el run se complete o requiera acción
+    console.log(`[OPENAI-TOOLS] Esperando completación del run...`)
+    const completedRun = await waitForRunCompletionOrAction(openai, threadId, runId)
+    console.log(`[OPENAI-TOOLS] Run completado con estado: ${completedRun.status}`)
 
-        console.log(`[OPENAI-TOOLS] 🔧 Ejecutando herramienta: ${functionName}`)
-        console.log(`[OPENAI-TOOLS] 📋 Argumentos:`, functionArgs)
+    // NUEVO: Log detallado del run completado
+    console.log(`[OPENAI-TOOLS] ========== DETALLES DEL RUN COMPLETADO ==========`)
+    console.log(`[OPENAI-TOOLS] Run ID: ${completedRun.id}`)
+    console.log(`[OPENAI-TOOLS] Status: ${completedRun.status}`)
+    console.log(`[OPENAI-TOOLS] Created at: ${completedRun.created_at}`)
+    console.log(`[OPENAI-TOOLS] Started at: ${completedRun.started_at}`)
+    console.log(`[OPENAI-TOOLS] Completed at: ${completedRun.completed_at}`)
 
-        // Enviar mensaje de "procesando" al usuario
-        const processingMessage =
-          FUNCTION_MESSAGES[functionName as keyof typeof FUNCTION_MESSAGES] || FUNCTION_MESSAGES.default
+    if (completedRun.usage) {
+      console.log(`[OPENAI-TOOLS] ========== USO DE TOKENS ==========`)
+      console.log(`[OPENAI-TOOLS] Prompt tokens: ${completedRun.usage.prompt_tokens}`)
+      console.log(`[OPENAI-TOOLS] Completion tokens: ${completedRun.usage.completion_tokens}`)
+      console.log(`[OPENAI-TOOLS] Total tokens: ${completedRun.usage.total_tokens}`)
+      console.log(`[OPENAI-TOOLS] ================================================`)
+    } else {
+      console.log(`[OPENAI-TOOLS] ⚠️ No hay información de uso de tokens disponible`)
+    }
 
-        try {
-          if (userPhoneNumber) {
-            const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
-            if (config) {
-              await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, processingMessage)
-            }
-          }
-          console.log(`[OPENAI-TOOLS] 📤 Mensaje de procesamiento enviado: ${processingMessage}`)
-        } catch (error) {
-          console.error(`[OPENAI-TOOLS] ⚠️ Error enviando mensaje de procesamiento:`, error)
-        }
+    if (completedRun.last_error) {
+      console.log(`[OPENAI-TOOLS] ❌ Error en el run: ${JSON.stringify(completedRun.last_error, null, 2)}`)
+    }
 
-        const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
+    console.log(`[OPENAI-TOOLS] ================================================`)
 
-        console.log(`[OPENAI-TOOLS] 🔧 Resultado de herramienta ${functionName}:`, JSON.stringify(toolResult, null, 2))
-
-        toolOutputs.push({
-          tool_call_id: toolCall.id,
-          output: JSON.stringify(toolResult),
-        })
-      }
-
-      await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
-        tool_outputs: toolOutputs,
+    if (completedRun.status === "completed") {
+      // Obtener los mensajes del asistente
+      console.log(`[OPENAI-TOOLS] ========== OBTENIENDO RESPUESTA ==========`)
+      console.log(`[OPENAI-TOOLS] Obteniendo mensajes del thread ${threadId}`)
+      const messages = await openai.beta.threads.messages.list(threadId, {
+        order: "desc",
+        limit: 1,
       })
 
-      // Continuar procesando
-      await processRun(openai, threadId, runId, phoneNumberId, clienteId, userPhoneNumber)
+      // Verificar si hay mensajes
+      if (messages.data.length === 0) {
+        console.warn("[OPENAI-TOOLS] No se encontraron mensajes en el thread")
+        throw new Error("No se encontraron mensajes en el thread")
+      }
+
+      // Obtener el último mensaje del asistente
+      const lastMessage = messages.data[0]
+      if (lastMessage.role !== "assistant") {
+        console.warn(`[OPENAI-TOOLS] El último mensaje no es del asistente: ${lastMessage.role}`)
+        throw new Error(`El último mensaje no es del asistente: ${lastMessage.role}`)
+      }
+
+      // Extraer el contenido del mensaje
+      let messageContent = ""
+      for (const content of lastMessage.content) {
+        if (content.type === "text") {
+          messageContent += content.text.value
+        }
+      }
+
+      console.log(`[OPENAI-TOOLS] ========== RESPUESTA DEL ASISTENTE ==========`)
+      console.log(`[OPENAI-TOOLS] Mensaje del asistente (${messageContent.length} caracteres):`)
+      console.log(`[OPENAI-TOOLS] "${messageContent}"`)
+      console.log(`[OPENAI-TOOLS] Tokens estimados de la respuesta: ${Math.ceil(messageContent.length / 4)}`)
+      console.log(`[OPENAI-TOOLS] ================================================`)
+
+      // Enviar el mensaje a WhatsApp
+      console.log(`[OPENAI-TOOLS] Enviando mensaje a WhatsApp para usuario ${userPhoneNumber}`)
+      await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, messageContent)
+      console.log(`[OPENAI-TOOLS] Mensaje enviado exitosamente a WhatsApp`)
+
+      // Incrementar métrica de mensajes enviados
+      await incrementMetric("messages_sent")
+
+      return { success: true }
+    } else if (completedRun.status === "requires_action") {
+      console.log(`[OPENAI-TOOLS] ========== PROCESANDO HERRAMIENTAS ==========`)
+      console.log(`[OPENAI-TOOLS] El run requiere acción - procesando herramientas`)
+
+      if (completedRun.required_action?.type === "submit_tool_outputs") {
+        const toolCalls = completedRun.required_action.submit_tool_outputs.tool_calls
+        const toolOutputs = []
+
+        console.log(`[OPENAI-TOOLS] Procesando ${toolCalls.length} llamadas a herramientas`)
+
+        // Procesar cada llamada a herramienta
+        for (const toolCall of toolCalls) {
+          const functionName = toolCall.function.name
+          const functionArgs = JSON.parse(toolCall.function.arguments)
+
+          console.log(`[OPENAI-TOOLS] ========== PROCESANDO HERRAMIENTA ==========`)
+          console.log(`[OPENAI-TOOLS] Función: ${functionName}`)
+          console.log(`[OPENAI-TOOLS] Argumentos:`, JSON.stringify(functionArgs, null, 2))
+          console.log(`[OPENAI-TOOLS] Tool Call ID: ${toolCall.id}`)
+          console.log(
+            `[OPENAI-TOOLS] Argumentos raw (${toolCall.function.arguments.length} caracteres): ${toolCall.function.arguments}`,
+          )
+
+          // Enviar mensaje de espera al usuario
+          const waitingMessage = FUNCTION_MESSAGES[functionName] || FUNCTION_MESSAGES.default
+          console.log(`[OPENAI-TOOLS] Enviando mensaje de espera: "${waitingMessage}"`)
+
+          try {
+            await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
+            console.log(`[OPENAI-TOOLS] Mensaje de espera enviado exitosamente`)
+          } catch (error) {
+            console.error(`[OPENAI-TOOLS] Error al enviar mensaje de espera:`, error)
+            // Continuar con la ejecución aunque falle el mensaje de espera
+          }
+
+          // Ejecutar la función
+          console.log(`[OPENAI-TOOLS] Ejecutando función ${functionName}...`)
+          const toolStartTime = Date.now()
+          const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
+          const toolEndTime = Date.now()
+          const toolDuration = toolEndTime - toolStartTime
+
+          console.log(`[OPENAI-TOOLS] ========== RESULTADO DE HERRAMIENTA ==========`)
+          console.log(`[OPENAI-TOOLS] Función: ${functionName}`)
+          console.log(`[OPENAI-TOOLS] Duración: ${toolDuration}ms`)
+          console.log(`[OPENAI-TOOLS] Resultado:`, JSON.stringify(toolResult, null, 2))
+
+          const resultString = JSON.stringify(toolResult)
+          console.log(`[OPENAI-TOOLS] Tamaño del resultado: ${resultString.length} caracteres`)
+          console.log(`[OPENAI-TOOLS] Tokens estimados del resultado: ${Math.ceil(resultString.length / 4)}`)
+          console.log(`[OPENAI-TOOLS] ================================================`)
+
+          // Preparar el resultado para enviarlo de vuelta al asistente
+          const toolOutput = {
+            tool_call_id: toolCall.id,
+            output: JSON.stringify(toolResult),
+          }
+
+          console.log(`[OPENAI-TOOLS] ========== ENVIANDO RESULTADO A OPENAI ==========`)
+          console.log(`[OPENAI-TOOLS] Tool Call ID: ${toolCall.id}`)
+          console.log(`[OPENAI-TOOLS] Output que se enviará (${toolOutput.output.length} caracteres):`)
+          console.log(`[OPENAI-TOOLS] ${toolOutput.output.substring(0, 500)}...`)
+          console.log(`[OPENAI-TOOLS] Tokens estimados del output: ${Math.ceil(toolOutput.output.length / 4)}`)
+          console.log(`[OPENAI-TOOLS] ================================================`)
+
+          toolOutputs.push(toolOutput)
+        }
+
+        // Enviar los resultados de las herramientas al asistente
+        console.log(`[OPENAI-TOOLS] ========== ENVIANDO TODOS LOS RESULTADOS ==========`)
+        console.log(`[OPENAI-TOOLS] Enviando resultados de ${toolOutputs.length} herramientas al asistente`)
+
+        let totalOutputTokens = 0
+        toolOutputs.forEach((output, index) => {
+          const tokens = Math.ceil(output.output.length / 4)
+          totalOutputTokens += tokens
+          console.log(`[OPENAI-TOOLS] Output ${index + 1}: ${tokens} tokens estimados`)
+        })
+        console.log(`[OPENAI-TOOLS] Total de tokens estimados en outputs: ${totalOutputTokens}`)
+
+        // Submit tool outputs using direct API call
+        console.log(`[OPENAI-TOOLS] ========== ENVIANDO TOOL OUTPUTS DIRECTAMENTE ==========`)
+        const submitUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`
+        console.log(`[OPENAI-TOOLS] Submit URL: ${submitUrl}`)
+
+        const submitHeaders = {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+          "OpenAI-Beta": "assistants=v2",
+        }
+
+        const submitBody = {
+          tool_outputs: toolOutputs,
+        }
+
+        console.log(`[OPENAI-TOOLS] Submit body:`, JSON.stringify(submitBody, null, 2))
+
+        try {
+          const submitResponse = await fetch(submitUrl, {
+            method: "POST",
+            headers: submitHeaders,
+            body: JSON.stringify(submitBody),
+          })
+
+          console.log(`[OPENAI-TOOLS] Submit response status: ${submitResponse.status}`)
+          console.log(`[OPENAI-TOOLS] Submit response headers:`, Object.fromEntries(submitResponse.headers.entries()))
+
+          if (!submitResponse.ok) {
+            const errorText = await submitResponse.text()
+            console.error(`[OPENAI-TOOLS] Submit error response:`, errorText)
+            throw new Error(`Submit tool outputs failed: ${submitResponse.status} ${errorText}`)
+          }
+
+          const submitData = await submitResponse.json()
+          console.log(`[OPENAI-TOOLS] Submit response data:`, JSON.stringify(submitData, null, 2))
+        } catch (error) {
+          console.error(`[OPENAI-TOOLS] Error en submit tool outputs directo:`, error)
+          throw error
+        }
+
+        console.log(`[OPENAI-TOOLS] Resultados enviados exitosamente`)
+        console.log(`[OPENAI-TOOLS] ================================================`)
+
+        // Continuar procesando el run después de enviar los resultados
+        console.log(`[OPENAI-TOOLS] Continuando procesamiento del run después de ejecutar herramientas`)
+        return await processRunWithCorrectFlow(
+          openai,
+          threadId,
+          runId,
+          accessToken,
+          phoneNumberId,
+          userPhoneNumber,
+          clienteId,
+          retryCount,
+        )
+      } else {
+        console.error(`[OPENAI-TOOLS] Tipo de acción requerida no soportado: ${completedRun.required_action?.type}`)
+        throw new Error(`Tipo de acción requerida no soportado: ${completedRun.required_action?.type}`)
+      }
+    } else if (completedRun.status === "failed") {
+      console.error(`[OPENAI-TOOLS] ❌ Run falló: ${completedRun.last_error?.message}`)
+      console.error(`[OPENAI-TOOLS] Detalles del error:`, JSON.stringify(completedRun.last_error, null, 2))
+      throw new Error(`Run falló: ${completedRun.last_error?.message}`)
+    } else {
+      console.warn(`[OPENAI-TOOLS] Estado inesperado del run: ${completedRun.status}`)
+      throw new Error(`Estado inesperado del run: ${completedRun.status}`)
     }
-  } else if (run.status === "failed") {
-    throw new Error(`Run falló: ${run.last_error?.message}`)
+  } catch (error) {
+    console.error(`[OPENAI-TOOLS] ❌ Error en processRunWithCorrectFlow:`, error)
+
+    // Reintentar si no hemos alcanzado el número máximo de reintentos
+    if (retryCount < MAX_RETRIES) {
+      // Extraer el tiempo de espera del mensaje de error
+      let waitTime = RETRY_DELAY
+      if (error.message && error.message.includes("Please try again in")) {
+        const match = error.message.match(/Please try again in (\d+\.?\d*)s/)
+        if (match) {
+          waitTime = Math.ceil(Number.parseFloat(match[1]) * 1000) + 1000 // +1s de buffer
+        }
+      }
+      console.log(`[OPENAI-TOOLS] Reintentando en ${waitTime}ms...`)
+      await wait(waitTime)
+      return processRunWithCorrectFlow(
+        openai,
+        threadId,
+        runId,
+        accessToken,
+        phoneNumberId,
+        userPhoneNumber,
+        clienteId,
+        retryCount + 1,
+      )
+    }
+
+    // Si hemos agotado los reintentos, lanzar el error
+    await logError("openai_run", error instanceof Error ? error : new Error(String(error)))
+    throw error
+  }
+}
+
+// Agregar logging detallado en waitForRunCompletionOrAction
+async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, runId: string) {
+  console.log(`[OPENAI-TOOLS] ========== ESPERANDO COMPLETACIÓN ==========`)
+  console.log(`[OPENAI-TOOLS] Parámetros recibidos:`)
+  console.log(`[OPENAI-TOOLS] - threadId: "${threadId}" (tipo: ${typeof threadId})`)
+  console.log(`[OPENAI-TOOLS] - runId: "${runId}" (tipo: ${typeof runId})`)
+
+  // Validar que los parámetros no sean undefined
+  if (!threadId || threadId === "undefined") {
+    console.error(`[OPENAI-TOOLS] ❌ threadId inválido: "${threadId}"`)
+    throw new Error(`threadId inválido: "${threadId}"`)
   }
 
-  console.log(`[OPENAI-TOOLS] ✅ Run completado: ${run.status}`)
-}
+  if (!runId || runId === "undefined") {
+    console.error(`[OPENAI-TOOLS] ❌ runId inválido: "${runId}"`)
+    throw new Error(`runId inválido: "${runId}"`)
+  }
 
-// Función auxiliar para esperar
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
+  console.log(`[OPENAI-TOOLS] Esperando a que el run ${runId} se complete o requiera acción...`)
 
-// Función para obtener el cliente de OpenAI
-function getOpenAIClient(): OpenAI {
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  })
+  const startTime = Date.now()
+
+  // Usar fetch directamente en lugar del SDK de OpenAI
+  const makeDirectAPICall = async (tId: string, rId: string) => {
+    console.log(`[OPENAI-TOOLS] ========== LLAMADA DIRECTA A API ==========`)
+    console.log(`[OPENAI-TOOLS] Haciendo llamada directa con threadId="${tId}" y runId="${rId}"`)
+
+    const url = `https://api.openai.com/v1/threads/${tId}/runs/${rId}`
+    console.log(`[OPENAI-TOOLS] URL: ${url}`)
+
+    const headers = {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+      "OpenAI-Beta": "assistants=v2",
+    }
+
+    console.log(`[OPENAI-TOOLS] Headers preparados (sin mostrar API key)`)
+
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: headers,
+      })
+
+      console.log(`[OPENAI-TOOLS] Response status: ${response.status}`)
+      console.log(`[OPENAI-TOOLS] Response headers:`, Object.fromEntries(response.headers.entries()))
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`[OPENAI-TOOLS] Error response:`, errorText)
+        throw new Error(`API call failed: ${response.status} ${errorText}`)
+      }
+
+      const data = await response.json()
+      console.log(`[OPENAI-TOOLS] Response data:`, JSON.stringify(data, null, 2))
+
+      return data
+    } catch (error) {
+      console.error(`[OPENAI-TOOLS] Error en llamada directa:`, error)
+      throw error
+    }
+  }
+
+  // Usar las variables locales en lugar de los parámetros directos
+  const localThreadId = String(threadId)
+  const localRunId = String(runId)
+
+  console.log(`[OPENAI-TOOLS] Variables locales: threadId="${localThreadId}", runId="${localRunId}"`)
+
+  let run = await makeDirectAPICall(localThreadId, localRunId)
+  let pollCount = 0
+
+  while (run.status === "queued" || run.status === "in_progress") {
+    pollCount++
+
+    // Verificar si hemos excedido el timeout
+    const elapsed = Date.now() - startTime
+    if (elapsed > OPENAI_TIMEOUT) {
+      console.error(`[OPENAI-TOOLS] ❌ Timeout esperando a que el run se complete: ${OPENAI_TIMEOUT}ms`)
+      throw new Error(`Timeout esperando a que el run se complete: ${OPENAI_TIMEOUT}ms`)
+    }
+
+    // Log cada 10 polls para no saturar
+    if (pollCount % 10 === 0) {
+      console.log(`[OPENAI-TOOLS] Poll ${pollCount}: Estado actual del run: ${run.status} (${elapsed}ms transcurridos)`)
+    }
+
+    // Esperar un poco antes de verificar de nuevo
+    await wait(1000)
+
+    console.log(`[OPENAI-TOOLS] ========== LLAMADA DIRECTA EN LOOP ==========`)
+    console.log(`[OPENAI-TOOLS] Poll ${pollCount}: Haciendo llamada directa`)
+
+    // Obtener el estado actualizado del run usando la llamada directa
+    run = await makeDirectAPICall(localThreadId, localRunId)
+  }
+
+  const totalTime = Date.now() - startTime
+  console.log(`[OPENAI-TOOLS] ✅ Run completado en ${totalTime}ms con estado: ${run.status} (${pollCount} polls)`)
+  console.log(`[OPENAI-TOOLS] ================================================`)
+  return run
 }
