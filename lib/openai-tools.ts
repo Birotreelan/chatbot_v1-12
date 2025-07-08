@@ -1261,6 +1261,11 @@ export async function getAssistantResponse(
   console.log(`[OPENAI-TOOLS] Assistant ID: ${assistantId}`)
   console.log(`[OPENAI-TOOLS] Mensaje: ${message}`)
 
+  // Validar que el threadId no sea undefined
+  if (!threadId || threadId === "undefined") {
+    throw new Error(`Thread ID inválido: ${threadId}`)
+  }
+
   const openai = getOpenAIClient()
 
   try {
@@ -1348,6 +1353,12 @@ async function processRun(
   userPhoneNumber?: string,
 ): Promise<void> {
   console.log(`[OPENAI-TOOLS] Procesando run: ${runId}`)
+  console.log(`[OPENAI-TOOLS] Thread ID para run: ${threadId}`)
+
+  // Validar que el threadId no sea undefined
+  if (!threadId || threadId === "undefined") {
+    throw new Error(`Thread ID inválido en processRun: ${threadId}`)
+  }
 
   let run = await openai.beta.threads.runs.retrieve(threadId, runId)
 
