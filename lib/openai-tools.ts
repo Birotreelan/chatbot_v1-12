@@ -1300,8 +1300,12 @@ export async function getAssistantResponse(
 
     console.log(`[OPENAI-TOOLS] Run creado: ${run.id}`)
 
+    // Necesitamos extraer el número de teléfono del mensaje del sistema
+    const userPhoneNumberMatch = message.match(/PacienteCelular: (\d+)/)
+    const userPhoneNumber = userPhoneNumberMatch ? userPhoneNumberMatch[1] : undefined
+
     // Procesar el run
-    await processRun(openai, threadId, run.id, phoneNumberId, config.cliente_id)
+    await processRun(openai, threadId, run.id, phoneNumberId, config.cliente_id, userPhoneNumber)
 
     // Obtener la respuesta
     const messages = await openai.beta.threads.messages.list(threadId, {
@@ -1341,6 +1345,7 @@ async function processRun(
   runId: string,
   phoneNumberId: string,
   clienteId?: string,
+  userPhoneNumber?: string,
 ): Promise<void> {
   console.log(`[OPENAI-TOOLS] Procesando run: ${runId}`)
 
@@ -1368,7 +1373,12 @@ async function processRun(
           FUNCTION_MESSAGES[functionName as keyof typeof FUNCTION_MESSAGES] || FUNCTION_MESSAGES.default
 
         try {
-          await sendWhatsAppMessage(phoneNumberId, run.thread_id, processingMessage)
+          if (userPhoneNumber) {
+            const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+            if (config) {
+              await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, processingMessage)
+            }
+          }
           console.log(`[OPENAI-TOOLS] 📤 Mensaje de procesamiento enviado: ${processingMessage}`)
         } catch (error) {
           console.error(`[OPENAI-TOOLS] ⚠️ Error enviando mensaje de procesamiento:`, error)
@@ -1389,7 +1399,7 @@ async function processRun(
       })
 
       // Continuar procesando
-      await processRun(openai, threadId, runId, phoneNumberId, clienteId)
+      await processRun(openai, threadId, runId, phoneNumberId, clienteId, userPhoneNumber)
     }
   } else if (run.status === "failed") {
     throw new Error(`Run falló: ${run.last_error?.message}`)
