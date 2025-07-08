@@ -542,3 +542,34 @@ export async function obtenerEspecialidades(
 ): Promise<ApiResponse<{ id: string; nombre: string }[]>> {
   return obtenerSubespecialidades(clienteId, useCache)
 }
+
+// Función para validar obras sociales
+export async function validarObraSocial(
+  clienteId: string,
+  busqueda: string,
+  useCache = true,
+): Promise<
+  ApiResponse<{
+    obras_sociales: {
+      id: string
+      nombre: string
+      razon_social: string
+      permite_turnos_online: boolean
+      permite_turnos_online_texto: string
+    }[]
+    total_encontradas: number
+    busqueda_realizada: string
+  }>
+> {
+  return fetchProxyApi<{
+    obras_sociales: {
+      id: string
+      nombre: string
+      razon_social: string
+      permite_turnos_online: boolean
+      permite_turnos_online_texto: string
+    }[]
+    total_encontradas: number
+    busqueda_realizada: string
+  }>(clienteId, "get_obras_sociales", { busqueda }, useCache)
+}

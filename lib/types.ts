@@ -64,3 +64,15 @@ export interface SystemStats {
   totalThreads: number
   lastUpdated: string
 }
+
+export interface ClientPromptConfig {
+  clienteId: string
+  companyName: string
+  businessType: string
+  customInstructions: string
+  whatsappSpecific?: string
+  widgetSpecific?: string
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}

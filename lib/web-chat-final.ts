@@ -1,4 +1,4 @@
-import { validateDNI, searchTurnos, reserveTurno } from "./clinic-api"
+import { validateDNI, searchTurnos, reserveTurno, validateObraSocial } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
 
 interface WebChatConfig {
@@ -337,6 +337,23 @@ async function processMessageWithOpenAI(
               },
             },
           },
+          {
+            type: "function",
+            function: {
+              name: "validar_obra_social",
+              description: "Valida si la obra social ingresada por el paciente existe y permite turnos online",
+              parameters: {
+                type: "object",
+                properties: {
+                  busqueda: {
+                    type: "string",
+                    description: "Nombre de la obra social ingresado por el paciente (ej: 'osde')",
+                  },
+                },
+                required: ["busqueda"],
+              },
+            },
+          },
         ],
       }),
     })
@@ -576,6 +593,25 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
                 success: false,
                 error:
                   "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para reservar tu turno.",
+                fallback: true,
+              })
+            }
+            break
+
+          case "validar_obra_social":
+            console.log(`[WEB-CHAT-FINAL] 🏥 Validando obra social con cliente: ${clienteId}`)
+            console.log(`[WEB-CHAT-FINAL] 📋 Búsqueda: ${args.busqueda}`)
+
+            try {
+              const obraSocialResult = await validateObraSocial(args.busqueda || "", clienteId)
+              console.log(`[WEB-CHAT-FINAL] 📋 Resultado obra social:`, obraSocialResult)
+              output = JSON.stringify(obraSocialResult)
+            } catch (error) {
+              console.error(`[WEB-CHAT-FINAL] ❌ Error validando obra social:`, error)
+              output = JSON.stringify({
+                success: false,
+                error:
+                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar obras sociales.",
                 fallback: true,
               })
             }

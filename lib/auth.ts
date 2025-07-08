@@ -65,6 +65,12 @@ export async function getSession(): Promise<string | null> {
   return null
 }
 
+// Comprueba si existe una sesión válida y devuelve un booleano
+export async function checkAuth(): Promise<boolean> {
+  const session = await getSession()
+  return session !== null
+}
+
 // Cerrar sesión
 export async function logout(): Promise<void> {
   const sessionId = cookies().get("session_id")?.value

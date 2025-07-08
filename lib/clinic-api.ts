@@ -374,6 +374,36 @@ export class ClinicAPI {
 
     return this.fetchProxyApi<any>("set_turno", params)
   }
+
+  /**
+   * Valida si la obra social existe y permite turnos online
+   */
+  async validarObraSocial(busqueda: string): Promise<
+    ApiResponse<{
+      obras_sociales: {
+        Id: string
+        Nombre: string
+        Razon_Social: string
+        Permite_Turnos_Online: boolean
+        Permite_Turnos_Online_Texto: string
+      }[]
+      total_encontradas: number
+      busqueda_realizada: string
+    }>
+  > {
+    console.log(`🏥 Validando obra social: ${busqueda}`)
+    return this.fetchProxyApi<{
+      obras_sociales: {
+        Id: string
+        Nombre: string
+        Razon_Social: string
+        Permite_Turnos_Online: boolean
+        Permite_Turnos_Online_Texto: string
+      }[]
+      total_encontradas: number
+      busqueda_realizada: string
+    }>("get_obras_sociales", { busqueda })
+  }
 }
 
 /**
@@ -553,6 +583,53 @@ export async function reserveTurno(
     }
   } catch (error) {
     console.error(`[RESERVE-TURNO] Error al reservar turno:`, error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
+  }
+}
+
+/**
+ * Valida una obra social usando la API de la clínica
+ */
+export async function validateObraSocial(
+  busqueda: string,
+  clienteId: string,
+): Promise<{
+  success: boolean
+  data?: any
+  error?: string
+}> {
+  try {
+    console.log(`[VALIDATE-OBRA-SOCIAL] Validando obra social: ${busqueda} para cliente: ${clienteId}`)
+
+    if (!clienteId) {
+      console.error(`[VALIDATE-OBRA-SOCIAL] ❌ Cliente ID faltante`)
+      return {
+        success: false,
+        error: "ID de cliente requerido",
+      }
+    }
+
+    const clinicAPI = createClinicAPI(clienteId)
+    const response = await clinicAPI.validarObraSocial(busqueda)
+
+    if (response.exito && response.datos) {
+      console.log(`[VALIDATE-OBRA-SOCIAL] ✅ Obras sociales encontradas:`, response.datos)
+      return {
+        success: true,
+        data: response.datos,
+      }
+    } else {
+      console.log(`[VALIDATE-OBRA-SOCIAL] ❌ No se encontraron obras sociales o error:`, response.error)
+      return {
+        success: false,
+        error: response.error?.mensaje || "No se encontraron obras sociales",
+      }
+    }
+  } catch (error) {
+    console.error(`[VALIDATE-OBRA-SOCIAL] Error al validar obra social:`, error)
     return {
       success: false,
       error: error instanceof Error ? error.message : "Error desconocido",
