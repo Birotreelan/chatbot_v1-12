@@ -30,7 +30,7 @@ function getCacheKey(action: string, params: Record<string, any>): string {
   return `${CACHE_PREFIX}${action}:${JSON.stringify(params)}`
 }
 
-// Modificar fetchProxyApi para usar caché
+// Función principal para hacer peticiones al proxy
 async function fetchProxyApi<T>(
   clienteId: string,
   action: string,
@@ -45,27 +45,23 @@ async function fetchProxyApi<T>(
   if (useCache && redis) {
     const cachedData = await redis.get(cacheKey)
     if (cachedData) {
-      console.log(`Usando datos en caché para ${action}`)
+      console.log(`[CACHE] ✅ Hit para ${action}`)
       return JSON.parse(cachedData as string)
     }
   }
 
   try {
-    // Usar la URL hardcodeada en lugar del parámetro
     const proxyUrl = getProxyUrl()
 
-    console.log(`Realizando petición POST a: ${proxyUrl}`)
-    console.log(`Action: ${action}, Cliente_Id: ${clienteId}`)
-    console.log(`Parámetros:`, params)
-
-    // Preparar el cuerpo de la solicitud - asegurarnos de que Cliente_Id está exactamente como se espera
+    // Preparar el cuerpo de la solicitud
     const requestBody = {
-      Cliente_Id: clienteId.trim(), // Eliminar espacios en blanco por si acaso
+      Cliente_Id: clienteId.trim(),
       Action: action,
       ...params,
     }
 
-    console.log(`Cuerpo de la solicitud: ${JSON.stringify(requestBody)}`)
+    console.log(`[API] 📤 ${action} → ${proxyUrl}`)
+    console.log(`[API] 📋 Params: ${JSON.stringify(params)}`)
 
     // Hacer la petición POST
     const response = await fetch(proxyUrl, {
@@ -78,27 +74,28 @@ async function fetchProxyApi<T>(
 
     // Obtener el texto de la respuesta
     const responseText = await response.text()
-    console.log(`Respuesta (texto) recibida:`, responseText)
+    console.log(
+      `[API] 📥 ${response.status} ${responseText.substring(0, 200)}${responseText.length > 200 ? "..." : ""}`,
+    )
 
     // Intentar parsear la respuesta como JSON
     let data
     try {
       data = JSON.parse(responseText)
-      console.log(`Respuesta (JSON) parseada:`, data)
     } catch (e) {
-      console.error(`Error al parsear la respuesta JSON:`, e)
+      console.error(`[API] ❌ JSON inválido:`, e)
       return {
         exito: false,
         error: {
           codigo: "FORMATO_INVALIDO",
-          mensaje: `La API devolvió una respuesta con formato inválido: ${responseText.substring(0, 100)}...`,
+          mensaje: `Respuesta inválida: ${responseText.substring(0, 100)}...`,
         },
       }
     }
 
-    // Verificar si hay un error específico de Cliente_Id
+    // Verificar errores específicos
     if (data.error && typeof data.error === "string" && data.error.includes("Cliente_Id")) {
-      console.error(`Error de Cliente_Id:`, data.error)
+      console.error(`[API] ❌ Error Cliente_Id:`, data.error)
       return {
         exito: false,
         error: {
@@ -108,9 +105,9 @@ async function fetchProxyApi<T>(
       }
     }
 
-    // Verificar si hay un error de la API
+    // Verificar errores HTTP
     if (!response.ok) {
-      console.error(`Error HTTP en la respuesta: ${response.status} ${response.statusText}`)
+      console.error(`[API] ❌ HTTP ${response.status}:`, data?.error || response.statusText)
       return {
         exito: false,
         error: {
@@ -120,9 +117,9 @@ async function fetchProxyApi<T>(
       }
     }
 
-    // Si la respuesta tiene un formato específico de error
+    // Verificar errores de la API
     if (data.error) {
-      console.error(`Error en los datos de la respuesta:`, data.error)
+      console.error(`[API] ❌ API Error:`, data.error)
       return {
         exito: false,
         error: {
@@ -132,10 +129,10 @@ async function fetchProxyApi<T>(
       }
     }
 
-    // Si la respuesta tiene un campo "success"
+    // Verificar campo success
     if (data.success !== undefined) {
       if (!data.success) {
-        console.error(`La API indicó éxito=false:`, data)
+        console.error(`[API] ❌ Success=false:`, data)
         return {
           exito: false,
           error: {
@@ -144,6 +141,14 @@ async function fetchProxyApi<T>(
           },
         }
       }
+
+      // Guardar en caché si es exitoso
+      if (useCache && redis) {
+        const result = { exito: true, datos: data.data }
+        await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
+        console.log(`[CACHE] 💾 Guardado ${action}`)
+      }
+
       return {
         exito: true,
         datos: data.data,
@@ -151,10 +156,17 @@ async function fetchProxyApi<T>(
     }
 
     // Si llegamos aquí, asumimos que la respuesta es exitosa
-    return { exito: true, datos: data }
+    const result = { exito: true, datos: data }
+
+    // Guardar en caché
+    if (useCache && redis) {
+      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
+      console.log(`[CACHE] 💾 Guardado ${action}`)
+    }
+
+    return result
   } catch (error) {
-    // Manejar errores de red u otros
-    console.error(`Error de red o durante el procesamiento:`, error)
+    console.error(`[API] ❌ Error de red:`, error)
     return {
       exito: false,
       error: {
@@ -194,7 +206,6 @@ export async function obtenerSubespecialidades(
   clienteId: string,
   useCache = true,
 ): Promise<ApiResponse<{ id: string; nombre: string }[]>> {
-  // Las subespecialidades cambian con poca frecuencia, podemos cachear por más tiempo
   return fetchProxyApi<{ id: string; nombre: string }[]>(clienteId, "get_subespecialidades", {}, useCache)
 }
 
@@ -463,9 +474,7 @@ export async function procesarReservaTurno(
   }
 
   try {
-    console.log(
-      `Procesando reserva de turno para DNI: ${dni}, fecha: ${fecha}, hora: ${hora}, profesional: ${profesional}`,
-    )
+    console.log(`[API] 🎯 Reservando turno: DNI=${dni}, fecha=${fecha}, hora=${hora}, profesional=${profesional}`)
 
     // 1. Primero obtenemos los datos del paciente
     const pacienteResponse = await buscarPaciente(clienteId, { dni })
@@ -526,7 +535,6 @@ export async function procesarReservaTurno(
     const turnos = turnosResponse.datos
 
     // La estructura exacta dependerá de cómo devuelve los datos tu API
-    // Este es un ejemplo genérico que deberás adaptar
     for (const turno of turnos) {
       if (turno.hora === hora || turno.hora.startsWith(hora)) {
         agendaId = turno.id || turno.agenda_id
@@ -555,7 +563,7 @@ export async function procesarReservaTurno(
 
     return reservaResponse
   } catch (error) {
-    console.error("Error al procesar la reserva del turno:", error)
+    console.error("[API] ❌ Error al procesar reserva:", error)
     return {
       exito: false,
       error: {
