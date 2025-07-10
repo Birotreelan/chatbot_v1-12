@@ -107,10 +107,23 @@ export async function buscarPaciente(clienteId: string, params: { dni: string })
       dni: params.dni,
     })
 
-    // Guardar en caché
-    await setCachedData(cacheKey, result)
-
-    return result
+    // Procesar respuesta
+    if (result.success) {
+      const processedResult = {
+        exito: true,
+        datos: result.data,
+      }
+      await setCachedData(cacheKey, processedResult)
+      return processedResult
+    } else {
+      return {
+        exito: false,
+        error: {
+          codigo: "PACIENTE_NO_ENCONTRADO",
+          mensaje: result.message || "Paciente no encontrado",
+        },
+      }
+    }
   } catch (error) {
     console.error(`[API-TOOLS] ❌ Error buscarPaciente:`, error)
     return {
@@ -123,56 +136,49 @@ export async function buscarPaciente(clienteId: string, params: { dni: string })
   }
 }
 
-// Función para validar obra social
+// Función para validar obra social - CORREGIDA
 export async function validarObraSocial(clienteId: string, busqueda: string): Promise<any> {
   logApiCall("validarObraSocial", clienteId, { busqueda })
 
   try {
-    const cacheKey = `${CACHE_PREFIX}obras_sociales_${clienteId}`
+    const cacheKey = `${CACHE_PREFIX}obra_social_${clienteId}_${busqueda.toLowerCase()}`
 
     // Intentar obtener de caché
-    let obrasSociales = await getCachedData(cacheKey)
-
-    if (!obrasSociales) {
-      // Hacer request a la API para obtener todas las obras sociales
-      obrasSociales = await makeApiRequest(clienteId, "get_obras_sociales")
-
-      // Guardar en caché
-      await setCachedData(cacheKey, obrasSociales)
+    const cachedResult = await getCachedData(cacheKey)
+    if (cachedResult) {
+      return cachedResult
     }
 
-    // Buscar la obra social específica
-    if (obrasSociales && obrasSociales.exito && obrasSociales.datos) {
-      const obras = Array.isArray(obrasSociales.datos) ? obrasSociales.datos : []
-      const busquedaLower = busqueda.toLowerCase()
+    // Hacer request a la API con el término de búsqueda
+    const result = await makeApiRequest(clienteId, "get_obras_sociales", {
+      busqueda: busqueda, // CORREGIDO: Enviar el término de búsqueda
+    })
 
-      const coincidencias = obras.filter(
-        (obra: any) => obra.nombre && obra.nombre.toLowerCase().includes(busquedaLower),
-      )
-
-      if (coincidencias.length > 0) {
-        return {
-          exito: true,
-          datos: coincidencias,
-          mensaje: `Se encontraron ${coincidencias.length} obra(s) social(es) que coinciden con "${busqueda}"`,
-        }
-      } else {
-        return {
-          exito: false,
-          error: {
-            codigo: "OBRA_SOCIAL_NO_ENCONTRADA",
-            mensaje: `No se encontró ninguna obra social que coincida con "${busqueda}"`,
-          },
-        }
+    // Procesar respuesta
+    if (result.success && result.data) {
+      const processedResult = {
+        exito: true,
+        datos: result.data,
+        mensaje: `Se encontraron obras sociales que coinciden con "${busqueda}"`,
       }
-    }
-
-    return {
-      exito: false,
-      error: {
-        codigo: "ERROR_OBTENER_OBRAS_SOCIALES",
-        mensaje: "No se pudieron obtener las obras sociales",
-      },
+      await setCachedData(cacheKey, processedResult)
+      return processedResult
+    } else if (result.error) {
+      return {
+        exito: false,
+        error: {
+          codigo: "OBRA_SOCIAL_NO_ENCONTRADA",
+          mensaje: result.error,
+        },
+      }
+    } else {
+      return {
+        exito: false,
+        error: {
+          codigo: "OBRA_SOCIAL_NO_ENCONTRADA",
+          mensaje: `No se encontró ninguna obra social que coincida con "${busqueda}"`,
+        },
+      }
     }
   } catch (error) {
     console.error(`[API-TOOLS] ❌ Error validarObraSocial:`, error)
@@ -202,10 +208,23 @@ export async function obtenerSubespecialidades(clienteId: string): Promise<any> 
     // Hacer request a la API
     const result = await makeApiRequest(clienteId, "get_subespecialidades")
 
-    // Guardar en caché
-    await setCachedData(cacheKey, result, 3600) // 1 hora para especialidades
-
-    return result
+    // Procesar respuesta
+    if (result.success) {
+      const processedResult = {
+        exito: true,
+        datos: result.data,
+      }
+      await setCachedData(cacheKey, processedResult, 3600) // 1 hora para especialidades
+      return processedResult
+    } else {
+      return {
+        exito: false,
+        error: {
+          codigo: "OBTENER_SUBESPECIALIDADES_ERROR",
+          mensaje: result.message || "Error obteniendo subespecialidades",
+        },
+      }
+    }
   } catch (error) {
     console.error(`[API-TOOLS] ❌ Error obtenerSubespecialidades:`, error)
     return {
@@ -236,10 +255,23 @@ export async function buscarProfesionales(clienteId: string, busqueda: string): 
       busqueda,
     })
 
-    // Guardar en caché
-    await setCachedData(cacheKey, result, 1800) // 30 minutos
-
-    return result
+    // Procesar respuesta
+    if (result.success) {
+      const processedResult = {
+        exito: true,
+        datos: result.data,
+      }
+      await setCachedData(cacheKey, processedResult, 1800) // 30 minutos
+      return processedResult
+    } else {
+      return {
+        exito: false,
+        error: {
+          codigo: "BUSCAR_PROFESIONALES_ERROR",
+          mensaje: result.message || "Error buscando profesionales",
+        },
+      }
+    }
   } catch (error) {
     console.error(`[API-TOOLS] ❌ Error buscarProfesionales:`, error)
     return {
@@ -276,7 +308,21 @@ export async function obtenerTurnos(
       paciente_dni: pacienteDni,
     })
 
-    return result
+    // Procesar respuesta
+    if (result.success) {
+      return {
+        exito: true,
+        datos: result.data,
+      }
+    } else {
+      return {
+        exito: false,
+        error: {
+          codigo: "OBTENER_TURNOS_ERROR",
+          mensaje: result.message || "Error obteniendo turnos",
+        },
+      }
+    }
   } catch (error) {
     console.error(`[API-TOOLS] ❌ Error obtenerTurnos:`, error)
     return {
@@ -300,7 +346,21 @@ export async function reservarTurno(clienteId: string, agendaId: string, pacient
       paciente_data: pacienteData,
     })
 
-    return result
+    // Procesar respuesta
+    if (result.success) {
+      return {
+        exito: true,
+        datos: result.data,
+      }
+    } else {
+      return {
+        exito: false,
+        error: {
+          codigo: "RESERVAR_TURNO_ERROR",
+          mensaje: result.message || "Error reservando turno",
+        },
+      }
+    }
   } catch (error) {
     console.error(`[API-TOOLS] ❌ Error reservarTurno:`, error)
     return {
