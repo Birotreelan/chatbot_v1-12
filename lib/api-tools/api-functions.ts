@@ -43,10 +43,17 @@ async function fetchProxyApi<T>(
 
   // Verificar caché si está habilitada
   if (useCache && redis) {
-    const cachedData = await redis.get(cacheKey)
-    if (cachedData) {
-      console.log(`[CACHE] ✅ Hit para ${action}`)
-      return JSON.parse(cachedData as string)
+    try {
+      const cachedData = await redis.get(cacheKey)
+      if (cachedData) {
+        console.log(`[CACHE] ✅ Hit para ${action}`)
+        // Asegurarse de que cachedData es un string antes de parsearlo
+        const dataToParse = typeof cachedData === "string" ? cachedData : JSON.stringify(cachedData)
+        return JSON.parse(dataToParse)
+      }
+    } catch (cacheError) {
+      console.warn(`[CACHE] ⚠️ Error leyendo caché para ${action}:`, cacheError)
+      // Continuar sin caché si hay error
     }
   }
 
@@ -144,9 +151,13 @@ async function fetchProxyApi<T>(
 
       // Guardar en caché si es exitoso
       if (useCache && redis) {
-        const result = { exito: true, datos: data.data }
-        await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
-        console.log(`[CACHE] 💾 Guardado ${action}`)
+        try {
+          const result = { exito: true, datos: data.data }
+          await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
+          console.log(`[CACHE] 💾 Guardado ${action}`)
+        } catch (cacheError) {
+          console.warn(`[CACHE] ⚠️ Error guardando en caché para ${action}:`, cacheError)
+        }
       }
 
       return {
@@ -160,8 +171,12 @@ async function fetchProxyApi<T>(
 
     // Guardar en caché
     if (useCache && redis) {
-      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
-      console.log(`[CACHE] 💾 Guardado ${action}`)
+      try {
+        await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
+        console.log(`[CACHE] 💾 Guardado ${action}`)
+      } catch (cacheError) {
+        console.warn(`[CACHE] ⚠️ Error guardando en caché para ${action}:`, cacheError)
+      }
     }
 
     return result
