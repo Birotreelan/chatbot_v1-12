@@ -12,21 +12,21 @@ interface WidgetPageProps {
 const WidgetPage: React.FC<WidgetPageProps> = ({ searchParams }) => {
   const { clienteId, config, embedded } = searchParams
 
-  // Parse config string to JSON object
+  // Parse config string to JSON object - MEJORADO
   let parsedConfig = {}
   try {
-    parsedConfig = JSON.parse(config)
+    if (config && config !== "undefined") {
+      parsedConfig = JSON.parse(config)
+    }
   } catch (error) {
     console.error("Error parsing config:", error)
+    // Usar configuración por defecto si hay error
+    parsedConfig = {}
   }
 
   return (
     <div>
-      <WidgetChat
-        clienteId={clienteId}
-        config={parsedConfig}
-        hideHeader={false} // Asegurar que el header se muestre
-      />
+      <WidgetChat clienteId={clienteId} config={parsedConfig} hideHeader={false} />
     </div>
   )
 }

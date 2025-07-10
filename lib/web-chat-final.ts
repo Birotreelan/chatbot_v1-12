@@ -17,7 +17,7 @@ interface ProcessWebMessageParams {
   ip: string
 }
 
-// Cache simple para threads web - MEJORADO
+// Cache simple para threads web - MEJORADO con persistencia
 const webThreadsCache = new Map<string, string>()
 
 // Función helper para obtener fechas dinámicas
@@ -68,13 +68,14 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
       throw new Error("Cliente ID no configurado")
     }
 
-    // Limpiar sessionId
+    // Limpiar sessionId - MEJORADO para mantener consistencia
     let cleanSessionId = sessionId
     while (cleanSessionId.startsWith("web_")) {
       cleanSessionId = cleanSessionId.substring(4)
     }
 
-    const threadKey = `${cleanSessionId}_${config.id}`
+    // CLAVE MEJORADA: Usar solo el sessionId limpio para mantener consistencia
+    const threadKey = `web_${cleanSessionId}`
     console.log(`[WEB-CHAT-FINAL] Thread key: ${threadKey}`)
 
     // MEJORAR: Obtener o crear thread con mejor logging
@@ -191,7 +192,7 @@ async function processMessageWithOpenAI(
     const messageData = await messageResponse.json()
     console.log(`[WEB-CHAT-FINAL] Mensaje añadido: ${messageData.id}`)
 
-    // 2. Crear run
+    // 2. Crear run con timeout aumentado
     console.log(`[WEB-CHAT-FINAL] Creando run con assistant: ${widgetAssistantId}`)
     const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
       method: "POST",
@@ -365,7 +366,7 @@ async function processMessageWithOpenAI(
     const runData = await runResponse.json()
     console.log(`[WEB-CHAT-FINAL] Run creado: ${runData.id}`)
 
-    // 3. Esperar completación
+    // 3. Esperar completación con timeout aumentado
     const finalResponse = await waitForRunCompletion(threadId, runData.id, clienteId)
     return finalResponse
   } catch (error) {
@@ -376,7 +377,7 @@ async function processMessageWithOpenAI(
 
 async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
   let attempts = 0
-  const maxAttempts = 30
+  const maxAttempts = 60 // AUMENTADO de 30 a 60 para evitar timeouts
 
   console.log(`[WEB-CHAT-FINAL] ========== ESPERANDO COMPLETACIÓN ==========`)
   console.log(`[WEB-CHAT-FINAL] Run ID: ${runId}`)
@@ -440,11 +441,12 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
       }
 
       attempts++
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      // AUMENTAR tiempo de espera entre intentos para tool calls pesadas
+      await new Promise((resolve) => setTimeout(resolve, 2000))
     } catch (error) {
       console.error(`[WEB-CHAT-FINAL] Error en intento ${attempts + 1}:`, error)
       attempts++
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      await new Promise((resolve) => setTimeout(resolve, 2000))
     }
   }
 
