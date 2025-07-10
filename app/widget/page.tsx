@@ -17,22 +17,22 @@ async function WidgetContent({ searchParams }: WidgetPageProps) {
   const { clienteId, position = "bottom-right", embedded = "false" } = searchParams
 
   if (!clienteId) {
-    console.log("[WIDGET-PAGE] ❌ Cliente ID no proporcionado")
+    console.error("[WIDGET-PAGE] ❌ Cliente ID faltante")
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-100">
-        <div className="text-center p-8 bg-white rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Error de Configuración</h2>
-          <p className="text-gray-600">No se proporcionó un ID de cliente válido.</p>
+      <div className="flex items-center justify-center min-h-screen bg-red-50">
+        <div className="text-center p-6 bg-white rounded-lg shadow-lg">
+          <h1 className="text-xl font-bold text-red-600 mb-2">Error de Configuración</h1>
+          <p className="text-gray-600">Cliente ID requerido</p>
         </div>
       </div>
     )
   }
 
+  // Obtener configuración del cliente
   let config = null
   try {
-    console.log("[WIDGET-PAGE] 🔍 Buscando configuración para cliente:", clienteId)
     config = await getWhatsappConfigByClienteId(clienteId)
-    console.log("[WIDGET-PAGE] ✅ Configuración obtenida:", config ? "Encontrada" : "No encontrada")
+    console.log("[WIDGET-PAGE] ✅ Configuración obtenida:", config?.displayName || "No encontrada")
   } catch (error) {
     console.error("[WIDGET-PAGE] ❌ Error obteniendo configuración:", error)
   }
@@ -47,9 +47,9 @@ async function WidgetContent({ searchParams }: WidgetPageProps) {
     widgetSecondaryColor: "#f0f9ff",
   }
 
-  // Usar configuración encontrada o por defecto
-  const widgetConfig = config
+  const finalConfig = config
     ? {
+        ...defaultConfig,
         widgetTitle: config.widgetTitle || defaultConfig.widgetTitle,
         widgetSubtitle: config.widgetSubtitle || defaultConfig.widgetSubtitle,
         widgetWelcomeMessage: config.widgetWelcomeMessage || defaultConfig.widgetWelcomeMessage,
@@ -59,19 +59,12 @@ async function WidgetContent({ searchParams }: WidgetPageProps) {
       }
     : defaultConfig
 
-  console.log("[WIDGET-PAGE] 🎨 Configuración final del widget:", widgetConfig)
+  console.log("[WIDGET-PAGE] 🎨 Configuración final:", finalConfig)
 
-  return (
-    <WidgetChat
-      clienteId={clienteId}
-      position={position as "bottom-right" | "bottom-left" | "top-right" | "top-left"}
-      embedded={embedded === "true"}
-      config={widgetConfig}
-    />
-  )
+  return <WidgetChat clienteId={clienteId} config={finalConfig} position={position} embedded={embedded === "true"} />
 }
 
-export default function WidgetPage({ searchParams }: WidgetPageProps) {
+export default function WidgetPage(props: WidgetPageProps) {
   return (
     <Suspense
       fallback={
@@ -80,7 +73,7 @@ export default function WidgetPage({ searchParams }: WidgetPageProps) {
         </div>
       }
     >
-      <WidgetContent searchParams={searchParams} />
+      <WidgetContent {...props} />
     </Suspense>
   )
 }
