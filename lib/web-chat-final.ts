@@ -1,5 +1,16 @@
-import { validateDNI, searchTurnos, reserveTurno } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
+import { openai } from "@/lib/openai"
+import { getRedisClient } from "@/lib/redis"
+import { logError } from "@/lib/monitoring"
+import type { WhatsappConfig } from "@/lib/types"
+import {
+  buscarPaciente,
+  validarObraSocial,
+  obtenerSubespecialidades,
+  buscarProfesionales,
+  obtenerTurnos,
+  reservarTurno,
+} from "@/lib/api-tools/api-functions"
 
 interface WebChatConfig {
   id: string
@@ -14,6 +25,13 @@ interface ProcessWebMessageParams {
   message: string
   sessionId: string
   config: WebChatConfig
+  ip: string
+}
+
+interface ProcessWebChatMessageParams {
+  message: string
+  sessionId: string
+  config: WhatsappConfig
   ip: string
 }
 
@@ -44,637 +62,323 @@ CelularPaciente: No disponible (consulta web)
 [/SISTEMA]`
 }
 
-export async function processWebMessage(params: ProcessWebMessageParams): Promise<string> {
+// Configuración de timeouts y reintentos
+const MAX_ATTEMPTS = 60 // Aumentado para tool calls pesadas
+const WAIT_TIME = 2000 // 2 segundos entre intentos
+const THREAD_CACHE_TTL = 3600 // 1 hora
+
+export async function processWebChatMessage({
+  message,
+  sessionId,
+  config,
+  ip,
+}: ProcessWebChatMessageParams): Promise<string> {
+  console.log("[WEB-CHAT-FINAL] ========== PROCESANDO MENSAJE WEB ==========")
+  console.log("[WEB-CHAT-FINAL] Session ID:", sessionId)
+  console.log("[WEB-CHAT-FINAL] Cliente:", config.displayName)
+  console.log("[WEB-CHAT-FINAL] Cliente ID:", config.id)
+  console.log("[WEB-CHAT-FINAL] IP:", ip)
+  console.log("[WEB-CHAT-FINAL] Mensaje:", message)
+  console.log("[WEB-CHAT-FINAL] ================================================")
+
   try {
-    const { message, sessionId, config, ip } = params
-    console.log(`[WEB-CHAT-FINAL] ========== PROCESANDO MENSAJE WEB ==========`)
-    console.log(`[WEB-CHAT-FINAL] Session ID: ${sessionId}`)
-    console.log(`[WEB-CHAT-FINAL] Cliente: ${config.displayName}`)
-    console.log(`[WEB-CHAT-FINAL] Cliente ID: ${config.id}`)
-    console.log(`[WEB-CHAT-FINAL] IP: ${ip}`)
-    console.log(`[WEB-CHAT-FINAL] Mensaje: ${message}`)
-    console.log(`[WEB-CHAT-FINAL] ================================================`)
-
-    // Validar parámetros
-    if (!sessionId || !message || !config?.widgetAssistantId) {
-      throw new Error("Parámetros requeridos faltantes")
-    }
-
-    // Obtener cliente_id de la configuración - IMPORTANTE: Usar el cliente_id específico si existe
-    const clienteId = config.cliente_id || ""
-
-    if (!clienteId) {
-      console.error(`[WEB-CHAT-FINAL] ❌ Cliente ID faltante en configuración`)
-      throw new Error("Cliente ID no configurado")
-    }
-
-    // Limpiar sessionId - MEJORADO para mantener consistencia
-    let cleanSessionId = sessionId
-    while (cleanSessionId.startsWith("web_")) {
-      cleanSessionId = cleanSessionId.substring(4)
-    }
-
-    // CLAVE MEJORADA: Usar solo el sessionId limpio para mantener consistencia
+    // Generar clave de thread simplificada para mantener contexto
+    const cleanSessionId = sessionId.replace(/^web_/, "").split("_")[0]
     const threadKey = `web_${cleanSessionId}`
-    console.log(`[WEB-CHAT-FINAL] Thread key: ${threadKey}`)
 
-    // MEJORAR: Obtener o crear thread con mejor logging
-    let threadId = webThreadsCache.get(threadKey)
-    console.log(`[WEB-CHAT-FINAL] 🔍 Thread en cache: ${threadId ? threadId : "NO ENCONTRADO"}`)
+    console.log("[WEB-CHAT-FINAL] Thread key:", threadKey)
 
-    if (!threadId) {
-      console.log(`[WEB-CHAT-FINAL] 📝 Creando nuevo thread para: ${threadKey}`)
-      threadId = await createWebThread(threadKey)
-      webThreadsCache.set(threadKey, threadId)
-      console.log(`[WEB-CHAT-FINAL] ✅ Thread creado y guardado en cache: ${threadId}`)
-    } else {
-      console.log(`[WEB-CHAT-FINAL] ♻️ Reutilizando thread existente: ${threadId}`)
-    }
+    // Obtener o crear thread
+    const threadId = await getOrCreateThread(threadKey)
+    console.log("[WEB-CHAT-FINAL] 🌐 Usando thread:", threadId)
 
-    console.log(`[WEB-CHAT-FINAL] 🌐 Usando thread: ${threadId}`)
-    console.log(`[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
+    // Garantía: NO enviar a WhatsApp
+    console.log("[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp")
 
-    // Crear el mensaje con bloque [SISTEMA]
-    const systemBlock = createSystemBlock(config.displayName)
-    const fullMessage = `${systemBlock}\n\n${message}`
+    // Crear bloque de sistema con información del cliente
+    const now = new Date()
+    const fechaHora = now.toLocaleString("es-AR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZone: "America/Argentina/Buenos_Aires",
+    })
 
-    console.log(`[WEB-CHAT-FINAL] 📋 Bloque [SISTEMA] creado:`)
-    console.log(systemBlock)
+    const sistemaBlock = `[SISTEMA] Nombre: ${config.displayName} FechaHora: ${fechaHora} CelularPaciente: No disponible (consulta web) [/SISTEMA]`
 
-    // Procesar mensaje
-    const response = await processMessageWithOpenAI(threadId, fullMessage, config.widgetAssistantId, clienteId)
-    console.log(`[WEB-CHAT-FINAL] ✅ Respuesta: ${response.length} caracteres`)
+    console.log("[WEB-CHAT-FINAL] 📋 Bloque [SISTEMA] creado:")
+    console.log(sistemaBlock)
 
+    // Procesar con OpenAI
+    const response = await processWithOpenAI({
+      threadId,
+      message: `${sistemaBlock}\n\n${message}`,
+      assistantId: config.assistantId || process.env.OPENAI_ASSISTANT_ID!,
+      clienteId: config.clienteId,
+    })
+
+    console.log("[WEB-CHAT-FINAL] ✅ Respuesta:", response.length, "caracteres")
     return response
   } catch (error) {
-    console.error("[WEB-CHAT-FINAL] ❌ Error:", error)
-    return "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente."
+    console.error("[WEB-CHAT-FINAL] ❌ Error procesando mensaje:", error)
+    await logError("WEB_CHAT_ERROR", error instanceof Error ? error.message : "Error desconocido", {
+      sessionId,
+      clienteId: config.id,
+      message: message.substring(0, 100),
+    })
+
+    return "Disculpá, hubo un problema procesando tu mensaje. Por favor, intentá nuevamente."
   }
 }
 
-async function createWebThread(identifier: string): Promise<string> {
+async function getOrCreateThread(threadKey: string): Promise<string> {
+  const redis = getRedisClient()
+
   try {
-    console.log(`[WEB-CHAT-FINAL] 🔧 Creando thread para: ${identifier}`)
-
-    // Verificar si ya existe en cache antes de crear
-    const existingThread = webThreadsCache.get(identifier)
-    if (existingThread) {
-      console.log(`[WEB-CHAT-FINAL] ⚠️ Thread ya existe en cache: ${existingThread}`)
-      return existingThread
+    // Intentar obtener thread existente
+    if (redis) {
+      const cachedThreadId = await redis.get(`thread:${threadKey}`)
+      if (cachedThreadId) {
+        console.log("[WEB-CHAT-FINAL] 🔍 Thread en cache:", cachedThreadId)
+        console.log("[WEB-CHAT-FINAL] ♻️ Reutilizando thread existente:", cachedThreadId)
+        return cachedThreadId as string
+      }
     }
 
-    const response = await fetch("https://api.openai.com/v1/threads", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "assistants=v2",
-      },
-      body: JSON.stringify({
-        metadata: {
-          identifier,
-          type: "web",
-          created_at: new Date().toISOString(),
-        },
-      }),
-    })
+    console.log("[WEB-CHAT-FINAL] 🔍 Thread en cache: NO ENCONTRADO")
+    console.log("[WEB-CHAT-FINAL] 📝 Creando nuevo thread para:", threadKey)
 
-    if (!response.ok) {
-      throw new Error(`Error creating thread: ${response.status} ${response.statusText}`)
+    // Crear nuevo thread
+    console.log("[WEB-CHAT-FINAL] 🔧 Creando thread para:", threadKey)
+    const thread = await openai.beta.threads.create()
+    console.log("[WEB-CHAT-FINAL] ✅ Thread creado exitosamente:", thread.id)
+
+    // Guardar en caché
+    if (redis) {
+      await redis.setex(`thread:${threadKey}`, THREAD_CACHE_TTL, thread.id)
+      console.log("[WEB-CHAT-FINAL] 💾 Thread guardado en cache con key:", threadKey)
     }
 
-    const thread = await response.json()
-    console.log(`[WEB-CHAT-FINAL] ✅ Thread creado exitosamente: ${thread.id}`)
-
-    // Guardar inmediatamente en cache
-    webThreadsCache.set(identifier, thread.id)
-    console.log(`[WEB-CHAT-FINAL] 💾 Thread guardado en cache con key: ${identifier}`)
-
+    console.log("[WEB-CHAT-FINAL] ✅ Thread creado y guardado en cache:", thread.id)
     return thread.id
   } catch (error) {
-    console.error("[WEB-CHAT-FINAL] ❌ Error creando thread:", error)
+    console.error("[WEB-CHAT-FINAL] ❌ Error creando/obteniendo thread:", error)
     throw error
   }
 }
 
-async function processMessageWithOpenAI(
-  threadId: string,
-  message: string,
-  widgetAssistantId: string,
-  clienteId: string,
-): Promise<string> {
+async function processWithOpenAI({
+  threadId,
+  message,
+  assistantId,
+  clienteId,
+}: {
+  threadId: string
+  message: string
+  assistantId: string
+  clienteId: string
+}): Promise<string> {
+  console.log("[WEB-CHAT-FINAL] ========== PROCESANDO CON OPENAI ==========")
+  console.log("[WEB-CHAT-FINAL] Thread ID:", threadId)
+  console.log("[WEB-CHAT-FINAL] Assistant ID:", assistantId)
+  console.log("[WEB-CHAT-FINAL] Cliente ID:", clienteId)
+  console.log("[WEB-CHAT-FINAL] ================================================")
+
   try {
-    console.log(`[WEB-CHAT-FINAL] ========== PROCESANDO CON OPENAI ==========`)
-    console.log(`[WEB-CHAT-FINAL] Thread ID: ${threadId}`)
-    console.log(`[WEB-CHAT-FINAL] Assistant ID: ${widgetAssistantId}`)
-    console.log(`[WEB-CHAT-FINAL] Cliente ID: ${clienteId}`)
-    console.log(`[WEB-CHAT-FINAL] ================================================`)
-
-    // 1. Añadir mensaje al thread
-    console.log(`[WEB-CHAT-FINAL] Añadiendo mensaje al thread: ${threadId}`)
-    const messageResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "assistants=v2",
-      },
-      body: JSON.stringify({
-        role: "user",
-        content: message,
-      }),
+    // Añadir mensaje al thread
+    console.log("[WEB-CHAT-FINAL] Añadiendo mensaje al thread:", threadId)
+    const messageObj = await openai.beta.threads.messages.create(threadId, {
+      role: "user",
+      content: message,
     })
+    console.log("[WEB-CHAT-FINAL] Mensaje añadido:", messageObj.id)
 
-    if (!messageResponse.ok) {
-      throw new Error(`Error adding message: ${messageResponse.status}`)
-    }
-
-    const messageData = await messageResponse.json()
-    console.log(`[WEB-CHAT-FINAL] Mensaje añadido: ${messageData.id}`)
-
-    // 2. Crear run con timeout aumentado
-    console.log(`[WEB-CHAT-FINAL] Creando run con assistant: ${widgetAssistantId}`)
-    const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "assistants=v2",
-      },
-      body: JSON.stringify({
-        assistant_id: widgetAssistantId,
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "validate_dni",
-              description: "Valida un DNI y obtiene información del paciente",
-              parameters: {
-                type: "object",
-                properties: {
-                  dni: { type: "string", description: "DNI a validar" },
-                },
-                required: ["dni"],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "obtener_subespecialidades",
-              description: "Lista las subespecialidades disponibles",
-              parameters: {
-                type: "object",
-                properties: {},
-                required: [],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "buscar_profesionales",
-              description: "Busca profesionales por nombre o especialidad",
-              parameters: {
-                type: "object",
-                properties: {
-                  busqueda: {
-                    type: "string",
-                    description: "Texto para buscar profesionales por nombre o especialidad",
-                  },
-                },
-                required: ["busqueda"],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "validar_obra_social",
-              description: "Valida si la obra social ingresada por el paciente existe y permite turnos online",
-              parameters: {
-                type: "object",
-                properties: {
-                  busqueda: {
-                    type: "string",
-                    description: "Nombre de la obra social ingresado por el paciente (ej: 'osde')",
-                  },
-                },
-                required: ["busqueda"],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "search_turnos",
-              description:
-                "Busca turnos disponibles. Si no se especifica rangoFechas, usa fechas actuales automáticamente.",
-              parameters: {
-                type: "object",
-                properties: {
-                  rangoFechas: {
-                    type: "string",
-                    description:
-                      "Rango de fechas en formato YYYY-MM-DD a YYYY-MM-DD. Si no se especifica, usa fechas actuales.",
-                  },
-                  profesional: {
-                    type: "string",
-                    description: "Nombre del profesional (opcional)",
-                  },
-                  especialidad: {
-                    type: "string",
-                    description: "Nombre de la especialidad (opcional)",
-                  },
-                  profesionalId: {
-                    type: "string",
-                    description: "ID del profesional (opcional)",
-                  },
-                },
-                required: [],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "reserve_turno",
-              description:
-                "Reserva un turno específico para un paciente usando los datos recopilados durante la conversación",
-              parameters: {
-                type: "object",
-                properties: {
-                  dni: {
-                    type: "string",
-                    description: "DNI del paciente",
-                  },
-                  nombre: {
-                    type: "string",
-                    description: "Nombre del paciente recopilado durante la conversación",
-                  },
-                  apellido: {
-                    type: "string",
-                    description: "Apellido del paciente recopilado durante la conversación",
-                  },
-                  telefono: {
-                    type: "string",
-                    description: "Teléfono del paciente recopilado durante la conversación",
-                  },
-                  email: {
-                    type: "string",
-                    description: "Email del paciente recopilado durante la conversación",
-                  },
-                  fecha: {
-                    type: "string",
-                    description: "Fecha del turno en formato YYYY-MM-DD",
-                  },
-                  hora: {
-                    type: "string",
-                    description: "Hora del turno en formato HH:MM",
-                  },
-                  profesional: {
-                    type: "string",
-                    description: "Nombre del profesional",
-                  },
-                  agendaId: {
-                    type: "string",
-                    description: "ID del turno/agenda a reservar",
-                  },
-                },
-                required: [
-                  "dni",
-                  "nombre",
-                  "apellido",
-                  "telefono",
-                  "email",
-                  "fecha",
-                  "hora",
-                  "profesional",
-                  "agendaId",
-                ],
-              },
-            },
-          },
-        ],
-      }),
+    // Crear run
+    console.log("[WEB-CHAT-FINAL] Creando run con assistant:", assistantId)
+    const run = await openai.beta.threads.runs.create(threadId, {
+      assistant_id: assistantId,
     })
+    console.log("[WEB-CHAT-FINAL] Run creado:", run.id)
 
-    if (!runResponse.ok) {
-      throw new Error(`Error creating run: ${runResponse.status}`)
-    }
+    // Esperar completación
+    const finalResponse = await waitForCompletion(run.id, threadId, clienteId)
+    console.log("[WEB-CHAT-FINAL] ✅ Respuesta final:", finalResponse.length, "caracteres")
 
-    const runData = await runResponse.json()
-    console.log(`[WEB-CHAT-FINAL] Run creado: ${runData.id}`)
-
-    // 3. Esperar completación con timeout aumentado
-    const finalResponse = await waitForRunCompletion(threadId, runData.id, clienteId)
     return finalResponse
   } catch (error) {
-    console.error("[WEB-CHAT-FINAL] Error procesando mensaje:", error)
+    console.error("[WEB-CHAT-FINAL] ❌ Error en processWithOpenAI:", error)
     throw error
   }
 }
 
-async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
-  let attempts = 0
-  const maxAttempts = 60 // AUMENTADO de 30 a 60 para evitar timeouts
+async function waitForCompletion(runId: string, threadId: string, clienteId: string): Promise<string> {
+  console.log("[WEB-CHAT-FINAL] ========== ESPERANDO COMPLETACIÓN ==========")
+  console.log("[WEB-CHAT-FINAL] Run ID:", runId)
+  console.log("[WEB-CHAT-FINAL] Cliente ID:", clienteId)
+  console.log("[WEB-CHAT-FINAL] ================================================")
 
-  console.log(`[WEB-CHAT-FINAL] ========== ESPERANDO COMPLETACIÓN ==========`)
-  console.log(`[WEB-CHAT-FINAL] Run ID: ${runId}`)
-  console.log(`[WEB-CHAT-FINAL] Cliente ID: ${clienteId}`)
-  console.log(`[WEB-CHAT-FINAL] ================================================`)
-
-  while (attempts < maxAttempts) {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      console.log(`[WEB-CHAT-FINAL] Verificando run ${runId} (intento ${attempts + 1}/${maxAttempts})`)
+      console.log(`[WEB-CHAT-FINAL] Verificando run ${runId} (intento ${attempt}/${MAX_ATTEMPTS})`)
 
-      const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "assistants=v2",
-        },
-      })
+      const run = await openai.beta.threads.runs.retrieve(threadId, runId)
+      console.log("[WEB-CHAT-FINAL] Estado del run:", run.status)
 
-      if (!runResponse.ok) {
-        throw new Error(`Error checking run: ${runResponse.status}`)
-      }
+      switch (run.status) {
+        case "completed":
+          // Obtener mensajes del thread
+          const messages = await openai.beta.threads.messages.list(threadId, {
+            order: "desc",
+            limit: 1,
+          })
 
-      const run = await runResponse.json()
-      console.log(`[WEB-CHAT-FINAL] Estado del run: ${run.status}`)
-
-      if (run.status === "completed") {
-        // Obtener mensajes
-        const messagesResponse = await fetch(
-          `https://api.openai.com/v1/threads/${threadId}/messages?limit=1&order=desc`,
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-              "Content-Type": "application/json",
-              "OpenAI-Beta": "assistants=v2",
-            },
-          },
-        )
-
-        if (!messagesResponse.ok) {
-          throw new Error(`Error getting messages: ${messagesResponse.status}`)
-        }
-
-        const messages = await messagesResponse.json()
-        if (messages.data.length > 0) {
-          const lastMessage = messages.data[0]
-          if (lastMessage.content[0]?.type === "text") {
-            const response = lastMessage.content[0].text.value
-
-            console.log(`[WEB-CHAT-FINAL] ✅ Respuesta final: ${response.length} caracteres`)
-            return response
+          if (messages.data.length > 0) {
+            const lastMessage = messages.data[0]
+            if (lastMessage.content[0]?.type === "text") {
+              return lastMessage.content[0].text.value
+            }
           }
-        }
+          throw new Error("No se pudo obtener la respuesta del asistente")
 
-        return "Respuesta procesada correctamente."
-      } else if (run.status === "requires_action") {
-        console.log(`[WEB-CHAT-FINAL] Run requiere acción - procesando tool calls`)
-        await handleToolCalls(threadId, runId, run, clienteId)
-      } else if (run.status === "failed" || run.status === "cancelled" || run.status === "expired") {
-        console.error(`[WEB-CHAT-FINAL] Run falló con estado: ${run.status}`)
-        return "Lo siento, ha ocurrido un error procesando tu solicitud."
+        case "requires_action":
+          console.log("[WEB-CHAT-FINAL] Run requiere acción - procesando tool calls")
+          await handleToolCalls(run, threadId, runId, clienteId)
+          break
+
+        case "failed":
+        case "cancelled":
+        case "expired":
+          throw new Error(`Run falló con estado: ${run.status}`)
+
+        case "queued":
+        case "in_progress":
+          // Continuar esperando
+          break
+
+        default:
+          console.log("[WEB-CHAT-FINAL] Estado desconocido:", run.status)
       }
 
-      attempts++
-      // AUMENTAR tiempo de espera entre intentos para tool calls pesadas
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      // Esperar antes del siguiente intento
+      await new Promise((resolve) => setTimeout(resolve, WAIT_TIME))
     } catch (error) {
-      console.error(`[WEB-CHAT-FINAL] Error en intento ${attempts + 1}:`, error)
-      attempts++
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-    }
-  }
-
-  return "La solicitud está tomando más tiempo del esperado. Por favor, intenta nuevamente."
-}
-
-async function handleToolCalls(threadId: string, runId: string, run: any, clienteId: string): Promise<void> {
-  try {
-    console.log(`[WEB-CHAT-FINAL] ========== PROCESANDO TOOL CALLS ==========`)
-    console.log(`[WEB-CHAT-FINAL] Cantidad: ${run.required_action.submit_tool_outputs.tool_calls.length}`)
-    console.log(`[WEB-CHAT-FINAL] Cliente ID: ${clienteId}`)
-    console.log(`[WEB-CHAT-FINAL] ================================================`)
-
-    const toolOutputs = []
-
-    for (const toolCall of run.required_action.submit_tool_outputs.tool_calls) {
-      console.log(`[WEB-CHAT-FINAL] ========== TOOL CALL ==========`)
-      console.log(`[WEB-CHAT-FINAL] Función: ${toolCall.function.name}`)
-      console.log(`[WEB-CHAT-FINAL] Argumentos: ${toolCall.function.arguments}`)
-      console.log(`[WEB-CHAT-FINAL] ================================`)
-
-      try {
-        let output = ""
-        const args = JSON.parse(toolCall.function.arguments)
-
-        switch (toolCall.function.name) {
-          case "validate_dni":
-            console.log(`[WEB-CHAT-FINAL] 🔍 Validando DNI: ${args.dni} con cliente: ${clienteId}`)
-
-            // Verificar si la API externa está disponible
-            try {
-              const dniResult = await validateDNI(args.dni, clienteId)
-              console.log(`[WEB-CHAT-FINAL] 📋 Resultado DNI:`, dniResult)
-              output = JSON.stringify(dniResult)
-            } catch (error) {
-              console.error(`[WEB-CHAT-FINAL] ❌ Error validando DNI:`, error)
-              // Respuesta de fallback cuando la API externa no está disponible
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para gestionar tu turno.",
-                fallback: true,
-              })
-            }
-            break
-
-          case "obtener_subespecialidades":
-            console.log(`[WEB-CHAT-FINAL] 📋 Obteniendo subespecialidades con cliente: ${clienteId}`)
-
-            try {
-              // Importar la función desde api-tools
-              const { obtenerSubespecialidades } = await import("@/lib/api-tools/api-functions")
-              const subespecialidadesResult = await obtenerSubespecialidades(clienteId)
-              console.log(`[WEB-CHAT-FINAL] 📋 Resultado subespecialidades:`, subespecialidadesResult)
-              output = JSON.stringify(subespecialidadesResult)
-            } catch (error) {
-              console.error(`[WEB-CHAT-FINAL] ❌ Error obteniendo subespecialidades:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar especialidades.",
-                fallback: true,
-              })
-            }
-            break
-
-          case "buscar_profesionales":
-            console.log(`[WEB-CHAT-FINAL] 👨‍⚕️ Buscando profesionales con cliente: ${clienteId}`)
-            console.log(`[WEB-CHAT-FINAL] 📋 Búsqueda: ${args.busqueda}`)
-
-            try {
-              // Importar la función desde api-tools
-              const { buscarProfesionales } = await import("@/lib/api-tools/api-functions")
-              const profesionalesResult = await buscarProfesionales(clienteId, args.busqueda || "")
-              console.log(`[WEB-CHAT-FINAL] 📋 Resultado profesionales:`, profesionalesResult)
-              output = JSON.stringify(profesionalesResult)
-            } catch (error) {
-              console.error(`[WEB-CHAT-FINAL] ❌ Error buscando profesionales:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar profesionales.",
-                fallback: true,
-              })
-            }
-            break
-
-          case "validar_obra_social":
-            console.log(`[WEB-CHAT-FINAL] 🏥 Validando obra social con cliente: ${clienteId}`)
-            console.log(`[WEB-CHAT-FINAL] 📋 Búsqueda: ${args.busqueda}`)
-
-            try {
-              // Importar la función desde api-tools
-              const { validarObraSocial } = await import("@/lib/api-tools/api-functions")
-              const obraSocialResult = await validarObraSocial(clienteId, args.busqueda || "")
-              console.log(`[WEB-CHAT-FINAL] 📋 Resultado obra social:`, obraSocialResult)
-              output = JSON.stringify(obraSocialResult)
-            } catch (error) {
-              console.error(`[WEB-CHAT-FINAL] ❌ Error validando obra social:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar obras sociales.",
-                fallback: true,
-              })
-            }
-            break
-
-          case "search_turnos":
-            console.log(`[WEB-CHAT-FINAL] 📅 Buscando turnos con cliente: ${clienteId}`)
-            console.log(`[WEB-CHAT-FINAL] 📋 Parámetros:`, args)
-
-            try {
-              // Si no hay rangoFechas o es una fecha del pasado, usar fechas dinámicas
-              let rangoFechas = args.rangoFechas
-              if (!rangoFechas || rangoFechas.includes("2024-01-08") || rangoFechas === "hoy a hoy") {
-                rangoFechas = getDefaultDateRange()
-                console.log(`[WEB-CHAT-FINAL] 📅 Usando fechas dinámicas: ${rangoFechas}`)
-              }
-
-              const turnosResult = await searchTurnos(
-                {
-                  rangoFechas: rangoFechas,
-                  profesional: args.profesional,
-                  especialidad: args.especialidad,
-                  profesionalId: args.profesionalId,
-                },
-                clienteId,
-              )
-              console.log(`[WEB-CHAT-FINAL] 📋 Resultado turnos:`, turnosResult)
-              output = JSON.stringify(turnosResult)
-            } catch (error) {
-              console.error(`[WEB-CHAT-FINAL] ❌ Error buscando turnos:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar turnos disponibles.",
-                fallback: true,
-              })
-            }
-            break
-
-          case "reserve_turno":
-            console.log(`[WEB-CHAT-FINAL] 🎯 Reservando turno con cliente: ${clienteId}`)
-            console.log(`[WEB-CHAT-FINAL] 📋 Datos de reserva:`, args)
-
-            try {
-              const reserveResult = await reserveTurno(
-                {
-                  agendaId: args.agendaId,
-                  dni: args.dni,
-                  nombre: args.nombre,
-                  apellido: args.apellido,
-                  telefono: args.telefono,
-                  email: args.email,
-                  fecha: args.fecha,
-                  hora: args.hora,
-                  profesional: args.profesional,
-                },
-                clienteId,
-              )
-              console.log(`[WEB-CHAT-FINAL] 📋 Resultado reserva:`, reserveResult)
-              output = JSON.stringify(reserveResult)
-            } catch (error) {
-              console.error(`[WEB-CHAT-FINAL] ❌ Error reservando turno:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para reservar tu turno.",
-                fallback: true,
-              })
-            }
-            break
-
-          default:
-            console.log(`[WEB-CHAT-FINAL] ❌ Tool call no reconocido: ${toolCall.function.name}`)
-            output = JSON.stringify({ error: "Función no disponible" })
-        }
-
-        toolOutputs.push({
-          tool_call_id: toolCall.id,
-          output: output,
-        })
-
-        console.log(`[WEB-CHAT-FINAL] ✅ Tool call procesado: ${toolCall.function.name}`)
-      } catch (error) {
-        console.error(`[WEB-CHAT-FINAL] ❌ Error en tool call ${toolCall.function.name}:`, error)
-        toolOutputs.push({
-          tool_call_id: toolCall.id,
-          output: JSON.stringify({
-            error: "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica.",
-            fallback: true,
-          }),
-        })
+      console.error(`[WEB-CHAT-FINAL] ❌ Error en intento ${attempt}:`, error)
+      if (attempt === MAX_ATTEMPTS) {
+        throw error
       }
+      await new Promise((resolve) => setTimeout(resolve, WAIT_TIME))
     }
-
-    // Enviar tool outputs
-    console.log(`[WEB-CHAT-FINAL] ========== ENVIANDO TOOL OUTPUTS ==========`)
-    console.log(`[WEB-CHAT-FINAL] Cantidad: ${toolOutputs.length}`)
-
-    const submitResponse = await fetch(
-      `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "assistants=v2",
-        },
-        body: JSON.stringify({
-          tool_outputs: toolOutputs,
-        }),
-      },
-    )
-
-    if (!submitResponse.ok) {
-      const errorText = await submitResponse.text()
-      console.error(`[WEB-CHAT-FINAL] ❌ Error submitting tool outputs: ${submitResponse.status} ${errorText}`)
-      throw new Error(`Error submitting tool outputs: ${submitResponse.status}`)
-    }
-
-    console.log(`[WEB-CHAT-FINAL] ✅ Tool outputs enviados correctamente`)
-    console.log(`[WEB-CHAT-FINAL] ================================================`)
-  } catch (error) {
-    console.error("[WEB-CHAT-FINAL] ❌ Error en handleToolCalls:", error)
-    throw error
   }
+
+  throw new Error("Timeout esperando completación del run")
 }
 
-export { processWebMessage as processWebChatMessage }
+async function handleToolCalls(run: any, threadId: string, runId: string, clienteId: string): Promise<void> {
+  console.log("[WEB-CHAT-FINAL] ========== PROCESANDO TOOL CALLS ==========")
+  console.log("[WEB-CHAT-FINAL] Cantidad:", run.required_action?.submit_tool_outputs?.tool_calls?.length || 0)
+  console.log("[WEB-CHAT-FINAL] Cliente ID:", clienteId)
+  console.log("[WEB-CHAT-FINAL] ================================================")
+
+  const toolCalls = run.required_action?.submit_tool_outputs?.tool_calls || []
+  const toolOutputs = []
+
+  for (const toolCall of toolCalls) {
+    console.log("[WEB-CHAT-FINAL] ========== TOOL CALL ==========")
+    console.log("[WEB-CHAT-FINAL] Función:", toolCall.function.name)
+    console.log("[WEB-CHAT-FINAL] Argumentos:", toolCall.function.arguments)
+    console.log("[WEB-CHAT-FINAL] ================================")
+
+    try {
+      const result = await executeToolCall(toolCall, clienteId)
+      toolOutputs.push({
+        tool_call_id: toolCall.id,
+        output: JSON.stringify(result),
+      })
+      console.log("[WEB-CHAT-FINAL] ✅ Tool call procesado:", toolCall.function.name)
+    } catch (error) {
+      console.error("[WEB-CHAT-FINAL] ❌ Error en tool call:", error)
+      toolOutputs.push({
+        tool_call_id: toolCall.id,
+        output: JSON.stringify({
+          exito: false,
+          error: {
+            codigo: "TOOL_CALL_ERROR",
+            mensaje: error instanceof Error ? error.message : "Error desconocido",
+          },
+        }),
+      })
+    }
+  }
+
+  // Enviar tool outputs
+  console.log("[WEB-CHAT-FINAL] ========== ENVIANDO TOOL OUTPUTS ==========")
+  console.log("[WEB-CHAT-FINAL] Cantidad:", toolOutputs.length)
+
+  await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
+    tool_outputs: toolOutputs,
+  })
+
+  console.log("[WEB-CHAT-FINAL] ✅ Tool outputs enviados correctamente")
+  console.log("[WEB-CHAT-FINAL] ================================================")
+}
+
+async function executeToolCall(toolCall: any, clienteId: string): Promise<any> {
+  const functionName = toolCall.function.name
+  const args = JSON.parse(toolCall.function.arguments)
+
+  switch (functionName) {
+    case "buscar_paciente":
+      console.log("[WEB-CHAT-FINAL] 🔍 Buscando paciente con cliente:", clienteId)
+      console.log("[WEB-CHAT-FINAL] 📋 DNI:", args.dni)
+      const pacienteResult = await buscarPaciente(clienteId, { dni: args.dni })
+      console.log("[WEB-CHAT-FINAL] 📋 Resultado paciente:", pacienteResult.exito ? "Encontrado" : "No encontrado")
+      return pacienteResult
+
+    case "validar_obra_social":
+      console.log("[WEB-CHAT-FINAL] 🏥 Validando obra social con cliente:", clienteId)
+      console.log("[WEB-CHAT-FINAL] 📋 Búsqueda:", args.busqueda)
+      const obraSocialResult = await validarObraSocial(clienteId, args.busqueda)
+      console.log("[WEB-CHAT-FINAL] 📋 Resultado obra social:", obraSocialResult)
+      return obraSocialResult
+
+    case "obtener_especialidades":
+      console.log("[WEB-CHAT-FINAL] 🏥 Obteniendo especialidades con cliente:", clienteId)
+      const especialidadesResult = await obtenerSubespecialidades(clienteId)
+      console.log("[WEB-CHAT-FINAL] 📋 Resultado especialidades:", especialidadesResult.exito ? "Obtenidas" : "Error")
+      return especialidadesResult
+
+    case "buscar_profesionales":
+      console.log("[WEB-CHAT-FINAL] 👨‍⚕️ Buscando profesionales con cliente:", clienteId)
+      console.log("[WEB-CHAT-FINAL] 📋 Búsqueda:", args.busqueda)
+      const profesionalesResult = await buscarProfesionales(clienteId, args.busqueda)
+      console.log("[WEB-CHAT-FINAL] 📋 Resultado profesionales:", profesionalesResult.exito ? "Encontrados" : "Error")
+      return profesionalesResult
+
+    case "obtener_turnos":
+      console.log("[WEB-CHAT-FINAL] 📅 Obteniendo turnos con cliente:", clienteId)
+      console.log("[WEB-CHAT-FINAL] 📋 Parámetros:", args)
+      const turnosResult = await obtenerTurnos(
+        clienteId,
+        args.fechaDesde,
+        args.fechaHasta,
+        args.profesionalId,
+        args.pacienteDni,
+      )
+      console.log("[WEB-CHAT-FINAL] 📋 Resultado turnos:", turnosResult.exito ? "Obtenidos" : "Error")
+      return turnosResult
+
+    case "reservar_turno":
+      console.log("[WEB-CHAT-FINAL] 📝 Reservando turno con cliente:", clienteId)
+      console.log("[WEB-CHAT-FINAL] 📋 Parámetros:", args)
+      const reservaResult = await reservarTurno(clienteId, args.agendaId, args.pacienteData)
+      console.log("[WEB-CHAT-FINAL] 📋 Resultado reserva:", reservaResult.exito ? "Reservado" : "Error")
+      return reservaResult
+
+    default:
+      console.log("[WEB-CHAT-FINAL] ❌ Función desconocida:", functionName)
+      throw new Error(`Función desconocida: ${functionName}`)
+  }
+}
