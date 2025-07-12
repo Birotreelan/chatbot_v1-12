@@ -1,5 +1,6 @@
 import { validateDNI, searchTurnos, reserveTurno } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
+import { Redis } from "@upstash/redis"
 
 interface WebChatConfig {
   id: string
@@ -17,8 +18,42 @@ interface ProcessWebMessageParams {
   ip: string
 }
 
-// Cache simple para threads web - MEJORADO
-const webThreadsCache = new Map<string, string>()
+// Función para obtener el cliente de Redis
+function getRedisClient() {
+  try {
+    return Redis.fromEnv()
+  } catch (error) {
+    console.warn("[WEB-CHAT-FINAL] ⚠️ Redis no disponible:", error)
+    return null
+  }
+}
+
+// Funciones para manejar el cache de threads web
+async function getThreadFromCache(threadKey: string): Promise<string | null> {
+  const redis = getRedisClient()
+  if (redis) {
+    try {
+      const threadId = await redis.get(`web_thread:${threadKey}`)
+      return threadId as string | null
+    } catch (error) {
+      console.error("[WEB-CHAT-FINAL] Error obteniendo thread de Redis:", error)
+      return null
+    }
+  }
+  return null
+}
+
+async function setThreadInCache(threadKey: string, threadId: string): Promise<void> {
+  const redis = getRedisClient()
+  if (redis) {
+    try {
+      // Guardar con TTL de 24 horas
+      await redis.setex(`web_thread:${threadKey}`, 86400, threadId)
+    } catch (error) {
+      console.error("[WEB-CHAT-FINAL] Error guardando thread en Redis:", error)
+    }
+  }
+}
 
 // Función helper para obtener fechas dinámicas
 function getDefaultDateRange(): string {
@@ -78,13 +113,13 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] Thread key: ${threadKey}`)
 
     // MEJORAR: Obtener o crear thread con mejor logging
-    let threadId = webThreadsCache.get(threadKey)
+    let threadId = await getThreadFromCache(threadKey)
     console.log(`[WEB-CHAT-FINAL] 🔍 Thread en cache: ${threadId ? threadId : "NO ENCONTRADO"}`)
 
     if (!threadId) {
       console.log(`[WEB-CHAT-FINAL] 📝 Creando nuevo thread para: ${threadKey}`)
       threadId = await createWebThread(threadKey)
-      webThreadsCache.set(threadKey, threadId)
+      await setThreadInCache(threadKey, threadId)
       console.log(`[WEB-CHAT-FINAL] ✅ Thread creado y guardado en cache: ${threadId}`)
     } else {
       console.log(`[WEB-CHAT-FINAL] ♻️ Reutilizando thread existente: ${threadId}`)
@@ -115,19 +150,13 @@ async function createWebThread(identifier: string): Promise<string> {
   try {
     console.log(`[WEB-CHAT-FINAL] 🔧 Creando thread para: ${identifier}`)
 
-    // Verificar si ya existe en cache antes de crear
-    const existingThread = webThreadsCache.get(identifier)
-    if (existingThread) {
-      console.log(`[WEB-CHAT-FINAL] ⚠️ Thread ya existe en cache: ${existingThread}`)
-      return existingThread
-    }
-
     const response = await fetch("https://api.openai.com/v1/threads", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
         "OpenAI-Beta": "assistants=v2",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         metadata: {
@@ -144,10 +173,6 @@ async function createWebThread(identifier: string): Promise<string> {
 
     const thread = await response.json()
     console.log(`[WEB-CHAT-FINAL] ✅ Thread creado exitosamente: ${thread.id}`)
-
-    // Guardar inmediatamente en cache
-    webThreadsCache.set(identifier, thread.id)
-    console.log(`[WEB-CHAT-FINAL] 💾 Thread guardado en cache con key: ${identifier}`)
 
     return thread.id
   } catch (error) {
