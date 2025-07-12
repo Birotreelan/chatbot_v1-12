@@ -17,7 +17,7 @@ interface ProcessWebMessageParams {
   ip: string
 }
 
-// Cache simple para threads web - MEJORADO con persistencia
+// Cache simple para threads web - MEJORADO
 const webThreadsCache = new Map<string, string>()
 
 // Función helper para obtener fechas dinámicas
@@ -68,14 +68,13 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
       throw new Error("Cliente ID no configurado")
     }
 
-    // Limpiar sessionId - MEJORADO para mantener consistencia
+    // Limpiar sessionId
     let cleanSessionId = sessionId
     while (cleanSessionId.startsWith("web_")) {
       cleanSessionId = cleanSessionId.substring(4)
     }
 
-    // CLAVE MEJORADA: Usar solo el sessionId limpio para mantener consistencia
-    const threadKey = `web_${cleanSessionId}`
+    const threadKey = `${cleanSessionId}_${config.id}`
     console.log(`[WEB-CHAT-FINAL] Thread key: ${threadKey}`)
 
     // MEJORAR: Obtener o crear thread con mejor logging
@@ -101,7 +100,7 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] 📋 Bloque [SISTEMA] creado:`)
     console.log(systemBlock)
 
-    // Procesar mensaje - ARREGLAR: Pasar el clienteId correcto
+    // Procesar mensaje
     const response = await processMessageWithOpenAI(threadId, fullMessage, config.widgetAssistantId, clienteId)
     console.log(`[WEB-CHAT-FINAL] ✅ Respuesta: ${response.length} caracteres`)
 
@@ -170,16 +169,6 @@ async function processMessageWithOpenAI(
     console.log(`[WEB-CHAT-FINAL] Cliente ID: ${clienteId}`)
     console.log(`[WEB-CHAT-FINAL] ================================================`)
 
-    // VALIDAR que threadId no sea undefined
-    if (!threadId || threadId === "undefined") {
-      throw new Error(`Thread ID inválido: ${threadId}`)
-    }
-
-    // VALIDAR que clienteId no sea undefined
-    if (!clienteId || clienteId === "undefined") {
-      throw new Error(`Cliente ID inválido: ${clienteId}`)
-    }
-
     // 1. Añadir mensaje al thread
     console.log(`[WEB-CHAT-FINAL] Añadiendo mensaje al thread: ${threadId}`)
     const messageResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
@@ -202,7 +191,7 @@ async function processMessageWithOpenAI(
     const messageData = await messageResponse.json()
     console.log(`[WEB-CHAT-FINAL] Mensaje añadido: ${messageData.id}`)
 
-    // 2. Crear run con timeout aumentado
+    // 2. Crear run
     console.log(`[WEB-CHAT-FINAL] Creando run con assistant: ${widgetAssistantId}`)
     const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
       method: "POST",
@@ -213,18 +202,170 @@ async function processMessageWithOpenAI(
       },
       body: JSON.stringify({
         assistant_id: widgetAssistantId,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "validate_dni",
+              description: "Valida un DNI y obtiene información del paciente",
+              parameters: {
+                type: "object",
+                properties: {
+                  dni: { type: "string", description: "DNI a validar" },
+                },
+                required: ["dni"],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "obtener_subespecialidades",
+              description: "Lista las subespecialidades disponibles",
+              parameters: {
+                type: "object",
+                properties: {},
+                required: [],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "buscar_profesionales",
+              description: "Busca profesionales por nombre o especialidad",
+              parameters: {
+                type: "object",
+                properties: {
+                  busqueda: {
+                    type: "string",
+                    description: "Texto para buscar profesionales por nombre o especialidad",
+                  },
+                },
+                required: ["busqueda"],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "validar_obra_social",
+              description: "Valida si la obra social ingresada por el paciente existe y permite turnos online",
+              parameters: {
+                type: "object",
+                properties: {
+                  busqueda: {
+                    type: "string",
+                    description: "Nombre de la obra social ingresado por el paciente (ej: 'osde')",
+                  },
+                },
+                required: ["busqueda"],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "search_turnos",
+              description:
+                "Busca turnos disponibles. Si no se especifica rangoFechas, usa fechas actuales automáticamente.",
+              parameters: {
+                type: "object",
+                properties: {
+                  rangoFechas: {
+                    type: "string",
+                    description:
+                      "Rango de fechas en formato YYYY-MM-DD a YYYY-MM-DD. Si no se especifica, usa fechas actuales.",
+                  },
+                  profesional: {
+                    type: "string",
+                    description: "Nombre del profesional (opcional)",
+                  },
+                  especialidad: {
+                    type: "string",
+                    description: "Nombre de la especialidad (opcional)",
+                  },
+                  profesionalId: {
+                    type: "string",
+                    description: "ID del profesional (opcional)",
+                  },
+                },
+                required: [],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "reserve_turno",
+              description:
+                "Reserva un turno específico para un paciente usando los datos recopilados durante la conversación",
+              parameters: {
+                type: "object",
+                properties: {
+                  dni: {
+                    type: "string",
+                    description: "DNI del paciente",
+                  },
+                  nombre: {
+                    type: "string",
+                    description: "Nombre del paciente recopilado durante la conversación",
+                  },
+                  apellido: {
+                    type: "string",
+                    description: "Apellido del paciente recopilado durante la conversación",
+                  },
+                  telefono: {
+                    type: "string",
+                    description: "Teléfono del paciente recopilado durante la conversación",
+                  },
+                  email: {
+                    type: "string",
+                    description: "Email del paciente recopilado durante la conversación",
+                  },
+                  fecha: {
+                    type: "string",
+                    description: "Fecha del turno en formato YYYY-MM-DD",
+                  },
+                  hora: {
+                    type: "string",
+                    description: "Hora del turno en formato HH:MM",
+                  },
+                  profesional: {
+                    type: "string",
+                    description: "Nombre del profesional",
+                  },
+                  agendaId: {
+                    type: "string",
+                    description: "ID del turno/agenda a reservar",
+                  },
+                },
+                required: [
+                  "dni",
+                  "nombre",
+                  "apellido",
+                  "telefono",
+                  "email",
+                  "fecha",
+                  "hora",
+                  "profesional",
+                  "agendaId",
+                ],
+              },
+            },
+          },
+        ],
       }),
     })
 
     if (!runResponse.ok) {
-      const errorText = await runResponse.text()
-      throw new Error(`Error creating run: ${runResponse.status} - ${errorText}`)
+      throw new Error(`Error creating run: ${runResponse.status}`)
     }
 
     const runData = await runResponse.json()
     console.log(`[WEB-CHAT-FINAL] Run creado: ${runData.id}`)
 
-    // 3. Esperar completación con timeout aumentado
+    // 3. Esperar completación
     const finalResponse = await waitForRunCompletion(threadId, runData.id, clienteId)
     return finalResponse
   } catch (error) {
@@ -235,17 +376,12 @@ async function processMessageWithOpenAI(
 
 async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
   let attempts = 0
-  const maxAttempts = 60 // AUMENTADO de 30 a 60 para evitar timeouts
+  const maxAttempts = 30
 
   console.log(`[WEB-CHAT-FINAL] ========== ESPERANDO COMPLETACIÓN ==========`)
   console.log(`[WEB-CHAT-FINAL] Run ID: ${runId}`)
   console.log(`[WEB-CHAT-FINAL] Cliente ID: ${clienteId}`)
   console.log(`[WEB-CHAT-FINAL] ================================================`)
-
-  // VALIDAR parámetros antes del loop
-  if (!threadId || threadId === "undefined") {
-    throw new Error(`Thread ID inválido en waitForRunCompletion: ${threadId}`)
-  }
 
   while (attempts < maxAttempts) {
     try {
@@ -304,12 +440,11 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
       }
 
       attempts++
-      // AUMENTAR tiempo de espera entre intentos para tool calls pesadas
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      await new Promise((resolve) => setTimeout(resolve, 1000))
     } catch (error) {
       console.error(`[WEB-CHAT-FINAL] Error en intento ${attempts + 1}:`, error)
       attempts++
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      await new Promise((resolve) => setTimeout(resolve, 1000))
     }
   }
 

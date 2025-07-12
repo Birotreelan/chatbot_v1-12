@@ -21,11 +21,12 @@ export async function enqueueUserMessage(
     config: any
   },
 ) {
-  console.log(`[QUEUE] 📋 Encolando: ${userPhoneNumber}`)
+  console.log(`[USER-QUEUE] Encolando mensaje para usuario ${userPhoneNumber}`)
 
   const redisClient = getRedisClient()
   if (!redisClient) {
-    console.warn(`[QUEUE] ⚠️ Sin Redis, procesando directo`)
+    console.warn("[USER-QUEUE] Redis no disponible, procesando directamente")
+    // Si Redis no está disponible, procesar directamente
     await processIndividualMessage(
       messageData.userMessage,
       messageData.phoneNumberId,
@@ -37,24 +38,34 @@ export async function enqueueUserMessage(
   }
 
   try {
+    // Crear el objeto del mensaje con timestamp
     const queuedMessage: QueuedMessage = {
       userMessage: messageData.userMessage,
       messageType: messageData.messageType || "text",
       phoneNumberId: messageData.phoneNumberId,
+      // Serializar el objeto config para evitar problemas con objetos circulares
       config: JSON.parse(JSON.stringify(messageData.config)),
       timestamp: Date.now(),
     }
 
+    // Serializar correctamente el mensaje antes de guardarlo
     const serializedMessage = JSON.stringify(queuedMessage)
-    const queueKey = `user_queue:${userPhoneNumber}`
+    console.log(`[USER-QUEUE] Mensaje serializado: ${serializedMessage.substring(0, 100)}...`)
 
+    // Añadir el mensaje a la cola del usuario
+    const queueKey = `user_queue:${userPhoneNumber}`
     await redisClient.lpush(queueKey, serializedMessage)
+
+    // Establecer TTL para la cola (24 horas)
     await redisClient.expire(queueKey, 24 * 60 * 60)
 
-    console.log(`[QUEUE] ✅ Encolado: ${userPhoneNumber}`)
+    console.log(`[USER-QUEUE] Mensaje añadido a la cola de ${userPhoneNumber}`)
+
+    // Procesar la cola si no se está procesando ya
     await processUserQueue(userPhoneNumber)
   } catch (error) {
-    console.error(`[QUEUE] ❌ Error encolar:`, error)
+    console.error(`[USER-QUEUE] Error al encolar mensaje para ${userPhoneNumber}:`, error)
+    // Fallback: procesar directamente si hay error con Redis
     await processIndividualMessage(
       messageData.userMessage,
       messageData.phoneNumberId,
@@ -66,44 +77,55 @@ export async function enqueueUserMessage(
 }
 
 async function processUserQueue(userPhoneNumber: string) {
+  // Verificar si ya se está procesando este usuario
   if (processingUsers.has(userPhoneNumber)) {
-    console.log(`[QUEUE] ⏳ Ya procesando: ${userPhoneNumber}`)
+    console.log(`[USER-QUEUE] Usuario ${userPhoneNumber} ya está siendo procesado`)
     return
   }
 
   const redisClient = getRedisClient()
   if (!redisClient) {
-    console.warn(`[QUEUE] ⚠️ Sin Redis para procesar`)
+    console.warn("[USER-QUEUE] Redis no disponible para procesar cola")
     return
   }
 
+  // Marcar usuario como en procesamiento
   processingUsers.add(userPhoneNumber)
 
   try {
-    console.log(`[QUEUE] 🔄 Procesando cola: ${userPhoneNumber}`)
+    console.log(`[USER-QUEUE] Iniciando procesamiento de cola para ${userPhoneNumber}`)
+
     const queueKey = `user_queue:${userPhoneNumber}`
 
     while (true) {
+      // Obtener el siguiente mensaje de la cola
       const rawMessage = await redisClient.rpop(queueKey)
 
       if (!rawMessage) {
-        console.log(`[QUEUE] ✅ Cola vacía: ${userPhoneNumber}`)
+        // No hay más mensajes en la cola
+        console.log(`[USER-QUEUE] Cola vacía para usuario ${userPhoneNumber}`)
         break
       }
 
       try {
+        // Manejar diferentes tipos de datos que puede devolver Redis
         let serializedMessage: string
+
+        console.log(`[USER-QUEUE] Tipo de mensaje recuperado: ${typeof rawMessage}`)
+        console.log(`[USER-QUEUE] Mensaje crudo:`, rawMessage)
 
         if (typeof rawMessage === "string") {
           serializedMessage = rawMessage
         } else if (typeof rawMessage === "object" && rawMessage !== null) {
+          // Si Redis devuelve un objeto, intentar convertirlo
           if (Array.isArray(rawMessage)) {
-            console.error(`[QUEUE] ❌ Array recibido, saltando`)
+            console.error(`[USER-QUEUE] Mensaje es un array, saltando:`, rawMessage)
             continue
           }
 
+          // Si el objeto ya tiene la estructura correcta, usarlo directamente
           if (rawMessage.userMessage && rawMessage.phoneNumberId && rawMessage.config) {
-            console.log(`[QUEUE] 🔄 Procesando objeto directo`)
+            console.log(`[USER-QUEUE] Objeto ya tiene estructura válida, procesando directamente`)
             await processIndividualMessage(
               rawMessage.userMessage,
               rawMessage.phoneNumberId,
@@ -111,36 +133,45 @@ async function processUserQueue(userPhoneNumber: string) {
               userPhoneNumber,
               rawMessage.messageType || "text",
             )
-            console.log(`[QUEUE] ✅ Mensaje procesado: ${userPhoneNumber}`)
+            console.log(`[USER-QUEUE] Mensaje procesado exitosamente para ${userPhoneNumber}`)
             continue
           }
 
+          // Intentar serializar el objeto
           try {
             serializedMessage = JSON.stringify(rawMessage)
           } catch (serializeError) {
-            console.error(`[QUEUE] ❌ Error serializar:`, serializeError)
+            console.error(`[USER-QUEUE] Error al serializar objeto:`, serializeError)
             continue
           }
         } else {
-          console.error(`[QUEUE] ❌ Tipo no soportado: ${typeof rawMessage}`)
+          console.error(`[USER-QUEUE] Tipo de mensaje no soportado: ${typeof rawMessage}`)
           continue
         }
 
+        console.log(`[USER-QUEUE] Mensaje a parsear: ${serializedMessage.substring(0, 100)}...`)
+
+        // Parsear el mensaje
         let queuedMessage: QueuedMessage
         try {
           queuedMessage = JSON.parse(serializedMessage)
         } catch (parseError) {
-          console.error(`[QUEUE] ❌ Error parsear:`, parseError)
+          console.error(`[USER-QUEUE] Error al parsear mensaje:`, parseError)
+          console.error(`[USER-QUEUE] Mensaje problemático:`, serializedMessage)
           continue
         }
 
+        // Validar que el mensaje tiene la estructura correcta
         if (!queuedMessage.userMessage || !queuedMessage.phoneNumberId || !queuedMessage.config) {
-          console.error(`[QUEUE] ❌ Estructura inválida`)
+          console.error(`[USER-QUEUE] Mensaje con estructura inválida:`, queuedMessage)
           continue
         }
 
-        console.log(`[QUEUE] 🔄 Procesando: "${queuedMessage.userMessage.substring(0, 30)}..."`)
+        console.log(
+          `[USER-QUEUE] Procesando mensaje de ${userPhoneNumber}: "${queuedMessage.userMessage}" (tipo: ${queuedMessage.messageType || "text"})`,
+        )
 
+        // Procesar el mensaje
         await processIndividualMessage(
           queuedMessage.userMessage,
           queuedMessage.phoneNumberId,
@@ -149,18 +180,21 @@ async function processUserQueue(userPhoneNumber: string) {
           queuedMessage.messageType || "text",
         )
 
-        console.log(`[QUEUE] ✅ Mensaje procesado: ${userPhoneNumber}`)
+        console.log(`[USER-QUEUE] Mensaje procesado exitosamente para ${userPhoneNumber}`)
       } catch (error) {
-        console.error(`[QUEUE] ❌ Error procesar mensaje:`, error)
+        console.error(`[USER-QUEUE] Error al procesar mensaje de ${userPhoneNumber}:`, error)
+        // Continuar con el siguiente mensaje en caso de error
       }
 
+      // Pequeña pausa entre mensajes para evitar sobrecarga
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
   } catch (error) {
-    console.error(`[QUEUE] ❌ Error procesar cola:`, error)
+    console.error(`[USER-QUEUE] Error al procesar cola de ${userPhoneNumber}:`, error)
   } finally {
+    // Remover usuario del conjunto de procesamiento
     processingUsers.delete(userPhoneNumber)
-    console.log(`[QUEUE] ✅ Completado: ${userPhoneNumber}`)
+    console.log(`[USER-QUEUE] Procesamiento completado para usuario ${userPhoneNumber}`)
   }
 }
 
@@ -184,7 +218,7 @@ export async function getUserQueueStatus(userPhoneNumber: string) {
       isProcessing,
     }
   } catch (error) {
-    console.error(`[QUEUE] ❌ Error estado:`, error)
+    console.error(`[USER-QUEUE] Error al obtener estado de cola para ${userPhoneNumber}:`, error)
     return {
       queueLength: 0,
       isProcessing: false,
@@ -192,7 +226,7 @@ export async function getUserQueueStatus(userPhoneNumber: string) {
   }
 }
 
-// Función para limpiar colas antiguas
+// Función para limpiar colas antiguas (puede ser llamada por un cron job)
 export async function cleanupOldQueues() {
   const redisClient = getRedisClient()
   if (!redisClient) {
@@ -200,46 +234,54 @@ export async function cleanupOldQueues() {
   }
 
   try {
-    console.log(`[QUEUE] 🧹 Limpiando colas antiguas`)
+    console.log("[USER-QUEUE] Iniciando limpieza de colas antiguas")
+
+    // Buscar todas las colas de usuarios
     const queueKeys = await redisClient.keys("user_queue:*")
 
     for (const queueKey of queueKeys) {
       try {
+        // Verificar si la cola tiene TTL
         const ttl = await redisClient.ttl(queueKey)
+
         if (ttl === -1) {
+          // Si no tiene TTL, establecer uno (24 horas)
           await redisClient.expire(queueKey, 24 * 60 * 60)
-          console.log(`[QUEUE] ⏰ TTL establecido: ${queueKey}`)
+          console.log(`[USER-QUEUE] TTL establecido para ${queueKey}`)
         }
       } catch (error) {
-        console.error(`[QUEUE] ❌ Error procesar ${queueKey}:`, error)
+        console.error(`[USER-QUEUE] Error al procesar ${queueKey}:`, error)
       }
     }
 
-    console.log(`[QUEUE] ✅ Limpieza completada: ${queueKeys.length} colas`)
+    console.log(`[USER-QUEUE] Limpieza completada. Procesadas ${queueKeys.length} colas`)
   } catch (error) {
-    console.error(`[QUEUE] ❌ Error limpieza:`, error)
+    console.error("[USER-QUEUE] Error durante la limpieza de colas:", error)
   }
 }
 
-// Función para limpiar todas las colas
+// Agregar función para limpiar colas existentes
 export async function clearAllUserQueues() {
   const redisClient = getRedisClient()
   if (!redisClient) {
-    console.warn(`[QUEUE] ⚠️ Sin Redis para limpiar`)
+    console.warn("[USER-QUEUE] Redis no disponible para limpiar colas")
     return
   }
 
   try {
-    console.log(`[QUEUE] 🧹 Limpiando todas las colas`)
+    console.log("[USER-QUEUE] Limpiando todas las colas existentes...")
+
+    // Buscar todas las colas de usuarios
     const queueKeys = await redisClient.keys("user_queue:*")
 
     if (queueKeys.length > 0) {
+      // Eliminar todas las colas
       await redisClient.del(...queueKeys)
-      console.log(`[QUEUE] ✅ ${queueKeys.length} colas eliminadas`)
+      console.log(`[USER-QUEUE] ${queueKeys.length} colas eliminadas`)
     } else {
-      console.log(`[QUEUE] ℹ️ No hay colas para eliminar`)
+      console.log("[USER-QUEUE] No hay colas para eliminar")
     }
   } catch (error) {
-    console.error(`[QUEUE] ❌ Error limpiar:`, error)
+    console.error("[USER-QUEUE] Error al limpiar colas:", error)
   }
 }

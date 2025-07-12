@@ -16,6 +16,3 @@ export function getRedisClient() {
     return null
   }
 }
-
-// --- named export expected by other modules ---
-export { redis }
