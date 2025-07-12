@@ -541,13 +541,27 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
               const { validarObraSocial } = await import("@/lib/api-tools/api-functions")
               const obraSocialResult = await validarObraSocial(clienteId, args.busqueda || "")
               console.log(`[WEB-CHAT-FINAL] 📋 Resultado obra social:`, obraSocialResult)
-              output = JSON.stringify(obraSocialResult)
+
+              // Asegurar que el resultado sea serializable
+              if (typeof obraSocialResult === "object") {
+                output = JSON.stringify(obraSocialResult)
+              } else {
+                output = String(obraSocialResult)
+              }
             } catch (error) {
               console.error(`[WEB-CHAT-FINAL] ❌ Error validando obra social:`, error)
+              console.error(
+                `[WEB-CHAT-FINAL] ❌ Error stack:`,
+                error instanceof Error ? error.stack : "No stack available",
+              )
+
               output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar obras sociales.",
+                exito: false,
+                error: {
+                  codigo: "ERROR_VALIDACION_OBRA_SOCIAL",
+                  mensaje:
+                    "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar obras sociales.",
+                },
                 fallback: true,
               })
             }

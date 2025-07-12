@@ -46,7 +46,13 @@ async function fetchProxyApi<T>(
     const cachedData = await redis.get(cacheKey)
     if (cachedData) {
       console.log(`[CACHE] ✅ Hit para ${action}`)
-      return JSON.parse(cachedData as string)
+      // Verificar si cachedData ya es un objeto o es una cadena JSON
+      if (typeof cachedData === "string") {
+        return JSON.parse(cachedData)
+      } else {
+        // Si ya es un objeto, devolverlo directamente
+        return cachedData as ApiResponse<T>
+      }
     }
   }
 
