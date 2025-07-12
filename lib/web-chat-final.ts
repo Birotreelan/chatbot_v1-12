@@ -156,7 +156,6 @@ async function createWebThread(identifier: string): Promise<string> {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
         "OpenAI-Beta": "assistants=v2",
-        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         metadata: {
@@ -362,7 +361,8 @@ async function processMessageWithOpenAI(
                   },
                   agendaId: {
                     type: "string",
-                    description: "ID del turno/agenda a reservar",
+                    description:
+                      "ID del turno/agenda a reservar - CRÍTICO: debe coincidir exactamente con el ID del turno seleccionado",
                   },
                 },
                 required: [
@@ -614,6 +614,17 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
                 clienteId,
               )
               console.log(`[WEB-CHAT-FINAL] 📋 Resultado turnos:`, turnosResult)
+
+              // VALIDACIÓN CRÍTICA: Verificar que los turnos tengan IDs correctos
+              if (turnosResult.success && turnosResult.data && Array.isArray(turnosResult.data)) {
+                console.log(`[WEB-CHAT-FINAL] 🔍 VERIFICANDO MAPEO DE TURNOS:`)
+                turnosResult.data.slice(0, 15).forEach((turno: any, index: number) => {
+                  console.log(
+                    `[WEB-CHAT-FINAL] Turno #${index + 1}: ID=${turno.id || turno.agendaId}, ${turno.fecha} ${turno.hora} - ${turno.profesional}`,
+                  )
+                })
+              }
+
               output = JSON.stringify(turnosResult)
             } catch (error) {
               console.error(`[WEB-CHAT-FINAL] ❌ Error buscando turnos:`, error)
@@ -629,6 +640,24 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
           case "reserve_turno":
             console.log(`[WEB-CHAT-FINAL] 🎯 Reservando turno con cliente: ${clienteId}`)
             console.log(`[WEB-CHAT-FINAL] 📋 Datos de reserva:`, args)
+
+            // VALIDACIÓN CRÍTICA antes de reservar
+            console.log(`[WEB-CHAT-FINAL] ========== VALIDACIÓN CRÍTICA ==========`)
+            console.log(`[WEB-CHAT-FINAL] 🔍 agendaId recibido: ${args.agendaId}`)
+            console.log(`[WEB-CHAT-FINAL] 🔍 fecha esperada: ${args.fecha}`)
+            console.log(`[WEB-CHAT-FINAL] 🔍 hora esperada: ${args.hora}`)
+            console.log(`[WEB-CHAT-FINAL] 🔍 profesional esperado: ${args.profesional}`)
+            console.log(`[WEB-CHAT-FINAL] ================================================`)
+
+            if (!args.agendaId) {
+              console.error(`[WEB-CHAT-FINAL] ❌ CRÍTICO: agendaId faltante`)
+              output = JSON.stringify({
+                success: false,
+                error: "Error crítico: ID de turno faltante. Por favor, selecciona el turno nuevamente.",
+                fallback: true,
+              })
+              break
+            }
 
             try {
               const reserveResult = await reserveTurno(
@@ -646,6 +675,31 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
                 clienteId,
               )
               console.log(`[WEB-CHAT-FINAL] 📋 Resultado reserva:`, reserveResult)
+
+              // VALIDACIÓN POST-RESERVA: Verificar que los datos coincidan
+              if (reserveResult.success && reserveResult.data && reserveResult.data.turno) {
+                const turnoReservado = reserveResult.data.turno
+                console.log(`[WEB-CHAT-FINAL] ========== VERIFICACIÓN POST-RESERVA ==========`)
+                console.log(`[WEB-CHAT-FINAL] ✅ Turno reservado exitosamente:`)
+                console.log(`[WEB-CHAT-FINAL] - ID: ${turnoReservado.Id}`)
+                console.log(`[WEB-CHAT-FINAL] - Fecha: ${turnoReservado.Fecha}`)
+                console.log(`[WEB-CHAT-FINAL] - Hora: ${turnoReservado.Hora}`)
+                console.log(`[WEB-CHAT-FINAL] - Profesional: ${turnoReservado.Profesional_Nombre}`)
+                console.log(`[WEB-CHAT-FINAL] ================================================`)
+
+                // Verificar si hay discrepancias
+                if (turnoReservado.Fecha !== args.fecha) {
+                  console.warn(
+                    `[WEB-CHAT-FINAL] ⚠️ ADVERTENCIA: Fecha reservada (${turnoReservado.Fecha}) difiere de la esperada (${args.fecha})`,
+                  )
+                }
+                if (turnoReservado.Hora !== `${args.hora}:00` && turnoReservado.Hora !== args.hora) {
+                  console.warn(
+                    `[WEB-CHAT-FINAL] ⚠️ ADVERTENCIA: Hora reservada (${turnoReservado.Hora}) difiere de la esperada (${args.hora})`,
+                  )
+                }
+              }
+
               output = JSON.stringify(reserveResult)
             } catch (error) {
               console.error(`[WEB-CHAT-FINAL] ❌ Error reservando turno:`, error)

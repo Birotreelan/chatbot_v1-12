@@ -586,6 +586,11 @@ export async function executeOpenAITool(
           for (const diaData of data.turnos_disponibles) {
             if (diaData.turnos && Array.isArray(diaData.turnos)) {
               for (const turno of diaData.turnos) {
+                // LOGGING MEJORADO para debugging
+                console.log(
+                  `[TOOL] 🔍 Procesando turno: ID=${turno.Id}, Fecha=${turno.Fecha}, Hora=${turno.Hora}, Profesional=${turno.Profesional_Nombre}`,
+                )
+
                 todosLosTurnos.push({
                   id: turno.Id,
                   fecha: turno.Fecha,
@@ -602,7 +607,20 @@ export async function executeOpenAITool(
             if (todosLosTurnos.length >= 40) break
           }
 
-          console.log(`[TOOL] ✅ ${todosLosTurnos.length} turnos encontrados`)
+          console.log(`[TOOL] ✅ ${todosLosTurnos.length} turnos encontrados y mapeados correctamente`)
+
+          // Verificar que los primeros turnos tengan los datos correctos
+          if (todosLosTurnos.length > 0) {
+            console.log(
+              `[TOOL] 🔍 Primer turno: ID=${todosLosTurnos[0].id}, Fecha=${todosLosTurnos[0].fecha}, Hora=${todosLosTurnos[0].hora}`,
+            )
+            if (todosLosTurnos.length > 12) {
+              console.log(
+                `[TOOL] 🔍 Turno #13: ID=${todosLosTurnos[12].id}, Fecha=${todosLosTurnos[12].fecha}, Hora=${todosLosTurnos[12].hora}`,
+              )
+            }
+          }
+
           return truncateToolResponse({
             exito: true,
             datos: todosLosTurnos.slice(0, 40),
