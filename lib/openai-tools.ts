@@ -55,10 +55,16 @@ export const openAITools = [
     type: "function" as const,
     function: {
       name: "reservar_turno",
-      description: "Reserva el turno seleccionado usando los datos del paciente recopilados durante la conversación.",
+      description:
+        "Reserva el turno seleccionado usando los datos del paciente recopilados durante la conversación. CRÍTICO: Debe incluir el agendaId del turno específico seleccionado por el usuario.",
       parameters: {
         type: "object",
         properties: {
+          agendaId: {
+            type: "string",
+            description:
+              "ID único del turno/agenda seleccionado por el usuario. CRÍTICO: Este debe ser el ID exacto del turno que el usuario eligió de la lista de turnos disponibles.",
+          },
           dni: {
             type: "string",
             description: "DNI del paciente",
@@ -92,7 +98,7 @@ export const openAITools = [
             description: "Nombre del profesional",
           },
         },
-        required: ["dni", "nombre", "apellido", "telefono", "email", "fecha", "hora", "profesional"],
+        required: ["agendaId", "dni", "nombre", "apellido", "telefono", "email", "fecha", "hora", "profesional"],
       },
     },
   },
@@ -373,9 +379,37 @@ export async function executeOpenAITool(
         break
 
       case "reservar_turno":
+        console.log(`[TOOL] ========== RESERVAR TURNO - VALIDACIÓN ==========`)
+        console.log(`[TOOL] 📋 Argumentos recibidos:`, toolArgs)
+        console.log(`[TOOL] ================================================`)
+
         requestBody.Action = "set_turno"
-        // Lógica compleja de reserva (mantenida igual pero con logs simplificados)
-        // ... (resto de la lógica de reserva)
+
+        // CRÍTICO: Validar que agendaId esté presente
+        if (!toolArgs.agendaId) {
+          console.error(`[TOOL] ❌ CRÍTICO: agendaId faltante en reservar_turno`)
+          console.error(`[TOOL] ❌ Argumentos recibidos:`, toolArgs)
+          return {
+            exito: false,
+            error: {
+              codigo: "AGENDA_ID_FALTANTE",
+              mensaje: "El ID del turno (agendaId) es requerido para realizar la reserva",
+            },
+          }
+        }
+
+        // Usar el agendaId directamente
+        requestBody.Agenda_Id = toolArgs.agendaId
+
+        // Agregar datos del paciente
+        if (toolArgs.dni) requestBody.Paciente_DNI = toolArgs.dni
+        if (toolArgs.nombre) requestBody.Paciente_Nombre = toolArgs.nombre
+        if (toolArgs.apellido) requestBody.Paciente_Apellido = toolArgs.apellido
+        if (toolArgs.telefono) requestBody.Paciente_Telefono = toolArgs.telefono
+        if (toolArgs.email) requestBody.Paciente_Email = toolArgs.email
+
+        console.log(`[TOOL] ✅ Agenda_Id configurado: ${requestBody.Agenda_Id}`)
+        console.log(`[TOOL] 📋 Request body completo:`, requestBody)
         break
 
       default:
@@ -638,12 +672,17 @@ export async function executeOpenAITool(
         }
 
       case "reservar_turno":
+        console.log(`[TOOL] ========== RESPUESTA RESERVAR TURNO ==========`)
+        console.log(`[TOOL] 📋 Respuesta de la API:`, data)
+        console.log(`[TOOL] ================================================`)
+
         if (data.success || data.exito) {
           return {
             exito: true,
             datos: {
               mensaje: "Turno reservado exitosamente",
               confirmacion: data.confirmacion || "Reserva confirmada",
+              turno: data.turno || null,
             },
           }
         } else if (data.error) {
