@@ -195,17 +195,23 @@ Responde de manera apropiada según la acción realizada.`
             }
           } else {
             // Si success es true pero no hay action_type específico
+            const accionDetectada = originalMessage.toLowerCase().includes("confirmar")
+              ? "confirmacion"
+              : originalMessage.toLowerCase().includes("cancelar")
+                ? "cancelacion"
+                : "respuesta_generica"
+
             userMessage = `El paciente respondió "${originalMessage}" a una plantilla.
 
 [RESPUESTA_BOTON_PROCESADA]
-Accion: respuesta_generica
+Accion: ${accionDetectada}
 Estado: procesado
-Mensaje: Respuesta "${originalMessage}" procesada exitosamente
-Instrucciones: La respuesta del botón fue registrada correctamente
+Mensaje: Respuesta "${originalMessage}" procesada exitosamente por el proxy
+Instrucciones: Seguir las reglas específicas del system prompt para respuestas de tipo "${accionDetectada}"
 Timestamp: ${new Date().toISOString()}
 [/RESPUESTA_BOTON_PROCESADA]
 
-Responde confirmando que la respuesta fue recibida y procesada correctamente.`
+Responde según las reglas específicas del system prompt para el tipo de acción "${accionDetectada}".`
           }
         } else {
           // Si hay error en el proxy
