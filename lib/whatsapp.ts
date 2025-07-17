@@ -45,7 +45,8 @@ export async function handleMessage(value: WhatsAppValue) {
     // Extraer información del mensaje
     const message = value.messages[0]
     const userPhoneNumber = message.from
-    let userMessage = extractMessageContent(message) // Changed from const to let
+    let userMessage = extractMessageContent(message)
+    const originalMessage = userMessage
 
     console.log(`[WHATSAPP] Procesando mensaje de ${userPhoneNumber}: "${userMessage}" (tipo: ${message.type})`)
 
@@ -128,12 +129,80 @@ export async function handleMessage(value: WhatsAppValue) {
         proxyResponse = { success: false, error: "NETWORK_ERROR", message: error.message }
       }
 
-      // Modificar el mensaje para incluir la respuesta del proxy
+      // Modificar el mensaje para incluir la respuesta del proxy de forma más específica
       if (proxyResponse) {
-        console.log(`[WHATSAPP] Incluyendo respuesta del proxy en el mensaje para OpenAI`)
-        // Agregar la respuesta del proxy al mensaje que se enviará a OpenAI
-        const originalMessage = userMessage
-        userMessage = `${originalMessage}\n\n[RESPUESTA_PROXY]\n${JSON.stringify(proxyResponse)}\n[/RESPUESTA_PROXY]`
+        console.log(`[WHATSAPP] Procesando respuesta del proxy:`, JSON.stringify(proxyResponse, null, 2))
+
+        if (proxyResponse.success && proxyResponse.action_type) {
+          // Usar la información específica del proxy para crear el mensaje
+          switch (proxyResponse.action_type) {
+            case "confirmacion_turno":
+              userMessage = `El paciente confirmó su turno presionando "${originalMessage}".
+
+[CONFIRMACION_TURNO_EXITOSA]
+Accion: Confirmación de turno
+Estado: ${proxyResponse.status}
+Mensaje: ${proxyResponse.message}
+Instrucciones: ${proxyResponse.next_steps}
+Timestamp: ${proxyResponse.timestamp}
+[/CONFIRMACION_TURNO_EXITOSA]
+
+Responde confirmando que el turno fue confirmado exitosamente y proporciona los detalles relevantes.`
+              break
+
+            case "cancelacion_turno":
+              userMessage = `El paciente canceló su turno presionando "${originalMessage}".
+
+[CANCELACION_TURNO_EXITOSA]
+Accion: Cancelación de turno
+Estado: ${proxyResponse.status}
+Mensaje: ${proxyResponse.message}
+Instrucciones: ${proxyResponse.next_steps}
+Timestamp: ${proxyResponse.timestamp}
+[/CANCELACION_TURNO_EXITOSA]
+
+Responde confirmando que el turno fue cancelado y ofrece ayuda para reagendar.`
+              break
+
+            case "reprogramacion_turno":
+              userMessage = `El paciente solicitó reprogramar su turno presionando "${originalMessage}".
+
+[REPROGRAMACION_TURNO_SOLICITADA]
+Accion: Reprogramación de turno
+Estado: ${proxyResponse.status}
+Mensaje: ${proxyResponse.message}
+Instrucciones: ${proxyResponse.next_steps}
+Timestamp: ${proxyResponse.timestamp}
+[/REPROGRAMACION_TURNO_SOLICITADA]
+
+Responde confirmando que la solicitud fue recibida y explica los próximos pasos.`
+              break
+
+            default:
+              userMessage = `El paciente respondió "${originalMessage}" a una plantilla.
+
+[RESPUESTA_BOTON_PROCESADA]
+Accion: ${proxyResponse.action_type}
+Estado: ${proxyResponse.status}
+Mensaje: ${proxyResponse.message}
+Instrucciones: ${proxyResponse.next_steps}
+Timestamp: ${proxyResponse.timestamp}
+[/RESPUESTA_BOTON_PROCESADA]
+
+Responde de manera apropiada según la acción realizada.`
+          }
+        } else {
+          // Si hay error en el proxy
+          userMessage = `El paciente presionó "${originalMessage}" pero hubo un error en el procesamiento.
+
+[ERROR_PROCESAMIENTO_BOTON]
+Accion: ${originalMessage}
+Estado: Error
+Error: ${JSON.stringify(proxyResponse)}
+[/ERROR_PROCESAMIENTO_BOTON]
+
+Informa que hubo un problema técnico y ofrece alternativas de contacto.`
+        }
       }
     }
 

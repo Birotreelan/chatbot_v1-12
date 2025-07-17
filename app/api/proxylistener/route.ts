@@ -5,22 +5,144 @@ import OpenAI from "openai"
 
 export async function POST(request: Request) {
   try {
-    console.log("[PROXYLISTENER] Iniciando procesamiento de solicitud")
+    console.log("[PROXYLISTENER] ===== INICIO DE SOLICITUD =====")
 
     // Obtener los parámetros de la solicitud
     const data = await request.json()
+    console.log("[PROXYLISTENER] Datos recibidos:", JSON.stringify(data, null, 2))
+
+    // Detectar si es envío de template o respuesta de botón
+    const isTemplateResponse = data.action === "template_response"
+
+    if (isTemplateResponse) {
+      console.log("[PROXYLISTENER] ===== PROCESANDO RESPUESTA DE BOTÓN =====")
+      return await handleButtonResponse(data)
+    } else {
+      console.log("[PROXYLISTENER] ===== PROCESANDO ENVÍO DE TEMPLATE =====")
+      return await handleTemplateSend(data)
+    }
+  } catch (error) {
+    console.error("[PROXYLISTENER] Error general:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Error desconocido",
+      },
+      { status: 500 },
+    )
+  }
+}
+
+// Función para manejar respuestas de botones
+async function handleButtonResponse(data: any) {
+  try {
+    const { Cliente_Id, Phone_Number_Id, messages } = data
+
+    if (!messages || messages.length === 0) {
+      return NextResponse.json({ success: false, error: "No se encontraron mensajes" }, { status: 400 })
+    }
+
+    const message = messages[0]
+    const userPhoneNumber = message.from
+    const buttonResponse = message.button?.text || message.button?.payload || ""
+
+    console.log("[PROXYLISTENER] Usuario:", userPhoneNumber)
+    console.log("[PROXYLISTENER] Respuesta del botón:", buttonResponse)
+    console.log("[PROXYLISTENER] Tipo de mensaje:", message.type)
+
+    // Buscar configuración
+    const config = await getWhatsAppConfigByPhoneId(Phone_Number_Id)
+    if (!config) {
+      return NextResponse.json(
+        { success: false, error: `No se encontró configuración para Phone_Number_Id: ${Phone_Number_Id}` },
+        { status: 404 },
+      )
+    }
+
+    // Procesar según el tipo de respuesta
+    let responseData = {
+      success: true,
+      action: "button_response",
+      button_text: buttonResponse,
+      user_phone: userPhoneNumber,
+      timestamp: new Date().toISOString(),
+    }
+
+    // Determinar el tipo de acción basado en la respuesta del botón
+    const buttonLower = buttonResponse.toLowerCase()
+
+    if (buttonLower.includes("confirmar") || buttonLower === "sí" || buttonLower === "si") {
+      responseData = {
+        ...responseData,
+        action_type: "confirmacion_turno",
+        message: "Turno confirmado exitosamente",
+        status: "confirmed",
+        next_steps: "El turno ha sido confirmado. Te esperamos en la fecha y hora programada.",
+      }
+
+      console.log("[PROXYLISTENER] ✅ Turno confirmado por usuario:", userPhoneNumber)
+    } else if (buttonLower.includes("cancelar") || buttonLower === "no") {
+      responseData = {
+        ...responseData,
+        action_type: "cancelacion_turno",
+        message: "Turno cancelado exitosamente",
+        status: "cancelled",
+        next_steps: "El turno ha sido cancelado. Si deseas reagendar, puedes solicitar un nuevo turno.",
+      }
+
+      console.log("[PROXYLISTENER] ❌ Turno cancelado por usuario:", userPhoneNumber)
+    } else if (buttonLower.includes("reprogramar") || buttonLower.includes("reagendar")) {
+      responseData = {
+        ...responseData,
+        action_type: "reprogramacion_turno",
+        message: "Solicitud de reprogramación recibida",
+        status: "rescheduling_requested",
+        next_steps:
+          "Tu solicitud de reprogramación ha sido recibida. Nos comunicaremos contigo para coordinar una nueva fecha.",
+      }
+
+      console.log("[PROXYLISTENER] 🔄 Reprogramación solicitada por usuario:", userPhoneNumber)
+    } else {
+      // Respuesta genérica para otros botones
+      responseData = {
+        ...responseData,
+        action_type: "respuesta_generica",
+        message: `Respuesta "${buttonResponse}" procesada`,
+        status: "processed",
+        next_steps: "Tu respuesta ha sido registrada exitosamente.",
+      }
+
+      console.log("[PROXYLISTENER] ℹ️ Respuesta genérica procesada:", buttonResponse)
+    }
+
+    console.log("[PROXYLISTENER] Respuesta preparada:", JSON.stringify(responseData, null, 2))
+    return NextResponse.json(responseData)
+  } catch (error) {
+    console.error("[PROXYLISTENER] Error procesando respuesta de botón:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Error procesando respuesta de botón",
+        details: error instanceof Error ? error.message : "Error desconocido",
+      },
+      { status: 500 },
+    )
+  }
+}
+
+// Función para manejar envío de templates
+async function handleTemplateSend(data: any) {
+  try {
     const { Cliente_Id, Phone_Number_Id, Phone, Type, Body } = data
 
-    console.log("[PROXYLISTENER] Parámetros recibidos:", {
-      Cliente_Id,
-      Phone_Number_Id,
-      Phone,
-      Type,
-      bodyType: typeof Body,
-      bodyLength: typeof Body === "string" ? Body.length : JSON.stringify(Body).length,
-    })
+    console.log("[PROXYLISTENER] Parámetros extraídos:")
+    console.log("[PROXYLISTENER] - Cliente_Id:", Cliente_Id)
+    console.log("[PROXYLISTENER] - Phone_Number_Id:", Phone_Number_Id)
+    console.log("[PROXYLISTENER] - Phone:", Phone)
+    console.log("[PROXYLISTENER] - Type:", Type)
+    console.log("[PROXYLISTENER] - Body:", typeof Body === "object" ? JSON.stringify(Body, null, 2) : Body)
 
-    // Validar que se proporcionaron los parámetros necesarios
+    // Validaciones
     if (!Cliente_Id) {
       return NextResponse.json({ success: false, error: "Se requiere el parámetro Cliente_Id" }, { status: 400 })
     }
@@ -44,21 +166,15 @@ export async function POST(request: Request) {
       )
     }
 
-    // Usar "text" como valor predeterminado si no se proporciona Type
     const messageType = Type || "text"
 
-    console.log("[PROXYLISTENER] Buscando configuración de WhatsApp...")
-
-    // Buscar la configuración de WhatsApp correspondiente
+    // Buscar configuración de WhatsApp
     let config = null
 
-    // Primero intentamos buscar por Phone_Number_Id si está disponible
     if (Phone_Number_Id) {
       config = await getWhatsAppConfigByPhoneId(Phone_Number_Id)
     }
 
-    // Si no encontramos la configuración por Phone_Number_Id o no se proporcionó,
-    // buscamos todas las configuraciones que coincidan con el Cliente_Id
     if (!config) {
       const allConfigs = await getAllWhatsAppConfigs()
       const matchingConfigs = allConfigs.filter((c) => c.cliente_id === Cliente_Id && c.active)
@@ -70,7 +186,6 @@ export async function POST(request: Request) {
         )
       }
 
-      // Usamos la primera configuración que coincida
       config = matchingConfigs[0]
     }
 
@@ -81,7 +196,6 @@ export async function POST(request: Request) {
       hasToken: !!config.accessToken,
     })
 
-    // Verificar que la configuración esté activa
     if (!config.active) {
       return NextResponse.json(
         { success: false, error: "La configuración de WhatsApp no está activa" },
@@ -89,11 +203,9 @@ export async function POST(request: Request) {
       )
     }
 
-    // Determinar el número de teléfono del destinatario
+    // Determinar número de teléfono destinatario
     let destinationPhone = Phone
 
-    // Si no se proporcionó un número de teléfono específico, usamos el último número
-    // de teléfono registrado en la configuración
     if (!destinationPhone) {
       if (!config.lastUserPhoneNumber) {
         return NextResponse.json(
@@ -107,27 +219,22 @@ export async function POST(request: Request) {
       destinationPhone = config.lastUserPhoneNumber
     }
 
-    // Asegurarse de que el número de teléfono tenga el formato correcto (con código de país)
+    // Formatear número de teléfono
     if (!destinationPhone.startsWith("+")) {
-      // Si no tiene el prefijo +, asumimos que es un número de Argentina
       destinationPhone = `+${destinationPhone}`
     }
 
-    // Limpiar el número para usarlo como clave (sin el +)
     const cleanPhoneNumber = destinationPhone.replace("+", "")
 
     console.log("[PROXYLISTENER] Número de teléfono formateado:", destinationPhone)
     console.log("[PROXYLISTENER] Enviando mensaje tipo:", messageType)
 
-    // Variable para capturar la respuesta de WhatsApp
+    // Enviar mensaje según el tipo
     let whatsappResponse = null
 
-    // Enviar el mensaje según el tipo
     if (messageType === "text") {
-      // Enviar mensaje de texto normal
       whatsappResponse = await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, destinationPhone, Body)
     } else {
-      // Enviar mensaje de plantilla
       whatsappResponse = await sendWhatsAppTemplate(
         config.phoneNumberId,
         config.accessToken,
@@ -136,16 +243,15 @@ export async function POST(request: Request) {
         config.wabaId,
       )
 
-      // NUEVO: Notificar a OpenAI sobre la plantilla enviada con información detallada
+      // Notificar a OpenAI sobre la plantilla enviada
       if (messageType === "template") {
         try {
-          console.log("[PROXYLISTENER] Analizando plantilla enviada para notificar a OpenAI...")
+          console.log("[PROXYLISTENER] Notificando a OpenAI sobre plantilla enviada...")
 
-          // Obtener o crear thread para este usuario
           const threadResult = await getThreadForUser(cleanPhoneNumber, config.id)
           console.log("[PROXYLISTENER] Thread obtenido:", threadResult.threadId)
 
-          // Analizar la plantilla para extraer información básica
+          // Analizar plantilla
           const templateAnalysis = {
             name: "plantilla_desconocida",
             content: "Plantilla enviada",
@@ -155,21 +261,18 @@ export async function POST(request: Request) {
             const templateData = typeof Body === "string" ? JSON.parse(Body) : Body
             console.log("[PROXYLISTENER] Datos de plantilla parseados:", JSON.stringify(templateData, null, 2))
 
-            // Extraer nombre de la plantilla
             if (templateData.template && templateData.template.name) {
               templateAnalysis.name = templateData.template.name
             } else if (templateData.name) {
               templateAnalysis.name = templateData.name
             }
 
-            // Extraer contenido básico si está disponible
             if (templateData.template && templateData.template.components) {
               const components = templateData.template.components
               let textContent = ""
 
               for (const component of components) {
                 if (component.type === "body" && component.parameters) {
-                  // Construir contenido básico con los parámetros
                   textContent = `Plantilla ${templateAnalysis.name} con parámetros enviada`
                   break
                 }
@@ -183,16 +286,14 @@ export async function POST(request: Request) {
             console.log("[PROXYLISTENER] Análisis de plantilla completado:", templateAnalysis)
           } catch (e) {
             console.log("[PROXYLISTENER] Error al parsear template data:", e)
-            console.log("[PROXYLISTENER] Body recibido:", Body)
           }
 
-          // Crear mensaje de notificación simplificado para OpenAI
+          // Crear notificación para OpenAI
           const notificationMessage = `[SISTEMA_PLANTILLA]
 Plantilla_Nombre: ${templateAnalysis.name}
 Plantilla_Contenido: ${templateAnalysis.content}
 [/SISTEMA_PLANTILLA]`
 
-          // Enviar notificación a OpenAI
           const openai = new OpenAI({
             apiKey: process.env.OPENAI_API_KEY,
           })
@@ -202,21 +303,17 @@ Plantilla_Contenido: ${templateAnalysis.content}
             content: notificationMessage,
           })
 
-          console.log("[PROXYLISTENER] Notificación detallada enviada a OpenAI exitosamente")
-          console.log("[PROXYLISTENER] Contenido de notificación:", notificationMessage)
+          console.log("[PROXYLISTENER] Notificación enviada a OpenAI exitosamente")
         } catch (error) {
           console.error("[PROXYLISTENER] Error al notificar a OpenAI:", error)
-          // No fallar el envío de la plantilla por este error
         }
       }
     }
 
     console.log("[PROXYLISTENER] Respuesta de WhatsApp:", whatsappResponse)
-
-    // Devolver la respuesta exacta de WhatsApp
     return NextResponse.json(whatsappResponse)
   } catch (error) {
-    console.error("[PROXYLISTENER] Error al enviar mensaje:", error)
+    console.error("[PROXYLISTENER] Error enviando template:", error)
     return NextResponse.json(
       {
         success: false,
