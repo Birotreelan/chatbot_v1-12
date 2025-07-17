@@ -59,7 +59,41 @@ async function handleButtonResponse(data: any) {
       )
     }
 
-    // Procesar según el tipo de respuesta
+    // Simular validación del estado del turno
+    // En un sistema real, aquí consultarías la base de datos para verificar el estado actual del turno
+    const buttonLower = buttonResponse.toLowerCase()
+
+    // Simular diferentes tipos de errores que puede devolver el sistema real
+    if (buttonLower.includes("cancelar")) {
+      // Simular que el turno ya fue confirmado y no se puede cancelar
+      return NextResponse.json({
+        success: false,
+        error: "CANNOT_CANCEL",
+        message: "No se puede cancelar un turno que ya fue confirmado",
+        action_type: "error_cancelacion",
+        user_action: buttonResponse,
+        suggested_action: "contact_clinic",
+      })
+    }
+
+    if (buttonLower.includes("confirmar")) {
+      // Simular que el turno ya fue cancelado y no se puede confirmar
+      // (esto podría pasar si alguien cancela y luego intenta confirmar)
+      const isAlreadyCancelled = Math.random() > 0.7 // 30% de probabilidad para testing
+
+      if (isAlreadyCancelled) {
+        return NextResponse.json({
+          success: false,
+          error: "CANNOT_CONFIRM",
+          message: "No se puede confirmar un turno que ya fue cancelado",
+          action_type: "error_confirmacion",
+          user_action: buttonResponse,
+          suggested_action: "contact_clinic",
+        })
+      }
+    }
+
+    // Procesar según el tipo de respuesta (casos exitosos)
     let responseData = {
       success: true,
       action: "button_response",
@@ -67,9 +101,6 @@ async function handleButtonResponse(data: any) {
       user_phone: userPhoneNumber,
       timestamp: new Date().toISOString(),
     }
-
-    // Determinar el tipo de acción basado en la respuesta del botón
-    const buttonLower = buttonResponse.toLowerCase()
 
     if (buttonLower.includes("confirmar") || buttonLower === "sí" || buttonLower === "si") {
       responseData = {
@@ -127,6 +158,81 @@ async function handleButtonResponse(data: any) {
       },
       { status: 500 },
     )
+  }
+}
+
+// Función para extraer información del turno desde el template
+function extractAppointmentInfo(templateBody: any): any {
+  try {
+    const appointmentInfo = {
+      fecha: null,
+      hora: null,
+      profesional: null,
+      especialidad: null,
+      lugar: null,
+    }
+
+    // Si el Body es string, intentar parsearlo
+    const templateData = typeof templateBody === "string" ? JSON.parse(templateBody) : templateBody
+
+    // Buscar en los componentes del template
+    if (templateData.template && templateData.template.components) {
+      for (const component of templateData.template.components) {
+        if (component.type === "body" && component.parameters) {
+          // Los parámetros suelen estar en orden: fecha, hora, profesional, lugar
+          const params = component.parameters
+
+          if (params.length >= 1 && params[0].text) {
+            // Primer parámetro suele ser la fecha
+            appointmentInfo.fecha = params[0].text
+          }
+
+          if (params.length >= 2 && params[1].text) {
+            // Segundo parámetro suele ser la hora
+            appointmentInfo.hora = params[1].text
+          }
+
+          if (params.length >= 3 && params[2].text) {
+            // Tercer parámetro suele ser el profesional
+            appointmentInfo.profesional = params[2].text
+          }
+
+          if (params.length >= 4 && params[3].text) {
+            // Cuarto parámetro suele ser el lugar
+            appointmentInfo.lugar = params[3].text
+          }
+        }
+      }
+    }
+
+    // También buscar en el texto plano si no encontramos en los parámetros
+    if (!appointmentInfo.fecha || !appointmentInfo.hora) {
+      const bodyText = JSON.stringify(templateData)
+
+      // Buscar patrones de fecha (DD/MM/YYYY)
+      const fechaMatch = bodyText.match(/(\d{1,2}\/\d{1,2}\/\d{4})/g)
+      if (fechaMatch && fechaMatch.length > 0) {
+        appointmentInfo.fecha = fechaMatch[0]
+      }
+
+      // Buscar patrones de hora (HH:MM)
+      const horaMatch = bodyText.match(/(\d{1,2}:\d{2})/g)
+      if (horaMatch && horaMatch.length > 0) {
+        appointmentInfo.hora = horaMatch[0]
+      }
+
+      // Buscar nombres de profesionales (palabras que empiecen con mayúscula)
+      const profesionalMatch = bodyText.match(/([A-Z][a-z]+,?\s+[A-Z][a-z]+)/g)
+      if (profesionalMatch && profesionalMatch.length > 0) {
+        appointmentInfo.profesional = profesionalMatch[0]
+      }
+    }
+
+    console.log("[PROXYLISTENER] Información del turno extraída:", appointmentInfo)
+    return appointmentInfo
+  } catch (error) {
+    console.error("[PROXYLISTENER] Error al extraer información del turno:", error)
+    return null
   }
 }
 
@@ -251,10 +357,14 @@ async function handleTemplateSend(data: any) {
           const threadResult = await getThreadForUser(cleanPhoneNumber, config.id)
           console.log("[PROXYLISTENER] Thread obtenido:", threadResult.threadId)
 
+          // Extraer información del turno desde el template
+          const appointmentInfo = extractAppointmentInfo(Body)
+
           // Analizar plantilla
           const templateAnalysis = {
             name: "plantilla_desconocida",
             content: "Plantilla enviada",
+            appointmentInfo: appointmentInfo,
           }
 
           try {
@@ -288,10 +398,21 @@ async function handleTemplateSend(data: any) {
             console.log("[PROXYLISTENER] Error al parsear template data:", e)
           }
 
-          // Crear notificación para OpenAI
-          const notificationMessage = `[SISTEMA_PLANTILLA]
+          // Crear notificación para OpenAI con información del turno
+          let notificationMessage = `[SISTEMA_PLANTILLA]
 Plantilla_Nombre: ${templateAnalysis.name}
-Plantilla_Contenido: ${templateAnalysis.content}
+Plantilla_Contenido: ${templateAnalysis.content}`
+
+          // Agregar información del turno si está disponible
+          if (appointmentInfo && (appointmentInfo.fecha || appointmentInfo.hora || appointmentInfo.profesional)) {
+            notificationMessage += `
+Turno_Fecha: ${appointmentInfo.fecha || "No especificada"}
+Turno_Hora: ${appointmentInfo.hora || "No especificada"}
+Turno_Profesional: ${appointmentInfo.profesional || "No especificado"}
+Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
+          }
+
+          notificationMessage += `
 [/SISTEMA_PLANTILLA]`
 
           const openai = new OpenAI({

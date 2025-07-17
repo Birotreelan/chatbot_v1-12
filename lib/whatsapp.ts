@@ -149,7 +149,7 @@ Instrucciones: ${proxyResponse.next_steps}
 Timestamp: ${proxyResponse.timestamp}
 [/CONFIRMACION_TURNO_EXITOSA]
 
-Responde confirmando que el turno fue confirmado exitosamente y proporciona los detalles relevantes.`
+IMPORTANTE: Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno confirmado (fecha, hora, profesional, lugar).`
                 break
 
               case "cancelacion_turno":
@@ -163,7 +163,7 @@ Instrucciones: ${proxyResponse.next_steps}
 Timestamp: ${proxyResponse.timestamp}
 [/CANCELACION_TURNO_EXITOSA]
 
-Responde confirmando que el turno fue cancelado y ofrece ayuda para reagendar.`
+IMPORTANTE: Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno cancelado.`
                 break
 
               case "reprogramacion_turno":
@@ -177,7 +177,7 @@ Instrucciones: ${proxyResponse.next_steps}
 Timestamp: ${proxyResponse.timestamp}
 [/REPROGRAMACION_TURNO_SOLICITADA]
 
-Responde confirmando que la solicitud fue recibida y explica los próximos pasos.`
+IMPORTANTE: Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno a reprogramar.`
                 break
 
               default:
@@ -211,11 +211,59 @@ Instrucciones: Seguir las reglas específicas del system prompt para respuestas 
 Timestamp: ${new Date().toISOString()}
 [/RESPUESTA_BOTON_PROCESADA]
 
-Responde según las reglas específicas del system prompt para el tipo de acción "${accionDetectada}".`
+IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno.`
           }
         } else {
-          // Si hay error en el proxy
-          userMessage = `El paciente presionó "${originalMessage}" pero hubo un error en el procesamiento.
+          // Si hay error en el proxy, manejar casos específicos
+          const errorType = proxyResponse.error
+          const userAction = proxyResponse.user_action || originalMessage
+
+          switch (errorType) {
+            case "CANNOT_CANCEL":
+              userMessage = `El paciente intentó cancelar su turno presionando "${userAction}" pero no es posible.
+
+[ERROR_ESTADO_TURNO]
+Accion_Solicitada: Cancelación
+Error: ${errorType}
+Mensaje: ${proxyResponse.message || "No se puede cancelar un turno que ya fue confirmado"}
+Razon: El turno ya fue confirmado y no puede ser cancelado por este medio
+Solucion_Sugerida: Contactar directamente con la clínica
+[/ERROR_ESTADO_TURNO]
+
+Explica que no se puede cancelar un turno ya confirmado y que debe contactar a la clínica si cometió un error.`
+              break
+
+            case "CANNOT_CONFIRM":
+              userMessage = `El paciente intentó confirmar su turno presionando "${userAction}" pero no es posible.
+
+[ERROR_ESTADO_TURNO]
+Accion_Solicitada: Confirmación
+Error: ${errorType}
+Mensaje: ${proxyResponse.message || "No se puede confirmar un turno que ya fue cancelado"}
+Razon: El turno ya fue cancelado y no puede ser confirmado por este medio
+Solucion_Sugerida: Contactar directamente con la clínica
+[/ERROR_ESTADO_TURNO]
+
+Explica que no se puede confirmar un turno ya cancelado y que debe contactar a la clínica si cometió un error.`
+              break
+
+            case "TURNO_EXPIRED":
+              userMessage = `El paciente intentó gestionar su turno presionando "${userAction}" pero el turno ya expiró.
+
+[ERROR_ESTADO_TURNO]
+Accion_Solicitada: ${userAction}
+Error: ${errorType}
+Mensaje: ${proxyResponse.message || "El turno ya expiró"}
+Razon: El turno ya pasó la fecha/hora programada
+Solucion_Sugerida: Contactar directamente con la clínica para reagendar
+[/ERROR_ESTADO_TURNO]
+
+Explica que el turno ya expiró y que debe contactar a la clínica para reagendar.`
+              break
+
+            default:
+              // Error genérico
+              userMessage = `El paciente presionó "${originalMessage}" pero hubo un error en el procesamiento.
 
 [ERROR_PROCESAMIENTO_BOTON]
 Accion: ${originalMessage}
@@ -224,6 +272,7 @@ Error: ${JSON.stringify(proxyResponse)}
 [/ERROR_PROCESAMIENTO_BOTON]
 
 Informa que hubo un problema técnico y ofrece alternativas de contacto.`
+          }
         }
       }
     }
