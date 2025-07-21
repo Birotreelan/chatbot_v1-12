@@ -1,65 +1,47 @@
-/* -------------------------------------------------------------------------------------------------
- * fetchProxyApi
- * -----------------------------------------------------------------------------------------------*/
-"use server"
-
 /**
- * Minimal helper to call your proxy service with a JSON payload.
- *
- * @param proxyBaseUrl  Base URL of the proxy service, e.g. "https://treelan.net/managment/proxy_service/"
- * @param endpoint      Path of the endpoint inside the proxy, e.g. "set_turno"
- * @param payload       Data that will be JSON-stringified and sent in the request body
- * @param init          Optional fetch init overrides (headers, cache, etc.).  The method and body
- *                      will be supplied automatically.
- *
- * @throws Error        If the request fails or the proxy responds with a non-2xx status
- * @returns             Parsed JSON response (or plain text if the response is not JSON)
+ * Utility function to make HTTP requests to proxy APIs
+ * Handles common error cases and provides consistent logging
  */
-export async function fetchProxyApi(
-  proxyBaseUrl: string,
-  endpoint: string,
-  payload: unknown = {},
-  init: Omit<RequestInit, "method" | "body"> = {},
-) {
-  /* ------------------------------------------------------------------------ */
-  // Compose the final URL without duplicate slashes.
-  /* ------------------------------------------------------------------------ */
-  const url = proxyBaseUrl.replace(/\/+$/, "") + "/" + endpoint.replace(/^\/+/, "")
+export async function fetchProxyApi(url: string, data: any, options: { timeout?: number } = {}) {
+  const { timeout = 30000 } = options
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15_000) // 15 s hard-timeout
+  console.log(`[PROXY] 📤 POST → ${url}`)
+  console.log(`[PROXY] 📦 Payload:`, JSON.stringify(data, null, 2))
 
   try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeout)
+
     const response = await fetch(url, {
-      ...init,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(init.headers ?? {}),
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(data),
       signal: controller.signal,
     })
 
-    // Try to decode JSON but gracefully fall back to raw text
-    const raw = await response.text()
-    let data: unknown
-    try {
-      data = raw ? JSON.parse(raw) : null
-    } catch {
-      data = raw
-    }
+    clearTimeout(timeoutId)
+
+    console.log(`[PROXY] 📥 ${response.status} ${response.statusText}`)
 
     if (!response.ok) {
-      throw new Error(
-        `Proxy API error ${response.status} ${response.statusText}: ${
-          typeof data === "string" ? data : JSON.stringify(data)
-        }`,
-      )
+      const errorText = await response.text()
+      console.error(`[PROXY] ❌ Error response: ${errorText}`)
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
     }
 
-    return data
-  } finally {
-    clearTimeout(timeout)
+    const responseData = await response.json()
+    console.log(`[PROXY] ✅ Response:`, JSON.stringify(responseData, null, 2))
+
+    return responseData
+  } catch (error) {
+    if (error.name === "AbortError") {
+      console.error(`[PROXY] ⏰ Request timeout after ${timeout}ms`)
+      throw new Error(`Request timeout after ${timeout}ms`)
+    }
+
+    console.error(`[PROXY] ❌ Network error:`, error)
+    throw error
   }
 }
