@@ -222,7 +222,7 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
   // Fallback: truncar el string completo
   const truncatedString = responseStr.substring(0, maxLength - 100) + "... [TRUNCADO]"
   return {
-    exito: false,
+    exito: response.exito || false,
     datos: truncatedString,
     _truncated: true,
     _originalLength: originalLength,
@@ -374,9 +374,12 @@ export async function executeOpenAITool(
 
       case "reservar_turno":
         requestBody.Action = "set_turno"
+        // Cambiar esta línea:
+        // requestBody.agendaId = toolArgs.agendaId
+        // Por esta:
         requestBody.Agenda_Id = toolArgs.agendaId
 
-        // Campos del paciente
+        // También agregar los otros campos requeridos
         requestBody.Paciente_DNI = toolArgs.dni
         requestBody.Paciente_Nombre = toolArgs.nombre
         requestBody.Paciente_Apellido = toolArgs.apellido
@@ -384,44 +387,9 @@ export async function executeOpenAITool(
         requestBody.Paciente_Email = toolArgs.email
 
         // Campos opcionales adicionales si están disponibles
-        if (toolArgs.fecha) {
-          // Asegurar que la fecha esté en formato YYYY-MM-DD
-          let fechaFormateada = toolArgs.fecha
-          if (fechaFormateada.includes(" de ")) {
-            // Si viene en formato "23 de julio", convertir a fecha actual del año
-            const hoy = new Date()
-            const año = hoy.getFullYear()
-
-            // Mapeo de meses en español
-            const meses = {
-              enero: "01",
-              febrero: "02",
-              marzo: "03",
-              abril: "04",
-              mayo: "05",
-              junio: "06",
-              julio: "07",
-              agosto: "08",
-              septiembre: "09",
-              octubre: "10",
-              noviembre: "11",
-              diciembre: "12",
-            }
-
-            const partes = fechaFormateada.toLowerCase().split(" de ")
-            if (partes.length === 2) {
-              const dia = partes[0].padStart(2, "0")
-              const mes = meses[partes[1]] || "07" // Default julio si no encuentra
-              fechaFormateada = `${año}-${mes}-${dia}`
-            }
-          }
-          requestBody.Fecha = fechaFormateada
-        }
-
+        if (toolArgs.fecha) requestBody.Fecha = toolArgs.fecha
         if (toolArgs.hora) requestBody.Hora = toolArgs.hora
         if (toolArgs.profesional) requestBody.Profesional_Nombre = toolArgs.profesional
-
-        console.log(`[TOOL] 📅 Reservando turno con fecha: ${requestBody.Fecha}`)
         break
 
       default:
@@ -626,6 +594,45 @@ export async function executeOpenAITool(
           }
         }
 
+      case "buscar_turnos_disponibles":
+        if (data.turnos_disponibles) {
+          const todosLosTurnos = []
+          for (const diaData of data.turnos_disponibles) {
+            if (diaData.turnos && Array.isArray(diaData.turnos)) {
+              for (const turno of diaData.turnos) {
+                todosLosTurnos.push({
+                  id: turno.Id,
+                  fecha: turno.Fecha,
+                  hora: turno.Hora,
+                  profesional: turno.Profesional_Nombre,
+                  profesional_id: turno.Profesional_Id,
+                  especialidad: turno.Especialidad,
+                  estado: "disponible",
+                  sede_nombre: turno.Sede_Nombre,
+                  dia_semana: turno.Dia_Semana,
+                })
+              }
+            }
+            if (todosLosTurnos.length >= 40) break
+          }
+
+          console.log(`[TOOL] ✅ ${todosLosTurnos.length} turnos encontrados`)
+          return truncateToolResponse({
+            exito: true,
+            datos: todosLosTurnos.slice(0, 40),
+          })
+        } else if (data.error) {
+          return {
+            exito: false,
+            error: {
+              codigo: "API_ERROR",
+              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
+            },
+          }
+        } else {
+          return { exito: true, datos: [] }
+        }
+
       case "reservar_turno":
         if (data.success || data.exito) {
           return {
@@ -651,48 +658,6 @@ export async function executeOpenAITool(
               mensaje: "La API devolvió una respuesta inesperada al reservar el turno",
             },
           }
-        }
-
-      case "buscar_turnos_disponibles":
-        if (data.turnos_disponibles) {
-          const todosLosTurnos = []
-          for (const diaData of data.turnos_disponibles) {
-            if (diaData.turnos && Array.isArray(diaData.turnos)) {
-              for (const turno of diaData.turnos) {
-                todosLosTurnos.push({
-                  id: turno.Id,
-                  agendaId: turno.Id, // Agregar agendaId explícitamente
-                  fecha: turno.Fecha, // Mantener formato YYYY-MM-DD
-                  hora: turno.Hora,
-                  profesional: turno.Profesional_Nombre,
-                  profesional_id: turno.Profesional_Id,
-                  especialidad: turno.Especialidad,
-                  estado: "disponible",
-                  sede_nombre: turno.Sede_Nombre,
-                  dia_semana: turno.Dia_Semana,
-                  // Agregar fecha formateada para mostrar al usuario
-                  fecha_display: turno.Fecha_Display || turno.Fecha,
-                })
-              }
-            }
-            if (todosLosTurnos.length >= 40) break
-          }
-
-          console.log(`[TOOL] ✅ ${todosLosTurnos.length} turnos encontrados`)
-          return truncateToolResponse({
-            exito: true,
-            datos: todosLosTurnos.slice(0, 40),
-          })
-        } else if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-            },
-          }
-        } else {
-          return { exito: true, datos: [] }
         }
 
       default:
