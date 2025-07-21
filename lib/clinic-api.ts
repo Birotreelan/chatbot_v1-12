@@ -349,7 +349,7 @@ export class ClinicAPI {
     },
   ): Promise<ApiResponse<any>> {
     const params: Record<string, any> = {
-      Agenda_Id: agendaId, // Asegurar que use Agenda_Id con mayúscula
+      Agenda_Id: agendaId,
       Paciente_Telefono: pacienteData.telefono,
       Paciente_Email: pacienteData.email,
     }
