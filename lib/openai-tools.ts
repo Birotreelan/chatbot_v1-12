@@ -3,7 +3,7 @@
 import { fetchProxyApi } from "./fetch-proxy-api"
 import OpenAI from "openai"
 import { sendWhatsAppMessage } from "./whatsapp-api"
-import { getWhatsAppConfig, getWhatsAppConfigByPhoneId } from "./db"
+import { getWhatsAppConfigByPhoneId } from "./db"
 
 // Handlers for each tool
 async function handleValidateDNI(args: any, clienteId: string): Promise<string> {
@@ -198,19 +198,13 @@ export async function getAssistantResponse(
   console.log(`[OPENAI] 📝 Mensaje: "${message.substring(0, 100)}..."`)
 
   try {
-    // Get configuration using phoneNumberId to get the correct config
-    const config = await getWhatsAppConfig(phoneNumberId)
+    // Get configuration using phoneNumberId
+    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
     if (!config) {
-      // Try to get config by phoneNumberId directly
-      const configByPhone = await getWhatsAppConfigByPhoneId(phoneNumberId)
-      if (!configByPhone) {
-        console.error(`[OPENAI] ❌ No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
-        throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
-      }
-      console.log(`[OPENAI] ⚙️ Config: ${configByPhone.displayName} | Cliente: ${configByPhone.cliente_id}`)
-    } else {
-      console.log(`[OPENAI] ⚙️ Config: ${config.displayName} | Cliente: ${config.cliente_id}`)
+      console.error(`[OPENAI] ❌ No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
+      throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
     }
+    console.log(`[OPENAI] ⚙️ Config: ${config.displayName} | Cliente: ${config.cliente_id}`)
 
     // Add user message to thread
     console.log(`[OPENAI] 📤 Mensaje enviado a thread ${threadId}`)

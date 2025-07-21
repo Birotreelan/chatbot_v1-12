@@ -1,47 +1,60 @@
-/**
- * Utility function to make HTTP requests to proxy APIs
- * Handles common error cases and provides consistent logging
- */
-export async function fetchProxyApi(url: string, data: any, options: { timeout?: number } = {}) {
-  const { timeout = 30000 } = options
-
-  console.log(`[PROXY] 📤 POST → ${url}`)
-  console.log(`[PROXY] 📦 Payload:`, JSON.stringify(data, null, 2))
+export async function fetchProxyApi(proxyUrl: string, payload: any): Promise<any> {
+  console.log(`[PROXY] 📤 POST → ${proxyUrl}`)
+  console.log(`[PROXY] 📋 Payload:`, JSON.stringify(payload, null, 2))
 
   try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeout)
-
-    const response = await fetch(url, {
+    const response = await fetch(proxyUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(data),
-      signal: controller.signal,
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000), // 30 second timeout
     })
 
-    clearTimeout(timeoutId)
-
-    console.log(`[PROXY] 📥 ${response.status} ${response.statusText}`)
+    const responseText = await response.text()
+    console.log(
+      `[PROXY] 📥 ${response.status} ${responseText.substring(0, 200)}${responseText.length > 200 ? "..." : ""}`,
+    )
 
     if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`[PROXY] ❌ Error response: ${errorText}`)
-      throw new Error(`HTTP ${response.status}: ${errorText}`)
+      throw new Error(`HTTP ${response.status}: ${responseText}`)
     }
 
-    const responseData = await response.json()
-    console.log(`[PROXY] ✅ Response:`, JSON.stringify(responseData, null, 2))
+    let data
+    try {
+      data = JSON.parse(responseText)
+    } catch (parseError) {
+      console.error(`[PROXY] ❌ Error parsing response:`, parseError)
+      return {
+        exito: false,
+        error: {
+          codigo: "PARSE_ERROR",
+          mensaje: `Invalid JSON response: ${responseText.substring(0, 100)}...`,
+        },
+      }
+    }
 
-    return responseData
+    return data
   } catch (error) {
+    console.error(`[PROXY] ❌ Error:`, error)
+
     if (error.name === "AbortError") {
-      console.error(`[PROXY] ⏰ Request timeout after ${timeout}ms`)
-      throw new Error(`Request timeout after ${timeout}ms`)
+      return {
+        exito: false,
+        error: {
+          codigo: "TIMEOUT",
+          mensaje: "Request timeout after 30 seconds",
+        },
+      }
     }
 
-    console.error(`[PROXY] ❌ Network error:`, error)
-    throw error
+    return {
+      exito: false,
+      error: {
+        codigo: "NETWORK_ERROR",
+        mensaje: error instanceof Error ? error.message : "Unknown network error",
+      },
+    }
   }
 }
