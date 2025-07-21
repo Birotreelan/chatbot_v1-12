@@ -374,8 +374,22 @@ export async function executeOpenAITool(
 
       case "reservar_turno":
         requestBody.Action = "set_turno"
-        // Lógica compleja de reserva (mantenida igual pero con logs simplificados)
-        // ... (resto de la lógica de reserva)
+        // Cambiar esta línea:
+        // requestBody.agendaId = toolArgs.agendaId
+        // Por esta:
+        requestBody.Agenda_Id = toolArgs.agendaId
+
+        // También agregar los otros campos requeridos
+        requestBody.Paciente_DNI = toolArgs.dni
+        requestBody.Paciente_Nombre = toolArgs.nombre
+        requestBody.Paciente_Apellido = toolArgs.apellido
+        requestBody.Paciente_Telefono = toolArgs.telefono
+        requestBody.Paciente_Email = toolArgs.email
+
+        // Campos opcionales adicionales si están disponibles
+        if (toolArgs.fecha) requestBody.Fecha = toolArgs.fecha
+        if (toolArgs.hora) requestBody.Hora = toolArgs.hora
+        if (toolArgs.profesional) requestBody.Profesional_Nombre = toolArgs.profesional
         break
 
       default:
