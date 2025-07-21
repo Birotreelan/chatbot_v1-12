@@ -79,6 +79,10 @@ export const openAITools = [
             type: "string",
             description: "Email del paciente recopilado durante la conversación",
           },
+          agenda_id: {
+            type: "string",
+            description: "ID de la agenda del turno a reservar, obtenido de la búsqueda de turnos disponibles",
+          },
           fecha: {
             type: "string",
             description: "Fecha del turno en formato YYYY-MM-DD",
@@ -92,7 +96,7 @@ export const openAITools = [
             description: "Nombre del profesional",
           },
         },
-        required: ["dni", "nombre", "apellido", "telefono", "email", "fecha", "hora", "profesional"],
+        required: ["dni", "nombre", "apellido", "telefono", "email", "agenda_id"],
       },
     },
   },
@@ -374,10 +378,7 @@ export async function executeOpenAITool(
 
       case "reservar_turno":
         requestBody.Action = "set_turno"
-        // Cambiar esta línea:
-        // requestBody.agendaId = toolArgs.agendaId
-        // Por esta:
-        requestBody.Agenda_Id = toolArgs.agendaId
+        requestBody.Agenda_Id = toolArgs.agenda_id || toolArgs.agendaId
 
         // También agregar los otros campos requeridos
         requestBody.Paciente_DNI = toolArgs.dni
