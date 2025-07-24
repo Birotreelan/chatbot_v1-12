@@ -283,6 +283,97 @@ export async function executeOpenAITool(
         break
 
       case "buscar_turnos_disponibles":
+        requestBody.Action = "get_turnos"
+        // Extraer fechas desde y hasta del rango
+        if (toolArgs.rango_fechas) {
+          let fechaDesde, fechaHasta
+          if (toolArgs.rango_fechas.includes(" a ")) {
+            ;[fechaDesde, fechaHasta] = toolArgs.rango_fechas.split(" a ")
+          } else if (toolArgs.rango_fechas.includes(" to ")) {
+            ;[fechaDesde, fechaHasta] = toolArgs.rango_fechas.split(" to ")
+          } else {
+            fechaDesde = toolArgs.rango_fechas
+            fechaHasta = toolArgs.rango_fechas
+          }
+
+          requestBody.Fecha_Desde = fechaDesde.trim()
+          requestBody.Fecha_Hasta = fechaHasta ? fechaHasta.trim() : fechaDesde.trim()
+        } else {
+          const hoy = new Date()
+          const fechaDesde = hoy.toISOString().split("T")[0]
+          const unMesDespues = new Date(hoy.setMonth(hoy.getMonth() + 1)).toISOString().split("T")[0]
+          requestBody.Fecha_Desde = fechaDesde
+          requestBody.Fecha_Hasta = unMesDespues
+        }
+
+        if (toolArgs.profesional_id) {
+          requestBody.Profesional_Id = toolArgs.profesional_id
+        } else if (toolArgs.profesional) {
+          // Buscar profesional primero
+          const profesionalRequestBody = {
+            Cliente_Id: clienteId.trim(),
+            Action: "get_profesionales",
+            busqueda: toolArgs.profesional,
+          }
+
+          console.log(`[PROXY] 🔍 Buscando profesional: ${toolArgs.profesional}`)
+          const profesionalResponse = await fetch(proxyUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(profesionalRequestBody),
+          })
+
+          const profesionalData = JSON.parse(await profesionalResponse.text())
+          if (profesionalData.profesionales && profesionalData.profesionales.length > 0) {
+            if (profesionalData.profesionales.length > 1) {
+              return {
+                exito: true,
+                datos: {
+                  multiple: true,
+                  profesionales: profesionalData.profesionales.map((p: any) => ({
+                    id: p.Id,
+                    nombre: p.Nombre,
+                    especialidad: p.Especialidad,
+                  })),
+                  mensaje: "Se encontraron múltiples profesionales. Por favor, seleccione uno.",
+                },
+              }
+            }
+            requestBody.Profesional_Id = profesionalData.profesionales[0].Id
+          }
+        } else if (toolArgs.especialidad) {
+          // Buscar subespecialidad primero
+          const subespecialidadRequestBody = {
+            Cliente_Id: clienteId.trim(),
+            Action: "get_subespecialidades",
+          }
+
+          console.log(`[PROXY] 🔍 Buscando especialidad: ${toolArgs.especialidad}`)
+          const subespecialidadResponse = await fetch(proxyUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(subespecialidadRequestBody),
+          })
+
+          const subespecialidadData = JSON.parse(await subespecialidadResponse.text())
+          if (subespecialidadData.subespecialidades && subespecialidadData.subespecialidades.length > 0) {
+            const subespecialidadEncontrada = subespecialidadData.subespecialidades.find((e: any) =>
+              e.Nombre.toLowerCase().includes(toolArgs.especialidad.toLowerCase()),
+            )
+
+            if (subespecialidadEncontrada) {
+              requestBody.Subespecialidad_Id = subespecialidadEncontrada.Id
+            } else {
+              return {
+                exito: false,
+                error: {
+                  codigo: "SUBESPECIALIDAD_NO_ENCONTRADA",
+                  mensaje: `No se encontró la subespecialidad: ${toolArgs.especialidad}`,
+                },
+              }
+            }
+          }
+        }
         break
 
       case "reservar_turno":
@@ -528,6 +619,25 @@ export async function executeOpenAITool(
               codigo: "RESPUESTA_INESPERADA",
               mensaje: "La API devolvió una respuesta inesperada al reservar el turno",
             },
+          }
+        }
+
+      case "buscar_turnos_disponibles":
+        console.log(`[TOOL] ✅ Respuesta original del proxy para buscar_turnos_disponibles:`, data)
+
+        // Devolver la respuesta exactamente como llega del proxy
+        if (data.error) {
+          return {
+            exito: false,
+            error: {
+              codigo: "API_ERROR",
+              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
+            },
+          }
+        } else {
+          return {
+            exito: true,
+            datos: data, // Devolver toda la respuesta original sin modificaciones
           }
         }
 
