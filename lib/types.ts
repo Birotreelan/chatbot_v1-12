@@ -12,6 +12,7 @@ export interface WhatsAppConfig {
   accessToken: string
   webhookUrl?: string
   cliente_id?: string
+  sede_id?: string
   proxy?: string
 
   // Widget configuration
