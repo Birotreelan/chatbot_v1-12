@@ -1,71 +1,132 @@
 import { NextResponse } from "next/server"
-import { processWhatsAppMessage } from "@/lib/whatsapp-processor"
+import { getWhatsAppConfigByPhoneId } from "@/lib/db"
+import { handleMessage } from "@/lib/whatsapp"
+import { enqueueMessage } from "@/lib/queue"
+import { incrementMetric, logError } from "@/lib/monitoring"
+import { rateLimit } from "@/lib/rate-limit"
 
-export async function POST(req: Request) {
+// Permitir que la función se ejecute durante más tiempo
+export const maxDuration = 60
+
+// Manejar la verificación del webhook (GET)
+export async function GET(req: Request) {
   try {
-    const body = await req.json()
+    const url = new URL(req.url)
+    const mode = url.searchParams.get("hub.mode")
+    const token = url.searchParams.get("hub.verify_token")
+    const challenge = url.searchParams.get("hub.challenge")
+    const phoneNumberId = url.searchParams.get("phone_number_id")
 
-    if (!body || !body.entry || !Array.isArray(body.entry) || body.entry.length === 0) {
-      console.error("Invalid webhook body:", body)
-      return new NextResponse("Invalid body", { status: 400 })
+    console.log(
+      `[WEBHOOK] Verificación recibida: mode=${mode}, token=${token?.substring(0, 3)}***, phoneNumberId=${phoneNumberId}`,
+    )
+
+    // Si se proporciona un phoneNumberId, verificar con la configuración específica
+    if (phoneNumberId) {
+      const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+      if (config && mode === "subscribe" && token === config.verifyToken) {
+        console.log(`[WEBHOOK] Verificación exitosa para phoneNumberId=${phoneNumberId}`)
+        return new Response(challenge, { status: 200 })
+      }
+    } else {
+      // Si no se proporciona phoneNumberId, verificar con el token global
+      if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+        console.log(`[WEBHOOK] Verificación exitosa con token global`)
+        return new Response(challenge, { status: 200 })
+      }
     }
 
-    const entry = body.entry[0]
-
-    if (!entry.changes || !Array.isArray(entry.changes) || entry.changes.length === 0) {
-      console.error("No changes found in entry:", entry)
-      return new NextResponse("No changes found", { status: 200 }) // Not an error, just no relevant data
-    }
-
-    const change = entry.changes[0]
-
-    if (
-      !change.value ||
-      !change.value.messages ||
-      !Array.isArray(change.value.messages) ||
-      change.value.messages.length === 0
-    ) {
-      console.log("No messages found in change:", change)
-      return new NextResponse("No messages found", { status: 200 }) // Not an error, just no messages
-    }
-
-    const message = change.value.messages[0]
-    const messageText = message.text.body
-    const from = message.from
-    const whatsappConfig = {
-      // Replace with your actual configuration values
-      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
-      accessToken: process.env.WHATSAPP_ACCESS_TOKEN || "",
-      version: "v17.0", // Or your desired version
-    }
-
-    if (!whatsappConfig.phoneNumberId || !whatsappConfig.accessToken) {
-      console.error("WhatsApp configuration missing. Check environment variables.")
-      return new NextResponse("WhatsApp configuration missing", { status: 500 })
-    }
-
-    const response = await processWhatsAppMessage({
-      message: messageText,
-      phoneNumber: from,
-      config: whatsappConfig,
-    })
-
-    return NextResponse.json({ received: true }, { status: 200 })
-  } catch (error: any) {
-    console.error("Webhook error:", error)
-    return new NextResponse(`Webhook Error: ${error.message}`, { status: 400 })
+    console.log(`[WEBHOOK] Verificación fallida`)
+    return new Response("Verification failed", { status: 403 })
+  } catch (error) {
+    console.error("[WEBHOOK] Error en verificación:", error)
+    await logError("webhook_verification", error instanceof Error ? error : new Error(String(error)))
+    return new Response("Error processing verification", { status: 500 })
   }
 }
 
-export async function GET(req: Request) {
-  const mode = req.nextUrl.searchParams.get("hub.mode")
-  const token = req.nextUrl.searchParams.get("hub.verify_token")
-  const challenge = req.nextUrl.searchParams.get("hub.challenge")
+// Manejar los mensajes entrantes (POST)
+export async function POST(req: Request) {
+  console.log("[WEBHOOK] Recibida solicitud POST")
 
-  if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
-    console.log("WEBHOOK_VERIFIED")
-    return new NextResponse(challenge, { status: 200 })
-  } else {
-    return new NextResponse("Error, invalid token", { status: 403 })
+  try {
+    // Obtener la IP del cliente
+    const ip = req.headers.get("x-forwarded-for") || "unknown"
+    console.log(`[WEBHOOK] IP del cliente: ${ip}`)
+
+    // Aplicar rate limiting, pero permitir IPs de Meta/WhatsApp
+    const rateLimitResult = await rateLimit(`ip:${ip}`)
+    if (!rateLimitResult.success) {
+      console.warn(`[WEBHOOK] Solicitud limitada por tasa para IP: ${ip}`)
+      return NextResponse.json({ success: false, error: "Rate limited" }, { status: 429 })
+    }
+
+    // Procesar el cuerpo de la solicitud
+    const body = await req.json()
+    console.log(`[WEBHOOK] Objeto recibido: ${body.object}`)
+
+    // Verificar si es un mensaje de WhatsApp
+    if (body.object !== "whatsapp_business_account") {
+      console.warn(`[WEBHOOK] Objeto no reconocido: ${body.object}`)
+      return NextResponse.json({ success: false, error: "Not a WhatsApp message" }, { status: 400 })
+    }
+
+    // Incrementar métrica de mensajes recibidos
+    await incrementMetric("messages_received")
+
+    // Procesar cada entrada y cambio
+    for (const entry of body.entry || []) {
+      for (const change of entry.changes || []) {
+        if (change.field === "messages" && change.value && change.value.messages && change.value.messages.length > 0) {
+          const phoneNumberId = change.value.metadata.phone_number_id
+          const userPhoneNumber = change.value.messages[0].from
+
+          console.log(`[WEBHOOK] Mensaje recibido de ${userPhoneNumber} para phoneNumberId=${phoneNumberId}`)
+
+          // Obtener la configuración de WhatsApp
+          const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+          if (!config) {
+            console.error(`[WEBHOOK] Configuración no encontrada para phoneNumberId=${phoneNumberId}`)
+            continue
+          }
+
+          // Determinar si debemos usar QStash o procesar directamente
+          const useQStash = process.env.USE_QSTASH === "true"
+          console.log(`[WEBHOOK] Usando QStash: ${useQStash}`)
+
+          if (useQStash) {
+            // Encolar el mensaje para procesamiento asíncrono
+            console.log(`[WEBHOOK] Encolando mensaje para procesamiento asíncrono`)
+            try {
+              const result = await enqueueMessage(change.value)
+              if (result.success && result.messageId) {
+                console.log(`[WEBHOOK] Mensaje encolado con ID: ${result.messageId}`)
+              } else {
+                console.error(`[WEBHOOK] Error al encolar mensaje, procesando directamente como fallback`)
+                await handleMessage(change.value)
+              }
+            } catch (error) {
+              console.error(`[WEBHOOK] Error al encolar mensaje:`, error)
+              // Si falla el encolamiento, procesar de forma síncrona como fallback
+              console.log(`[WEBHOOK] Procesando mensaje directamente como fallback`)
+              await handleMessage(change.value)
+            }
+          } else {
+            // Procesar el mensaje directamente
+            console.log(`[WEBHOOK] Procesando mensaje directamente`)
+            await handleMessage(change.value)
+          }
+        }
+      }
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error("[WEBHOOK] Error al procesar webhook:", error)
+    await logError("webhook", error instanceof Error ? error : new Error(String(error)))
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : "Error desconocido" },
+      { status: 500 },
+    )
   }
 }
