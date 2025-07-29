@@ -374,6 +374,13 @@ export class ClinicAPI {
 
     return this.fetchProxyApi<any>("set_turno", params)
   }
+
+  /**
+   * Obtiene los datos de sedes disponibles
+   */
+  async obtenerSedes(): Promise<ApiResponse<any>> {
+    return this.fetchProxyApi<any>("get_data_sedes")
+  }
 }
 
 /**
@@ -553,6 +560,50 @@ export async function reserveTurno(
     }
   } catch (error) {
     console.error(`[RESERVE-TURNO] Error al reservar turno:`, error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
+  }
+}
+
+/**
+ * Obtiene los datos de sedes usando la API de la clínica
+ */
+export async function getSedes(clienteId: string): Promise<{
+  success: boolean
+  data?: any
+  error?: string
+}> {
+  try {
+    console.log(`[GET-SEDES] Obteniendo sedes para cliente: ${clienteId}`)
+
+    if (!clienteId) {
+      console.error(`[GET-SEDES] ❌ Cliente ID faltante`)
+      return {
+        success: false,
+        error: "ID de cliente requerido",
+      }
+    }
+
+    const clinicAPI = createClinicAPI(clienteId)
+    const response = await clinicAPI.obtenerSedes()
+
+    if (response.exito && response.datos) {
+      console.log(`[GET-SEDES] ✅ Sedes obtenidas:`, response.datos)
+      return {
+        success: true,
+        data: response.datos,
+      }
+    } else {
+      console.log(`[GET-SEDES] ❌ No se encontraron sedes o error:`, response.error)
+      return {
+        success: false,
+        error: response.error?.mensaje || "No se encontraron sedes",
+      }
+    }
+  } catch (error) {
+    console.error(`[GET-SEDES] Error al obtener sedes:`, error)
     return {
       success: false,
       error: error instanceof Error ? error.message : "Error desconocido",

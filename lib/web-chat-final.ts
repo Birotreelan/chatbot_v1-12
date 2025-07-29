@@ -1,4 +1,4 @@
-import { validateDNI, searchTurnos, reserveTurno } from "./clinic-api"
+import { validateDNI, searchTurnos, reserveTurno, getSedes } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import { Redis } from "@upstash/redis"
 
@@ -69,9 +69,47 @@ function getDefaultDateRange(): string {
   return `${formatDate(today)} a ${formatDate(nextWeek)}`
 }
 
-// Función para crear el bloque [SISTEMA]
-function createSystemBlock(clinicName: string, clienteId?: string, sedeId?: string): string {
+// Función para crear el bloque [SISTEMA] con datos de sedes
+async function createSystemBlock(clinicName: string, clienteId?: string, sedeId?: string): Promise<string> {
   const fechaHora = getArgentinaDateTime()
+
+  let sedesInfo = "No disponible"
+
+  // Obtener datos de sedes si tenemos clienteId
+  if (clienteId) {
+    try {
+      console.log(`[WEB-CHAT-FINAL] 🏥 Obteniendo datos de sedes para cliente: ${clienteId}`)
+      const sedesResult = await getSedes(clienteId)
+
+      if (sedesResult.success && sedesResult.data) {
+        // Formatear los datos de sedes para el bloque [SISTEMA]
+        if (Array.isArray(sedesResult.data)) {
+          sedesInfo = sedesResult.data
+            .map(
+              (sede: any) =>
+                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
+            )
+            .join(" | ")
+        } else if (sedesResult.data.sedes && Array.isArray(sedesResult.data.sedes)) {
+          sedesInfo = sedesResult.data.sedes
+            .map(
+              (sede: any) =>
+                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
+            )
+            .join(" | ")
+        } else {
+          sedesInfo = JSON.stringify(sedesResult.data).substring(0, 200) + "..."
+        }
+        console.log(`[WEB-CHAT-FINAL] ✅ Sedes obtenidas y formateadas`)
+      } else {
+        console.log(`[WEB-CHAT-FINAL] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
+        sedesInfo = `Error: ${sedesResult.error}`
+      }
+    } catch (error) {
+      console.error(`[WEB-CHAT-FINAL] ❌ Error obteniendo sedes:`, error)
+      sedesInfo = "Error al obtener sedes"
+    }
+  }
 
   return `[SISTEMA]
 Nombre: ${clinicName}
@@ -79,6 +117,7 @@ FechaHora: ${fechaHora}
 CelularPaciente: No disponible (consulta web)
 Cliente_id: ${clienteId || "No configurado"}
 sede_id: ${sedeId || "No configurado"}
+Sedes_Disponibles: ${sedesInfo}
 [/SISTEMA]`
 }
 
@@ -131,8 +170,8 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] 🌐 Usando thread: ${threadId}`)
     console.log(`[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
 
-    // Crear el mensaje con bloque [SISTEMA]
-    const systemBlock = createSystemBlock(config.displayName, config.cliente_id, config.sede_id)
+    // Crear el mensaje con bloque [SISTEMA] (ahora es async)
+    const systemBlock = await createSystemBlock(config.displayName, config.cliente_id, config.sede_id)
     const fullMessage = `${systemBlock}\n\n${message}`
 
     console.log(`[WEB-CHAT-FINAL] 📋 Bloque [SISTEMA] creado:`)

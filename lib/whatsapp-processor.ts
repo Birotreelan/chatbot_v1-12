@@ -1,4 +1,4 @@
-import { validateDNI, searchTurnos, reserveTurno } from "./clinic-api"
+import { validateDNI, searchTurnos, reserveTurno, getSedes } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import { getThreadForUser, updateWhatsAppStats } from "./db"
 import type { WhatsAppConfig } from "./types"
@@ -9,14 +9,52 @@ interface ProcessWhatsAppMessageParams {
   config: WhatsAppConfig
 }
 
-// Función para crear el bloque [SISTEMA] para WhatsApp
-function createWhatsAppSystemBlock(
+// Función para crear el bloque [SISTEMA] para WhatsApp con datos de sedes
+async function createWhatsAppSystemBlock(
   clinicName: string,
   phoneNumber: string,
   clienteId?: string,
   sedeId?: string,
-): string {
+): Promise<string> {
   const fechaHora = getArgentinaDateTime()
+
+  let sedesInfo = "No disponible"
+
+  // Obtener datos de sedes si tenemos clienteId
+  if (clienteId) {
+    try {
+      console.log(`[WHATSAPP-PROCESSOR] 🏥 Obteniendo datos de sedes para cliente: ${clienteId}`)
+      const sedesResult = await getSedes(clienteId)
+
+      if (sedesResult.success && sedesResult.data) {
+        // Formatear los datos de sedes para el bloque [SISTEMA]
+        if (Array.isArray(sedesResult.data)) {
+          sedesInfo = sedesResult.data
+            .map(
+              (sede: any) =>
+                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
+            )
+            .join(" | ")
+        } else if (sedesResult.data.sedes && Array.isArray(sedesResult.data.sedes)) {
+          sedesInfo = sedesResult.data.sedes
+            .map(
+              (sede: any) =>
+                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
+            )
+            .join(" | ")
+        } else {
+          sedesInfo = JSON.stringify(sedesResult.data).substring(0, 200) + "..."
+        }
+        console.log(`[WHATSAPP-PROCESSOR] ✅ Sedes obtenidas y formateadas`)
+      } else {
+        console.log(`[WHATSAPP-PROCESSOR] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
+        sedesInfo = `Error: ${sedesResult.error}`
+      }
+    } catch (error) {
+      console.error(`[WHATSAPP-PROCESSOR] ❌ Error obteniendo sedes:`, error)
+      sedesInfo = "Error al obtener sedes"
+    }
+  }
 
   return `[SISTEMA]
 Nombre: ${clinicName}
@@ -24,6 +62,7 @@ FechaHora: ${fechaHora}
 CelularPaciente: ${phoneNumber}
 Cliente_id: ${clienteId || "No configurado"}
 sede_id: ${sedeId || "No configurado"}
+Sedes_Disponibles: ${sedesInfo}
 [/SISTEMA]`
 }
 
@@ -56,8 +95,8 @@ export async function processWhatsAppMessage(params: ProcessWhatsAppMessageParam
     const { threadId, isNewThread, isResetThread } = await getThreadForUser(phoneNumber, config.id)
     console.log(`[WHATSAPP-PROCESSOR] 🌐 Usando thread: ${threadId} (nuevo: ${isNewThread}, reset: ${isResetThread})`)
 
-    // Crear el mensaje con bloque [SISTEMA]
-    const systemBlock = createWhatsAppSystemBlock(config.displayName, phoneNumber, clienteId, sedeId)
+    // Crear el mensaje con bloque [SISTEMA] (ahora es async)
+    const systemBlock = await createWhatsAppSystemBlock(config.displayName, phoneNumber, clienteId, sedeId)
     const fullMessage = `${systemBlock}\n\n${message}`
 
     console.log(`[WHATSAPP-PROCESSOR] 📋 Bloque [SISTEMA] creado:`)
