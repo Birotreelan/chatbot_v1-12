@@ -78,7 +78,7 @@ async function createSystemBlock(clinicName: string, clienteId?: string, sedeId?
   // Obtener datos de sedes si tenemos clienteId
   if (clienteId) {
     try {
-      console.log(`[WEB-CHAT-FINAL] 🏥 Obteniendo datos de sedes para cliente: ${clienteId}`)
+      console.log(`[WEB-CHAT-FINAL] Obteniendo datos de sedes para cliente: ${clienteId}`)
       const sedesResult = await getSedes(clienteId)
 
       if (sedesResult.success && sedesResult.data) {
@@ -100,7 +100,7 @@ async function createSystemBlock(clinicName: string, clienteId?: string, sedeId?
         } else {
           sedesInfo = JSON.stringify(sedesResult.data).substring(0, 200) + "..."
         }
-        console.log(`[WEB-CHAT-FINAL] ✅ Sedes obtenidas y formateadas`)
+        console.log(`[WEB-CHAT-FINAL] Sedes obtenidas y formateadas`)
       } else {
         console.log(`[WEB-CHAT-FINAL] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
         sedesInfo = `Error: ${sedesResult.error}`
@@ -198,7 +198,6 @@ async function createWebThread(identifier: string): Promise<string> {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
         "OpenAI-Beta": "assistants=v2",
-        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         metadata: {
