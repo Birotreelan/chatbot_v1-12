@@ -70,7 +70,6 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     accessToken: config.accessToken || "",
     webhookUrl: config.webhookUrl,
     cliente_id: config.cliente_id,
-    sede_id: config.sede_id,
     proxy: config.proxy,
     // Añadir configuraciones por defecto del widget
     widgetEnabled: config.widgetEnabled !== undefined ? config.widgetEnabled : true,

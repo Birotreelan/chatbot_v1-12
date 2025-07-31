@@ -334,6 +334,37 @@ export async function validarObraSocial(
   }>(clienteId, "get_obras_sociales", { busqueda }, useCache)
 }
 
+// Función para obtener datos de sede
+export async function obtenerDatosSede(
+  clienteId: string,
+  sedeId: string,
+  useCache = true,
+): Promise<
+  ApiResponse<{
+    id: string
+    nombre_completo: string
+    domicilio: string
+    telefono: string
+    email: string
+    localidad: string
+    provincia: string
+    horario: string
+    dominio_web: string
+  }>
+> {
+  return fetchProxyApi<{
+    id: string
+    nombre_completo: string
+    domicilio: string
+    telefono: string
+    email: string
+    localidad: string
+    provincia: string
+    horario: string
+    dominio_web: string
+  }>(clienteId, "get_data_sedes", { sede_id: sedeId }, useCache)
+}
+
 // Funciones de compatibilidad con el código anterior
 
 // Compatibilidad: buscar paciente por DNI

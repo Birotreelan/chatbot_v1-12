@@ -371,8 +371,6 @@ FechaHora: ${fechaHora}
 PrimerMensaje: ${threadResult.isNewThread}
 TipoMensaje: ${messageType}
 PacienteCelular: ${userPhoneNumber}
-Cliente_id: ${config.cliente_id}
-sede_id: ${config.sede_id}
 [/SISTEMA]
 
 ${userMessage}`
@@ -386,8 +384,6 @@ PrimerMensaje: true
 ThreadReseteado: true
 TipoMensaje: ${messageType}
 PacienteCelular: ${userPhoneNumber}
-Cliente_id: ${config.cliente_id}
-sede_id: ${config.sede_id}
 [/SISTEMA]
 
 ${userMessage}`
@@ -449,8 +445,6 @@ FechaHora: ${fechaHora}
 PrimerMensaje: true
 TipoMensaje: ${messageType}
 PacienteCelular: ${userPhoneNumber}
-Cliente_id: ${config.cliente_id}
-sede_id: ${config.sede_id}
 [/SISTEMA]
 
 ${userMessage}`

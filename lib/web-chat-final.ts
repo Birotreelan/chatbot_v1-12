@@ -1,4 +1,4 @@
-import { validateDNI, searchTurnos, reserveTurno, getSedes } from "./clinic-api"
+import { validateDNI, searchTurnos, reserveTurno } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import { Redis } from "@upstash/redis"
 
@@ -69,55 +69,37 @@ function getDefaultDateRange(): string {
   return `${formatDate(today)} a ${formatDate(nextWeek)}`
 }
 
-// Función para crear el bloque [SISTEMA] con datos de sedes
+// Función para crear el bloque [SISTEMA] con datos de sede
 async function createSystemBlock(clinicName: string, clienteId?: string, sedeId?: string): Promise<string> {
   const fechaHora = getArgentinaDateTime()
 
-  let sedesInfo = "No disponible"
+  let sedeInfo = ""
 
-  // Obtener datos de sedes si tenemos clienteId
-  if (clienteId) {
+  // Obtener datos de sede si tenemos clienteId y sedeId
+  if (clienteId && sedeId) {
     try {
-      console.log(`[WEB-CHAT-FINAL] Obteniendo datos de sedes para cliente: ${clienteId}`)
-      const sedesResult = await getSedes(clienteId)
+      const { obtenerDatosSede } = await import("@/lib/api-tools/api-functions")
+      const sedeResponse = await obtenerDatosSede(clienteId, sedeId)
 
-      if (sedesResult.success && sedesResult.data) {
-        // Formatear los datos de sedes para el bloque [SISTEMA]
-        if (Array.isArray(sedesResult.data)) {
-          sedesInfo = sedesResult.data
-            .map(
-              (sede: any) =>
-                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
-            )
-            .join(" | ")
-        } else if (sedesResult.data.sedes && Array.isArray(sedesResult.data.sedes)) {
-          sedesInfo = sedesResult.data.sedes
-            .map(
-              (sede: any) =>
-                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
-            )
-            .join(" | ")
-        } else {
-          sedesInfo = JSON.stringify(sedesResult.data).substring(0, 200) + "..."
-        }
-        console.log(`[WEB-CHAT-FINAL] Sedes obtenidas y formateadas`)
-      } else {
-        console.log(`[WEB-CHAT-FINAL] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
-        sedesInfo = `Error: ${sedesResult.error}`
+      if (sedeResponse.exito && sedeResponse.datos) {
+        const sede = sedeResponse.datos
+        sedeInfo = `
+Sede: ${sede.nombre_completo}
+Domicilio: ${sede.domicilio}
+Telefono: ${sede.telefono}
+Email: ${sede.email}
+Horario: ${sede.horario}
+Web: ${sede.dominio_web}`
       }
     } catch (error) {
-      console.error(`[WEB-CHAT-FINAL] ❌ Error obteniendo sedes:`, error)
-      sedesInfo = "Error al obtener sedes"
+      console.error("[WEB-CHAT-FINAL] ❌ Error obteniendo datos de sede:", error)
     }
   }
 
   return `[SISTEMA]
 Nombre: ${clinicName}
 FechaHora: ${fechaHora}
-CelularPaciente: No disponible (consulta web)
-Cliente_id: ${clienteId || "No configurado"}
-sede_id: ${sedeId || "No configurado"}
-Sedes_Disponibles: ${sedesInfo}
+CelularPaciente: No disponible (consulta web)${sedeInfo}
 [/SISTEMA]`
 }
 
@@ -170,8 +152,8 @@ export async function processWebMessage(params: ProcessWebMessageParams): Promis
     console.log(`[WEB-CHAT-FINAL] 🌐 Usando thread: ${threadId}`)
     console.log(`[WEB-CHAT-FINAL] 🚫 GARANTÍA: NO se enviará a WhatsApp`)
 
-    // Crear el mensaje con bloque [SISTEMA] (ahora es async)
-    const systemBlock = await createSystemBlock(config.displayName, config.cliente_id, config.sede_id)
+    // Crear el mensaje con bloque [SISTEMA]
+    const systemBlock = await createSystemBlock(config.displayName, clienteId, config.sede_id)
     const fullMessage = `${systemBlock}\n\n${message}`
 
     console.log(`[WEB-CHAT-FINAL] 📋 Bloque [SISTEMA] creado:`)
@@ -198,6 +180,7 @@ async function createWebThread(identifier: string): Promise<string> {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
         "OpenAI-Beta": "assistants=v2",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         metadata: {
@@ -417,6 +400,23 @@ async function processMessageWithOpenAI(
                   "profesional",
                   "agendaId",
                 ],
+              },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "obtener_datos_sede",
+              description: "Obtiene información detallada de una sede específica",
+              parameters: {
+                type: "object",
+                properties: {
+                  sede_id: {
+                    type: "string",
+                    description: "ID de la sede a consultar",
+                  },
+                },
+                required: ["sede_id"],
               },
             },
           },
@@ -694,6 +694,27 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
                 success: false,
                 error:
                   "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para reservar tu turno.",
+                fallback: true,
+              })
+            }
+            break
+
+          case "obtener_datos_sede":
+            console.log(`[WEB-CHAT-FINAL] 🏢 Obteniendo datos de sede con cliente: ${clienteId}`)
+            console.log(`[WEB-CHAT-FINAL] 📋 Sede ID: ${args.sede_id}`)
+
+            try {
+              // Importar la función desde api-tools
+              const { obtenerDatosSede } = await import("@/lib/api-tools/api-functions")
+              const sedeResult = await obtenerDatosSede(clienteId, args.sede_id || "")
+              console.log(`[WEB-CHAT-FINAL] 📋 Resultado sede:`, sedeResult)
+              output = JSON.stringify(sedeResult)
+            } catch (error) {
+              console.error(`[WEB-CHAT-FINAL] ❌ Error obteniendo datos de sede:`, error)
+              output = JSON.stringify({
+                success: false,
+                error:
+                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar información de la sede.",
                 fallback: true,
               })
             }

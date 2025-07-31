@@ -37,7 +37,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
     verifyToken: config?.verifyToken || "",
     active: config?.active !== undefined ? config.active : true,
     cliente_id: config?.cliente_id || "",
-    sede_id: config?.sede_id || "",
     proxy: config?.proxy || "",
     // Configuraciones del widget
     widgetEnabled: config?.widgetEnabled !== undefined ? config.widgetEnabled : true,
@@ -315,17 +314,6 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                     value={formData.cliente_id}
                     onChange={handleChange}
                     placeholder="ID del cliente para la API"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="sede_id">Sede ID</Label>
-                  <Input
-                    id="sede_id"
-                    name="sede_id"
-                    value={formData.sede_id}
-                    onChange={handleChange}
-                    placeholder="ID de la sede"
                   />
                 </div>
 
@@ -769,7 +757,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="mt-2 bg-transparent"
+                            className="mt-2"
                             onClick={() => copyToClipboard(getEmbedCode())}
                           >
                             <Copy className="h-4 w-4 mr-2" />
@@ -786,7 +774,7 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="mt-2 bg-transparent"
+                            className="mt-2"
                             onClick={() => copyToClipboard(getJavaScriptCode())}
                           >
                             <Copy className="h-4 w-4 mr-2" />
