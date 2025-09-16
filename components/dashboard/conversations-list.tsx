@@ -2,107 +2,86 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { MessageCircle, User, Clock } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { MessageSquare, Clock, User, Phone } from "lucide-react"
+import { formatDistanceToNow } from "date-fns"
+import { es } from "date-fns/locale"
 
-interface Conversation {
-  phoneNumber: string
-  configId: string
-  clienteId: string
-  userName?: string
-  messageCount: number
-  firstMessageAt: string
-  lastMessageAt: string
+interface ClientConversation {
+  clientId: string
+  clientName: string
+  phoneNumberId: string
   lastMessage: string
+  lastMessageTime: Date
+  messageCount: number
+  threadId?: string
 }
 
 interface ConversationsListProps {
-  conversations: Conversation[]
-  loading: boolean
-  onConversationSelect: (conversation: Conversation) => void
-  formatRelativeTime: (timestamp: string) => string
+  clients: ClientConversation[]
+  onClientSelect: (client: ClientConversation) => void
 }
 
-export function ConversationsList({
-  conversations,
-  loading,
-  onConversationSelect,
-  formatRelativeTime,
-}: ConversationsListProps) {
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Card key={i}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="space-y-2">
-                  <div className="h-4 bg-gray-200 rounded animate-pulse w-32" />
-                  <div className="h-3 bg-gray-200 rounded animate-pulse w-24" />
-                </div>
-                <div className="h-6 bg-gray-200 rounded animate-pulse w-16" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="h-3 bg-gray-200 rounded animate-pulse w-full mb-2" />
-              <div className="h-3 bg-gray-200 rounded animate-pulse w-3/4" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    )
-  }
-
-  if (conversations.length === 0) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-8">
-          <div className="text-center">
-            <MessageCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">No hay conversaciones</h3>
-            <p className="text-gray-600">Este cliente aún no tiene conversaciones registradas</p>
-          </div>
-        </CardContent>
-      </Card>
-    )
+export function ConversationsList({ clients, onClientSelect }: ConversationsListProps) {
+  const truncateMessage = (message: string, maxLength = 100) => {
+    if (message.length <= maxLength) return message
+    return message.substring(0, maxLength) + "..."
   }
 
   return (
-    <div className="space-y-4">
-      {conversations.map((conversation) => (
-        <Card
-          key={`${conversation.configId}-${conversation.phoneNumber}`}
-          className="cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => onConversationSelect(conversation)}
-        >
+    <div className="grid gap-4">
+      {clients.map((client) => (
+        <Card key={client.clientId} className="hover:shadow-md transition-shadow">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="flex-shrink-0">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <User className="h-5 w-5 text-blue-600" />
-                  </div>
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <User className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <CardTitle className="text-base">{conversation.userName || "Usuario"}</CardTitle>
-                  <p className="text-sm text-gray-600">{conversation.phoneNumber}</p>
+                  <CardTitle className="text-lg">{client.clientName}</CardTitle>
+                  <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                    <Phone className="h-3 w-3" />
+                    <span>{client.clientId}</span>
+                  </div>
                 </div>
               </div>
-              <div className="text-right">
-                <Badge variant="secondary" className="mb-1">
-                  {conversation.messageCount} mensajes
+              <div className="flex items-center space-x-2">
+                <Badge variant="secondary" className="flex items-center space-x-1">
+                  <MessageSquare className="h-3 w-3" />
+                  <span>{client.messageCount}</span>
                 </Badge>
-                <div className="flex items-center text-xs text-gray-500">
-                  <Clock className="h-3 w-3 mr-1" />
-                  {formatRelativeTime(conversation.lastMessageAt)}
-                </div>
+                {client.threadId && (
+                  <Badge variant="outline" className="text-xs">
+                    Thread: {client.threadId.substring(0, 8)}...
+                  </Badge>
+                )}
               </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm text-gray-700 line-clamp-2">{conversation.lastMessage}</p>
-            <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-              <span>Iniciado: {new Date(conversation.firstMessageAt).toLocaleDateString()}</span>
-              <span>Último: {formatRelativeTime(conversation.lastMessageAt)}</span>
+          <CardContent className="pt-0">
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">Último mensaje:</p>
+                <p className="text-sm">{truncateMessage(client.lastMessage)}</p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-1 text-xs text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  <span>
+                    {formatDistanceToNow(client.lastMessageTime, {
+                      addSuffix: true,
+                      locale: es,
+                    })}
+                  </span>
+                </div>
+
+                <Button size="sm" onClick={() => onClientSelect(client)} className="flex items-center space-x-1">
+                  <MessageSquare className="h-3 w-3" />
+                  <span>Ver conversación</span>
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

@@ -1,31 +1,32 @@
 import { NextResponse } from "next/server"
 import { getAllClientsWithConversations } from "@/lib/db"
-import { isAuthenticated } from "@/lib/auth"
+import { getSession } from "@/lib/auth"
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     // Verificar autenticación
-    if (!isAuthenticated(request)) {
+    const session = await getSession()
+    if (!session) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 })
     }
 
-    console.log("[API] Obteniendo clientes con conversaciones...")
+    console.log("[API] 📋 Obteniendo clientes con conversaciones")
 
-    // Obtener todos los clientes con sus conversaciones
     const clients = await getAllClientsWithConversations()
 
-    console.log(`[API] Encontrados ${clients.length} clientes`)
+    console.log(`[API] ✅ Encontrados ${clients.length} clientes`)
 
     return NextResponse.json({
       success: true,
-      clients,
+      data: clients,
     })
   } catch (error) {
-    console.error("[API] Error obteniendo conversaciones:", error)
+    console.error("[API] ❌ Error obteniendo clientes:", error)
+
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Error desconocido",
+        error: "Error interno del servidor",
       },
       { status: 500 },
     )

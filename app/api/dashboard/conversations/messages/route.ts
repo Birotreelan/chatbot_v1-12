@@ -1,46 +1,39 @@
 import { NextResponse } from "next/server"
-import { getConversationsByClient, getConversationMessages } from "@/lib/db"
-import { isAuthenticated } from "@/lib/auth"
+import { getClientMessages } from "@/lib/db"
+import { getSession } from "@/lib/auth"
 
 export async function GET(request: Request) {
   try {
     // Verificar autenticación
-    if (!isAuthenticated(request)) {
+    const session = await getSession()
+    if (!session) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
-    const clienteId = searchParams.get("clienteId")
-    const configId = searchParams.get("configId")
-    const phoneNumber = searchParams.get("phoneNumber")
+    const clientId = searchParams.get("clientId")
 
-    if (clienteId && !configId && !phoneNumber) {
-      // Obtener conversaciones de un cliente
-      console.log(`[API] Obteniendo conversaciones para cliente: ${clienteId}`)
-      const conversations = await getConversationsByClient(clienteId)
-
-      return NextResponse.json({
-        success: true,
-        conversations,
-      })
-    } else if (configId && phoneNumber) {
-      // Obtener mensajes de una conversación específica
-      console.log(`[API] Obteniendo mensajes para ${phoneNumber} en config ${configId}`)
-      const messages = await getConversationMessages(configId, phoneNumber)
-
-      return NextResponse.json({
-        success: true,
-        messages,
-      })
-    } else {
-      return NextResponse.json({ success: false, error: "Parámetros inválidos" }, { status: 400 })
+    if (!clientId) {
+      return NextResponse.json({ success: false, error: "clientId es requerido" }, { status: 400 })
     }
+
+    console.log(`[API] 📨 Obteniendo mensajes para cliente: ${clientId}`)
+
+    const messages = await getClientMessages(clientId)
+
+    console.log(`[API] ✅ Encontrados ${messages.length} mensajes`)
+
+    return NextResponse.json({
+      success: true,
+      data: messages,
+    })
   } catch (error) {
-    console.error("[API] Error obteniendo mensajes:", error)
+    console.error("[API] ❌ Error obteniendo mensajes:", error)
+
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Error desconocido",
+        error: "Error interno del servidor",
       },
       { status: 500 },
     )

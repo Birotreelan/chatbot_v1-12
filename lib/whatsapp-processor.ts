@@ -1,12 +1,21 @@
 import { validateDNI, searchTurnos, reserveTurno, getSedes } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import { getThreadForUser, updateWhatsAppStats } from "./db"
+import { getOrCreateThread, addMessageToThread, runAssistant } from "./openai"
+import { getWhatsAppConfig } from "./db"
 import type { WhatsAppConfig } from "./types"
 
 interface ProcessWhatsAppMessageParams {
   message: string
   phoneNumber: string
   config: WhatsAppConfig
+}
+
+interface ProcessMessageParams {
+  userPhone: string
+  userName: string
+  message: string
+  phoneNumberId: string
 }
 
 // Función para crear el bloque [SISTEMA] para WhatsApp con datos de sedes
@@ -641,5 +650,58 @@ async function handleToolCalls(threadId: string, runId: string, run: any, client
   } catch (error) {
     console.error("[WHATSAPP-PROCESSOR] ❌ Error en handleToolCalls:", error)
     throw error
+  }
+}
+
+export async function processMessage({
+  userPhone,
+  userName,
+  message,
+  phoneNumberId,
+}: ProcessMessageParams): Promise<string | null> {
+  console.log(`[PROCESSOR] 🚀 Iniciando procesamiento para ${userName}`)
+
+  try {
+    // Obtener configuración de WhatsApp
+    const config = await getWhatsAppConfig(phoneNumberId)
+    if (!config) {
+      console.error(`[PROCESSOR] ❌ No se encontró configuración para ${phoneNumberId}`)
+      return "Lo siento, hay un problema de configuración. Por favor contacta al administrador."
+    }
+
+    console.log(`[PROCESSOR] ⚙️ Usando asistente: ${config.assistantId}`)
+
+    // Obtener o crear thread para el usuario
+    const threadId = await getOrCreateThread(userPhone)
+    console.log(`[PROCESSOR] 🧵 Thread ID: ${threadId}`)
+
+    // Agregar mensaje del usuario al thread
+    await addMessageToThread(threadId, message)
+    console.log(`[PROCESSOR] ✅ Mensaje agregado al thread`)
+
+    // Ejecutar el asistente
+    console.log(`[PROCESSOR] 🤖 Ejecutando asistente...`)
+    const response = await runAssistant(threadId, config.assistantId)
+
+    if (response) {
+      console.log(`[PROCESSOR] ✅ Respuesta generada: "${response.substring(0, 100)}..."`)
+      return response
+    } else {
+      console.log(`[PROCESSOR] ⚠️ No se obtuvo respuesta del asistente`)
+      return "Lo siento, no pude procesar tu mensaje en este momento. Por favor intenta de nuevo."
+    }
+  } catch (error) {
+    console.error(`[PROCESSOR] ❌ Error procesando mensaje:`, error)
+
+    // Respuesta de error amigable
+    if (error instanceof Error) {
+      if (error.message.includes("timeout")) {
+        return "Lo siento, el procesamiento está tomando más tiempo del esperado. Por favor intenta de nuevo."
+      } else if (error.message.includes("rate limit")) {
+        return "Estoy recibiendo muchos mensajes. Por favor espera un momento antes de enviar otro mensaje."
+      }
+    }
+
+    return "Lo siento, ocurrió un error procesando tu mensaje. Por favor intenta de nuevo más tarde."
   }
 }
