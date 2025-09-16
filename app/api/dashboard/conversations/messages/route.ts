@@ -1,39 +1,44 @@
-import { NextResponse } from "next/server"
-import { getClientMessages } from "@/lib/db"
+import { type NextRequest, NextResponse } from "next/server"
 import { getSession } from "@/lib/auth"
+import { getConversationMessages } from "@/lib/db"
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
+    console.log("[API] Obteniendo mensajes de conversación...")
+
     // Verificar autenticación
     const session = await getSession()
     if (!session) {
+      console.log("[API] Usuario no autenticado")
       return NextResponse.json({ error: "No autorizado" }, { status: 401 })
     }
 
+    // Obtener parámetros de la URL
     const { searchParams } = new URL(request.url)
-    const clientId = searchParams.get("clientId")
+    const configId = searchParams.get("configId")
+    const phoneNumber = searchParams.get("phoneNumber")
 
-    if (!clientId) {
-      return NextResponse.json({ success: false, error: "clientId es requerido" }, { status: 400 })
+    if (!configId || !phoneNumber) {
+      return NextResponse.json({ error: "configId y phoneNumber son requeridos" }, { status: 400 })
     }
 
-    console.log(`[API] 📨 Obteniendo mensajes para cliente: ${clientId}`)
+    console.log(`[API] Obteniendo mensajes para config ${configId} y teléfono ${phoneNumber}`)
 
-    const messages = await getClientMessages(clientId)
+    // Obtener mensajes de la conversación
+    const messages = await getConversationMessages(configId, phoneNumber)
 
-    console.log(`[API] ✅ Encontrados ${messages.length} mensajes`)
+    console.log(`[API] Encontrados ${messages.length} mensajes`)
 
     return NextResponse.json({
       success: true,
-      data: messages,
+      messages,
     })
   } catch (error) {
-    console.error("[API] ❌ Error obteniendo mensajes:", error)
-
+    console.error("[API] Error obteniendo mensajes:", error)
     return NextResponse.json(
       {
         success: false,
-        error: "Error interno del servidor",
+        error: error instanceof Error ? error.message : "Error desconocido",
       },
       { status: 500 },
     )

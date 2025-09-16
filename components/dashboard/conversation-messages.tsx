@@ -1,107 +1,94 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { ArrowLeft, RefreshCw, User, Bot, Clock, AlertCircle, MessageSquare } from "lucide-react"
-import { formatDistanceToNow, format } from "date-fns"
+import { Button } from "@/components/ui/button"
+import { RefreshCw, Bot, User } from "lucide-react"
+import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
+import { useToast } from "@/hooks/use-toast"
 
-interface ConversationMessage {
-  clientId: string
-  clientName: string
-  phoneNumberId: string
-  messageId: string
+interface Message {
+  id: string
+  phoneNumber: string
+  configId: string
+  clienteId: string
   message: string
-  isFromUser: boolean
-  timestamp: Date
+  messageType: "incoming" | "outgoing"
+  timestamp: string
   threadId?: string
+  userName?: string
+  isFromUser: boolean
 }
 
-interface ClientConversation {
-  clientId: string
-  clientName: string
-  phoneNumberId: string
-  lastMessage: string
-  lastMessageTime: Date
+interface Conversation {
+  phoneNumber: string
+  configId: string
+  clienteId: string
+  userName?: string
   messageCount: number
-  threadId?: string
+  lastMessageAt: string
+  lastMessage: string
 }
 
 interface ConversationMessagesProps {
-  client: ClientConversation
-  onBack: () => void
+  conversation: Conversation
 }
 
-export function ConversationMessages({ client, onBack }: ConversationMessagesProps) {
-  const [messages, setMessages] = useState<ConversationMessage[]>([])
+export function ConversationMessages({ conversation }: ConversationMessagesProps) {
+  const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const { toast } = useToast()
 
   const fetchMessages = async () => {
     try {
-      setLoading(true)
-      setError(null)
-
+      setRefreshing(true)
       const response = await fetch(
-        `/api/dashboard/conversations/messages?clientId=${encodeURIComponent(client.clientId)}`,
+        `/api/dashboard/conversations/messages?configId=${conversation.configId}&phoneNumber=${conversation.phoneNumber}`,
       )
       const data = await response.json()
 
-      if (!response.ok) {
+      if (data.success) {
+        setMessages(data.messages)
+      } else {
         throw new Error(data.error || "Error obteniendo mensajes")
       }
-
-      if (data.success) {
-        // Convertir fechas y ordenar por timestamp (más antiguos primero para mostrar cronológicamente)
-        const messagesWithDates = data.data
-          .map((message: any) => ({
-            ...message,
-            timestamp: new Date(message.timestamp),
-          }))
-          .sort((a: ConversationMessage, b: ConversationMessage) => a.timestamp.getTime() - b.timestamp.getTime())
-
-        setMessages(messagesWithDates)
-      } else {
-        throw new Error(data.error || "Error desconocido")
-      }
     } catch (error) {
-      console.error("Error obteniendo mensajes:", error)
-      setError(error instanceof Error ? error.message : "Error desconocido")
+      console.error("Error fetching messages:", error)
+      toast({
+        title: "Error",
+        description: "No se pudieron cargar los mensajes",
+        variant: "destructive",
+      })
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }
 
   useEffect(() => {
     fetchMessages()
-  }, [client.clientId])
+  }, [conversation])
 
   if (loading) {
     return (
       <Card>
         <CardHeader>
-          <div className="flex items-center space-x-4">
-            <Button variant="ghost" size="sm" onClick={onBack}>
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <div>
-              <CardTitle className="flex items-center space-x-2">
-                <RefreshCw className="h-5 w-5 animate-spin" />
-                <span>Cargando mensajes...</span>
-              </CardTitle>
-            </div>
-          </div>
+          <CardTitle>Cargando mensajes...</CardTitle>
+          <CardDescription>Obteniendo el historial de la conversación</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="animate-pulse space-y-4">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"}`}>
-                <div className="max-w-xs space-y-2">
-                  <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                  <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+          <div className="space-y-4">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="animate-pulse">
+                <div className="flex space-x-3">
+                  <div className="h-8 w-8 bg-muted rounded-full"></div>
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 bg-muted rounded w-1/4"></div>
+                    <div className="h-3 bg-muted rounded w-3/4"></div>
+                  </div>
                 </div>
               </div>
             ))}
@@ -111,108 +98,81 @@ export function ConversationMessages({ client, onBack }: ConversationMessagesPro
     )
   }
 
-  if (error) {
-    return (
-      <Card>
-        <CardHeader>
-          <div className="flex items-center space-x-4">
-            <Button variant="ghost" size="sm" onClick={onBack}>
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <CardTitle>Error cargando mensajes</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription className="flex items-center justify-between">
-              <span>Error: {error}</span>
-              <Button variant="outline" size="sm" onClick={fetchMessages} className="ml-4 bg-transparent">
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Reintentar
-              </Button>
-            </AlertDescription>
-          </Alert>
-        </CardContent>
-      </Card>
-    )
-  }
-
   return (
     <div className="space-y-4">
-      {/* Header */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="sm" onClick={onBack}>
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-              <div className="flex items-center space-x-3">
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <User className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <CardTitle className="text-xl">{client.clientName}</CardTitle>
-                  <p className="text-sm text-muted-foreground">{client.clientId}</p>
-                </div>
-              </div>
+            <div>
+              <CardTitle className="flex items-center space-x-2">
+                <User className="h-5 w-5" />
+                <span>{conversation.userName || conversation.phoneNumber}</span>
+              </CardTitle>
+              <CardDescription>
+                {conversation.userName && `${conversation.phoneNumber} • `}
+                {messages.length} mensajes en total
+              </CardDescription>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <Badge variant="secondary" className="flex items-center space-x-1">
-                <MessageSquare className="h-3 w-3" />
-                <span>{messages.length} mensajes</span>
-              </Badge>
-              {client.threadId && (
-                <Badge variant="outline" className="text-xs">
-                  Thread: {client.threadId.substring(0, 12)}...
-                </Badge>
-              )}
-              <Button variant="outline" size="sm" onClick={fetchMessages} disabled={loading}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-                Actualizar
-              </Button>
-            </div>
+            <Button variant="outline" size="sm" onClick={fetchMessages} disabled={refreshing}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
+              Actualizar
+            </Button>
           </div>
         </CardHeader>
-      </Card>
 
-      {/* Messages */}
-      <Card>
-        <CardContent className="p-6">
+        <CardContent>
           {messages.length === 0 ? (
             <div className="text-center py-8">
-              <MessageSquare className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <p className="text-muted-foreground">No hay mensajes en esta conversación</p>
             </div>
           ) : (
             <div className="space-y-4 max-h-96 overflow-y-auto">
               {messages.map((message) => (
-                <div key={message.messageId} className={`flex ${message.isFromUser ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                      message.isFromUser ? "bg-primary text-primary-foreground" : "bg-muted"
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2 mb-1">
-                      {message.isFromUser ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
-                      <span className="text-xs font-medium">{message.isFromUser ? client.clientName : "Bot"}</span>
+                <div
+                  key={message.id}
+                  className={`flex space-x-3 ${message.isFromUser ? "justify-start" : "justify-end"}`}
+                >
+                  {message.isFromUser && (
+                    <div className="flex-shrink-0">
+                      <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                        <User className="h-4 w-4 text-blue-600" />
+                      </div>
                     </div>
+                  )}
 
-                    <p className="text-sm whitespace-pre-wrap">{message.message}</p>
+                  <div className={`flex-1 max-w-xs lg:max-w-md ${message.isFromUser ? "" : "flex justify-end"}`}>
+                    <div
+                      className={`rounded-lg px-3 py-2 ${
+                        message.isFromUser ? "bg-muted text-foreground" : "bg-primary text-primary-foreground"
+                      }`}
+                    >
+                      <p className="text-sm">{message.message}</p>
 
-                    <div className="flex items-center space-x-1 mt-2 text-xs opacity-70">
-                      <Clock className="h-3 w-3" />
-                      <span>
-                        {format(message.timestamp, "HH:mm")} •{" "}
-                        {formatDistanceToNow(message.timestamp, {
-                          addSuffix: true,
-                          locale: es,
-                        })}
-                      </span>
+                      <div className="flex items-center justify-between mt-1 text-xs opacity-70">
+                        <span>
+                          {formatDistanceToNow(new Date(message.timestamp), {
+                            addSuffix: true,
+                            locale: es,
+                          })}
+                        </span>
+
+                        {message.threadId && (
+                          <Badge variant="outline" className="text-xs">
+                            Thread: {message.threadId.slice(-6)}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
+
+                  {!message.isFromUser && (
+                    <div className="flex-shrink-0">
+                      <div className="h-8 w-8 rounded-full bg-green-100 flex items-center justify-center">
+                        <Bot className="h-4 w-4 text-green-600" />
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

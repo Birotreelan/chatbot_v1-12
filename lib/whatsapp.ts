@@ -1,123 +1,135 @@
-import { sendWhatsAppMessage } from "./whatsapp-api"
+import { getWhatsAppConfigByPhoneId, saveConversationMessage } from "./db"
 import { processWhatsAppMessage } from "./whatsapp-processor"
-import { saveConversationMessage } from "./db"
+import { incrementMetric, logError } from "./monitoring"
 
-interface WhatsAppWebhookData {
-  messaging_product: string
-  metadata: {
-    display_phone_number: string
-    phone_number_id: string
-  }
-  contacts?: Array<{
-    profile: {
-      name: string
-    }
-    wa_id: string
-  }>
-  messages?: Array<{
-    from: string
-    id: string
-    timestamp: string
-    text?: {
-      body: string
-    }
-    type: string
-  }>
-}
-
-export async function handleMessage(body: WhatsAppWebhookData): Promise<void> {
+// Función principal para manejar mensajes de WhatsApp
+export async function handleMessage(messageData: any): Promise<void> {
   console.log("[WHATSAPP] ========== PROCESANDO WEBHOOK ==========")
-  console.log("[WHATSAPP] Datos recibidos:", JSON.stringify(body, null, 2))
+  console.log("[WHATSAPP] Datos recibidos:", JSON.stringify(messageData, null, 2))
 
   try {
-    // Verificar que tenemos mensajes
-    if (!body.messages || body.messages.length === 0) {
-      console.log("[WHATSAPP] ⚠️ No hay mensajes en el webhook")
+    // Verificar que tenemos los datos necesarios
+    if (!messageData.messages || !Array.isArray(messageData.messages) || messageData.messages.length === 0) {
+      console.log("[WHATSAPP] ⚠️ No hay mensajes válidos en los datos")
       return
     }
 
-    // Obtener información del teléfono
-    const phoneNumberId = body.metadata?.phone_number_id
-    if (!phoneNumberId) {
-      console.log("[WHATSAPP] ⚠️ No se encontró phone_number_id")
+    if (!messageData.metadata || !messageData.metadata.phone_number_id) {
+      console.log("[WHATSAPP] ⚠️ No hay metadata válida en los datos")
       return
     }
 
-    // Procesar cada mensaje
-    for (const message of body.messages) {
-      console.log(`[WHATSAPP] 📨 Procesando mensaje: ${message.id}`)
+    const phoneNumberId = messageData.metadata.phone_number_id
+    const message = messageData.messages[0]
+    const userPhoneNumber = message.from
 
-      // Solo procesar mensajes de texto
-      if (message.type !== "text" || !message.text?.body) {
-        console.log(`[WHATSAPP] ⚠️ Mensaje no es de texto o está vacío`)
-        continue
-      }
+    console.log(`[WHATSAPP] 📱 Procesando mensaje de ${userPhoneNumber} para phoneNumberId=${phoneNumberId}`)
 
-      const userPhone = message.from
-      const messageText = message.text.body
-      const messageId = message.id
-      const timestamp = new Date(Number.parseInt(message.timestamp) * 1000)
+    // Obtener la configuración de WhatsApp
+    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+    if (!config) {
+      console.error(`[WHATSAPP] ❌ Configuración no encontrada para phoneNumberId=${phoneNumberId}`)
+      await logError("whatsapp_config_not_found", new Error(`Config not found for phoneNumberId: ${phoneNumberId}`))
+      return
+    }
 
-      // Obtener nombre del contacto
-      const contact = body.contacts?.find((c) => c.wa_id === userPhone)
-      const userName = contact?.profile?.name || userPhone
+    console.log(`[WHATSAPP] ✅ Configuración encontrada: ${config.displayName} (${config.id})`)
 
-      console.log(`[WHATSAPP] 👤 Usuario: ${userName} (${userPhone})`)
-      console.log(`[WHATSAPP] 💬 Mensaje: "${messageText}"`)
-
-      try {
-        // Guardar mensaje entrante
-        await saveConversationMessage({
-          clientId: userPhone,
-          clientName: userName,
-          phoneNumberId,
-          messageId,
-          message: messageText,
-          isFromUser: true,
-          timestamp,
-        })
-
-        console.log("[WHATSAPP] ✅ Mensaje entrante guardado")
-
-        // Procesar mensaje con IA
-        const response = await processWhatsAppMessage({
-          userPhone,
-          userName,
-          message: messageText,
-          phoneNumberId,
-        })
-
-        if (response) {
-          console.log(`[WHATSAPP] 🤖 Respuesta generada: "${response}"`)
-
-          // Enviar respuesta
-          const sent = await sendWhatsAppMessage(userPhone, response, phoneNumberId)
-
-          if (sent) {
-            // Guardar respuesta del bot
-            await saveConversationMessage({
-              clientId: userPhone,
-              clientName: userName,
-              phoneNumberId,
-              messageId: `bot_${Date.now()}`,
-              message: response,
-              isFromUser: false,
-              timestamp: new Date(),
-            })
-
-            console.log("[WHATSAPP] ✅ Respuesta enviada y guardada")
-          } else {
-            console.log("[WHATSAPP] ❌ Error enviando respuesta")
-          }
-        } else {
-          console.log("[WHATSAPP] ⚠️ No se generó respuesta")
-        }
-      } catch (error) {
-        console.error(`[WHATSAPP] ❌ Error procesando mensaje ${messageId}:`, error)
+    // Obtener información del contacto
+    let userName = "Usuario"
+    if (messageData.contacts && messageData.contacts.length > 0) {
+      const contact = messageData.contacts.find((c: any) => c.wa_id === userPhoneNumber)
+      if (contact && contact.profile && contact.profile.name) {
+        userName = contact.profile.name
       }
     }
+
+    console.log(`[WHATSAPP] 👤 Usuario: ${userName} (${userPhoneNumber})`)
+
+    // Verificar que es un mensaje de texto
+    if (message.type !== "text" || !message.text || !message.text.body) {
+      console.log(`[WHATSAPP] ⚠️ Tipo de mensaje no soportado: ${message.type}`)
+      return
+    }
+
+    const messageText = message.text.body
+    console.log(`[WHATSAPP] 💬 Mensaje: "${messageText}"`)
+
+    // Guardar mensaje entrante
+    await saveConversationMessage(
+      userPhoneNumber,
+      config.id,
+      config.cliente_id || "unknown",
+      messageText,
+      "incoming",
+      undefined,
+      userName,
+    )
+
+    // Incrementar métrica de mensajes recibidos
+    await incrementMetric("messages_received")
+
+    // Procesar el mensaje con IA
+    console.log(`[WHATSAPP] 🤖 Enviando a procesamiento de IA...`)
+    await processWhatsAppMessage({
+      phoneNumber: userPhoneNumber,
+      message: messageText,
+      config,
+      userName,
+    })
+
+    console.log(`[WHATSAPP] ✅ Mensaje procesado exitosamente`)
   } catch (error) {
-    console.error("[WHATSAPP] ❌ Error general procesando webhook:", error)
+    console.error("[WHATSAPP] ❌ Error procesando mensaje:", error)
+    await logError("whatsapp_message_processing", error instanceof Error ? error : new Error(String(error)))
     throw error
+  }
+}
+
+// Función para enviar mensajes de WhatsApp
+export async function sendWhatsAppMessage(phoneNumber: string, message: string, config: any): Promise<boolean> {
+  try {
+    console.log(`[WHATSAPP] 📤 Enviando mensaje a ${phoneNumber}`)
+
+    const url = `https://graph.facebook.com/v18.0/${config.phoneNumberId}/messages`
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: phoneNumber,
+      type: "text",
+      text: {
+        body: message,
+      },
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`[WHATSAPP] ❌ Error enviando mensaje: ${response.status} - ${errorText}`)
+      return false
+    }
+
+    const result = await response.json()
+    console.log(`[WHATSAPP] ✅ Mensaje enviado exitosamente:`, result)
+
+    // Guardar mensaje saliente
+    await saveConversationMessage(phoneNumber, config.id, config.cliente_id || "unknown", message, "outgoing")
+
+    // Incrementar métrica de mensajes enviados
+    await incrementMetric("messages_sent")
+
+    return true
+  } catch (error) {
+    console.error(`[WHATSAPP] ❌ Error enviando mensaje:`, error)
+    await logError("whatsapp_send_message", error instanceof Error ? error : new Error(String(error)))
+    return false
   }
 }
