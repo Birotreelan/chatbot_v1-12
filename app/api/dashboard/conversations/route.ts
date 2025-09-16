@@ -1,22 +1,27 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { getAllClientsWithConversations, getConversationsByClient } from "@/lib/db"
+import { NextResponse } from "next/server"
+import { getAllClientsWithConversations } from "@/lib/db"
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url)
-    const clienteId = searchParams.get("clienteId")
+    console.log("[API] 📋 Obteniendo clientes con conversaciones")
 
-    if (clienteId) {
-      // Obtener conversaciones de un cliente específico
-      const conversations = await getConversationsByClient(clienteId)
-      return NextResponse.json({ success: true, data: conversations })
-    } else {
-      // Obtener todos los clientes con sus estadísticas de conversaciones
-      const clients = await getAllClientsWithConversations()
-      return NextResponse.json({ success: true, data: clients })
-    }
+    const clients = await getAllClientsWithConversations()
+
+    console.log(`[API] ✅ Encontrados ${clients.length} clientes`)
+
+    return NextResponse.json({
+      success: true,
+      data: clients,
+    })
   } catch (error) {
-    console.error("Error obteniendo conversaciones:", error)
-    return NextResponse.json({ success: false, error: "Error interno del servidor" }, { status: 500 })
+    console.error("[API] ❌ Error obteniendo clientes:", error)
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Error interno del servidor",
+      },
+      { status: 500 },
+    )
   }
 }

@@ -1,52 +1,51 @@
 "use client"
 
 import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { logout } from "@/app/actions"
+import { usePathname } from "next/navigation"
+import { cn } from "@/lib/utils"
+import { LayoutDashboard, Settings, Activity, MessageSquare } from "lucide-react"
+
+const navigation = [
+  {
+    name: "Dashboard",
+    href: "/dashboard",
+    icon: LayoutDashboard,
+  },
+  {
+    name: "Configuraciones",
+    href: "/dashboard/config",
+    icon: Settings,
+  },
+  {
+    name: "Monitoreo",
+    href: "/dashboard/monitoring",
+    icon: Activity,
+  },
+  {
+    name: "Conversaciones",
+    href: "/dashboard/conversations",
+    icon: MessageSquare,
+  },
+]
 
 export function DashboardNav() {
-  const router = useRouter()
-
-  async function handleLogout() {
-    await logout()
-    router.push("/login")
-    router.refresh()
-  }
+  const pathname = usePathname()
 
   return (
-    <header className="bg-background border-b">
-      <div className="container mx-auto flex h-16 items-center justify-between">
-        <div className="flex items-center gap-6">
-          <Link href="/dashboard" className="font-bold text-xl">
-            WhatsApp AI
-          </Link>
-          <nav className="hidden md:flex gap-6">
-            <Link href="/dashboard" className="text-foreground/60 hover:text-foreground">
-              Dashboard
-            </Link>
-            <Link href="/dashboard/config/new" className="text-foreground/60 hover:text-foreground">
-              Nuevo Número
-            </Link>
-            <Link href="/dashboard/conversations" className="text-foreground/60 hover:text-foreground">
-              Conversaciones
-            </Link>
-            <Link
-              href="/demo"
-              className="text-foreground/60 hover:text-foreground"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Demo Widget
-            </Link>
-          </nav>
-        </div>
-        <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={handleLogout}>
-            Cerrar Sesión
-          </Button>
-        </div>
-      </div>
-    </header>
+    <nav className="flex space-x-2 lg:flex-col lg:space-x-0 lg:space-y-1">
+      {navigation.map((item) => (
+        <Link
+          key={item.name}
+          href={item.href}
+          className={cn(
+            "flex items-center rounded-lg px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground",
+            pathname === item.href ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+          )}
+        >
+          <item.icon className="mr-2 h-4 w-4" />
+          {item.name}
+        </Link>
+      ))}
+    </nav>
   )
 }
