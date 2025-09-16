@@ -3,6 +3,7 @@
 import { MessageSquare } from "lucide-react"
 import { useRouter } from "next/router"
 import { useState } from "react"
+import Link from "next/link"
 
 const DashboardNav = () => {
   const router = useRouter()
@@ -46,16 +47,14 @@ const DashboardNav = () => {
             <div className="hidden md:block">
               <div className="ml-10 flex items-baseline space-x-4">
                 {navigation.map((item) => (
-                  <a
+                  <Link
                     key={item.name}
                     href={item.href}
-                    className={`${
-                      item.current ? "bg-gray-900 text-white" : "text-gray-300 hover:bg-gray-700 hover:text-white"
-                    } px-3 py-2 rounded-md text-sm font-medium`}
+                    className={`${item.current ? "bg-gray-900 text-white" : "text-gray-300 hover:bg-gray-700 hover:text-white"} px-3 py-2 rounded-md text-sm font-medium`}
                     aria-current={item.current ? "page" : undefined}
                   >
                     {item.name}
-                  </a>
+                  </Link>
                 ))}
               </div>
             </div>

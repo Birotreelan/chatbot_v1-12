@@ -43,7 +43,7 @@ export function ConversationMessages({ configId, phoneNumber, userName }: Conver
       const data = await response.json()
 
       if (data.success) {
-        setMessages(data.messages)
+        setMessages(data.messages || [])
       }
     } catch (error) {
       console.error("Error fetching messages:", error)

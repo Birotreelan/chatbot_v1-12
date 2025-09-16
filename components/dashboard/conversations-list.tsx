@@ -37,7 +37,7 @@ export function ConversationsList({ clienteId, onConversationSelect }: Conversat
       const data = await response.json()
 
       if (data.success) {
-        setConversations(data.conversations)
+        setConversations(data.conversations || [])
       }
     } catch (error) {
       console.error("Error fetching conversations:", error)

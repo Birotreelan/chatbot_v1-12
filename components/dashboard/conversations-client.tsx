@@ -45,7 +45,7 @@ export function ConversationsClient() {
       const data = await response.json()
 
       if (data.success) {
-        setClients(data.clients)
+        setClients(data.clients || [])
       }
     } catch (error) {
       console.error("Error fetching clients:", error)

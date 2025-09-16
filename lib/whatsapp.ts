@@ -12,15 +12,19 @@ async function processIndividualMessage(
   console.log(`[WHATSAPP] Mensaje preparado para OpenAI: ${systemBlock} ${userMessage}`)
 
   // Guardar mensaje del usuario
-  await saveConversationMessage(
-    phoneNumber,
-    config.id,
-    config.cliente_id || "",
-    userMessage,
-    "incoming",
-    threadId,
-    userName,
-  )
+  try {
+    await saveConversationMessage(
+      phoneNumber,
+      config.id,
+      config.cliente_id || "",
+      userMessage,
+      "incoming",
+      threadId,
+      userName || phoneNumber,
+    )
+  } catch (error) {
+    console.error("[WHATSAPP] Error guardando mensaje entrante:", error)
+  }
 
   // Assuming the code to get assistant response is here
   const response = "Assistant response content" // Placeholder for actual response content
@@ -28,15 +32,19 @@ async function processIndividualMessage(
 
   // Guardar respuesta del bot
   if (response) {
-    await saveConversationMessage(
-      phoneNumber,
-      config.id,
-      config.cliente_id || "",
-      response,
-      "outgoing",
-      threadId,
-      userName,
-    )
+    try {
+      await saveConversationMessage(
+        phoneNumber,
+        config.id,
+        config.cliente_id || "",
+        response,
+        "outgoing",
+        threadId,
+        userName || phoneNumber,
+      )
+    } catch (error) {
+      console.error("[WHATSAPP] Error guardando respuesta del bot:", error)
+    }
   }
 
   // Assuming the rest of the code is here

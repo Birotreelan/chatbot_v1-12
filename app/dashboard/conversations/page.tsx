@@ -11,3 +11,5 @@ export default function ConversationsPage() {
     </div>
   )
 }
+
+export const dynamic = "force-dynamic"
