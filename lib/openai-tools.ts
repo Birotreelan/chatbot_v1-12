@@ -146,23 +146,6 @@ export const openAITools = [
       },
     },
   },
-  {
-    type: "function" as const,
-    function: {
-      name: "obtener_datos_sede",
-      description: "Obtiene información detallada de una sede específica",
-      parameters: {
-        type: "object",
-        properties: {
-          sede_id: {
-            type: "string",
-            description: "ID de la sede a consultar",
-          },
-        },
-        required: ["sede_id"],
-      },
-    },
-  },
 ]
 
 // Mensajes predefinidos para cada función
@@ -173,7 +156,6 @@ const FUNCTION_MESSAGES = {
   obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
   buscar_profesionales: "Buscando profesionales, aguardá unos instantes.",
   validar_obra_social: "Verificando la obra social, aguardá unos instantes.",
-  obtener_datos_sede: "Consultando información de la sede, aguardá unos instantes.",
   default: "Estoy procesando tu solicitud, dame un momento por favor.",
 }
 
@@ -409,11 +391,6 @@ export async function executeOpenAITool(
         if (toolArgs.fecha) requestBody.Fecha = toolArgs.fecha
         if (toolArgs.hora) requestBody.Hora = toolArgs.hora
         if (toolArgs.profesional) requestBody.Profesional_Nombre = toolArgs.profesional
-        break
-
-      case "obtener_datos_sede":
-        requestBody.Action = "get_data_sedes"
-        requestBody.sede_id = toolArgs.sede_id
         break
 
       default:
@@ -662,34 +639,6 @@ export async function executeOpenAITool(
             exito: true,
             datos: data, // Devolver toda la respuesta original sin modificaciones
           }
-        }
-
-      case "obtener_datos_sede":
-        if (data.sede) {
-          return {
-            exito: true,
-            datos: {
-              id: data.sede.Id,
-              nombre_completo: data.sede.Nombre_Completo,
-              domicilio: data.sede.Domicilio,
-              telefono: data.sede.Telefono,
-              email: data.sede.E_Mail,
-              localidad: data.sede.Localidad,
-              provincia: data.sede.Provincia,
-              horario: data.sede.Horario,
-              dominio_web: data.sede.Dominio_Web,
-            },
-          }
-        } else if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-            },
-          }
-        } else {
-          return { exito: true, datos: null }
         }
 
       default:

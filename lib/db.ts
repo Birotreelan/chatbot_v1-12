@@ -1,6 +1,7 @@
 import { Redis } from "@upstash/redis"
-import type { WhatsAppConfig, ThreadInfo, SystemStats } from "./types"
+import type { WhatsAppConfig, ThreadInfo, SystemStats, ConversationMessage, ConversationSummary } from "./types"
 import { nanoid } from "nanoid"
+import OpenAI from "openai"
 
 // Inicializar el cliente de Redis
 let redis: Redis | null = null
@@ -26,6 +27,8 @@ const memoryStorage = {
   phoneToConfig: new Map<string, string>(),
   threads: new Map<string, ThreadInfo>(),
   stats: null as SystemStats | null,
+  messages: new Map<string, ConversationMessage[]>(),
+  summaries: new Map<string, ConversationSummary[]>(),
 }
 
 // Prefijos para las claves en Redis
@@ -33,6 +36,8 @@ const CONFIG_PREFIX = "whatsapp_config:"
 const THREAD_PREFIX = "thread:"
 const PHONE_TO_CONFIG_PREFIX = "phone_to_config:"
 const STATS_KEY = "system_stats"
+const MESSAGE_PREFIX = "conversation_message:"
+const CONVERSATION_PREFIX = "conversation_summary:"
 
 // Función auxiliar para manejar la serialización/deserialización segura
 function safeJsonParse(data: any): any {
@@ -70,6 +75,7 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     accessToken: config.accessToken || "",
     webhookUrl: config.webhookUrl,
     cliente_id: config.cliente_id,
+    sede_id: config.sede_id,
     proxy: config.proxy,
     // Añadir configuraciones por defecto del widget
     widgetEnabled: config.widgetEnabled !== undefined ? config.widgetEnabled : true,
@@ -476,7 +482,7 @@ export async function getThreadForUser(
 
   // Crear un nuevo thread
   console.log(`[DB] 📝 No se encontró thread existente, creando uno nuevo`)
-  const openai = new (await import("openai")).default({
+  const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   })
 
@@ -518,7 +524,7 @@ export async function resetThreadForUser(
 
   try {
     // 1. CREAR UN THREAD COMPLETAMENTE NUEVO EN OPENAI
-    const openai = new (await import("openai")).default({
+    const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     })
 
@@ -667,3 +673,184 @@ export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig 
 // Export alias for compatibility
 export const getWhatsappConfigByClienteId = getConfigByClienteId
 export const getConfigById = getWhatsAppConfig // Alias para compatibilidad
+
+// Funciones para la gestión de mensajes y conversaciones
+
+// Guardar un mensaje de conversación
+export async function saveConversationMessage(message: ConversationMessage): Promise<void> {
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    const messageKey = `${MESSAGE_PREFIX}${message.configId}:${message.phoneNumber}:${message.id}`
+
+    // Guardar el mensaje con TTL de 7 días (604800 segundos)
+    await redisClient.setex(messageKey, 604800, JSON.stringify(message))
+
+    // Actualizar el resumen de la conversación
+    await updateConversationSummary(message)
+
+    console.log(`[DB] 💬 Mensaje guardado: ${messageKey}`)
+  } else {
+    console.log(`[DB] ⚠️ Redis no disponible, no se puede guardar el mensaje`)
+  }
+}
+
+// Actualizar resumen de conversación
+async function updateConversationSummary(message: ConversationMessage): Promise<void> {
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    const summaryKey = `${CONVERSATION_PREFIX}${message.configId}:${message.phoneNumber}`
+
+    // Obtener resumen existente
+    const existingSummaryData = await redisClient.get(summaryKey)
+    const existingSummary = safeJsonParse(existingSummaryData)
+
+    const summary: ConversationSummary = {
+      phoneNumber: message.phoneNumber,
+      userName: message.userName || existingSummary?.userName,
+      lastMessage: message.message.substring(0, 100), // Limitar a 100 caracteres
+      lastMessageAt: message.timestamp,
+      messageCount: (existingSummary?.messageCount || 0) + 1,
+      configId: message.configId,
+      clienteId: message.clienteId,
+    }
+
+    // Guardar con TTL de 7 días
+    await redisClient.setex(summaryKey, 604800, JSON.stringify(summary))
+  }
+}
+
+// Obtener mensajes de una conversación
+export async function getConversationMessages(
+  configId: string,
+  phoneNumber: string,
+  limit = 50,
+): Promise<ConversationMessage[]> {
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    const pattern = `${MESSAGE_PREFIX}${configId}:${phoneNumber}:*`
+    const keys = await redisClient.keys(pattern)
+
+    if (keys.length === 0) return []
+
+    const messages = await Promise.all(
+      keys.map(async (key) => {
+        const messageData = await redisClient.get(key)
+        return safeJsonParse(messageData)
+      }),
+    )
+
+    const validMessages = messages.filter(Boolean) as ConversationMessage[]
+
+    // Ordenar por timestamp (más recientes primero)
+    return validMessages
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, limit)
+  }
+
+  return []
+}
+
+// Obtener todas las conversaciones de un cliente
+export async function getClientConversations(clienteId: string): Promise<ConversationSummary[]> {
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    // Obtener todas las configuraciones del cliente
+    const configs = await getAllWhatsAppConfigs()
+    const clientConfigs = configs.filter((config) => config.cliente_id === clienteId)
+
+    const allConversations: ConversationSummary[] = []
+
+    for (const config of clientConfigs) {
+      const pattern = `${CONVERSATION_PREFIX}${config.id}:*`
+      const keys = await redisClient.keys(pattern)
+
+      const conversations = await Promise.all(
+        keys.map(async (key) => {
+          const summaryData = await redisClient.get(key)
+          return safeJsonParse(summaryData)
+        }),
+      )
+
+      const validConversations = conversations.filter(Boolean) as ConversationSummary[]
+      allConversations.push(...validConversations)
+    }
+
+    // Ordenar por último mensaje (más recientes primero)
+    return allConversations.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+  }
+
+  return []
+}
+
+// Obtener todas las conversaciones de una configuración específica
+export async function getConfigConversations(configId: string): Promise<ConversationSummary[]> {
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    const pattern = `${CONVERSATION_PREFIX}${configId}:*`
+    const keys = await redisClient.keys(pattern)
+
+    if (keys.length === 0) return []
+
+    const conversations = await Promise.all(
+      keys.map(async (key) => {
+        const summaryData = await redisClient.get(key)
+        return safeJsonParse(summaryData)
+      }),
+    )
+
+    const validConversations = conversations.filter(Boolean) as ConversationSummary[]
+
+    // Ordenar por último mensaje (más recientes primero)
+    return validConversations.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+  }
+
+  return []
+}
+
+// Obtener estadísticas de conversaciones
+export async function getConversationStats(configId?: string): Promise<{
+  totalConversations: number
+  totalMessages: number
+  activeConversations: number // conversaciones con mensajes en las últimas 24 horas
+}> {
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    const pattern = configId ? `${CONVERSATION_PREFIX}${configId}:*` : `${CONVERSATION_PREFIX}*`
+
+    const keys = await redisClient.keys(pattern)
+
+    if (keys.length === 0) {
+      return { totalConversations: 0, totalMessages: 0, activeConversations: 0 }
+    }
+
+    const conversations = await Promise.all(
+      keys.map(async (key) => {
+        const summaryData = await redisClient.get(key)
+        return safeJsonParse(summaryData)
+      }),
+    )
+
+    const validConversations = conversations.filter(Boolean) as ConversationSummary[]
+
+    const now = new Date()
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+
+    const activeConversations = validConversations.filter((conv) => new Date(conv.lastMessageAt) > yesterday).length
+
+    const totalMessages = validConversations.reduce((sum, conv) => sum + conv.messageCount, 0)
+
+    return {
+      totalConversations: validConversations.length,
+      totalMessages,
+      activeConversations,
+    }
+  }
+
+  return { totalConversations: 0, totalMessages: 0, activeConversations: 0 }
+}
