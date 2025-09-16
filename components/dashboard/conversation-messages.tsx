@@ -66,7 +66,7 @@ export function ConversationMessages({ configId, phoneNumber }: ConversationMess
 
   return (
     <div className="space-y-4 max-h-[600px] overflow-y-auto">
-      {messages.reverse().map((message) => (
+      {messages.map((message) => (
         <div key={message.id} className={cn("flex gap-3", message.isFromUser ? "justify-start" : "justify-end")}>
           <div className={cn("flex gap-3 max-w-[80%]", message.isFromUser ? "flex-row" : "flex-row-reverse")}>
             <div className="flex-shrink-0">

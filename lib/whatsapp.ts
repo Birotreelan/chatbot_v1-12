@@ -1,31 +1,22 @@
-import { saveConversationMessage, type ConversationMessage } from "./db"
-import { nanoid } from "nanoid"
+import { saveConversationMessage } from "./db"
 
 // Assuming the rest of the code for lib/whatsapp.ts is here
 
-async function processIndividualMessage(phoneNumber: string, userMessage: string, config: any, threadId: string) {
+async function processIndividualMessage(userPhoneNumber, config, userMessage, threadId, userName) {
   // Existing code here
-  console.log(`[WHATSAPP] Mensaje preparado para OpenAI: ${systemMessage}`)
 
-  // Guardar el mensaje entrante
-  const incomingMessage: ConversationMessage = {
-    id: nanoid(),
-    phoneNumber: phoneNumber,
-    configId: config.id,
-    clienteId: config.cliente_id || "",
-    message: userMessage,
-    messageType: "incoming",
-    timestamp: new Date().toISOString(),
-    threadId: threadId,
-    userName: phoneNumber, // Se puede mejorar con el nombre del contacto
-    isFromUser: true,
-  }
+  console.log("[WHATSAPP] Mensaje preparado para OpenAI:", systemMessage)
 
-  try {
-    await saveConversationMessage(incomingMessage)
-  } catch (error) {
-    console.error("[WHATSAPP] Error guardando mensaje entrante:", error)
-  }
+  // Guardar mensaje del usuario
+  await saveConversationMessage(
+    userPhoneNumber,
+    config.id,
+    config.cliente_id,
+    userMessage,
+    "incoming",
+    threadId,
+    userName,
+  )
 
   // Existing code here
 }

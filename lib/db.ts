@@ -1,856 +1,167 @@
-import { Redis } from "@upstash/redis"
-import type { WhatsAppConfig, ThreadInfo, SystemStats, ConversationMessage, ConversationSummary } from "./types"
-import { nanoid } from "nanoid"
-import OpenAI from "openai"
+import redis from "redis"
+import { getAllConfigurations } from "./config" // Assuming getAllConfigurations is defined elsewhere
 
-// Inicializar el cliente de Redis
-let redis: Redis | null = null
-
-// Función para obtener el cliente de Redis
-function getRedisClient() {
-  if (redis) return redis
-
+// Funciones para manejo de mensajes de conversaciones
+export async function saveConversationMessage(
+  phoneNumber: string,
+  configId: string,
+  clienteId: string,
+  message: string,
+  messageType: "incoming" | "outgoing",
+  threadId?: string,
+  userName?: string,
+) {
   try {
-    // Inicializar el cliente de Redis usando las variables de entorno de Upstash
-    redis = Redis.fromEnv()
-    console.log("[DB] ✅ Cliente Redis inicializado correctamente")
-    return redis
-  } catch (error) {
-    console.warn("[DB] ⚠️ Upstash Redis no está disponible:", error)
-    return null
-  }
-}
-
-// Almacenamiento en memoria como fallback
-const memoryStorage = {
-  configs: new Map<string, WhatsAppConfig>(),
-  phoneToConfig: new Map<string, string>(),
-  threads: new Map<string, ThreadInfo>(),
-  stats: null as SystemStats | null,
-  messages: new Map<string, ConversationMessage[]>(),
-  summaries: new Map<string, ConversationSummary[]>(),
-}
-
-// Prefijos para las claves en Redis
-const CONFIG_PREFIX = "whatsapp_config:"
-const THREAD_PREFIX = "thread:"
-const PHONE_TO_CONFIG_PREFIX = "phone_to_config:"
-const STATS_KEY = "system_stats"
-const MESSAGE_PREFIX = "conversation_message:"
-const CONVERSATION_PREFIX = "conversation_summary:"
-
-// Función auxiliar para manejar la serialización/deserialización segura
-function safeJsonParse(data: any): any {
-  if (typeof data === "string") {
-    try {
-      return JSON.parse(data)
-    } catch (error) {
-      console.error("[DB] Error al parsear JSON:", error)
-      return null
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const messageData = {
+      id: messageId,
+      phoneNumber,
+      configId,
+      clienteId,
+      message,
+      messageType,
+      timestamp: new Date().toISOString(),
+      threadId,
+      userName,
+      isFromUser: messageType === "incoming",
     }
-  }
-  return data // Si ya es un objeto, devolverlo tal cual
-}
 
-// Funciones para la gestión de configuraciones de WhatsApp
+    // Guardar mensaje individual con TTL de 7 días (604800 segundos)
+    const messageKey = `conversation_message:${configId}:${phoneNumber}:${messageId}`
+    await redis.setex(messageKey, 604800, JSON.stringify(messageData))
 
-// Crear una nueva configuración
-export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Promise<WhatsAppConfig> {
-  const id = config.id || nanoid()
-  const now = new Date().toISOString()
+    // Actualizar lista de mensajes para esta conversación
+    const conversationKey = `conversation:${configId}:${phoneNumber}`
+    await redis.lpush(conversationKey, messageId)
+    await redis.expire(conversationKey, 604800)
 
-  console.log(`[DB] 📝 Creando nueva configuración con ID: ${id}`)
-
-  const newConfig: WhatsAppConfig = {
-    id,
-    phoneNumberId: config.phoneNumberId || "",
-    wabaId: config.wabaId || "",
-    displayName: config.displayName || `WhatsApp ${id.slice(0, 6)}`,
-    whatsappAssistantId: config.whatsappAssistantId || process.env.OPENAI_ASSISTANT_ID || "",
-    widgetAssistantId: config.widgetAssistantId || process.env.OPENAI_ASSISTANT_ID || "",
-    active: config.active !== undefined ? config.active : true,
-    createdAt: now,
-    updatedAt: now,
-    verifyToken: config.verifyToken || nanoid(16),
-    accessToken: config.accessToken || "",
-    webhookUrl: config.webhookUrl,
-    cliente_id: config.cliente_id,
-    sede_id: config.sede_id,
-    proxy: config.proxy,
-    // Añadir configuraciones por defecto del widget
-    widgetEnabled: config.widgetEnabled !== undefined ? config.widgetEnabled : true,
-    widgetTitle: config.widgetTitle || "Asistente Virtual",
-    widgetPrimaryColor: config.widgetPrimaryColor || "#0ea5e9",
-    widgetSecondaryColor: config.widgetSecondaryColor || "#f0f9ff",
-    widgetPosition: config.widgetPosition || "bottom-right",
-    widgetWelcomeMessage: config.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
-    widgetPlaceholder: config.widgetPlaceholder || "Escribe tu mensaje...",
-    widgetButtonText: config.widgetButtonText || "Enviar",
-    widgetHeaderText: config.widgetHeaderText || "Chat de Soporte",
-    widgetSubtitle: config.widgetSubtitle || "Estamos aquí para ayudarte",
-    widgetBrandingEnabled: config.widgetBrandingEnabled !== undefined ? config.widgetBrandingEnabled : true,
-    widgetBrandingText: config.widgetBrandingText || "Powered by AI",
-    widgetMaxHeight: config.widgetMaxHeight || 600,
-    widgetMaxWidth: config.widgetMaxWidth || 400,
-    widgetBorderRadius: config.widgetBorderRadius || 12,
-    widgetShadow: config.widgetShadow !== undefined ? config.widgetShadow : true,
-    widgetAnimation: config.widgetAnimation !== undefined ? config.widgetAnimation : true,
-    widgetSoundEnabled: config.widgetSoundEnabled !== undefined ? config.widgetSoundEnabled : true,
-    widgetTheme: config.widgetTheme || "light",
-    // Nuevos campos para el botón flotante
-    widgetFloatingButtonText: config.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual",
-    widgetShowFloatingText: config.widgetShowFloatingText !== undefined ? config.widgetShowFloatingText : true,
-    stats: {
-      messagesReceived: 0,
-      messagesProcessed: 0,
-      errors: 0,
-    },
-  }
-
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    console.log(`[DB] 💾 Guardando configuración ${id} en Redis`)
-    // Guardar en Redis - siempre como cadena JSON
-    await redisClient.set(`${CONFIG_PREFIX}${id}`, JSON.stringify(newConfig))
-
-    // Mapear el número de teléfono al ID de configuración
-    if (newConfig.phoneNumberId) {
-      await redisClient.set(`${PHONE_TO_CONFIG_PREFIX}${newConfig.phoneNumberId}`, id)
-    }
-  } else {
-    console.log(`[DB] 💾 Guardando configuración ${id} en memoria`)
-    // Fallback a memoria
-    memoryStorage.configs.set(id, newConfig)
-    if (newConfig.phoneNumberId) {
-      memoryStorage.phoneToConfig.set(newConfig.phoneNumberId, id)
-    }
-  }
-
-  // Actualizar estadísticas
-  await updateSystemStats()
-
-  console.log(`[DB] ✅ Configuración ${id} creada exitosamente`)
-  return newConfig
-}
-
-// Obtener una configuración por ID
-export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | null> {
-  try {
-    console.log(`[DB] 🔍 Obteniendo configuración ${id}`)
-
-    const redisClient = getRedisClient()
-
-    if (redisClient) {
-      console.log(`[DB] 🔍 Buscando en Redis con clave: ${CONFIG_PREFIX}${id}`)
-      const configData = await redisClient.get(`${CONFIG_PREFIX}${id}`)
-
-      if (!configData) {
-        console.log(`[DB] ❌ Configuración ${id} no encontrada en Redis`)
-
-        // Intentar listar todas las claves para debug
-        try {
-          const allKeys = await redisClient.keys(`${CONFIG_PREFIX}*`)
-          console.log(`[DB] 🔍 Claves disponibles en Redis:`, allKeys)
-        } catch (keyError) {
-          console.error(`[DB] Error al listar claves:`, keyError)
+    // Actualizar resumen de conversación
+    const summaryKey = `conversation_summary:${configId}:${phoneNumber}`
+    const existingSummary = await redis.get(summaryKey)
+    const summary = existingSummary
+      ? JSON.parse(existingSummary)
+      : {
+          phoneNumber,
+          configId,
+          clienteId,
+          userName,
+          messageCount: 0,
+          firstMessageAt: new Date().toISOString(),
+          lastMessageAt: new Date().toISOString(),
+          lastMessage: "",
         }
 
-        return null
-      }
+    summary.messageCount += 1
+    summary.lastMessageAt = new Date().toISOString()
+    summary.lastMessage = message.substring(0, 100) + (message.length > 100 ? "..." : "")
+    if (userName) summary.userName = userName
 
-      console.log(`[DB] 📄 Datos encontrados en Redis, deserializando...`)
-      // Usar la función auxiliar para manejar la deserialización
-      const config = safeJsonParse(configData)
+    await redis.setex(summaryKey, 604800, JSON.stringify(summary))
 
-      if (!config) {
-        console.error(`[DB] ❌ Error al deserializar configuración ${id}`)
-        return null
-      }
-
-      console.log(`[DB] ✅ Configuración ${id} obtenida exitosamente`)
-      console.log(`[DB] - displayName: ${config.displayName}`)
-      console.log(`[DB] - cliente_id: ${config.cliente_id}`)
-      return config
-    } else {
-      console.log(`[DB] 🔍 Buscando en memoria`)
-      // Fallback a memoria
-      const config = memoryStorage.configs.get(id) || null
-      console.log(`[DB] Configuración ${id} obtenida de memoria:`, config ? "encontrada" : "no encontrada")
-
-      if (!config) {
-        console.log(`[DB] 🔍 Configuraciones disponibles en memoria:`, Array.from(memoryStorage.configs.keys()))
-      }
-
-      return config
-    }
+    console.log(`[DB] 💬 Mensaje guardado: ${messageType} para ${phoneNumber}`)
+    return messageId
   } catch (error) {
-    console.error(`[DB] ❌ ERROR CRÍTICO al obtener configuración ${id}:`, error)
-    console.error(`[DB] Stack trace:`, error instanceof Error ? error.stack : "No stack trace available")
-    return null
+    console.error("[DB] ❌ Error guardando mensaje:", error)
+    throw error
   }
 }
 
-// Obtener una configuración por ID de número de teléfono
-export async function getWhatsAppConfigByPhoneId(phoneNumberId: string): Promise<WhatsAppConfig | null> {
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    // Intentar obtener el ID de configuración directamente
-    const key = `${PHONE_TO_CONFIG_PREFIX}${phoneNumberId}`
-    const configId = await redisClient.get(key)
-
-    if (!configId) {
-      // Si no encontramos el ID, intentamos buscar manualmente
-      const allConfigs = await getAllWhatsAppConfigs()
-      const manualMatch = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
-
-      if (manualMatch) {
-        // Corregir el mapeo en Redis
-        await redisClient.set(key, manualMatch.id)
-        return manualMatch
-      }
-
-      return null
-    }
-
-    const config = await getWhatsAppConfig(configId as string)
-    return config
-  } else {
-    // Fallback a memoria
-    const configId = memoryStorage.phoneToConfig.get(phoneNumberId)
-
-    if (!configId) {
-      // Si no encontramos el ID, intentamos buscar manualmente
-      const allConfigs = Array.from(memoryStorage.configs.values())
-      const manualMatch = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
-
-      if (manualMatch) {
-        // Corregir el mapeo en memoria
-        memoryStorage.phoneToConfig.set(phoneNumberId, manualMatch.id)
-        return manualMatch
-      }
-
-      return null
-    }
-
-    return memoryStorage.configs.get(configId) || null
-  }
-}
-
-// Obtener todas las configuraciones
-export async function getAllWhatsAppConfigs(): Promise<WhatsAppConfig[]> {
+export async function getConversationsByClient(clienteId: string) {
   try {
-    console.log(`[DB] 📋 Obteniendo todas las configuraciones`)
+    const pattern = `conversation_summary:*`
+    const keys = await redis.keys(pattern)
 
-    const redisClient = getRedisClient()
-
-    if (redisClient) {
-      console.log(`[DB] 🔍 Buscando en Redis`)
-      const keys = await redisClient.keys(`${CONFIG_PREFIX}*`)
-      console.log(`[DB] 📊 Encontradas ${keys.length} claves en Redis`)
-
-      if (keys.length === 0) {
-        console.log(`[DB] ⚠️ No hay configuraciones en Redis`)
-        return []
+    const conversations = []
+    for (const key of keys) {
+      const data = await redis.get(key)
+      if (data) {
+        const summary = JSON.parse(data)
+        if (summary.clienteId === clienteId) {
+          conversations.push(summary)
+        }
       }
-
-      const configs = await Promise.all(
-        keys.map(async (key) => {
-          console.log(`[DB] 📄 Procesando clave: ${key}`)
-          const configData = await redisClient.get(key)
-          // Usar la función auxiliar para manejar la deserialización
-          const config = safeJsonParse(configData)
-          if (config) {
-            console.log(`[DB] ✅ Configuración deserializada: ${config.displayName} (${config.id})`)
-          } else {
-            console.log(`[DB] ❌ Error al deserializar configuración de clave: ${key}`)
-          }
-          return config
-        }),
-      )
-
-      const validConfigs = configs.filter(Boolean) as WhatsAppConfig[]
-      console.log(`[DB] ✅ Total de configuraciones válidas: ${validConfigs.length}`)
-      return validConfigs
-    } else {
-      console.log(`[DB] 🔍 Buscando en memoria`)
-      // Fallback a memoria
-      const configs = Array.from(memoryStorage.configs.values())
-      console.log(`[DB] 📊 Encontradas ${configs.length} configuraciones en memoria`)
-      return configs
     }
+
+    // Ordenar por último mensaje
+    conversations.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+
+    console.log(`[DB] 📋 Encontradas ${conversations.length} conversaciones para cliente ${clienteId}`)
+    return conversations
   } catch (error) {
-    console.error(`[DB] ❌ ERROR CRÍTICO al obtener todas las configuraciones:`, error)
-    console.error(`[DB] Stack trace:`, error instanceof Error ? error.stack : "No stack trace available")
+    console.error("[DB] ❌ Error obteniendo conversaciones:", error)
     return []
   }
 }
 
-// Actualizar una configuración
-export async function updateWhatsAppConfig(
-  id: string,
-  updates: Partial<WhatsAppConfig>,
-): Promise<WhatsAppConfig | null> {
+export async function getConversationMessages(configId: string, phoneNumber: string) {
   try {
-    console.log(`[DB] 🔄 Actualizando configuración ${id} con:`, updates)
+    const conversationKey = `conversation:${configId}:${phoneNumber}`
+    const messageIds = await redis.lrange(conversationKey, 0, -1)
 
-    const config = await getWhatsAppConfig(id)
-    if (!config) {
-      console.log(`[DB] ❌ Configuración ${id} no encontrada`)
-      return null
+    const messages = []
+    for (const messageId of messageIds) {
+      const messageKey = `conversation_message:${configId}:${phoneNumber}:${messageId}`
+      const messageData = await redis.get(messageKey)
+      if (messageData) {
+        messages.push(JSON.parse(messageData))
+      }
     }
 
-    const redisClient = getRedisClient()
+    // Ordenar por timestamp
+    messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
 
-    if (redisClient) {
-      // Si el phoneNumberId cambió, actualizar el mapeo
-      if (updates.phoneNumberId && updates.phoneNumberId !== config.phoneNumberId) {
-        if (config.phoneNumberId) {
-          await redisClient.del(`${PHONE_TO_CONFIG_PREFIX}${config.phoneNumberId}`)
+    console.log(`[DB] 💬 Encontrados ${messages.length} mensajes para ${phoneNumber}`)
+    return messages
+  } catch (error) {
+    console.error("[DB] ❌ Error obteniendo mensajes:", error)
+    return []
+  }
+}
+
+export async function getAllClientsWithConversations() {
+  try {
+    // Obtener todas las configuraciones
+    const configs = await getAllConfigurations()
+
+    // Agrupar por cliente_id
+    const clientsMap = new Map()
+
+    for (const config of configs) {
+      if (!clientsMap.has(config.cliente_id)) {
+        clientsMap.set(config.cliente_id, {
+          cliente_id: config.cliente_id,
+          displayName: config.displayName,
+          configs: [],
+          totalConversations: 0,
+          totalMessages: 0,
+          activeConversations: 0,
+        })
+      }
+
+      const client = clientsMap.get(config.cliente_id)
+      client.configs.push(config)
+
+      // Obtener conversaciones para esta configuración
+      const conversations = await getConversationsByClient(config.cliente_id)
+      client.totalConversations += conversations.length
+
+      // Contar mensajes y conversaciones activas (últimas 24 horas)
+      const now = new Date()
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+
+      for (const conv of conversations) {
+        client.totalMessages += conv.messageCount
+        if (new Date(conv.lastMessageAt) > yesterday) {
+          client.activeConversations += 1
         }
-        await redisClient.set(`${PHONE_TO_CONFIG_PREFIX}${updates.phoneNumberId}`, id)
       }
-
-      const updatedConfig: WhatsAppConfig = {
-        ...config,
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }
-
-      // Guardar en Redis - siempre como cadena JSON
-      const serializedConfig = JSON.stringify(updatedConfig)
-      await redisClient.set(`${CONFIG_PREFIX}${id}`, serializedConfig)
-
-      console.log(`[DB] ✅ Configuración ${id} actualizada exitosamente`)
-      return updatedConfig
-    } else {
-      // Fallback a memoria
-      if (updates.phoneNumberId && updates.phoneNumberId !== config.phoneNumberId) {
-        if (config.phoneNumberId) {
-          memoryStorage.phoneToConfig.delete(config.phoneNumberId)
-        }
-        memoryStorage.phoneToConfig.set(updates.phoneNumberId, id)
-      }
-
-      const updatedConfig: WhatsAppConfig = {
-        ...config,
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      }
-
-      memoryStorage.configs.set(id, updatedConfig)
-      console.log(`[DB] ✅ Configuración ${id} actualizada en memoria`)
-      return updatedConfig
     }
+
+    const clients = Array.from(clientsMap.values())
+    console.log(`[DB] 👥 Encontrados ${clients.length} clientes con conversaciones`)
+    return clients
   } catch (error) {
-    console.error(`[DB] ❌ Error al actualizar configuración ${id}:`, error)
-    throw error
+    console.error("[DB] ❌ Error obteniendo clientes:", error)
+    return []
   }
-}
-
-// Eliminar una configuración
-export async function deleteWhatsAppConfig(id: string): Promise<boolean> {
-  const config = await getWhatsAppConfig(id)
-  if (!config) return false
-
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    // Eliminar el mapeo de número de teléfono
-    if (config.phoneNumberId) {
-      await redisClient.del(`${PHONE_TO_CONFIG_PREFIX}${config.phoneNumberId}`)
-    }
-
-    // Eliminar la configuración
-    await redisClient.del(`${CONFIG_PREFIX}${id}`)
-  } else {
-    // Fallback a memoria
-    if (config.phoneNumberId) {
-      memoryStorage.phoneToConfig.delete(config.phoneNumberId)
-    }
-    memoryStorage.configs.delete(id)
-  }
-
-  // Actualizar estadísticas
-  await updateSystemStats()
-
-  return true
-}
-
-// Función para obtener configuración por clienteId - NUEVA FUNCIÓN AGREGADA
-export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppConfig | null> {
-  try {
-    console.log(`[DB] 🔍 Buscando configuración para cliente_id: ${clienteId}`)
-
-    const configs = await getAllWhatsAppConfigs()
-    console.log(`[DB] 📊 Total de configuraciones disponibles: ${configs.length}`)
-
-    if (configs.length > 0) {
-      console.log(`[DB] 🔍 IDs de configuraciones disponibles:`)
-      configs.forEach((config, index) => {
-        console.log(
-          `[DB]   ${index + 1}. ID: ${config.id}, cliente_id: ${config.cliente_id}, displayName: ${config.displayName}`,
-        )
-      })
-    }
-
-    const config = configs.find((config) => config.cliente_id === clienteId)
-
-    if (config) {
-      console.log(`[DB] ✅ Configuración encontrada para cliente_id ${clienteId}:`)
-      console.log(`[DB] - ID: ${config.id}`)
-      console.log(`[DB] - displayName: ${config.displayName}`)
-      return config
-    }
-
-    console.log(`[DB] ❌ No se encontró configuración para cliente_id: ${clienteId}`)
-    return null
-  } catch (error) {
-    console.error(`[DB] ❌ ERROR CRÍTICO al buscar configuración por cliente_id:`, error)
-    console.error(`[DB] Stack trace:`, error instanceof Error ? error.stack : "No stack trace available")
-    return null
-  }
-}
-
-// Funciones para la gestión de threads
-
-// Obtener o crear un thread para un usuario y configuración
-export async function getThreadForUser(
-  phoneNumber: string,
-  whatsappConfigId: string,
-): Promise<{ threadId: string; isNewThread: boolean; isResetThread?: boolean }> {
-  const key = `${THREAD_PREFIX}${phoneNumber}:${whatsappConfigId}`
-  const redisClient = getRedisClient()
-
-  console.log(`[DB] 🔍 Obteniendo thread para ${phoneNumber} con config ${whatsappConfigId}`)
-
-  if (redisClient) {
-    // Intentar obtener el thread existente
-    const threadData = await redisClient.get(key)
-    const threadInfo = safeJsonParse(threadData)
-
-    if (threadInfo) {
-      console.log(`[DB] ✅ Thread encontrado: ${threadInfo.threadId}`)
-
-      // Verificar si es un thread reseteado
-      const isResetThread = threadInfo.isResetThread === true
-
-      // Actualizar la información del thread
-      const updatedThreadInfo = {
-        ...threadInfo,
-        lastMessageAt: new Date().toISOString(),
-        messageCount: (threadInfo.messageCount || 0) + 1,
-        // Limpiar el flag de reset después del primer uso
-        isResetThread: false,
-      }
-
-      // Guardar en Redis - siempre como cadena JSON
-      await redisClient.set(key, JSON.stringify(updatedThreadInfo))
-
-      return {
-        threadId: threadInfo.threadId,
-        isNewThread: false,
-        isResetThread,
-      }
-    }
-  } else {
-    // Fallback a memoria con la misma lógica
-    const threadInfo = memoryStorage.threads.get(key)
-
-    if (threadInfo) {
-      console.log(`[DB] ✅ Thread encontrado en memoria: ${threadInfo.threadId}`)
-
-      const isResetThread = threadInfo.isResetThread === true
-
-      const updatedThreadInfo = {
-        ...threadInfo,
-        lastMessageAt: new Date().toISOString(),
-        messageCount: (threadInfo.messageCount || 0) + 1,
-        isResetThread: false,
-      }
-
-      memoryStorage.threads.set(key, updatedThreadInfo)
-
-      return {
-        threadId: threadInfo.threadId,
-        isNewThread: false,
-        isResetThread,
-      }
-    }
-  }
-
-  // Crear un nuevo thread
-  console.log(`[DB] 📝 No se encontró thread existente, creando uno nuevo`)
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  })
-
-  const thread = await openai.beta.threads.create()
-  console.log(`[DB] ✅ Nuevo thread creado: ${thread.id}`)
-
-  // Guardar la información del thread
-  const newThreadInfo: ThreadInfo = {
-    threadId: thread.id,
-    phoneNumber,
-    whatsappConfigId,
-    lastMessageAt: new Date().toISOString(),
-    messageCount: 1,
-  }
-
-  if (redisClient) {
-    // Guardar en Redis - siempre como cadena JSON
-    await redisClient.set(key, JSON.stringify(newThreadInfo))
-  } else {
-    // Fallback a memoria
-    memoryStorage.threads.set(key, newThreadInfo)
-  }
-
-  // Actualizar estadísticas
-  await updateSystemStats()
-
-  return { threadId: thread.id, isNewThread: true }
-}
-
-// Resetear un thread para un usuario - OPTIMIZADO
-export async function resetThreadForUser(
-  phoneNumber: string,
-  whatsappConfigId: string,
-): Promise<{ threadId: string; isNewThread: boolean }> {
-  const key = `${THREAD_PREFIX}${phoneNumber}:${whatsappConfigId}`
-  const redisClient = getRedisClient()
-
-  console.log(`[DB] 🔄 RESETEANDO thread para ${phoneNumber} con config ${whatsappConfigId}`)
-
-  try {
-    // 1. CREAR UN THREAD COMPLETAMENTE NUEVO EN OPENAI
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    })
-
-    const newThread = await openai.beta.threads.create()
-    console.log(`[DB] ✅ NUEVO thread creado en OpenAI: ${newThread.id}`)
-
-    // 2. ELIMINAR COMPLETAMENTE EL THREAD ANTERIOR
-    if (redisClient) {
-      await redisClient.del(key)
-      console.log(`[DB] ✅ Thread anterior eliminado de Redis`)
-    } else {
-      memoryStorage.threads.delete(key)
-      console.log(`[DB] ✅ Thread anterior eliminado de memoria`)
-    }
-
-    // 3. GUARDAR EL NUEVO THREAD CON FLAG DE RESET
-    const newThreadInfo: ThreadInfo = {
-      threadId: newThread.id,
-      phoneNumber,
-      whatsappConfigId,
-      lastMessageAt: new Date().toISOString(),
-      messageCount: 0, // Empezar en 0 para que se considere nuevo
-      isResetThread: true, // Flag para indicar que es un thread reseteado
-      createdAt: new Date().toISOString(),
-    }
-
-    if (redisClient) {
-      await redisClient.set(key, JSON.stringify(newThreadInfo))
-      console.log(`[DB] ✅ Nuevo thread guardado en Redis: ${newThread.id}`)
-    } else {
-      memoryStorage.threads.set(key, newThreadInfo)
-      console.log(`[DB] ✅ Nuevo thread guardado en memoria: ${newThread.id}`)
-    }
-
-    // 4. ACTUALIZAR ESTADÍSTICAS
-    await updateSystemStats()
-
-    console.log(`[DB] ✅ RESET COMPLETADO: ${newThread.id}`)
-    return { threadId: newThread.id, isNewThread: true }
-  } catch (error) {
-    console.error(`[DB] ❌ Error al resetear thread:`, error)
-    throw error
-  }
-}
-
-// Obtener todos los threads
-export async function getAllThreads(): Promise<ThreadInfo[]> {
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    const keys = await redisClient.keys(`${THREAD_PREFIX}*`)
-
-    if (keys.length === 0) return []
-
-    const threads = await Promise.all(
-      keys.map(async (key) => {
-        const threadData = await redisClient.get(key)
-        // Usar la función auxiliar para manejar la deserialización
-        return safeJsonParse(threadData)
-      }),
-    )
-
-    return threads.filter(Boolean) as ThreadInfo[]
-  } else {
-    // Fallback a memoria
-    return Array.from(memoryStorage.threads.values())
-  }
-}
-
-// Funciones para estadísticas del sistema
-
-// Actualizar estadísticas del sistema
-export async function updateSystemStats(): Promise<SystemStats> {
-  const configs = await getAllWhatsAppConfigs()
-  const threads = await getAllThreads()
-
-  const stats: SystemStats = {
-    totalConfigs: configs.length,
-    activeConfigs: configs.filter((c) => c.active).length,
-    totalMessages: threads.reduce((sum, t) => sum + (t.messageCount || 0), 0),
-    totalThreads: threads.length,
-    lastUpdated: new Date().toISOString(),
-  }
-
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    // Guardar en Redis - siempre como cadena JSON
-    await redisClient.set(STATS_KEY, JSON.stringify(stats))
-  } else {
-    // Fallback a memoria
-    memoryStorage.stats = stats
-  }
-
-  return stats
-}
-
-// Obtener estadísticas del sistema
-export async function getSystemStats(): Promise<SystemStats> {
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    const statsData = await redisClient.get(STATS_KEY)
-    // Usar la función auxiliar para manejar la deserialización
-    const stats = safeJsonParse(statsData)
-
-    if (!stats) {
-      return updateSystemStats()
-    }
-
-    return stats
-  } else {
-    // Fallback a memoria
-    if (!memoryStorage.stats) {
-      return updateSystemStats()
-    }
-
-    return memoryStorage.stats
-  }
-}
-
-// Actualizar estadísticas de un número de WhatsApp
-export async function updateWhatsAppStats(
-  configId: string,
-  updates: { messagesReceived?: number; messagesProcessed?: number; errors?: number },
-): Promise<void> {
-  const config = await getWhatsAppConfig(configId)
-  if (!config) return
-
-  const updatedStats = {
-    ...config.stats,
-    messagesReceived: (config.stats?.messagesReceived || 0) + (updates.messagesReceived || 0),
-    messagesProcessed: (config.stats?.messagesProcessed || 0) + (updates.messagesProcessed || 0),
-    errors: (config.stats?.errors || 0) + (updates.errors || 0),
-    lastMessageAt: updates.messagesReceived ? new Date().toISOString() : config.stats?.lastMessageAt,
-  }
-
-  await updateWhatsAppConfig(configId, { stats: updatedStats })
-}
-
-// Función adicional para obtener configuración por ID (alias para compatibilidad)
-export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig | null> {
-  return getWhatsAppConfig(id)
-}
-
-// Export alias for compatibility
-export const getWhatsappConfigByClienteId = getConfigByClienteId
-export const getConfigById = getWhatsAppConfig // Alias para compatibilidad
-
-// Funciones para la gestión de mensajes y conversaciones
-
-// Guardar un mensaje de conversación
-export async function saveConversationMessage(message: ConversationMessage): Promise<void> {
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    const messageKey = `${MESSAGE_PREFIX}${message.configId}:${message.phoneNumber}:${message.id}`
-
-    // Guardar el mensaje con TTL de 7 días (604800 segundos)
-    await redisClient.setex(messageKey, 604800, JSON.stringify(message))
-
-    // Actualizar el resumen de la conversación
-    await updateConversationSummary(message)
-
-    console.log(`[DB] 💬 Mensaje guardado: ${messageKey}`)
-  } else {
-    console.log(`[DB] ⚠️ Redis no disponible, no se puede guardar el mensaje`)
-  }
-}
-
-// Actualizar resumen de conversación
-async function updateConversationSummary(message: ConversationMessage): Promise<void> {
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    const summaryKey = `${CONVERSATION_PREFIX}${message.configId}:${message.phoneNumber}`
-
-    // Obtener resumen existente
-    const existingSummaryData = await redisClient.get(summaryKey)
-    const existingSummary = safeJsonParse(existingSummaryData)
-
-    const summary: ConversationSummary = {
-      phoneNumber: message.phoneNumber,
-      userName: message.userName || existingSummary?.userName,
-      lastMessage: message.message.substring(0, 100), // Limitar a 100 caracteres
-      lastMessageAt: message.timestamp,
-      messageCount: (existingSummary?.messageCount || 0) + 1,
-      configId: message.configId,
-      clienteId: message.clienteId,
-    }
-
-    // Guardar con TTL de 7 días
-    await redisClient.setex(summaryKey, 604800, JSON.stringify(summary))
-  }
-}
-
-// Obtener mensajes de una conversación
-export async function getConversationMessages(
-  configId: string,
-  phoneNumber: string,
-  limit = 50,
-): Promise<ConversationMessage[]> {
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    const pattern = `${MESSAGE_PREFIX}${configId}:${phoneNumber}:*`
-    const keys = await redisClient.keys(pattern)
-
-    if (keys.length === 0) return []
-
-    const messages = await Promise.all(
-      keys.map(async (key) => {
-        const messageData = await redisClient.get(key)
-        return safeJsonParse(messageData)
-      }),
-    )
-
-    const validMessages = messages.filter(Boolean) as ConversationMessage[]
-
-    // Ordenar por timestamp (más recientes primero)
-    return validMessages
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, limit)
-  }
-
-  return []
-}
-
-// Obtener todas las conversaciones de un cliente
-export async function getClientConversations(clienteId: string): Promise<ConversationSummary[]> {
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    // Obtener todas las configuraciones del cliente
-    const configs = await getAllWhatsAppConfigs()
-    const clientConfigs = configs.filter((config) => config.cliente_id === clienteId)
-
-    const allConversations: ConversationSummary[] = []
-
-    for (const config of clientConfigs) {
-      const pattern = `${CONVERSATION_PREFIX}${config.id}:*`
-      const keys = await redisClient.keys(pattern)
-
-      const conversations = await Promise.all(
-        keys.map(async (key) => {
-          const summaryData = await redisClient.get(key)
-          return safeJsonParse(summaryData)
-        }),
-      )
-
-      const validConversations = conversations.filter(Boolean) as ConversationSummary[]
-      allConversations.push(...validConversations)
-    }
-
-    // Ordenar por último mensaje (más recientes primero)
-    return allConversations.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
-  }
-
-  return []
-}
-
-// Obtener todas las conversaciones de una configuración específica
-export async function getConfigConversations(configId: string): Promise<ConversationSummary[]> {
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    const pattern = `${CONVERSATION_PREFIX}${configId}:*`
-    const keys = await redisClient.keys(pattern)
-
-    if (keys.length === 0) return []
-
-    const conversations = await Promise.all(
-      keys.map(async (key) => {
-        const summaryData = await redisClient.get(key)
-        return safeJsonParse(summaryData)
-      }),
-    )
-
-    const validConversations = conversations.filter(Boolean) as ConversationSummary[]
-
-    // Ordenar por último mensaje (más recientes primero)
-    return validConversations.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
-  }
-
-  return []
-}
-
-// Obtener estadísticas de conversaciones
-export async function getConversationStats(configId?: string): Promise<{
-  totalConversations: number
-  totalMessages: number
-  activeConversations: number // conversaciones con mensajes en las últimas 24 horas
-}> {
-  const redisClient = getRedisClient()
-
-  if (redisClient) {
-    const pattern = configId ? `${CONVERSATION_PREFIX}${configId}:*` : `${CONVERSATION_PREFIX}*`
-
-    const keys = await redisClient.keys(pattern)
-
-    if (keys.length === 0) {
-      return { totalConversations: 0, totalMessages: 0, activeConversations: 0 }
-    }
-
-    const conversations = await Promise.all(
-      keys.map(async (key) => {
-        const summaryData = await redisClient.get(key)
-        return safeJsonParse(summaryData)
-      }),
-    )
-
-    const validConversations = conversations.filter(Boolean) as ConversationSummary[]
-
-    const now = new Date()
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-
-    const activeConversations = validConversations.filter((conv) => new Date(conv.lastMessageAt) > yesterday).length
-
-    const totalMessages = validConversations.reduce((sum, conv) => sum + conv.messageCount, 0)
-
-    return {
-      totalConversations: validConversations.length,
-      totalMessages,
-      activeConversations,
-    }
-  }
-
-  return { totalConversations: 0, totalMessages: 0, activeConversations: 0 }
 }
