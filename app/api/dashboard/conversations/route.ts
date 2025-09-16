@@ -4,21 +4,19 @@ import { getAllClientsWithConversations, getConversationsByClient } from "@/lib/
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const clienteId = searchParams.get("cliente_id")
+    const clienteId = searchParams.get("clienteId")
 
     if (clienteId) {
       // Obtener conversaciones de un cliente específico
       const conversations = await getConversationsByClient(clienteId)
-      return NextResponse.json({ success: true, conversations })
+      return NextResponse.json({ success: true, data: conversations })
     } else {
-      // Obtener todos los clientes con sus estadísticas
+      // Obtener todos los clientes con sus estadísticas de conversaciones
       const clients = await getAllClientsWithConversations()
-      return NextResponse.json({ success: true, clients })
+      return NextResponse.json({ success: true, data: clients })
     }
   } catch (error) {
-    console.error("[API] Error obteniendo conversaciones:", error)
+    console.error("Error obteniendo conversaciones:", error)
     return NextResponse.json({ success: false, error: "Error interno del servidor" }, { status: 500 })
   }
 }
-
-export const dynamic = "force-dynamic"

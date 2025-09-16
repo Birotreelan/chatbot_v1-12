@@ -4,19 +4,17 @@ import { getConversationMessages } from "@/lib/db"
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const configId = searchParams.get("config_id")
-    const phoneNumber = searchParams.get("phone_number")
+    const configId = searchParams.get("configId")
+    const phoneNumber = searchParams.get("phoneNumber")
 
     if (!configId || !phoneNumber) {
-      return NextResponse.json({ success: false, error: "config_id y phone_number son requeridos" }, { status: 400 })
+      return NextResponse.json({ success: false, error: "configId y phoneNumber son requeridos" }, { status: 400 })
     }
 
     const messages = await getConversationMessages(configId, phoneNumber)
-    return NextResponse.json({ success: true, messages })
+    return NextResponse.json({ success: true, data: messages })
   } catch (error) {
-    console.error("[API] Error obteniendo mensajes:", error)
+    console.error("Error obteniendo mensajes:", error)
     return NextResponse.json({ success: false, error: "Error interno del servidor" }, { status: 500 })
   }
 }
-
-export const dynamic = "force-dynamic"

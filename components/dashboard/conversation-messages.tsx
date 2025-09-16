@@ -1,11 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Card, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect, useRef } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Bot, User, Clock, Hash } from "lucide-react"
-import { format } from "date-fns"
-import { es } from "date-fns/locale"
+import { Button } from "@/components/ui/button"
+import { RefreshCw, Bot, User, Clock } from "lucide-react"
 
 interface Message {
   id: string
@@ -23,27 +22,36 @@ interface Message {
 interface ConversationMessagesProps {
   configId: string
   phoneNumber: string
-  userName?: string
 }
 
-export function ConversationMessages({ configId, phoneNumber, userName }: ConversationMessagesProps) {
+export function ConversationMessages({ configId, phoneNumber }: ConversationMessagesProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetchMessages()
   }, [configId, phoneNumber])
 
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
   const fetchMessages = async () => {
     try {
       setLoading(true)
       const response = await fetch(
-        `/api/dashboard/conversations/messages?config_id=${configId}&phone_number=${phoneNumber}`,
+        `/api/dashboard/conversations/messages?configId=${configId}&phoneNumber=${phoneNumber}`,
       )
       const data = await response.json()
 
       if (data.success) {
-        setMessages(data.messages || [])
+        setMessages(data.data)
       }
     } catch (error) {
       console.error("Error fetching messages:", error)
@@ -52,80 +60,76 @@ export function ConversationMessages({ configId, phoneNumber, userName }: Conver
     }
   }
 
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await fetchMessages()
+    setRefreshing(false)
+  }
+
+  const formatTime = (timestamp: string) => {
+    return new Date(timestamp).toLocaleString()
+  }
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-2 text-sm text-muted-foreground">Cargando mensajes...</p>
-        </div>
-      </div>
+      <Card>
+        <CardContent className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p>Cargando mensajes...</p>
+          </div>
+        </CardContent>
+      </Card>
     )
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header de la conversación */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <User className="h-5 w-5" />
-            {userName || phoneNumber}
-          </CardTitle>
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-            <span>{phoneNumber}</span>
-            <Badge variant="outline">{messages.length} mensajes</Badge>
-            {messages.length > 0 && messages[0].threadId && (
-              <div className="flex items-center gap-1">
-                <Hash className="h-3 w-3" />
-                <span className="font-mono text-xs">{messages[0].threadId.slice(-8)}</span>
-              </div>
-            )}
+    <Card className="h-[600px] flex flex-col">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+        <CardTitle className="text-lg">Mensajes</CardTitle>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline">{messages.length} mensajes</Badge>
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+      </CardHeader>
+
+      <CardContent className="flex-1 overflow-y-auto space-y-4">
+        {messages.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground">No hay mensajes en esta conversación</p>
           </div>
-        </CardHeader>
-      </Card>
+        ) : (
+          <>
+            {messages.map((message) => (
+              <div key={message.id} className={`flex ${message.isFromUser ? "justify-start" : "justify-end"}`}>
+                <div
+                  className={`max-w-[70%] rounded-lg p-3 ${
+                    message.isFromUser ? "bg-muted text-foreground" : "bg-primary text-primary-foreground"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    {message.isFromUser ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+                    <span className="text-xs opacity-70">{message.isFromUser ? "Usuario" : "Bot"}</span>
+                  </div>
 
-      {/* Lista de mensajes */}
-      <div className="space-y-4">
-        {messages.map((message) => (
-          <div key={message.id} className={`flex gap-3 ${message.isFromUser ? "justify-start" : "justify-end"}`}>
-            <div className={`flex gap-3 max-w-[80%] ${message.isFromUser ? "flex-row" : "flex-row-reverse"}`}>
-              {/* Avatar */}
-              <div
-                className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                  message.isFromUser ? "bg-blue-100 text-blue-600" : "bg-green-100 text-green-600"
-                }`}
-              >
-                {message.isFromUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-              </div>
+                  <p className="text-sm whitespace-pre-wrap">{message.message}</p>
 
-              {/* Mensaje */}
-              <div
-                className={`rounded-lg px-4 py-2 ${
-                  message.isFromUser ? "bg-blue-50 border border-blue-200" : "bg-green-50 border border-green-200"
-                }`}
-              >
-                <p className="text-sm whitespace-pre-wrap">{message.message}</p>
-                <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                  <Clock className="h-3 w-3" />
-                  <span>
-                    {format(new Date(message.timestamp), "dd/MM/yyyy HH:mm", {
-                      locale: es,
-                    })}
-                  </span>
+                  <div className="flex items-center gap-1 mt-2 text-xs opacity-70">
+                    <Clock className="h-3 w-3" />
+                    <span>{formatTime(message.timestamp)}</span>
+                    {message.threadId && (
+                      <span className="ml-2 font-mono text-xs">Thread: {message.threadId.slice(-8)}</span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        ))}
-        {messages.length === 0 && (
-          <div className="text-center py-12">
-            <Bot className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No hay mensajes</h3>
-            <p className="text-muted-foreground">Esta conversación aún no tiene mensajes registrados.</p>
-          </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </>
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
