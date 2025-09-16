@@ -1,5 +1,5 @@
 import redis from "redis"
-import { getAllConfigurations } from "./config" // Assuming getAllConfigurations is defined elsewhere
+import { getAllWhatsAppConfigs } from "./config" // Assuming config.ts is the file where getAllWhatsAppConfigs is declared
 
 // Funciones para manejo de mensajes de conversaciones
 export async function saveConversationMessage(
@@ -121,7 +121,7 @@ export async function getConversationMessages(configId: string, phoneNumber: str
 export async function getAllClientsWithConversations() {
   try {
     // Obtener todas las configuraciones
-    const configs = await getAllConfigurations()
+    const configs = await getAllWhatsAppConfigs()
 
     // Agrupar por cliente_id
     const clientsMap = new Map()

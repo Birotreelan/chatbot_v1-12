@@ -5,7 +5,9 @@ async function getAssistantResponse(phoneNumber: string, config: any, response: 
   console.log("[OPENAI] 📱 Enviado a WhatsApp")
 
   // Guardar respuesta del bot
-  await saveConversationMessage(phoneNumber, config.id, config.cliente_id, response, "outgoing", threadId)
+  if (config?.id && config?.cliente_id) {
+    await saveConversationMessage(phoneNumber, config.id, config.cliente_id, response, "outgoing", threadId)
+  }
 
   // The rest of the code here
 }

@@ -1,20 +1,44 @@
-import { MessageSquare } from "lucide-react"
+"use client"
 
-const navItems = [
-  {
-    title: "Dashboard",
-    href: "/dashboard",
-    icon: Home,
-  },
-  {
-    title: "Monitoreo",
-    href: "/dashboard/monitoring",
-    icon: Monitor,
-  },
-  {
-    title: "Conversaciones",
-    href: "/dashboard/conversations",
-    icon: MessageSquare,
-  },
-  //** rest of code here **/
-]
+import { MessageSquare } from "lucide-react"
+import { useRouter } from "next/router"
+
+const DashboardNav = () => {
+  const router = useRouter()
+  const pathname = router.pathname
+
+  const navigation = [
+    {
+      name: "Dashboard",
+      href: "/dashboard",
+      icon: "home",
+      current: pathname === "/dashboard",
+    },
+    {
+      name: "Monitoring",
+      href: "/dashboard/monitoring",
+      icon: "monitor",
+      current: pathname === "/dashboard/monitoring",
+    },
+    {
+      name: "Conversaciones",
+      href: "/dashboard/conversations",
+      icon: MessageSquare,
+      current: pathname === "/dashboard/conversations",
+    },
+    // ** rest of code here **
+  ]
+
+  return (
+    <nav>
+      {navigation.map((item) => (
+        <a href={item.href} key={item.name}>
+          {item.icon}
+          {item.name}
+        </a>
+      ))}
+    </nav>
+  )
+}
+
+export default DashboardNav

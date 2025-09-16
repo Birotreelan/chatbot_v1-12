@@ -1,24 +1,20 @@
 import { saveConversationMessage } from "./db"
 
-// Assuming the rest of the code for lib/whatsapp.ts is here
-
-async function processIndividualMessage(userPhoneNumber, config, userMessage, threadId, userName) {
-  // Existing code here
-
-  console.log("[WHATSAPP] Mensaje preparado para OpenAI:", systemMessage)
+// Assuming the rest of the code is here and processIndividualMessage function exists
+async function processIndividualMessage(phoneNumber: string, config: any, userMessage: string, threadId: string) {
+  const systemBlock = "System block content" // Placeholder for actual system block content
+  console.log(`[WHATSAPP] Mensaje preparado para OpenAI: ${systemBlock} ${userMessage}`)
 
   // Guardar mensaje del usuario
   await saveConversationMessage(
-    userPhoneNumber,
+    phoneNumber,
     config.id,
-    config.cliente_id,
+    config.cliente_id || "",
     userMessage,
     "incoming",
     threadId,
-    userName,
+    undefined, // userName se puede obtener del contacto si está disponible
   )
 
-  // Existing code here
+  // Further processing code here
 }
-
-// Assuming the rest of the code for lib/whatsapp.ts is here

@@ -4,7 +4,7 @@ import { getAllClientsWithConversations, getConversationsByClient } from "@/lib/
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const clienteId = searchParams.get("cliente_id")
+    const clienteId = searchParams.get("clienteId")
 
     if (clienteId) {
       // Obtener conversaciones de un cliente específico
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ clients })
     }
   } catch (error) {
-    console.error("Error en API conversations:", error)
+    console.error("[API] Error en /api/dashboard/conversations:", error)
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 })
   }
 }
