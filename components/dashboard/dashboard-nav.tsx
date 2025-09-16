@@ -3,13 +3,13 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { BarChart3, Settings, MessageSquare, Activity } from "lucide-react"
+import { LayoutDashboard, Settings, Activity, MessageSquare } from "lucide-react"
 
 const navigation = [
   {
     name: "Dashboard",
     href: "/dashboard",
-    icon: BarChart3,
+    icon: LayoutDashboard,
   },
   {
     name: "Configuraciones",
@@ -17,14 +17,14 @@ const navigation = [
     icon: Settings,
   },
   {
-    name: "Conversaciones",
-    href: "/dashboard/conversations",
-    icon: MessageSquare,
-  },
-  {
     name: "Monitoreo",
     href: "/dashboard/monitoring",
     icon: Activity,
+  },
+  {
+    name: "Conversaciones",
+    href: "/dashboard/conversations",
+    icon: MessageSquare,
   },
 ]
 

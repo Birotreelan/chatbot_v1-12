@@ -7,21 +7,19 @@ export default function ConversationsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Conversaciones</h1>
-        <p className="text-muted-foreground">Monitorea y revisa las conversaciones de tus chatbots</p>
+        <p className="text-muted-foreground">Monitorea y revisa las conversaciones de WhatsApp por cliente</p>
       </div>
 
       <Suspense
         fallback={
           <Card>
             <CardHeader>
-              <CardTitle>Cargando conversaciones...</CardTitle>
-              <CardDescription>Obteniendo las conversaciones más recientes</CardDescription>
+              <CardTitle>Cargando...</CardTitle>
+              <CardDescription>Obteniendo datos de conversaciones</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="animate-pulse space-y-4">
-                <div className="h-4 bg-muted rounded w-3/4"></div>
-                <div className="h-4 bg-muted rounded w-1/2"></div>
-                <div className="h-4 bg-muted rounded w-2/3"></div>
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             </CardContent>
           </Card>

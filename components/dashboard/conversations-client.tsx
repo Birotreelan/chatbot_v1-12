@@ -1,214 +1,255 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ConversationsList } from "./conversations-list"
-import { ConversationMessages } from "./conversation-messages"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { RefreshCw, ArrowLeft } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+import { ArrowLeft, MessageSquare, Users } from "lucide-react"
+import { ConversationsList } from "./conversations-list"
+import { ConversationMessages } from "./conversation-messages"
 
 interface Client {
-  cliente_id: string
+  clienteId: string
   displayName: string
-  totalConversations: number
-  totalMessages: number
-  activeConversations: number
 }
 
 interface Conversation {
+  id: string
   phoneNumber: string
   configId: string
-  clienteId: string
-  userName?: string
-  messageCount: number
-  lastMessageAt: string
+  userName: string
   lastMessage: string
+  lastMessageTime: string
+  messageCount: number
 }
 
+type ViewState =
+  | { type: "clients" }
+  | { type: "conversations"; client: Client }
+  | { type: "messages"; conversation: Conversation; client: Client }
+
 export function ConversationsClient() {
+  const [viewState, setViewState] = useState<ViewState>({ type: "clients" })
   const [clients, setClients] = useState<Client[]>([])
   const [conversations, setConversations] = useState<Conversation[]>([])
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null)
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const { toast } = useToast()
+  const [error, setError] = useState<string | null>(null)
 
-  const fetchClients = async () => {
+  // Cargar clientes al montar el componente
+  useEffect(() => {
+    loadClients()
+  }, [])
+
+  const loadClients = async () => {
     try {
-      setRefreshing(true)
+      setLoading(true)
+      setError(null)
+
       const response = await fetch("/api/dashboard/conversations")
       const data = await response.json()
 
-      if (data.success) {
-        setClients(data.clients)
-      } else {
-        throw new Error(data.error || "Error obteniendo clientes")
+      if (!response.ok) {
+        throw new Error(data.error || "Error cargando clientes")
       }
-    } catch (error) {
-      console.error("Error fetching clients:", error)
-      toast({
-        title: "Error",
-        description: "No se pudieron cargar los clientes",
-        variant: "destructive",
-      })
+
+      if (data.success) {
+        setClients(data.clients || [])
+      } else {
+        throw new Error(data.error || "Error en la respuesta")
+      }
+    } catch (err) {
+      console.error("Error cargando clientes:", err)
+      setError(err instanceof Error ? err.message : "Error desconocido")
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }
 
-  const fetchConversations = async (clientId: string) => {
+  const loadConversations = async (clienteId: string) => {
     try {
       setLoading(true)
-      // Por ahora, simulamos las conversaciones basadas en el cliente
-      // En una implementación real, harías una llamada a la API específica
-      const mockConversations: Conversation[] = [
-        {
-          phoneNumber: "5493413121395",
-          configId: "config1",
-          clienteId: clientId,
-          userName: "Nicolas de Santiago",
-          messageCount: 5,
-          lastMessageAt: new Date().toISOString(),
-          lastMessage: "Hola, necesito ayuda con mi turno",
-        },
-      ]
+      setError(null)
 
-      setConversations(mockConversations)
-    } catch (error) {
-      console.error("Error fetching conversations:", error)
-      toast({
-        title: "Error",
-        description: "No se pudieron cargar las conversaciones",
-        variant: "destructive",
-      })
+      const response = await fetch(`/api/dashboard/conversations?clienteId=${encodeURIComponent(clienteId)}`)
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Error cargando conversaciones")
+      }
+
+      if (data.success) {
+        setConversations(data.conversations || [])
+      } else {
+        throw new Error(data.error || "Error en la respuesta")
+      }
+    } catch (err) {
+      console.error("Error cargando conversaciones:", err)
+      setError(err instanceof Error ? err.message : "Error desconocido")
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => {
-    fetchClients()
-  }, [])
-
-  const handleClientSelect = (client: Client) => {
-    setSelectedClient(client)
-    setSelectedConversation(null)
-    fetchConversations(client.cliente_id)
+  const handleClientSelect = async (client: Client) => {
+    setViewState({ type: "conversations", client })
+    await loadConversations(client.clienteId)
   }
 
   const handleConversationSelect = (conversation: Conversation) => {
-    setSelectedConversation(conversation)
-  }
-
-  const handleBack = () => {
-    if (selectedConversation) {
-      setSelectedConversation(null)
-    } else if (selectedClient) {
-      setSelectedClient(null)
-      setConversations([])
+    if (viewState.type === "conversations") {
+      setViewState({
+        type: "messages",
+        conversation,
+        client: viewState.client,
+      })
     }
   }
 
-  if (loading && clients.length === 0) {
+  const handleBackToClients = () => {
+    setViewState({ type: "clients" })
+    setConversations([])
+  }
+
+  const handleBackToConversations = () => {
+    if (viewState.type === "messages") {
+      setViewState({ type: "conversations", client: viewState.client })
+    }
+  }
+
+  if (loading && viewState.type === "clients") {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Cargando...</CardTitle>
-          <CardDescription>Obteniendo conversaciones</CardDescription>
+          <CardTitle>Cargando clientes...</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="animate-pulse space-y-4">
-            <div className="h-4 bg-muted rounded w-3/4"></div>
-            <div className="h-4 bg-muted rounded w-1/2"></div>
-            <div className="h-4 bg-muted rounded w-2/3"></div>
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
         </CardContent>
       </Card>
     )
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          {(selectedClient || selectedConversation) && (
-            <Button variant="outline" size="sm" onClick={handleBack}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Volver
-            </Button>
+  if (error) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-red-600">Error</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-red-600 mb-4">{error}</p>
+          <Button onClick={loadClients} variant="outline">
+            Reintentar
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Vista de clientes
+  if (viewState.type === "clients") {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Clientes ({clients.length})
+          </CardTitle>
+          <CardDescription>Selecciona un cliente para ver sus conversaciones de WhatsApp</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {clients.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>No hay clientes con conversaciones disponibles</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {clients.map((client) => (
+                <Card
+                  key={client.clienteId}
+                  className="cursor-pointer hover:shadow-md transition-shadow"
+                  onClick={() => handleClientSelect(client)}
+                >
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg">{client.displayName}</CardTitle>
+                    <CardDescription>ID: {client.clienteId}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button variant="outline" size="sm" className="w-full bg-transparent">
+                      Ver conversaciones
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           )}
-          <h2 className="text-lg font-semibold">
-            {selectedConversation
-              ? `Conversación con ${selectedConversation.userName || selectedConversation.phoneNumber}`
-              : selectedClient
-                ? `Conversaciones de ${selectedClient.displayName}`
-                : "Clientes"}
-          </h2>
-        </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
-        <Button variant="outline" size="sm" onClick={fetchClients} disabled={refreshing}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
-          Actualizar
-        </Button>
-      </div>
+  // Vista de conversaciones
+  if (viewState.type === "conversations") {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={handleBackToClients} className="mr-2">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <MessageSquare className="h-5 w-5" />
+            <div>
+              <CardTitle>Conversaciones - {viewState.client.displayName}</CardTitle>
+              <CardDescription>
+                {conversations.length} conversación{conversations.length !== 1 ? "es" : ""} encontrada
+                {conversations.length !== 1 ? "s" : ""}
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : (
+            <ConversationsList conversations={conversations} onConversationSelect={handleConversationSelect} />
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
 
-      {selectedConversation ? (
-        <ConversationMessages conversation={selectedConversation} />
-      ) : selectedClient ? (
-        <ConversationsList
-          conversations={conversations}
-          loading={loading}
-          onConversationSelect={handleConversationSelect}
-        />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {clients.map((client) => (
-            <Card
-              key={client.cliente_id}
-              className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => handleClientSelect(client)}
-            >
-              <CardHeader>
-                <CardTitle className="text-lg">{client.displayName}</CardTitle>
-                <CardDescription>Cliente ID: {client.cliente_id}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span>Conversaciones totales:</span>
-                    <span className="font-medium">{client.totalConversations}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Mensajes totales:</span>
-                    <span className="font-medium">{client.totalMessages}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Conversaciones activas:</span>
-                    <span className="font-medium text-green-600">{client.activeConversations}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+  // Vista de mensajes
+  if (viewState.type === "messages") {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={handleBackToConversations} className="mr-2">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <MessageSquare className="h-5 w-5" />
+            <div>
+              <CardTitle>
+                {viewState.conversation.userName} - {viewState.client.displayName}
+              </CardTitle>
+              <CardDescription>
+                {viewState.conversation.phoneNumber} • {viewState.conversation.messageCount} mensajes
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ConversationMessages
+            phoneNumber={viewState.conversation.phoneNumber}
+            configId={viewState.conversation.configId}
+          />
+        </CardContent>
+      </Card>
+    )
+  }
 
-      {clients.length === 0 && !loading && (
-        <Card>
-          <CardHeader>
-            <CardTitle>No hay conversaciones</CardTitle>
-            <CardDescription>No se encontraron conversaciones para mostrar</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              Las conversaciones aparecerán aquí una vez que los usuarios comiencen a interactuar con tus chatbots.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  )
+  return null
 }

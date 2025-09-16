@@ -1,35 +1,50 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSession } from "@/lib/auth"
-import { getAllClientsWithConversations } from "@/lib/db"
+import { getAllClients, getConversationsByClient } from "@/lib/db"
 
 export async function GET(request: NextRequest) {
   try {
-    console.log("[API] Obteniendo conversaciones...")
-
     // Verificar autenticación
     const session = await getSession()
     if (!session) {
-      console.log("[API] Usuario no autenticado")
       return NextResponse.json({ error: "No autorizado" }, { status: 401 })
     }
 
-    console.log("[API] Usuario autenticado, obteniendo clientes...")
+    const { searchParams } = new URL(request.url)
+    const clienteId = searchParams.get("clienteId")
 
-    // Obtener todos los clientes con conversaciones
-    const clients = await getAllClientsWithConversations()
+    if (clienteId) {
+      // Obtener conversaciones para un cliente específico
+      console.log(`[API] Obteniendo conversaciones para cliente: ${clienteId}`)
 
-    console.log(`[API] Encontrados ${clients.length} clientes`)
+      const conversations = await getConversationsByClient(clienteId)
 
-    return NextResponse.json({
-      success: true,
-      clients,
-    })
+      console.log(`[API] ✅ ${conversations.length} conversaciones encontradas`)
+
+      return NextResponse.json({
+        success: true,
+        conversations,
+      })
+    } else {
+      // Obtener lista de clientes
+      console.log(`[API] Obteniendo lista de clientes`)
+
+      const clients = await getAllClients()
+
+      console.log(`[API] ✅ ${clients.length} clientes encontrados`)
+
+      return NextResponse.json({
+        success: true,
+        clients,
+      })
+    }
   } catch (error) {
-    console.error("[API] Error obteniendo conversaciones:", error)
+    console.error("[API] Error en /api/dashboard/conversations:", error)
+
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Error desconocido",
+        error: error instanceof Error ? error.message : "Error interno del servidor",
       },
       { status: 500 },
     )

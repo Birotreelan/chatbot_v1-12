@@ -1,6 +1,6 @@
-import { getWhatsAppConfigByPhoneId, saveConversationMessage } from "./db"
+import { getWhatsAppConfigByPhoneId, saveConversationMessage, updateWhatsAppStats } from "./db"
 import { processWhatsAppMessage } from "./whatsapp-processor"
-import { incrementMetric, logError } from "./monitoring"
+import { logError, incrementMetric } from "./monitoring"
 
 // Función principal para manejar mensajes de WhatsApp
 export async function handleMessage(messageData: any): Promise<void> {
@@ -49,11 +49,18 @@ export async function handleMessage(messageData: any): Promise<void> {
     // Verificar que es un mensaje de texto
     if (message.type !== "text" || !message.text || !message.text.body) {
       console.log(`[WHATSAPP] ⚠️ Tipo de mensaje no soportado: ${message.type}`)
+
+      // Enviar mensaje de error para tipos no soportados
+      const errorMessage = "Lo siento, solo puedo procesar mensajes de texto por el momento."
+      await sendWhatsAppMessage(userPhoneNumber, errorMessage, config)
       return
     }
 
     const messageText = message.text.body
     console.log(`[WHATSAPP] 💬 Mensaje: "${messageText}"`)
+
+    // Actualizar estadísticas de mensajes recibidos
+    await updateWhatsAppStats(config.id, { messagesReceived: 1 })
 
     // Guardar mensaje entrante
     await saveConversationMessage(

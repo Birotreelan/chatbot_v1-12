@@ -1,13 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { RefreshCw, Bot, User } from "lucide-react"
+import { MessageSquare, RefreshCw, User, Bot } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
-import { useToast } from "@/hooks/use-toast"
 
 interface Message {
   id: string
@@ -15,170 +14,130 @@ interface Message {
   configId: string
   clienteId: string
   message: string
-  messageType: "incoming" | "outgoing"
-  timestamp: string
+  direction: "incoming" | "outgoing"
   threadId?: string
   userName?: string
-  isFromUser: boolean
-}
-
-interface Conversation {
-  phoneNumber: string
-  configId: string
-  clienteId: string
-  userName?: string
-  messageCount: number
-  lastMessageAt: string
-  lastMessage: string
+  timestamp: string
 }
 
 interface ConversationMessagesProps {
-  conversation: Conversation
+  phoneNumber: string
+  configId: string
 }
 
-export function ConversationMessages({ conversation }: ConversationMessagesProps) {
+export function ConversationMessages({ phoneNumber, configId }: ConversationMessagesProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const { toast } = useToast()
+  const [error, setError] = useState<string | null>(null)
 
-  const fetchMessages = async () => {
+  useEffect(() => {
+    loadMessages()
+  }, [phoneNumber, configId])
+
+  const loadMessages = async () => {
     try {
-      setRefreshing(true)
+      setLoading(true)
+      setError(null)
+
       const response = await fetch(
-        `/api/dashboard/conversations/messages?configId=${conversation.configId}&phoneNumber=${conversation.phoneNumber}`,
+        `/api/dashboard/conversations/messages?phoneNumber=${encodeURIComponent(phoneNumber)}&configId=${encodeURIComponent(configId)}`,
       )
       const data = await response.json()
 
-      if (data.success) {
-        setMessages(data.messages)
-      } else {
-        throw new Error(data.error || "Error obteniendo mensajes")
+      if (!response.ok) {
+        throw new Error(data.error || "Error cargando mensajes")
       }
-    } catch (error) {
-      console.error("Error fetching messages:", error)
-      toast({
-        title: "Error",
-        description: "No se pudieron cargar los mensajes",
-        variant: "destructive",
-      })
+
+      if (data.success) {
+        setMessages(data.messages || [])
+      } else {
+        throw new Error(data.error || "Error en la respuesta")
+      }
+    } catch (err) {
+      console.error("Error cargando mensajes:", err)
+      setError(err instanceof Error ? err.message : "Error desconocido")
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }
 
-  useEffect(() => {
-    fetchMessages()
-  }, [conversation])
-
   if (loading) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Cargando mensajes...</CardTitle>
-          <CardDescription>Obteniendo el historial de la conversación</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="animate-pulse">
-                <div className="flex space-x-3">
-                  <div className="h-8 w-8 bg-muted rounded-full"></div>
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 bg-muted rounded w-1/4"></div>
-                    <div className="h-3 bg-muted rounded w-3/4"></div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex items-center justify-center py-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-red-600 mb-4">{error}</p>
+        <Button onClick={loadMessages} variant="outline" size="sm">
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Reintentar
+        </Button>
+      </div>
+    )
+  }
+
+  if (messages.length === 0) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
+        <p>No hay mensajes en esta conversación</p>
+      </div>
     )
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center space-x-2">
-                <User className="h-5 w-5" />
-                <span>{conversation.userName || conversation.phoneNumber}</span>
-              </CardTitle>
-              <CardDescription>
-                {conversation.userName && `${conversation.phoneNumber} • `}
-                {messages.length} mensajes en total
-              </CardDescription>
+    <div className="space-y-4 max-h-96 overflow-y-auto">
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-muted-foreground">
+          {messages.length} mensaje{messages.length !== 1 ? "s" : ""}
+        </p>
+        <Button onClick={loadMessages} variant="outline" size="sm">
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Actualizar
+        </Button>
+      </div>
+
+      {messages.map((message) => (
+        <Card
+          key={message.id}
+          className={`${
+            message.direction === "incoming"
+              ? "bg-muted/50 border-l-4 border-l-blue-500"
+              : "bg-green-50 border-l-4 border-l-green-500"
+          }`}
+        >
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between mb-2">
+              <div className="flex items-center gap-2">
+                {message.direction === "incoming" ? (
+                  <User className="h-4 w-4 text-blue-600" />
+                ) : (
+                  <Bot className="h-4 w-4 text-green-600" />
+                )}
+                <span className="font-medium text-sm">
+                  {message.direction === "incoming" ? message.userName || "Usuario" : "Bot"}
+                </span>
+                <Badge variant={message.direction === "incoming" ? "default" : "secondary"} className="text-xs">
+                  {message.direction === "incoming" ? "Entrante" : "Saliente"}
+                </Badge>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {formatDistanceToNow(new Date(message.timestamp), {
+                  addSuffix: true,
+                  locale: es,
+                })}
+              </span>
             </div>
-
-            <Button variant="outline" size="sm" onClick={fetchMessages} disabled={refreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
-              Actualizar
-            </Button>
-          </div>
-        </CardHeader>
-
-        <CardContent>
-          {messages.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-muted-foreground">No hay mensajes en esta conversación</p>
-            </div>
-          ) : (
-            <div className="space-y-4 max-h-96 overflow-y-auto">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex space-x-3 ${message.isFromUser ? "justify-start" : "justify-end"}`}
-                >
-                  {message.isFromUser && (
-                    <div className="flex-shrink-0">
-                      <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
-                        <User className="h-4 w-4 text-blue-600" />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className={`flex-1 max-w-xs lg:max-w-md ${message.isFromUser ? "" : "flex justify-end"}`}>
-                    <div
-                      className={`rounded-lg px-3 py-2 ${
-                        message.isFromUser ? "bg-muted text-foreground" : "bg-primary text-primary-foreground"
-                      }`}
-                    >
-                      <p className="text-sm">{message.message}</p>
-
-                      <div className="flex items-center justify-between mt-1 text-xs opacity-70">
-                        <span>
-                          {formatDistanceToNow(new Date(message.timestamp), {
-                            addSuffix: true,
-                            locale: es,
-                          })}
-                        </span>
-
-                        {message.threadId && (
-                          <Badge variant="outline" className="text-xs">
-                            Thread: {message.threadId.slice(-6)}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {!message.isFromUser && (
-                    <div className="flex-shrink-0">
-                      <div className="h-8 w-8 rounded-full bg-green-100 flex items-center justify-center">
-                        <Bot className="h-4 w-4 text-green-600" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            <p className="text-sm whitespace-pre-wrap">{message.message}</p>
+            {message.threadId && <p className="text-xs text-muted-foreground mt-2">Thread: {message.threadId}</p>}
+          </CardContent>
+        </Card>
+      ))}
     </div>
   )
 }
