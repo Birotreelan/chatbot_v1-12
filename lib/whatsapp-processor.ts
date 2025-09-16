@@ -151,7 +151,8 @@ async function processMessageWithOpenAI(
     })
 
     if (!messageResponse.ok) {
-      throw new Error(`Error adding message: ${messageResponse.status}`)
+      const errorText = await messageResponse.text()
+      throw new Error(`Error adding message: ${messageResponse.status} - ${errorText}`)
     }
 
     const messageData = await messageResponse.json()
@@ -325,7 +326,8 @@ async function processMessageWithOpenAI(
     })
 
     if (!runResponse.ok) {
-      throw new Error(`Error creating run: ${runResponse.status}`)
+      const errorText = await runResponse.text()
+      throw new Error(`Error creating run: ${runResponse.status} - ${errorText}`)
     }
 
     const runData = await runResponse.json()
@@ -342,7 +344,7 @@ async function processMessageWithOpenAI(
 
 async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
   let attempts = 0
-  const maxAttempts = 30
+  const maxAttempts = 60 // Aumentar a 60 intentos (60 segundos)
 
   console.log(`[WHATSAPP-PROCESSOR] ========== ESPERANDO COMPLETACIÓN ==========`)
   console.log(`[WHATSAPP-PROCESSOR] Run ID: ${runId}`)
@@ -362,7 +364,8 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
       })
 
       if (!runResponse.ok) {
-        throw new Error(`Error checking run: ${runResponse.status}`)
+        const errorText = await runResponse.text()
+        throw new Error(`Error checking run: ${runResponse.status} - ${errorText}`)
       }
 
       const run = await runResponse.json()
@@ -382,7 +385,8 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
         )
 
         if (!messagesResponse.ok) {
-          throw new Error(`Error getting messages: ${messagesResponse.status}`)
+          const errorText = await messagesResponse.text()
+          throw new Error(`Error getting messages: ${messagesResponse.status} - ${errorText}`)
         }
 
         const messages = await messagesResponse.json()
@@ -402,6 +406,9 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
         await handleToolCalls(threadId, runId, run, clienteId)
       } else if (run.status === "failed" || run.status === "cancelled" || run.status === "expired") {
         console.error(`[WHATSAPP-PROCESSOR] Run falló con estado: ${run.status}`)
+        if (run.last_error) {
+          console.error(`[WHATSAPP-PROCESSOR] Error details:`, run.last_error)
+        }
         return "Lo siento, ha ocurrido un error procesando tu solicitud."
       }
 

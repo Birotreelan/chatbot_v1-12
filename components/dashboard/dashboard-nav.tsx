@@ -3,13 +3,14 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Settings, Activity, MessageSquare } from "lucide-react"
+import { Settings, Activity, MessageSquare, Home } from "lucide-react"
 
 const navigation = [
   {
     name: "Dashboard",
     href: "/dashboard",
-    icon: LayoutDashboard,
+    icon: Home,
+    exact: true,
   },
   {
     name: "Configuraciones",
@@ -17,14 +18,14 @@ const navigation = [
     icon: Settings,
   },
   {
-    name: "Monitoreo",
-    href: "/dashboard/monitoring",
-    icon: Activity,
-  },
-  {
     name: "Conversaciones",
     href: "/dashboard/conversations",
     icon: MessageSquare,
+  },
+  {
+    name: "Monitoreo",
+    href: "/dashboard/monitoring",
+    icon: Activity,
   },
 ]
 
@@ -32,20 +33,29 @@ export function DashboardNav() {
   const pathname = usePathname()
 
   return (
-    <nav className="flex space-x-2 lg:flex-col lg:space-x-0 lg:space-y-1">
-      {navigation.map((item) => (
-        <Link
-          key={item.name}
-          href={item.href}
-          className={cn(
-            "flex items-center rounded-lg px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground",
-            pathname === item.href ? "bg-accent text-accent-foreground" : "text-muted-foreground",
-          )}
-        >
-          <item.icon className="mr-2 h-4 w-4" />
-          {item.name}
-        </Link>
-      ))}
+    <nav className="space-y-1">
+      {navigation.map((item) => {
+        const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href)
+
+        return (
+          <Link
+            key={item.name}
+            href={item.href}
+            className={cn(
+              "group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors",
+              isActive ? "bg-gray-100 text-gray-900" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900",
+            )}
+          >
+            <item.icon
+              className={cn(
+                "mr-3 h-5 w-5 flex-shrink-0",
+                isActive ? "text-gray-500" : "text-gray-400 group-hover:text-gray-500",
+              )}
+            />
+            {item.name}
+          </Link>
+        )
+      })}
     </nav>
   )
 }
