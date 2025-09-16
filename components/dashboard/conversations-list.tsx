@@ -1,20 +1,20 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { MessageSquare, Clock, User } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
-import { MessageSquare, Phone, Clock } from "lucide-react"
 
 interface Conversation {
   phoneNumber: string
-  configId: string
-  clienteId: string
   userName?: string
-  messageCount: number
   lastMessage: string
   lastMessageAt: string
+  messageCount: number
+  configId: string
+  clienteId: string
 }
 
 interface ConversationsListProps {
@@ -33,9 +33,12 @@ export function ConversationsList({ clienteId, onConversationSelect }: Conversat
   const fetchConversations = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/dashboard/conversations?clienteId=${clienteId}`)
+      const response = await fetch(`/api/dashboard/conversations?cliente_id=${clienteId}`)
       const data = await response.json()
-      setConversations(data.conversations || [])
+
+      if (data.success) {
+        setConversations(data.conversations)
+      }
     } catch (error) {
       console.error("Error fetching conversations:", error)
     } finally {
@@ -45,84 +48,57 @@ export function ConversationsList({ clienteId, onConversationSelect }: Conversat
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-32">
-        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-2 text-sm text-muted-foreground">Cargando conversaciones...</p>
+        </div>
       </div>
-    )
-  }
-
-  if (conversations.length === 0) {
-    return (
-      <Card>
-        <CardContent className="text-center py-12">
-          <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No hay conversaciones</h3>
-          <p className="text-gray-600">Este cliente aún no tiene conversaciones registradas.</p>
-        </CardContent>
-      </Card>
     )
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold">Conversaciones</h2>
-        <Badge variant="secondary">{conversations.length} conversaciones</Badge>
-      </div>
-
-      <div className="grid gap-4">
-        {conversations.map((conversation) => (
-          <Card
-            key={`${conversation.configId}-${conversation.phoneNumber}`}
-            className="cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => onConversationSelect(conversation)}
-          >
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <Phone className="h-4 w-4 text-blue-600" />
-                    <span className="font-medium">{conversation.phoneNumber}</span>
-                    {conversation.userName && <Badge variant="outline">{conversation.userName}</Badge>}
-                  </div>
-
-                  <p className="text-sm text-gray-600 truncate mb-2">{conversation.lastMessage}</p>
-
-                  <div className="flex items-center space-x-4 text-xs text-gray-500">
-                    <div className="flex items-center space-x-1">
-                      <MessageSquare className="h-3 w-3" />
-                      <span>{conversation.messageCount} mensajes</span>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <Clock className="h-3 w-3" />
-                      <span>
-                        {formatDistanceToNow(new Date(conversation.lastMessageAt), {
-                          addSuffix: true,
-                          locale: es,
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="ml-4">
-                  <Badge
-                    variant={
-                      new Date(conversation.lastMessageAt) > new Date(Date.now() - 24 * 60 * 60 * 1000)
-                        ? "default"
-                        : "secondary"
-                    }
-                  >
-                    {new Date(conversation.lastMessageAt) > new Date(Date.now() - 24 * 60 * 60 * 1000)
-                      ? "Activa"
-                      : "Inactiva"}
-                  </Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {conversations.map((conversation) => (
+        <Card
+          key={`${conversation.configId}-${conversation.phoneNumber}`}
+          className="cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => onConversationSelect(conversation)}
+        >
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <User className="h-4 w-4" />
+                {conversation.userName || conversation.phoneNumber}
+              </CardTitle>
+              <Badge variant="secondary">{conversation.messageCount} mensajes</Badge>
+            </div>
+            {conversation.userName && <CardDescription className="text-xs">{conversation.phoneNumber}</CardDescription>}
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-start gap-2">
+              <MessageSquare className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-muted-foreground line-clamp-2">{conversation.lastMessage}</p>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Clock className="h-3 w-3" />
+              <span>
+                {formatDistanceToNow(new Date(conversation.lastMessageAt), {
+                  addSuffix: true,
+                  locale: es,
+                })}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+      {conversations.length === 0 && (
+        <div className="text-center py-12">
+          <MessageSquare className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <h3 className="text-lg font-semibold mb-2">No hay conversaciones</h3>
+          <p className="text-muted-foreground">Este cliente aún no tiene conversaciones registradas.</p>
+        </div>
+      )}
     </div>
   )
 }

@@ -153,7 +153,7 @@ importers:
         specifier: 2.15.0
         version: 2.15.0(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       redis:
-        specifier: latest
+        specifier: 5.8.2
         version: 5.8.2
       sonner:
         specifier: latest
