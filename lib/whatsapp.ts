@@ -1,20 +1,6 @@
-import { sendWhatsAppMessage } from "./whatsapp-api"
 import { getWhatsAppConfigByPhoneId, updateWhatsAppStats } from "./db"
 import { processWhatsAppMessage } from "./whatsapp-processor"
-import { logError, incrementMetric } from "./monitoring"
-
-interface WhatsAppMessage {
-  from: string
-  text?: { body: string }
-  type: string
-  id: string
-  timestamp: string
-}
-
-interface WhatsAppContact {
-  profile: { name: string }
-  wa_id: string
-}
+import { logError } from "./monitoring"
 
 interface WhatsAppWebhookData {
   messaging_product: string
@@ -22,142 +8,106 @@ interface WhatsAppWebhookData {
     display_phone_number: string
     phone_number_id: string
   }
-  contacts?: WhatsAppContact[]
-  messages?: WhatsAppMessage[]
+  contacts: Array<{
+    profile: {
+      name: string
+    }
+    wa_id: string
+  }>
+  messages: Array<{
+    from: string
+    id: string
+    timestamp: string
+    text: {
+      body: string
+    }
+    type: string
+  }>
 }
 
-export async function handleMessage(data: WhatsAppWebhookData): Promise<void> {
+export async function processWhatsAppWebhook(data: WhatsAppWebhookData) {
   console.log("[WHATSAPP] ========== PROCESANDO WEBHOOK ==========")
   console.log("[WHATSAPP] Datos recibidos:", JSON.stringify(data, null, 2))
 
   try {
-    // Validar estructura del webhook
+    // Validar estructura básica
     if (!data.messages || data.messages.length === 0) {
       console.log("[WHATSAPP] ⚠️ No hay mensajes para procesar")
-      return
+      return { success: true, message: "No messages to process" }
     }
 
     const message = data.messages[0]
+    const contact = data.contacts?.[0]
     const phoneNumberId = data.metadata.phone_number_id
-    const phoneNumber = message.from
 
-    console.log(`[WHATSAPP] 📱 Procesando mensaje de ${phoneNumber} para phoneNumberId=${phoneNumberId}`)
+    console.log(`[WHATSAPP] 📱 Procesando mensaje de ${message.from} para phoneNumberId=${phoneNumberId}`)
 
-    // Obtener configuración de WhatsApp
+    // Obtener configuración por phoneNumberId
     const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
     if (!config) {
       console.error(`[WHATSAPP] ❌ No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
-      await logError("whatsapp_config_not_found", new Error(`Config not found for phone: ${phoneNumberId}`))
-      return
+      throw new Error(`No configuration found for phoneNumberId: ${phoneNumberId}`)
     }
 
     console.log(`[WHATSAPP] ✅ Configuración encontrada: ${config.displayName} (${config.id})`)
+    console.log(`[WHATSAPP] 👤 Usuario: ${contact?.profile?.name || "Sin nombre"} (${message.from})`)
+    console.log(`[WHATSAPP] 💬 Mensaje: "${message.text?.body || "Sin texto"}"`)
 
-    // Obtener nombre del usuario
-    const userName = data.contacts?.[0]?.profile?.name || "Usuario"
-    console.log(`[WHATSAPP] 👤 Usuario: ${userName} (${phoneNumber})`)
+    // Actualizar estadísticas de mensajes recibidos
+    await updateWhatsAppStats(config.id, {
+      messagesReceived: 1,
+      lastMessageAt: new Date().toISOString(),
+    })
 
-    // Validar que el mensaje tenga texto
+    // Solo procesar mensajes de texto
     if (message.type !== "text" || !message.text?.body) {
-      console.log(`[WHATSAPP] ⚠️ Mensaje no es de texto o está vacío. Tipo: ${message.type}`)
-      return
+      console.log(`[WHATSAPP] ⚠️ Tipo de mensaje no soportado: ${message.type}`)
+      return { success: true, message: "Message type not supported" }
     }
-
-    const messageText = message.text.body
-    console.log(`[WHATSAPP] 💬 Mensaje: "${messageText}"`)
-
-    // Actualizar estadísticas
-    await updateWhatsAppStats(config.id, { messagesReceived: 1 })
-    await incrementMetric("messages_received")
 
     console.log("[WHATSAPP] 🤖 Enviando a procesamiento de IA...")
 
-    // CORREGIDO: Pasar los parámetros en el orden correcto
-    // processWhatsAppMessage(phoneNumber, message, userName, messageId, whatsappConfigId)
+    // Procesar el mensaje con IA
     const response = await processWhatsAppMessage(
-      phoneNumber, // phoneNumber
-      messageText, // message
-      userName, // userName
+      message.from, // phoneNumber
+      message.text.body, // message
+      contact?.profile?.name || "Usuario", // userName
       message.id, // messageId
-      config.id, // whatsappConfigId - ESTE ES EL PARÁMETRO CORRECTO
+      config.id, // whatsappConfigId - ESTE ES EL CORRECTO
     )
 
-    console.log(`[WHATSAPP] ✅ Respuesta generada: ${response.length} caracteres`)
-
-    // Enviar respuesta
-    await sendWhatsAppMessage(phoneNumberId, config.accessToken, phoneNumber, response)
-    console.log("[WHATSAPP] ✅ Respuesta enviada exitosamente")
-
-    // Actualizar estadísticas de procesamiento
-    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-    await incrementMetric("messages_sent")
-
-    console.log("[WHATSAPP] ========== PROCESAMIENTO COMPLETADO ==========")
+    console.log("[WHATSAPP] ✅ Mensaje procesado exitosamente")
+    return { success: true, response }
   } catch (error) {
     console.error("[WHATSAPP] ❌ Error procesando mensaje:", error)
-    await logError("whatsapp_processing", error instanceof Error ? error : new Error(String(error)))
-    await incrementMetric("whatsapp_errors")
-
-    // Si tenemos configuración, actualizar estadísticas de error
-    if (data.metadata?.phone_number_id) {
-      const config = await getWhatsAppConfigByPhoneId(data.metadata.phone_number_id)
-      if (config) {
-        await updateWhatsAppStats(config.id, { errors: 1 })
-      }
-    }
-
+    await logError("whatsapp_webhook", error instanceof Error ? error : new Error(String(error)))
     throw error
   }
 }
 
-export async function verifyWebhook(mode: string, token: string, challenge: string): Promise<string | null> {
-  console.log("[WHATSAPP] ========== VERIFICANDO WEBHOOK ==========")
-  console.log(`[WHATSAPP] Mode: ${mode}`)
-  console.log(`[WHATSAPP] Token: ${token}`)
-  console.log(`[WHATSAPP] Challenge: ${challenge}`)
-
-  // Obtener todas las configuraciones para verificar el token
-  const { getAllWhatsAppConfigs } = await import("./db")
-  const configs = await getAllWhatsAppConfigs()
-
-  // Buscar configuración que coincida con el token
-  const matchingConfig = configs.find((config) => config.verifyToken === token)
-
-  if (mode === "subscribe" && matchingConfig) {
-    console.log(`[WHATSAPP] ✅ Token verificado para configuración: ${matchingConfig.displayName}`)
-    return challenge
-  }
-
-  console.log("[WHATSAPP] ❌ Token de verificación inválido")
-  return null
-}
-
-// Función para procesar mensajes individuales
+// Función para procesar mensajes individuales (para compatibilidad)
 export async function processIndividualMessage(
-  userMessage: string,
+  message: string,
   phoneNumberId: string,
-  config: any,
   userPhoneNumber: string,
-  messageType?: string,
-): Promise<void> {
-  console.log(`[WHATSAPP] 🔄 Procesando mensaje individual de ${userPhoneNumber}`)
+  assistantId?: string,
+) {
+  console.log(`[WHATSAPP] 📱 Procesando mensaje individual para ${userPhoneNumber}`)
 
   try {
-    // Procesar mensaje con IA - CORREGIDO: pasar parámetros correctamente
-    const response = await processWhatsAppMessage(
-      userPhoneNumber, // phoneNumber
-      userMessage, // message
-      "Usuario", // userName
-      "individual", // messageId
-      config.id, // whatsappConfigId
-    )
+    // Obtener la configuración
+    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+    if (!config) {
+      throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
+    }
 
-    // Enviar respuesta
-    await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, response)
+    // Procesar con el procesador de WhatsApp
+    const result = await processWhatsAppMessage(userPhoneNumber, message, "Usuario", `msg_${Date.now()}`, config.id)
 
-    console.log(`[WHATSAPP] ✅ Mensaje individual procesado exitosamente`)
+    return result
   } catch (error) {
-    console.error(`[WHATSAPP] ❌ Error procesando mensaje individual:`, error)
+    console.error("[WHATSAPP] ❌ Error en processIndividualMessage:", error)
+    await logError("process_individual_message", error instanceof Error ? error : new Error(String(error)))
     throw error
   }
 }

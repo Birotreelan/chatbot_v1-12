@@ -66,6 +66,9 @@ export async function processWhatsAppMessage(
       `[WHATSAPP-PROCESSOR] 🌐 Usando thread: ${threadInfo.threadId} (nuevo: ${threadInfo.isNewThread}, reset: ${threadInfo.isResetThread})`,
     )
 
+    // Verificar si hay runs activos en el thread antes de agregar mensaje
+    await cancelActiveRuns(threadInfo.threadId)
+
     // Obtener o crear conversación
     const conversation = await getOrCreateConversation(
       phoneNumber,
@@ -104,7 +107,7 @@ export async function processWhatsAppMessage(
 
       if (config.cliente_id && config.sede_id) {
         try {
-          const systemBlock = await createSystemBlock(config.cliente_id, config.sede_id)
+          const systemBlock = await createSystemBlock(config.displayName, config.cliente_id, config.sede_id)
           additionalInstructions = systemBlock
           console.log("[WHATSAPP-PROCESSOR] ✅ Información del sistema agregada")
         } catch (error) {
@@ -162,6 +165,32 @@ export async function processWhatsAppMessage(
   }
 }
 
+// Función para cancelar runs activos
+async function cancelActiveRuns(threadId: string): Promise<void> {
+  try {
+    console.log(`[WHATSAPP-PROCESSOR] 🔍 Verificando runs activos en thread: ${threadId}`)
+
+    const runs = await openai.beta.threads.runs.list(threadId, {
+      limit: 10,
+      order: "desc",
+    })
+
+    for (const run of runs.data) {
+      if (run.status === "in_progress" || run.status === "queued") {
+        console.log(`[WHATSAPP-PROCESSOR] ⏹️ Cancelando run activo: ${run.id} (${run.status})`)
+        try {
+          await openai.beta.threads.runs.cancel(threadId, run.id)
+          console.log(`[WHATSAPP-PROCESSOR] ✅ Run ${run.id} cancelado`)
+        } catch (cancelError) {
+          console.error(`[WHATSAPP-PROCESSOR] ❌ Error cancelando run ${run.id}:`, cancelError)
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`[WHATSAPP-PROCESSOR] ❌ Error verificando runs activos:`, error)
+  }
+}
+
 async function waitForRunCompletion(
   threadId: string,
   runId: string,
@@ -172,6 +201,7 @@ async function waitForRunCompletion(
     try {
       console.log(`[WHATSAPP-PROCESSOR] Verificando run ${runId} (intento ${attempt}/${maxAttempts})`)
 
+      // CORREGIDO: Parámetros en el orden correcto (threadId, runId)
       const run = await openai.beta.threads.runs.retrieve(threadId, runId)
 
       if (run.status === "completed") {

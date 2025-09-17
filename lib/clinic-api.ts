@@ -1,220 +1,304 @@
-// Configuración de la API
-const PROXY_URL = process.env.CLINIC_PROXY_URL || "https://proxy.santiagovulliez.com/proxy_service/"
+import { logError } from "./monitoring"
 
-// Función auxiliar para hacer peticiones HTTP
-async function makeRequest(clienteId: string, action: string, params: Record<string, any> = {}): Promise<any> {
+const PROXY_URL = process.env.CLINIC_PROXY_URL || "https://treelan.net/managment/proxy_service/"
+
+interface ApiResponse<T = any> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
+interface Sede {
+  Id: string
+  Nombre: string
+  Direccion: string
+}
+
+interface Turno {
+  Id: string
+  Fecha: string
+  Hora: string
+  Profesional_Nombre: string
+  Centro_Nombre: string
+  Motivo_Nombre: string
+}
+
+interface Paciente {
+  Id: string
+  Nombres: string
+  Apellido: string
+  Nrodoc: string
+  Celular: string
+  Mail: string
+  Fecha_Nac: string
+  Deudor_Nombre: string
+  Plan_Nombre: string
+  Nro_Afiliado_Ppal: string
+}
+
+export async function getSedes(clienteId: string, sedeId?: string): Promise<ApiResponse<Sede[]>> {
+  console.log(`[CLINIC-API] 🏥 Obteniendo sedes para cliente: ${clienteId}`)
+  if (sedeId) {
+    console.log(`[CLINIC-API] 🎯 Sede específica: ${sedeId}`)
+  }
+
   try {
-    const body = {
-      Cliente_Id: clienteId,
-      Action: action,
-      ...params,
+    const requestBody = {
+      Cliente_Id: clienteId.trim(),
+      Action: "get_sedes",
+      ...(sedeId && { sede_id: sedeId.trim() }),
     }
 
-    console.log(`Realizando petición POST a: ${PROXY_URL}`)
-    console.log(`Action: ${action}, Cliente_Id: ${clienteId}`)
-    console.log(`Parámetros:`, params)
-    console.log(`Cuerpo de la solicitud:`, JSON.stringify(body))
+    console.log(`[CLINIC-API] 📤 Request:`, requestBody)
 
     const response = await fetch(PROXY_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(30000),
     })
 
+    const responseText = await response.text()
+    console.log(`[CLINIC-API] 📥 Response (${response.status}):`, responseText.substring(0, 500))
+
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      throw new Error(`HTTP ${response.status}: ${responseText}`)
     }
 
-    const textResponse = await response.text()
-    console.log(`Respuesta (texto) recibida:`, textResponse)
-
-    let jsonResponse
+    let data
     try {
-      jsonResponse = JSON.parse(textResponse)
-      console.log(`Respuesta (JSON) parseada:`, jsonResponse)
+      data = JSON.parse(responseText)
     } catch (parseError) {
-      console.error(`Error al parsear JSON:`, parseError)
-      throw new Error(`Respuesta no es JSON válido: ${textResponse}`)
+      throw new Error(`Invalid JSON response: ${responseText}`)
     }
 
-    // Verificar si hay errores en la respuesta
-    if (jsonResponse.error) {
-      console.error(`Error en los datos de la respuesta:`, jsonResponse.error)
+    if (data.error) {
       return {
         success: false,
-        codigo: "API_ERROR",
-        mensaje: jsonResponse.error,
-        data: null,
+        error: data.error,
       }
     }
 
     return {
       success: true,
-      data: jsonResponse,
-      mensaje: "Operación exitosa",
+      data: data.sedes || data,
     }
   } catch (error) {
-    console.error(`Error en makeRequest:`, error)
+    console.error(`[CLINIC-API] ❌ Error obteniendo sedes:`, error)
+    await logError("clinic_api_get_sedes", error instanceof Error ? error : new Error(String(error)))
     return {
       success: false,
-      codigo: "NETWORK_ERROR",
-      mensaje: error instanceof Error ? error.message : "Error de red desconocido",
-      data: null,
+      error: error instanceof Error ? error.message : "Error desconocido",
     }
   }
 }
 
-// Validar DNI y obtener información del paciente
-export async function validateDNI(dni: string, clienteId: string): Promise<any> {
-  console.log(`[VALIDATE-DNI] Validando DNI: ${dni} para cliente: ${clienteId}`)
-
-  try {
-    const result = await makeRequest(clienteId, "get_paciente", { dni })
-
-    if (result.success && result.data && result.data.paciente) {
-      console.log(`[VALIDATE-DNI] ✅ DNI válido encontrado:`, result.data)
-      return {
-        success: true,
-        data: result.data,
-      }
-    } else {
-      console.log(`[VALIDATE-DNI] ❌ DNI no encontrado o inválido`)
-      return {
-        success: false,
-        codigo: "DNI_NOT_FOUND",
-        mensaje: "DNI no encontrado en el sistema",
-      }
-    }
-  } catch (error) {
-    console.error(`[VALIDATE-DNI] ❌ Error validando DNI:`, error)
-    return {
-      success: false,
-      codigo: "VALIDATION_ERROR",
-      mensaje: "Error al validar el DNI",
-    }
-  }
-}
-
-// Obtener sedes disponibles
-export async function getSedes(clienteId: string, sedeId?: string): Promise<any> {
-  console.log(`[GET-SEDES] Obteniendo sedes para cliente: ${clienteId}`)
-
-  try {
-    const params: Record<string, any> = {}
-    if (sedeId) {
-      params.sede_id = sedeId
-    }
-
-    const result = await makeRequest(clienteId, "get_data_sedes", params)
-
-    if (result.success && result.data) {
-      console.log(`[GET-SEDES] ✅ Sedes obtenidas:`, result.data)
-      return {
-        success: true,
-        data: Array.isArray(result.data) ? result.data : [result.data],
-      }
-    } else {
-      console.log(`[GET-SEDES] ❌ No se encontraron sedes o error:`, result)
-      return {
-        success: false,
-        codigo: result.codigo || "SEDES_NOT_FOUND",
-        mensaje: result.mensaje || "No se encontraron sedes disponibles",
-      }
-    }
-  } catch (error) {
-    console.error(`[GET-SEDES] ❌ Error obteniendo sedes:`, error)
-    return {
-      success: false,
-      codigo: "SEDES_ERROR",
-      mensaje: "Error al obtener las sedes",
-    }
-  }
-}
-
-// Buscar turnos disponibles
-export async function searchTurnos(
-  params: {
-    rangoFechas?: string
-    profesional?: string
-    especialidad?: string
-    profesionalId?: string
-  },
+export async function validateDNI(
   clienteId: string,
-): Promise<any> {
-  console.log(`[SEARCH-TURNOS] Buscando turnos para cliente: ${clienteId}`)
-  console.log(`[SEARCH-TURNOS] Parámetros:`, params)
+  dni: string,
+): Promise<ApiResponse<{ paciente: Paciente | null; turnos_proximos: Turno[] }>> {
+  console.log(`[CLINIC-API] 🆔 Validando DNI: ${dni} para cliente: ${clienteId}`)
 
   try {
-    const result = await makeRequest(clienteId, "search_turnos", params)
+    const requestBody = {
+      Cliente_Id: clienteId.trim(),
+      Action: "get_paciente",
+      dni: dni.trim(),
+    }
 
-    if (result.success && result.data) {
-      console.log(`[SEARCH-TURNOS] ✅ Turnos encontrados:`, result.data)
-      return {
-        success: true,
-        data: Array.isArray(result.data) ? result.data : [result.data],
-      }
-    } else {
-      console.log(`[SEARCH-TURNOS] ❌ No se encontraron turnos`)
+    console.log(`[CLINIC-API] 📤 Request:`, requestBody)
+
+    const response = await fetch(PROXY_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(30000),
+    })
+
+    const responseText = await response.text()
+    console.log(`[CLINIC-API] 📥 Response (${response.status}):`, responseText.substring(0, 500))
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${responseText}`)
+    }
+
+    let data
+    try {
+      data = JSON.parse(responseText)
+    } catch (parseError) {
+      throw new Error(`Invalid JSON response: ${responseText}`)
+    }
+
+    if (data.error) {
       return {
         success: false,
-        codigo: "TURNOS_NOT_FOUND",
-        mensaje: "No se encontraron turnos disponibles",
+        error: data.error,
       }
     }
+
+    return {
+      success: true,
+      data: {
+        paciente: data.paciente || null,
+        turnos_proximos: data.turnos_proximos || [],
+      },
+    }
   } catch (error) {
-    console.error(`[SEARCH-TURNOS] ❌ Error buscando turnos:`, error)
+    console.error(`[CLINIC-API] ❌ Error validando DNI:`, error)
+    await logError("clinic_api_validate_dni", error instanceof Error ? error : new Error(String(error)))
     return {
       success: false,
-      codigo: "TURNOS_ERROR",
-      mensaje: "Error al buscar turnos",
+      error: error instanceof Error ? error.message : "Error desconocido",
     }
   }
 }
 
-// Reservar un turno
+export async function searchTurnos(
+  clienteId: string,
+  sedeId?: string,
+  fechaDesde?: string,
+  fechaHasta?: string,
+  profesionalId?: string,
+  especialidadId?: string,
+): Promise<ApiResponse<any>> {
+  console.log(`[CLINIC-API] 📅 Buscando turnos para cliente: ${clienteId}`)
+
+  try {
+    const requestBody: any = {
+      Cliente_Id: clienteId.trim(),
+      Action: "get_turnos",
+    }
+
+    if (sedeId) requestBody.sede_id = sedeId.trim()
+    if (fechaDesde) requestBody.Fecha_Desde = fechaDesde
+    if (fechaHasta) requestBody.Fecha_Hasta = fechaHasta
+    if (profesionalId) requestBody.Profesional_Id = profesionalId
+    if (especialidadId) requestBody.Subespecialidad_Id = especialidadId
+
+    console.log(`[CLINIC-API] 📤 Request:`, requestBody)
+
+    const response = await fetch(PROXY_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(30000),
+    })
+
+    const responseText = await response.text()
+    console.log(`[CLINIC-API] 📥 Response (${response.status}):`, responseText.substring(0, 500))
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${responseText}`)
+    }
+
+    let data
+    try {
+      data = JSON.parse(responseText)
+    } catch (parseError) {
+      throw new Error(`Invalid JSON response: ${responseText}`)
+    }
+
+    if (data.error) {
+      return {
+        success: false,
+        error: data.error,
+      }
+    }
+
+    return {
+      success: true,
+      data: data,
+    }
+  } catch (error) {
+    console.error(`[CLINIC-API] ❌ Error buscando turnos:`, error)
+    await logError("clinic_api_search_turnos", error instanceof Error ? error : new Error(String(error)))
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
+  }
+}
+
 export async function reserveTurno(
-  params: {
-    agendaId: string
+  clienteId: string,
+  turnoData: {
+    agenda_id: string
     dni: string
     nombre: string
     apellido: string
     telefono: string
     email: string
-    fecha: string
-    hora: string
-    profesional: string
+    fecha?: string
+    hora?: string
+    profesional?: string
   },
-  clienteId: string,
-): Promise<any> {
-  console.log(`[RESERVE-TURNO] Reservando turno para cliente: ${clienteId}`)
-  console.log(`[RESERVE-TURNO] Parámetros:`, params)
+): Promise<ApiResponse<any>> {
+  console.log(`[CLINIC-API] 📝 Reservando turno para cliente: ${clienteId}`)
+  console.log(`[CLINIC-API] 👤 Paciente: ${turnoData.nombre} ${turnoData.apellido} (${turnoData.dni})`)
 
   try {
-    const result = await makeRequest(clienteId, "reserve_turno", params)
+    const requestBody = {
+      Cliente_Id: clienteId.trim(),
+      Action: "set_turno",
+      Agenda_Id: turnoData.agenda_id,
+      Paciente_DNI: turnoData.dni,
+      Paciente_Nombre: turnoData.nombre,
+      Paciente_Apellido: turnoData.apellido,
+      Paciente_Telefono: turnoData.telefono,
+      Paciente_Email: turnoData.email,
+      ...(turnoData.fecha && { Fecha: turnoData.fecha }),
+      ...(turnoData.hora && { Hora: turnoData.hora }),
+      ...(turnoData.profesional && { Profesional_Nombre: turnoData.profesional }),
+    }
 
-    if (result.success) {
-      console.log(`[RESERVE-TURNO] ✅ Turno reservado exitosamente:`, result.data)
-      return {
-        success: true,
-        data: result.data,
-        mensaje: "Turno reservado exitosamente",
-      }
-    } else {
-      console.log(`[RESERVE-TURNO] ❌ Error al reservar turno:`, result)
+    console.log(`[CLINIC-API] 📤 Request:`, requestBody)
+
+    const response = await fetch(PROXY_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(30000),
+    })
+
+    const responseText = await response.text()
+    console.log(`[CLINIC-API] 📥 Response (${response.status}):`, responseText.substring(0, 500))
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${responseText}`)
+    }
+
+    let data
+    try {
+      data = JSON.parse(responseText)
+    } catch (parseError) {
+      throw new Error(`Invalid JSON response: ${responseText}`)
+    }
+
+    if (data.error) {
       return {
         success: false,
-        codigo: result.codigo || "RESERVA_ERROR",
-        mensaje: result.mensaje || "Error al reservar el turno",
+        error: data.error,
       }
     }
+
+    return {
+      success: true,
+      data: data,
+    }
   } catch (error) {
-    console.error(`[RESERVE-TURNO] ❌ Error reservando turno:`, error)
+    console.error(`[CLINIC-API] ❌ Error reservando turno:`, error)
+    await logError("clinic_api_reserve_turno", error instanceof Error ? error : new Error(String(error)))
     return {
       success: false,
-      codigo: "RESERVA_ERROR",
-      mensaje: "Error al reservar el turno",
+      error: error instanceof Error ? error.message : "Error desconocido",
     }
   }
 }
