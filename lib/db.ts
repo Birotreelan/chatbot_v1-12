@@ -387,3 +387,6 @@ export async function cleanupOldConversations(daysOld = 7) {
     return { deleted: 0 }
   }
 }
+
+// Función para compatibilidad con el webhook
+export const getWhatsAppConfigByPhoneId = getWhatsAppConfigByPhoneNumberId

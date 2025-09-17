@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, User, Bot, Clock, Phone, MessageCircle } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { ArrowLeft, User, MessageCircle, Calendar, Phone } from "lucide-react"
 import type { Conversation, ConversationMessage } from "@/lib/types"
 
 interface ConversationDetailProps {
@@ -17,25 +17,34 @@ export default function ConversationDetail({ conversation, onBack }: Conversatio
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadMessages()
+    fetchMessages()
   }, [conversation.id])
 
-  const loadMessages = async () => {
+  const fetchMessages = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`/api/dashboard/conversations/${encodeURIComponent(conversation.id)}`)
-      if (response.ok) {
-        const data = await response.json()
-        setMessages(data.data || [])
+      const response = await fetch(`/api/dashboard/conversations/${encodeURIComponent(conversation.id)}`, {
+        headers: {
+          Authorization: `Basic ${btoa(`${process.env.NEXT_PUBLIC_ADMIN_USERNAME || "admin"}:${process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "password"}`)}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error("Error al cargar mensajes")
+      }
+
+      const data = await response.json()
+      if (data.success) {
+        setMessages(data.messages)
       }
     } catch (error) {
-      console.error("Error cargando mensajes:", error)
+      console.error("Error fetching messages:", error)
     } finally {
       setLoading(false)
     }
   }
 
-  const formatTime = (dateString: string) => {
+  const formatDate = (dateString: string) => {
     const date = new Date(dateString)
     return date.toLocaleString("es-ES", {
       day: "2-digit",
@@ -50,27 +59,23 @@ export default function ConversationDetail({ conversation, onBack }: Conversatio
     <Card>
       <CardHeader>
         <div className="flex items-center gap-4">
-          <Button variant="outline" size="sm" onClick={onBack}>
+          <Button variant="ghost" size="sm" onClick={onBack}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-
           <div className="flex-1">
             <CardTitle className="flex items-center gap-2">
-              <MessageCircle className="h-5 w-5" />
-              Conversación con {conversation.userName}
+              <User className="h-5 w-5" />
+              {conversation.userName}
             </CardTitle>
-
-            <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+            <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
               <div className="flex items-center gap-1">
-                <Phone className="h-3 w-3" />
+                <Phone className="h-4 w-4" />
                 {conversation.phoneNumber}
               </div>
-
               <Badge variant="secondary">{conversation.clienteName}</Badge>
-
               <div className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                Última actividad: {formatTime(conversation.lastMessageAt)}
+                <Calendar className="h-4 w-4" />
+                {formatDate(conversation.createdAt)}
               </div>
             </div>
           </div>
@@ -99,29 +104,25 @@ export default function ConversationDetail({ conversation, onBack }: Conversatio
                     message.role === "user" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"
                   }`}
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    {message.role === "user" ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
-                    <span className="text-xs opacity-75">{message.role === "user" ? "Usuario" : "Asistente"}</span>
+                  <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                  <div className={`text-xs mt-1 ${message.role === "user" ? "text-blue-100" : "text-gray-500"}`}>
+                    {formatDate(message.createdAt)}
                   </div>
-
-                  <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-
-                  <div className="text-xs opacity-75 mt-2">{formatTime(message.createdAt)}</div>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        <div className="mt-6 pt-4 border-t">
+        <div className="mt-6 pt-4 border-t border-gray-200">
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="font-medium">Total de mensajes:</span>
-              <span className="ml-2">{conversation.messageCount}</span>
+              <span className="font-medium text-gray-700">Total de mensajes:</span>
+              <span className="ml-2">{messages.length}</span>
             </div>
             <div>
-              <span className="font-medium">Conversación iniciada:</span>
-              <span className="ml-2">{formatTime(conversation.createdAt)}</span>
+              <span className="font-medium text-gray-700">Último mensaje:</span>
+              <span className="ml-2">{formatDate(conversation.lastMessageAt)}</span>
             </div>
           </div>
         </div>

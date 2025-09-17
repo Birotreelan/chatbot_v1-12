@@ -1,25 +1,24 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getConversationMessages } from "@/lib/db"
 import { isAuthenticated } from "@/lib/auth"
+import { getConversationMessages } from "@/lib/db"
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     // Verificar autenticación
-    const authenticated = await isAuthenticated(request)
-    if (!authenticated) {
+    if (!isAuthenticated(request)) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 })
     }
 
     const conversationId = params.id
-    console.log(`[API] Obteniendo mensajes para conversación: ${conversationId}`)
+    console.log(`[API] 🔍 Obteniendo mensajes para conversación: ${conversationId}`)
 
     const messages = await getConversationMessages(conversationId)
 
-    console.log(`[API] ✅ Mensajes obtenidos: ${messages.length}`)
+    console.log(`[API] ✅ ${messages.length} mensajes encontrados`)
 
     return NextResponse.json({
       success: true,
-      data: messages,
+      messages,
       total: messages.length,
     })
   } catch (error) {
@@ -27,7 +26,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Error interno del servidor",
+        error: error instanceof Error ? error.message : "Error desconocido",
       },
       { status: 500 },
     )

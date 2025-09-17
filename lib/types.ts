@@ -1,22 +1,67 @@
 export interface WhatsAppConfig {
   id: string
-  displayName: string
   phoneNumberId: string
-  accessToken: string
-  verifyToken: string
+  wabaId: string
+  displayName: string
   whatsappAssistantId: string
-  cliente_id: string
-  sede_id?: string
-  wabaId?: string
-  isActive: boolean
+  widgetAssistantId: string
+  active: boolean
   createdAt: string
   updatedAt: string
+  verifyToken: string
+  accessToken: string
+  webhookUrl?: string
+  cliente_id?: string
+  sede_id?: string
+  proxy?: string
+
+  // Widget configuration
+  widgetEnabled: boolean
+  widgetTitle: string
+  widgetPrimaryColor: string
+  widgetSecondaryColor: string
+  widgetPosition: "bottom-right" | "bottom-left" | "top-right" | "top-left"
+  widgetWelcomeMessage: string
+  widgetPlaceholder: string
+  widgetButtonText: string
+  widgetHeaderText: string
+  widgetSubtitle: string
+  widgetBrandingEnabled: boolean
+  widgetBrandingText: string
+  widgetMaxHeight: number
+  widgetMaxWidth: number
+  widgetBorderRadius: number
+  widgetShadow: boolean
+  widgetAnimation: boolean
+  widgetSoundEnabled: boolean
+  widgetTheme: "light" | "dark"
+  widgetFloatingButtonText: string
+  widgetShowFloatingText: boolean
+
   stats: {
     messagesReceived: number
     messagesProcessed: number
     errors: number
     lastMessageAt?: string
   }
+}
+
+export interface ThreadInfo {
+  threadId: string
+  phoneNumber: string
+  whatsappConfigId: string
+  lastMessageAt: string
+  messageCount: number
+  isResetThread?: boolean
+  createdAt?: string
+}
+
+export interface SystemStats {
+  totalConfigs: number
+  activeConfigs: number
+  totalMessages: number
+  totalThreads: number
+  lastUpdated: string
 }
 
 export interface Conversation {
@@ -43,25 +88,12 @@ export interface ConversationMessage {
   createdAt: string
 }
 
-export interface ApiResponse<T = any> {
-  success: boolean
-  data?: T
-  error?: string
-  message?: string
-}
-
-export interface ErrorLog {
+export interface ConversationSummary {
   id: string
-  category: string
-  message: string
-  stack?: string
-  metadata?: Record<string, any>
-  createdAt: string
-}
-
-export interface MonitoringMetric {
-  name: string
-  value: number
-  timestamp: string
-  metadata?: Record<string, any>
+  phoneNumber: string
+  userName: string
+  clienteName: string
+  lastMessage: string
+  lastMessageAt: string
+  messageCount: number
 }
