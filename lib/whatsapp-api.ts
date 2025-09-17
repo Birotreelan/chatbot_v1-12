@@ -1,19 +1,13 @@
 import { logError } from "./monitoring"
 
-interface WhatsAppTextMessage {
-  messaging_product: "whatsapp"
+interface WhatsAppMessageResponse {
+  messaging_product: string
   to: string
-  type: "text"
-  text: {
+  type: string
+  text?: {
     body: string
   }
-}
-
-interface WhatsAppTemplateMessage {
-  messaging_product: "whatsapp"
-  to: string
-  type: "template"
-  template: {
+  template?: {
     name: string
     language: {
       code: string
@@ -28,29 +22,31 @@ interface WhatsAppTemplateMessage {
   }
 }
 
-// Función para enviar mensajes de texto a WhatsApp
 export async function sendWhatsAppMessage(
   phoneNumberId: string,
   accessToken: string,
   to: string,
   message: string,
-): Promise<any> {
+): Promise<boolean> {
   console.log(`[WHATSAPP-API] 📤 Enviando mensaje a ${to}`)
   console.log(`[WHATSAPP-API] 📱 Phone Number ID: ${phoneNumberId}`)
-  console.log(`[WHATSAPP-API] 💬 Mensaje: "${message.substring(0, 100)}${message.length > 100 ? "..." : ""}"`)
-
-  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`
-
-  const payload: WhatsAppTextMessage = {
-    messaging_product: "whatsapp",
-    to: to,
-    type: "text",
-    text: {
-      body: message,
-    },
-  }
+  console.log(`[WHATSAPP-API] 💬 Mensaje: ${message.substring(0, 100)}...`)
 
   try {
+    const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`
+
+    const payload: WhatsAppMessageResponse = {
+      messaging_product: "whatsapp",
+      to: to,
+      type: "text",
+      text: {
+        body: message,
+      },
+    }
+
+    console.log(`[WHATSAPP-API] 🌐 URL: ${url}`)
+    console.log(`[WHATSAPP-API] 📦 Payload:`, JSON.stringify(payload, null, 2))
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -63,20 +59,19 @@ export async function sendWhatsAppMessage(
     const responseData = await response.json()
 
     if (!response.ok) {
-      console.error(`[WHATSAPP-API] ❌ Error enviando mensaje:`, responseData)
+      console.error(`[WHATSAPP-API] ❌ Error en respuesta:`, responseData)
       throw new Error(`WhatsApp API error: ${response.status} - ${JSON.stringify(responseData)}`)
     }
 
     console.log(`[WHATSAPP-API] ✅ Mensaje enviado exitosamente:`, responseData)
-    return responseData
+    return true
   } catch (error) {
-    console.error(`[WHATSAPP-API] ❌ Error en sendWhatsAppMessage:`, error)
+    console.error(`[WHATSAPP-API] ❌ Error enviando mensaje:`, error)
     await logError("whatsapp_send_message", error instanceof Error ? error : new Error(String(error)))
     throw error
   }
 }
 
-// Función para enviar plantillas de WhatsApp
 export async function sendWhatsAppTemplate(
   phoneNumberId: string,
   accessToken: string,
@@ -84,37 +79,36 @@ export async function sendWhatsAppTemplate(
   templateName: string,
   languageCode = "es",
   parameters: Array<{ type: string; text: string }> = [],
-): Promise<any> {
-  console.log(`[WHATSAPP-API] 📤 Enviando template "${templateName}" a ${to}`)
-  console.log(`[WHATSAPP-API] 📱 Phone Number ID: ${phoneNumberId}`)
-  console.log(`[WHATSAPP-API] 🌐 Idioma: ${languageCode}`)
-  console.log(`[WHATSAPP-API] 📋 Parámetros:`, parameters)
-
-  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`
-
-  const payload: WhatsAppTemplateMessage = {
-    messaging_product: "whatsapp",
-    to: to,
-    type: "template",
-    template: {
-      name: templateName,
-      language: {
-        code: languageCode,
-      },
-    },
-  }
-
-  // Agregar componentes si hay parámetros
-  if (parameters.length > 0) {
-    payload.template.components = [
-      {
-        type: "body",
-        parameters: parameters,
-      },
-    ]
-  }
+): Promise<boolean> {
+  console.log(`[WHATSAPP-API] 📤 Enviando template ${templateName} a ${to}`)
 
   try {
+    const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`
+
+    const payload: WhatsAppMessageResponse = {
+      messaging_product: "whatsapp",
+      to: to,
+      type: "template",
+      template: {
+        name: templateName,
+        language: {
+          code: languageCode,
+        },
+        components:
+          parameters.length > 0
+            ? [
+                {
+                  type: "body",
+                  parameters: parameters,
+                },
+              ]
+            : undefined,
+      },
+    }
+
+    console.log(`[WHATSAPP-API] 🌐 URL: ${url}`)
+    console.log(`[WHATSAPP-API] 📦 Template Payload:`, JSON.stringify(payload, null, 2))
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -127,26 +121,25 @@ export async function sendWhatsAppTemplate(
     const responseData = await response.json()
 
     if (!response.ok) {
-      console.error(`[WHATSAPP-API] ❌ Error enviando template:`, responseData)
-      throw new Error(`WhatsApp API error: ${response.status} - ${JSON.stringify(responseData)}`)
+      console.error(`[WHATSAPP-API] ❌ Error en template:`, responseData)
+      throw new Error(`WhatsApp Template API error: ${response.status} - ${JSON.stringify(responseData)}`)
     }
 
     console.log(`[WHATSAPP-API] ✅ Template enviado exitosamente:`, responseData)
-    return responseData
+    return true
   } catch (error) {
-    console.error(`[WHATSAPP-API] ❌ Error en sendWhatsAppTemplate:`, error)
+    console.error(`[WHATSAPP-API] ❌ Error enviando template:`, error)
     await logError("whatsapp_send_template", error instanceof Error ? error : new Error(String(error)))
     throw error
   }
 }
 
-// Función para obtener plantillas disponibles
-export async function getWhatsAppTemplates(phoneNumberId: string, accessToken: string): Promise<any> {
+export async function getWhatsAppTemplates(phoneNumberId: string, accessToken: string): Promise<any[]> {
   console.log(`[WHATSAPP-API] 📋 Obteniendo templates para ${phoneNumberId}`)
 
-  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/message_templates`
-
   try {
+    const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/message_templates`
+
     const response = await fetch(url, {
       method: "GET",
       headers: {
@@ -159,25 +152,24 @@ export async function getWhatsAppTemplates(phoneNumberId: string, accessToken: s
 
     if (!response.ok) {
       console.error(`[WHATSAPP-API] ❌ Error obteniendo templates:`, responseData)
-      throw new Error(`WhatsApp API error: ${response.status} - ${JSON.stringify(responseData)}`)
+      throw new Error(`WhatsApp Templates API error: ${response.status} - ${JSON.stringify(responseData)}`)
     }
 
-    console.log(`[WHATSAPP-API] ✅ Templates obtenidos exitosamente:`, responseData)
-    return responseData
+    console.log(`[WHATSAPP-API] ✅ Templates obtenidos:`, responseData.data?.length || 0)
+    return responseData.data || []
   } catch (error) {
-    console.error(`[WHATSAPP-API] ❌ Error en getWhatsAppTemplates:`, error)
+    console.error(`[WHATSAPP-API] ❌ Error obteniendo templates:`, error)
     await logError("whatsapp_get_templates", error instanceof Error ? error : new Error(String(error)))
     throw error
   }
 }
 
-// Función para verificar el estado de un número de teléfono
-export async function verifyPhoneNumber(phoneNumberId: string, accessToken: string): Promise<any> {
-  console.log(`[WHATSAPP-API] 🔍 Verificando número de teléfono: ${phoneNumberId}`)
-
-  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}`
+export async function validateWhatsAppConfig(phoneNumberId: string, accessToken: string): Promise<boolean> {
+  console.log(`[WHATSAPP-API] 🔍 Validando configuración para ${phoneNumberId}`)
 
   try {
+    const url = `https://graph.facebook.com/v18.0/${phoneNumberId}`
+
     const response = await fetch(url, {
       method: "GET",
       headers: {
@@ -186,18 +178,17 @@ export async function verifyPhoneNumber(phoneNumberId: string, accessToken: stri
       },
     })
 
+    const responseData = await response.json()
+
     if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`[WHATSAPP-API] ❌ Error HTTP ${response.status}:`, errorText)
-      throw new Error(`Error verificando número: ${response.status} - ${errorText}`)
+      console.error(`[WHATSAPP-API] ❌ Error validando configuración:`, responseData)
+      return false
     }
 
-    const result = await response.json()
-    console.log(`[WHATSAPP-API] ✅ Número verificado:`, result)
-
-    return result
+    console.log(`[WHATSAPP-API] ✅ Configuración válida:`, responseData)
+    return true
   } catch (error) {
-    console.error(`[WHATSAPP-API] ❌ Error verificando número:`, error)
-    throw error
+    console.error(`[WHATSAPP-API] ❌ Error validando configuración:`, error)
+    return false
   }
 }
