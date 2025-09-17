@@ -1,46 +1,17 @@
 export interface WhatsAppConfig {
   id: string
-  phoneNumberId: string
-  wabaId: string
   displayName: string
+  phoneNumberId: string
+  accessToken: string
+  verifyToken: string
   whatsappAssistantId: string
-  widgetAssistantId: string
-  active: boolean
+  cliente_id: string
+  sede_id?: string
+  wabaId?: string
+  isActive: boolean
   createdAt: string
   updatedAt: string
-  verifyToken: string
-  accessToken: string
-  webhookUrl?: string
-  cliente_id?: string
-  sede_id?: string
-  proxy?: string
-
-  // Widget configuration
-  widgetEnabled?: boolean
-  widgetTitle?: string
-  widgetPrimaryColor?: string
-  widgetSecondaryColor?: string
-  widgetPosition?: "bottom-right" | "bottom-left" | "top-right" | "top-left"
-  widgetWelcomeMessage?: string
-  widgetPlaceholder?: string
-  widgetButtonText?: string
-  widgetHeaderText?: string
-  widgetSubtitle?: string
-  widgetBrandingEnabled?: boolean
-  widgetBrandingText?: string
-  widgetMaxHeight?: number
-  widgetMaxWidth?: number
-  widgetBorderRadius?: number
-  widgetShadow?: boolean
-  widgetAnimation?: boolean
-  widgetSoundEnabled?: boolean
-  widgetTheme?: "light" | "dark" | "auto"
-
-  // Nuevos campos para el botón flotante
-  widgetFloatingButtonText?: string
-  widgetShowFloatingText?: boolean
-
-  stats?: {
+  stats: {
     messagesReceived: number
     messagesProcessed: number
     errors: number
@@ -48,55 +19,49 @@ export interface WhatsAppConfig {
   }
 }
 
-export interface ThreadInfo {
-  threadId: string
+export interface Conversation {
+  id: string
   phoneNumber: string
-  whatsappConfigId: string
+  userName: string
+  configId: string
+  clienteId: string
+  clienteName: string
+  threadId: string
+  lastMessage: string
   lastMessageAt: string
   messageCount: number
-  isResetThread?: boolean
-  createdAt?: string
+  createdAt: string
+  updatedAt: string
 }
 
-export interface SystemStats {
-  totalConfigs: number
-  activeConfigs: number
-  totalMessages: number
-  totalThreads: number
-  lastUpdated: string
-}
-
-// Nuevos tipos para conversaciones
 export interface ConversationMessage {
   id: string
   conversationId: string
   role: "user" | "assistant"
   content: string
-  timestamp: string
-  messageId?: string // ID del mensaje de WhatsApp
-}
-
-export interface Conversation {
-  id: string
-  phoneNumber: string
-  userName: string
-  whatsappConfigId: string
-  clienteId: string
-  clienteName: string
-  threadId: string
+  messageId?: string
   createdAt: string
-  updatedAt: string
-  lastMessageAt: string
-  messageCount: number
-  messages: ConversationMessage[]
 }
 
-export interface ConversationSummary {
+export interface ApiResponse<T = any> {
+  success: boolean
+  data?: T
+  error?: string
+  message?: string
+}
+
+export interface ErrorLog {
   id: string
-  phoneNumber: string
-  userName: string
-  clienteName: string
-  lastMessage: string
-  lastMessageAt: string
-  messageCount: number
+  category: string
+  message: string
+  stack?: string
+  metadata?: Record<string, any>
+  createdAt: string
+}
+
+export interface MonitoringMetric {
+  name: string
+  value: number
+  timestamp: string
+  metadata?: Record<string, any>
 }

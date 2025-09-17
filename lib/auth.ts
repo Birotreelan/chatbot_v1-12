@@ -2,6 +2,7 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { Redis } from "@upstash/redis"
 import { nanoid } from "nanoid"
+import type { NextRequest } from "next/server"
 
 // Prefijo para las sesiones en Redis
 const SESSION_PREFIX = "session:"
@@ -63,6 +64,17 @@ export async function getSession(): Promise<string | null> {
   }
 
   return null
+}
+
+// Verificar si está autenticado (para APIs)
+export async function isAuthenticated(request?: NextRequest): Promise<boolean> {
+  try {
+    const session = await getSession()
+    return !!session
+  } catch (error) {
+    console.error("Error verificando autenticación:", error)
+    return false
+  }
 }
 
 // Cerrar sesión

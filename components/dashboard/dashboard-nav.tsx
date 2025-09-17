@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Settings, MessageCircle, Activity } from "lucide-react"
+import { LayoutDashboard, Settings, Activity, MessageCircle } from "lucide-react"
 
 const navigation = [
   {
@@ -28,25 +28,26 @@ const navigation = [
   },
 ]
 
-export function DashboardNav() {
+export default function DashboardNav() {
   const pathname = usePathname()
 
   return (
-    <nav className="space-y-1">
+    <nav className="flex space-x-8 border-b border-gray-200">
       {navigation.map((item) => {
         const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))
+
         return (
           <Link
             key={item.name}
             href={item.href}
             className={cn(
-              "flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors",
+              "flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors",
               isActive
-                ? "bg-blue-100 text-blue-700 border-r-2 border-blue-700"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50",
+                ? "border-blue-500 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300",
             )}
           >
-            <item.icon className="mr-3 h-4 w-4" />
+            <item.icon className="h-4 w-4" />
             {item.name}
           </Link>
         )

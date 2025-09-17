@@ -23,9 +23,12 @@ export async function GET(req: NextRequest) {
     // Limitar el número de elementos a procesar en cada categoría para evitar timeouts
     const MAX_ITEMS_PER_CATEGORY = 1000
 
-    // 1. Limpiar conversaciones antiguas (7 días)
-    const conversationsDeleted = await cleanupOldConversations()
-    console.log(`[CLEANUP] ✅ Conversaciones eliminadas: ${conversationsDeleted}`)
+    // Limpiar conversaciones antiguas (7 días)
+    const conversationCleanup = await cleanupOldConversations(7)
+    console.log(`[CLEANUP] ✅ Conversaciones limpiadas: ${conversationCleanup.deleted}`)
+
+    // Incrementar métricas
+    await incrementMetric("cleanup_conversations", conversationCleanup.deleted)
 
     // 2. Limpiar threads inactivos
     const threadKeys = await redis.keys("whatsapp_thread:*")
@@ -122,7 +125,6 @@ export async function GET(req: NextRequest) {
     console.log(`[CLEANUP] ✅ Entradas de rate limiting eliminadas: ${rateLimitEntriesDeleted}`)
 
     // Registrar la limpieza
-    await incrementMetric("cleanup_conversations_deleted", conversationsDeleted)
     await incrementMetric("cleanup_threads_deleted", threadsDeleted)
     await incrementMetric("cleanup_metrics_deleted", metricsCleanedUp)
     await incrementMetric("cleanup_cache_deleted", cacheEntriesDeleted)
@@ -137,8 +139,8 @@ export async function GET(req: NextRequest) {
     const result = {
       success: true,
       message: "Limpieza completada exitosamente",
-      deleted: {
-        conversations: conversationsDeleted,
+      cleaned: {
+        conversations: conversationCleanup.deleted,
         threads: threadsDeleted,
         metrics: metricsCleanedUp,
         cache: cacheEntriesDeleted,

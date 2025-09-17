@@ -5,7 +5,8 @@ import { isAuthenticated } from "@/lib/auth"
 export async function GET(request: NextRequest) {
   try {
     // Verificar autenticación
-    if (!isAuthenticated(request)) {
+    const authenticated = await isAuthenticated(request)
+    if (!authenticated) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 })
     }
 
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
     // Enriquecer conversaciones con nombres de clientes actualizados
     const enrichedConversations = conversations.map((conv) => ({
       ...conv,
-      clienteName: configMap.get(conv.clienteName) || conv.clienteName,
+      clienteName: configMap.get(conv.clienteId) || conv.clienteName,
     }))
 
     console.log(`[API] ✅ Conversaciones obtenidas: ${enrichedConversations.length}`)

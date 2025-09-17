@@ -1,32 +1,29 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getConversationById } from "@/lib/db"
+import { getConversationMessages } from "@/lib/db"
 import { isAuthenticated } from "@/lib/auth"
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     // Verificar autenticación
-    if (!isAuthenticated(request)) {
+    const authenticated = await isAuthenticated(request)
+    if (!authenticated) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 })
     }
 
     const conversationId = params.id
-    console.log(`[API] Obteniendo conversación: ${conversationId}`)
+    console.log(`[API] Obteniendo mensajes para conversación: ${conversationId}`)
 
-    const conversation = await getConversationById(conversationId)
+    const messages = await getConversationMessages(conversationId)
 
-    if (!conversation) {
-      console.log(`[API] ❌ Conversación no encontrada: ${conversationId}`)
-      return NextResponse.json({ success: false, error: "Conversación no encontrada" }, { status: 404 })
-    }
-
-    console.log(`[API] ✅ Conversación obtenida: ${conversationId} con ${conversation.messages.length} mensajes`)
+    console.log(`[API] ✅ Mensajes obtenidos: ${messages.length}`)
 
     return NextResponse.json({
       success: true,
-      data: conversation,
+      data: messages,
+      total: messages.length,
     })
   } catch (error) {
-    console.error("[API] ❌ Error obteniendo conversación:", error)
+    console.error("[API] ❌ Error obteniendo mensajes de conversación:", error)
     return NextResponse.json(
       {
         success: false,
