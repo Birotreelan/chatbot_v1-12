@@ -1,337 +1,380 @@
-import { logError } from "./monitoring"
-
-// Interfaces para las respuestas de la API
-interface ApiResponse<T = any> {
+interface ClinicAPIResponse<T = any> {
   success: boolean
   data?: T
   error?: string
   message?: string
 }
 
-interface Paciente {
-  Id: string
-  Nombres: string
-  Apellido: string
-  Nrodoc: string
-  Celular: string
-  Mail: string
-  Fecha_Nac: string
-  Deudor_Nombre: string
-  Plan_Nombre: string
-  Nro_Afiliado_Ppal: string
-}
-
 interface Sede {
-  Id: string
-  Nombre: string
-  Direccion: string
-  Telefono?: string
-  Email?: string
+  id: string
+  nombre: string
+  direccion?: string
+  telefono?: string
+  activa: boolean
 }
 
 interface Turno {
-  Id: string
-  Fecha: string
-  Hora: string
-  Profesional_Nombre: string
-  Centro_Nombre: string
-  Motivo_Nombre: string
-  Agenda_Id: string
+  id: string
+  fecha: string
+  hora: string
+  paciente_id: string
+  medico_id: string
+  sede_id: string
+  estado: string
+  observaciones?: string
 }
 
-interface TurnoDisponible {
-  Agenda_Id: string
-  Fecha: string
-  Hora: string
-  Profesional_Nombre: string
-  Especialidad: string
-  Centro_Nombre: string
+interface Paciente {
+  id: string
+  dni: string
+  nombre: string
+  apellido: string
+  telefono?: string
+  email?: string
+  fecha_nacimiento?: string
 }
 
-// Configuración de la API
-const DEFAULT_PROXY_URL = process.env.CLINIC_PROXY_URL || "https://treelan.net/managment/proxy_service/"
+class ClinicAPILogger {
+  private context: string
 
-// Función auxiliar para hacer peticiones a la API
-async function makeApiRequest<T>(
+  constructor(context: string) {
+    this.context = context
+  }
+
+  log(level: "INFO" | "ERROR" | "WARN" | "DEBUG", message: string, data?: any) {
+    const timestamp = new Date().toISOString()
+    const prefix = `[${this.context}] [${level}]`
+
+    if (data) {
+      console.log(`${prefix} ${message}`, JSON.stringify(data, null, 2))
+    } else {
+      console.log(`${prefix} ${message}`)
+    }
+  }
+
+  info(message: string, data?: any) {
+    this.log("INFO", message, data)
+  }
+  error(message: string, data?: any) {
+    this.log("ERROR", message, data)
+  }
+  warn(message: string, data?: any) {
+    this.log("WARN", message, data)
+  }
+  debug(message: string, data?: any) {
+    this.log("DEBUG", message, data)
+  }
+}
+
+// Función base para hacer requests a la API de la clínica
+async function makeClinicAPIRequest<T>(
+  endpoint: string,
   clienteId: string,
-  action: string,
-  additionalParams: Record<string, any> = {},
-  proxyUrl: string = DEFAULT_PROXY_URL,
-): Promise<ApiResponse<T>> {
-  console.log(`[CLINIC-API] 🔧 ${action} para cliente: ${clienteId}`)
-  console.log(`[CLINIC-API] 📦 Parámetros:`, additionalParams)
+  options: RequestInit = {},
+  timeout = 30000,
+): Promise<ClinicAPIResponse<T>> {
+  const logger = new ClinicAPILogger("CLINIC-API")
+
+  const baseUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
+  if (!baseUrl) {
+    throw new Error("CLINIC_PROXY_URL o PROXY_API_URL no configurada")
+  }
+
+  const url = `${baseUrl}${endpoint}`
+
+  logger.info("Haciendo request a API de clínica", {
+    url,
+    clienteId,
+    method: options.method || "GET",
+    timeout,
+  })
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeout)
 
   try {
-    const requestBody = {
-      Cliente_Id: clienteId.trim(),
-      Action: action,
-      ...additionalParams,
-    }
-
-    console.log(`[CLINIC-API] 📤 POST ${proxyUrl}`)
-    console.log(`[CLINIC-API] 📦 Body:`, JSON.stringify(requestBody, null, 2))
-
-    const response = await fetch(proxyUrl, {
-      method: "POST",
+    const response = await fetch(url, {
+      ...options,
       headers: {
         "Content-Type": "application/json",
+        "X-Cliente-ID": clienteId,
+        ...options.headers,
       },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(30000), // 30 segundos timeout
+      signal: controller.signal,
     })
 
+    clearTimeout(timeoutId)
+
     const responseText = await response.text()
-    console.log(`[CLINIC-API] 📥 Response Status: ${response.status}`)
-    console.log(
-      `[CLINIC-API] 📥 Response Body: ${responseText.substring(0, 500)}${responseText.length > 500 ? "..." : ""}`,
-    )
+    logger.debug("Respuesta de API de clínica", {
+      status: response.status,
+      statusText: response.statusText,
+      responseLength: responseText.length,
+    })
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${responseText}`)
+      logger.error("Error en API de clínica", {
+        status: response.status,
+        responseText: responseText.substring(0, 500),
+      })
+
+      return {
+        success: false,
+        error: `HTTP ${response.status}: ${responseText}`,
+      }
     }
 
-    let data
     try {
-      data = JSON.parse(responseText)
-    } catch (parseError) {
-      throw new Error(`Invalid JSON response: ${responseText}`)
-    }
+      const data = JSON.parse(responseText)
+      logger.info("Request exitoso a API de clínica")
 
-    console.log(`[CLINIC-API] ✅ ${action} completado exitosamente`)
-    return {
-      success: true,
-      data: data,
+      return {
+        success: true,
+        data,
+      }
+    } catch (parseError) {
+      logger.error("Error parseando respuesta JSON", { parseError, responseText: responseText.substring(0, 200) })
+
+      return {
+        success: false,
+        error: "Error parseando respuesta JSON",
+      }
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    console.error(`[CLINIC-API] ❌ Error en ${action}:`, errorMessage)
+    clearTimeout(timeoutId)
 
-    await logError(`clinic_api_${action}`, error instanceof Error ? error : new Error(errorMessage))
+    if (error.name === "AbortError") {
+      logger.error("Timeout en request a API de clínica", { timeout })
+      return {
+        success: false,
+        error: `Timeout después de ${timeout}ms`,
+      }
+    }
+
+    logger.error("Error en request a API de clínica", { error: error.message })
 
     return {
       success: false,
-      error: errorMessage,
+      error: error.message,
     }
   }
 }
 
-// Función para validar DNI
-export async function validateDNI(
-  clienteId: string,
-  dni: string,
-): Promise<ApiResponse<{ paciente: Paciente | null; es_nuevo: boolean }>> {
-  console.log(`[CLINIC-API] 🆔 Validando DNI: ${dni}`)
+export async function getSedes(clienteId: string, sedeId?: string): Promise<ClinicAPIResponse<Sede[]>> {
+  const logger = new ClinicAPILogger("GET-SEDES")
 
-  const result = await makeApiRequest<any>(clienteId, "get_paciente", { dni })
+  logger.info("Obteniendo sedes", { clienteId, sedeId })
 
-  if (!result.success) {
+  try {
+    const endpoint = sedeId ? `/sedes/${sedeId}` : "/sedes"
+    const result = await makeClinicAPIRequest<Sede[]>(endpoint, clienteId)
+
+    if (result.success) {
+      logger.info("Sedes obtenidas exitosamente", {
+        count: Array.isArray(result.data) ? result.data.length : 1,
+      })
+    }
+
     return result
-  }
-
-  const data = result.data
-
-  if (data.paciente) {
+  } catch (error) {
+    logger.error("Error obteniendo sedes", { error })
     return {
-      success: true,
-      data: {
-        paciente: data.paciente,
-        es_nuevo: false,
-      },
-    }
-  } else {
-    return {
-      success: true,
-      data: {
-        paciente: null,
-        es_nuevo: true,
-      },
+      success: false,
+      error: error.message,
     }
   }
 }
 
-// Función para buscar paciente por DNI
-export async function buscarPaciente(clienteId: string, dni: string): Promise<ApiResponse<Paciente | null>> {
-  console.log(`[CLINIC-API] 👤 Buscando paciente con DNI: ${dni}`)
-
-  const result = await makeApiRequest<any>(clienteId, "get_paciente", { dni })
-
-  if (!result.success) {
-    return result
-  }
-
-  return {
-    success: true,
-    data: result.data?.paciente || null,
-  }
-}
-
-// Función para obtener sedes
-export async function getSedes(clienteId: string, sedeId?: string): Promise<ApiResponse<Sede[]>> {
-  console.log(`[CLINIC-API] 🏥 Obteniendo sedes${sedeId ? ` para sede: ${sedeId}` : ""}`)
-
-  const params = sedeId ? { sede_id: sedeId } : {}
-  const result = await makeApiRequest<any>(clienteId, "get_sedes", params)
-
-  if (!result.success) {
-    return result
-  }
-
-  const sedes = result.data?.sedes || result.data || []
-
-  return {
-    success: true,
-    data: Array.isArray(sedes) ? sedes : [sedes],
-  }
-}
-
-// Función para buscar turnos disponibles
-export async function searchTurnos(
+export async function getTurnos(
   clienteId: string,
-  sedeId?: string,
-  fechaDesde?: string,
-  fechaHasta?: string,
-  profesionalId?: string,
-  especialidadId?: string,
-): Promise<ApiResponse<TurnoDisponible[]>> {
-  console.log(`[CLINIC-API] 📅 Buscando turnos disponibles`)
+  sedeId: string,
+  fechaDesde: string,
+  fechaHasta: string,
+): Promise<ClinicAPIResponse<Turno[]>> {
+  const logger = new ClinicAPILogger("GET-TURNOS")
 
-  const params: Record<string, any> = {}
+  logger.info("Obteniendo turnos", { clienteId, sedeId, fechaDesde, fechaHasta })
 
-  if (sedeId) params.sede_id = sedeId
-  if (fechaDesde) params.Fecha_Desde = fechaDesde
-  if (fechaHasta) params.Fecha_Hasta = fechaHasta
-  if (profesionalId) params.Profesional_Id = profesionalId
-  if (especialidadId) params.Subespecialidad_Id = especialidadId
+  try {
+    const params = new URLSearchParams({
+      sede_id: sedeId,
+      fecha_desde: fechaDesde,
+      fecha_hasta: fechaHasta,
+    })
 
-  // Si no se especifican fechas, usar rango por defecto
-  if (!fechaDesde && !fechaHasta) {
-    const hoy = new Date()
-    const unMesDespues = new Date(hoy)
-    unMesDespues.setMonth(unMesDespues.getMonth() + 1)
+    const endpoint = `/turnos?${params.toString()}`
+    const result = await makeClinicAPIRequest<Turno[]>(endpoint, clienteId)
 
-    params.Fecha_Desde = hoy.toISOString().split("T")[0]
-    params.Fecha_Hasta = unMesDespues.toISOString().split("T")[0]
-  }
+    if (result.success) {
+      logger.info("Turnos obtenidos exitosamente", {
+        count: Array.isArray(result.data) ? result.data.length : 0,
+      })
+    }
 
-  const result = await makeApiRequest<any>(clienteId, "get_turnos", params)
-
-  if (!result.success) {
     return result
-  }
-
-  const turnos = result.data?.turnos || result.data || []
-
-  return {
-    success: true,
-    data: Array.isArray(turnos) ? turnos : [],
+  } catch (error) {
+    logger.error("Error obteniendo turnos", { error })
+    return {
+      success: false,
+      error: error.message,
+    }
   }
 }
 
-// Función para reservar turno
-export async function reserveTurno(
+export async function crearTurno(
   clienteId: string,
   turnoData: {
-    Agenda_Id: string
-    Paciente_DNI: string
-    Paciente_Nombre: string
-    Paciente_Apellido: string
-    Paciente_Telefono: string
-    Paciente_Email: string
-    Fecha?: string
-    Hora?: string
-    Profesional_Nombre?: string
+    fecha: string
+    hora: string
+    paciente_id: string
+    medico_id: string
+    sede_id: string
+    observaciones?: string
   },
-): Promise<ApiResponse<{ confirmacion: string }>> {
-  console.log(`[CLINIC-API] 📝 Reservando turno para DNI: ${turnoData.Paciente_DNI}`)
+): Promise<ClinicAPIResponse<Turno>> {
+  const logger = new ClinicAPILogger("CREAR-TURNO")
 
-  const result = await makeApiRequest<any>(clienteId, "set_turno", turnoData)
+  logger.info("Creando turno", { clienteId, turnoData })
 
-  if (!result.success) {
+  try {
+    const result = await makeClinicAPIRequest<Turno>("/turnos", clienteId, {
+      method: "POST",
+      body: JSON.stringify(turnoData),
+    })
+
+    if (result.success) {
+      logger.info("Turno creado exitosamente", { turnoId: result.data?.id })
+    }
+
     return result
-  }
-
-  return {
-    success: true,
-    data: {
-      confirmacion: result.data?.confirmacion || "Turno reservado exitosamente",
-    },
+  } catch (error) {
+    logger.error("Error creando turno", { error })
+    return {
+      success: false,
+      error: error.message,
+    }
   }
 }
 
-// Función para obtener turnos próximos de un paciente
-export async function getTurnosProximos(clienteId: string, dni: string): Promise<ApiResponse<Turno[]>> {
-  console.log(`[CLINIC-API] 📋 Obteniendo turnos próximos para DNI: ${dni}`)
+export async function buscarPaciente(clienteId: string, dni: string): Promise<ClinicAPIResponse<Paciente[]>> {
+  const logger = new ClinicAPILogger("BUSCAR-PACIENTE")
 
-  const result = await makeApiRequest<any>(clienteId, "get_paciente", { dni })
+  logger.info("Buscando paciente", { clienteId, dni })
 
-  if (!result.success) {
+  try {
+    const params = new URLSearchParams({ dni })
+    const endpoint = `/pacientes/buscar?${params.toString()}`
+
+    const result = await makeClinicAPIRequest<Paciente[]>(endpoint, clienteId)
+
+    if (result.success) {
+      logger.info("Búsqueda de paciente completada", {
+        count: Array.isArray(result.data) ? result.data.length : 0,
+      })
+    }
+
     return result
-  }
-
-  const turnos = result.data?.turnos_proximos || []
-
-  return {
-    success: true,
-    data: Array.isArray(turnos) ? turnos : [],
+  } catch (error) {
+    logger.error("Error buscando paciente", { error })
+    return {
+      success: false,
+      error: error.message,
+    }
   }
 }
 
-// Función para obtener especialidades
-export async function getEspecialidades(clienteId: string): Promise<ApiResponse<any[]>> {
-  console.log(`[CLINIC-API] 🩺 Obteniendo especialidades`)
+export async function getMedicos(clienteId: string, sedeId?: string): Promise<ClinicAPIResponse<any[]>> {
+  const logger = new ClinicAPILogger("GET-MEDICOS")
 
-  const result = await makeApiRequest<any>(clienteId, "get_subespecialidades")
+  logger.info("Obteniendo médicos", { clienteId, sedeId })
 
-  if (!result.success) {
+  try {
+    const params = sedeId ? new URLSearchParams({ sede_id: sedeId }) : new URLSearchParams()
+    const endpoint = `/medicos${params.toString() ? "?" + params.toString() : ""}`
+
+    const result = await makeClinicAPIRequest<any[]>(endpoint, clienteId)
+
+    if (result.success) {
+      logger.info("Médicos obtenidos exitosamente", {
+        count: Array.isArray(result.data) ? result.data.length : 0,
+      })
+    }
+
     return result
-  }
-
-  const especialidades = result.data?.subespecialidades || result.data || []
-
-  return {
-    success: true,
-    data: Array.isArray(especialidades) ? especialidades : [],
+  } catch (error) {
+    logger.error("Error obteniendo médicos", { error })
+    return {
+      success: false,
+      error: error.message,
+    }
   }
 }
 
-// Función para buscar profesionales
-export async function buscarProfesionales(clienteId: string, busqueda: string): Promise<ApiResponse<any[]>> {
-  console.log(`[CLINIC-API] 👨‍⚕️ Buscando profesionales: ${busqueda}`)
+export async function getHorariosDisponibles(
+  clienteId: string,
+  medicoId: string,
+  sedeId: string,
+  fecha: string,
+): Promise<ClinicAPIResponse<string[]>> {
+  const logger = new ClinicAPILogger("GET-HORARIOS")
 
-  const result = await makeApiRequest<any>(clienteId, "get_profesionales", { busqueda })
+  logger.info("Obteniendo horarios disponibles", { clienteId, medicoId, sedeId, fecha })
 
-  if (!result.success) {
+  try {
+    const params = new URLSearchParams({
+      medico_id: medicoId,
+      sede_id: sedeId,
+      fecha: fecha,
+    })
+
+    const endpoint = `/horarios-disponibles?${params.toString()}`
+    const result = await makeClinicAPIRequest<string[]>(endpoint, clienteId)
+
+    if (result.success) {
+      logger.info("Horarios obtenidos exitosamente", {
+        count: Array.isArray(result.data) ? result.data.length : 0,
+      })
+    }
+
     return result
-  }
-
-  const profesionales = result.data?.profesionales || result.data || []
-
-  return {
-    success: true,
-    data: Array.isArray(profesionales) ? profesionales : [],
+  } catch (error) {
+    logger.error("Error obteniendo horarios", { error })
+    return {
+      success: false,
+      error: error.message,
+    }
   }
 }
 
-// Función para validar obra social
-export async function validarObraSocial(clienteId: string, busqueda: string): Promise<ApiResponse<any[]>> {
-  console.log(`[CLINIC-API] 🏥 Validando obra social: ${busqueda}`)
+// Función de utilidad para validar datos de turno
+export function validateTurnoData(turnoData: any): { valid: boolean; errors: string[] } {
+  const errors: string[] = []
 
-  const result = await makeApiRequest<any>(clienteId, "get_obras_sociales", { busqueda })
-
-  if (!result.success) {
-    return result
+  if (!turnoData.fecha) {
+    errors.push("Fecha es requerida")
   }
 
-  const obrasSociales = result.data?.obras_sociales || result.data || []
+  if (!turnoData.hora) {
+    errors.push("Hora es requerida")
+  }
+
+  if (!turnoData.paciente_id) {
+    errors.push("ID de paciente es requerido")
+  }
+
+  if (!turnoData.medico_id) {
+    errors.push("ID de médico es requerido")
+  }
+
+  if (!turnoData.sede_id) {
+    errors.push("ID de sede es requerido")
+  }
 
   return {
-    success: true,
-    data: Array.isArray(obrasSociales) ? obrasSociales : [],
+    valid: errors.length === 0,
+    errors,
   }
 }
 
-// Aliases para compatibilidad con el código existente
-export const getTurnos = searchTurnos
-export const crearTurno = reserveTurno
-export const getTurnosDisponibles = searchTurnos
-export const getSubespecialidades = getEspecialidades
+// Exportar tipos para uso externo
+export type { Sede, Turno, Paciente, ClinicAPIResponse }

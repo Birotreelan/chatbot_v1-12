@@ -141,11 +141,35 @@ export async function processWhatsAppMessage(
 
     // Crear run con el assistant
     logger.info("Creando run con assistant...")
+    logger.debug("Parámetros para crear run:", {
+      threadId: threadInfo.threadId,
+      assistantId: config.whatsappAssistantId,
+      hasAdditionalInstructions: !!additionalInstructions,
+      additionalInstructionsLength: additionalInstructions?.length || 0,
+    })
+
+    // CRÍTICO: Verificar que los parámetros estén definidos antes de crear el run
+    if (!threadInfo.threadId) {
+      throw new Error("ThreadId es undefined - no se puede crear el run")
+    }
+    if (!config.whatsappAssistantId) {
+      throw new Error("AssistantId es undefined - no se puede crear el run")
+    }
+
+    logger.info("Llamando a OpenAI para crear run...")
+    const runStartTime = Date.now()
+
     const run = await openai.beta.threads.runs.create(threadInfo.threadId, {
       assistant_id: config.whatsappAssistantId,
       additional_instructions: additionalInstructions || undefined,
     })
-    logger.info("Run creado:", { runId: run.id })
+
+    const runCreationTime = Date.now() - runStartTime
+    logger.info("Run creado exitosamente:", {
+      runId: run.id,
+      status: run.status,
+      creationTime: `${runCreationTime}ms`,
+    })
 
     // CRÍTICO: Verificar que tanto threadId como runId estén definidos
     if (!threadInfo.threadId || !run.id) {
