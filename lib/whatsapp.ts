@@ -1,306 +1,139 @@
-import { getSedes } from "./clinic-api"
+import { getWhatsAppConfigByPhoneId, updateWhatsAppStats } from "./db"
+import { processWhatsAppMessage } from "./whatsapp-processor"
+import { logError, incrementMetric } from "./monitoring"
 
-async function createSystemBlockWithSedes(
-  config: any,
-  userPhoneNumber: string,
-  isNewThread: boolean,
-  isResetThread: boolean,
-  messageType: string,
-): Promise<string> {
-  const fechaHora = getArgentinaDateTime()
+// Función principal para manejar mensajes de WhatsApp
+export async function handleMessage(messageData: any): Promise<void> {
+  console.log("[WHATSAPP] ========== PROCESANDO WEBHOOK ==========")
+  console.log("[WHATSAPP] Datos recibidos:", JSON.stringify(messageData, null, 2))
 
-  let sedesInfo = "No disponible"
-
-  // Obtener datos de sedes si tenemos cliente_id
-  if (config.cliente_id) {
-    try {
-      console.log(`[WHATSAPP] 🏥 Obteniendo datos de sedes para cliente: ${config.cliente_id}`)
-      const sedesResult = await getSedes(config.cliente_id)
-
-      if (sedesResult.success && sedesResult.data) {
-        // Formatear los datos de sedes para el bloque [SISTEMA]
-        if (Array.isArray(sedesResult.data)) {
-          sedesInfo = sedesResult.data
-            .map(
-              (sede: any) =>
-                `Nombre: ${sede.Nombre_Completo || sede.nombre || "Sin nombre"}, ` +
-                `Domicilio: ${sede.Domicilio || sede.direccion || "Sin dirección"}, ` +
-                `Telefono: ${sede.Telefono || sede.telefono || "Sin teléfono"}, ` +
-                `Email: ${sede.E_Mail || sede.email || "Sin email"}, ` +
-                `Localidad: ${sede.Localidad || sede.localidad || "Sin localidad"}, ` +
-                `Provincia: ${sede.Provincia || sede.provincia || "Sin provincia"}, ` +
-                `Horario: ${sede.Horario || sede.horario || "Sin horario"}, ` +
-                `Web: ${sede.Dominio_Web || sede.web || "Sin web"}`,
-            )
-            .join(" | ")
-        } else if (sedesResult.data.sedes && Array.isArray(sedesResult.data.sedes)) {
-          sedesInfo = sedesResult.data.sedes
-            .map(
-              (sede: any) =>
-                `Nombre: ${sede.Nombre_Completo || sede.nombre || "Sin nombre"}, ` +
-                `Domicilio: ${sede.Domicilio || sede.direccion || "Sin dirección"}, ` +
-                `Telefono: ${sede.Telefono || sede.telefono || "Sin teléfono"}, ` +
-                `Email: ${sede.E_Mail || sede.email || "Sin email"}, ` +
-                `Localidad: ${sede.Localidad || sede.localidad || "Sin localidad"}, ` +
-                `Provincia: ${sede.Provincia || sede.provincia || "Sin provincia"}, ` +
-                `Horario: ${sede.Horario || sede.horario || "Sin horario"}, ` +
-                `Web: ${sede.Dominio_Web || sede.web || "Sin web"}`,
-            )
-            .join(" | ")
-        } else {
-          // Si es un objeto único, formatearlo
-          const sede = sedesResult.data
-          sedesInfo =
-            `Nombre: ${sede.Nombre_Completo || sede.nombre || "Sin nombre"}, ` +
-            `Domicilio: ${sede.Domicilio || sede.direccion || "Sin dirección"}, ` +
-            `Telefono: ${sede.Telefono || sede.telefono || "Sin teléfono"}, ` +
-            `Email: ${sede.E_Mail || sede.email || "Sin email"}, ` +
-            `Localidad: ${sede.Localidad || sede.localidad || "Sin localidad"}, ` +
-            `Provincia: ${sede.Provincia || sede.provincia || "Sin provincia"}, ` +
-            `Horario: ${sede.Horario || sede.horario || "Sin horario"}, ` +
-            `Web: ${sede.Dominio_Web || sede.web || "Sin web"}`
-        }
-        console.log(`[WHATSAPP] ✅ Sedes obtenidas y formateadas`)
-      } else {
-        console.log(`[WHATSAPP] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
-        sedesInfo = `Error: ${sedesResult.error}`
-      }
-    } catch (error) {
-      console.error(`[WHATSAPP] ❌ Error obteniendo sedes:`, error)
-      sedesInfo = "Error al obtener sedes"
+  try {
+    // Verificar que tenemos los datos necesarios
+    if (!messageData.messages || !Array.isArray(messageData.messages) || messageData.messages.length === 0) {
+      console.log("[WHATSAPP] ⚠️ No hay mensajes válidos en los datos")
+      return
     }
-  }
 
-  return `[SISTEMA]
-Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
-PrimerMensaje: ${isNewThread}
-ThreadReseteado: ${isResetThread}
-TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}
-Cliente_id: ${config.cliente_id || "No configurado"}
-sede_id: ${config.sede_id || "No configurado"}
-Sedes_Disponibles: ${sedesInfo}
-[/SISTEMA]`
-}
-
-async function createSystemBlock(
-  config: WhatsAppConfig,
-  phoneNumber: string,
-  isFirstMessage: boolean,
-  isResetThread: boolean,
-  messageType: string,
-): Promise<string> {
-  const fechaHora = getArgentinaDateTime()
-
-  let sedesInfo = "No disponible"
-
-  // Obtener datos de sedes si tenemos cliente_id
-  if (config.cliente_id) {
-    try {
-      console.log(`[WHATSAPP] 🏥 Obteniendo datos de sedes para cliente: ${config.cliente_id}`)
-      const sedesResult = await getSedes(config.cliente_id)
-
-      if (sedesResult.success && sedesResult.data) {
-        // Formatear los datos de sedes para el bloque [SISTEMA]
-        if (Array.isArray(sedesResult.data)) {
-          sedesInfo = sedesResult.data
-            .map(
-              (sede: any) =>
-                `Nombre: ${sede.Nombre_Completo || sede.nombre || "Sin nombre"}, ` +
-                `Domicilio: ${sede.Domicilio || sede.direccion || "Sin dirección"}, ` +
-                `Telefono: ${sede.Telefono || sede.telefono || "Sin teléfono"}, ` +
-                `Email: ${sede.E_Mail || sede.email || "Sin email"}, ` +
-                `Localidad: ${sede.Localidad || sede.localidad || "Sin localidad"}, ` +
-                `Provincia: ${sede.Provincia || sede.provincia || "Sin provincia"}, ` +
-                `Horario: ${sede.Horario || sede.horario || "Sin horario"}, ` +
-                `Web: ${sede.Dominio_Web || sede.web || "Sin web"}`,
-            )
-            .join(" | ")
-        } else if (sedesResult.data.sedes && Array.isArray(sedesResult.data.sedes)) {
-          sedesInfo = sedesResult.data.sedes
-            .map(
-              (sede: any) =>
-                `Nombre: ${sede.Nombre_Completo || sede.nombre || "Sin nombre"}, ` +
-                `Domicilio: ${sede.Domicilio || sede.direccion || "Sin dirección"}, ` +
-                `Telefono: ${sede.Telefono || sede.telefono || "Sin teléfono"}, ` +
-                `Email: ${sede.E_Mail || sede.email || "Sin email"}, ` +
-                `Localidad: ${sede.Localidad || sede.localidad || "Sin localidad"}, ` +
-                `Provincia: ${sede.Provincia || sede.provincia || "Sin provincia"}, ` +
-                `Horario: ${sede.Horario || sede.horario || "Sin horario"}, ` +
-                `Web: ${sede.Dominio_Web || sede.web || "Sin web"}`,
-            )
-            .join(" | ")
-        } else {
-          // Si es un objeto único, formatearlo
-          const sede = sedesResult.data
-          sedesInfo =
-            `Nombre: ${sede.Nombre_Completo || sede.nombre || "Sin nombre"}, ` +
-            `Domicilio: ${sede.Domicilio || sede.direccion || "Sin dirección"}, ` +
-            `Telefono: ${sede.Telefono || sede.telefono || "Sin teléfono"}, ` +
-            `Email: ${sede.E_Mail || sede.email || "Sin email"}, ` +
-            `Localidad: ${sede.Localidad || sede.localidad || "Sin localidad"}, ` +
-            `Provincia: ${sede.Provincia || sede.provincia || "Sin provincia"}, ` +
-            `Horario: ${sede.Horario || sede.horario || "Sin horario"}, ` +
-            `Web: ${sede.Dominio_Web || sede.web || "Sin web"}`
-        }
-        console.log(`[WHATSAPP] ✅ Sedes obtenidas y formateadas`)
-      } else {
-        console.log(`[WHATSAPP] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
-        sedesInfo = `Error: ${sedesResult.error}`
-      }
-    } catch (error) {
-      console.error(`[WHATSAPP] ❌ Error obteniendo sedes:`, error)
-      sedesInfo = "Error al obtener sedes"
+    if (!messageData.metadata || !messageData.metadata.phone_number_id) {
+      console.log("[WHATSAPP] ⚠️ No hay metadata válida en los datos")
+      return
     }
-  }
 
-  return `[SISTEMA]
-Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
-PrimerMensaje: ${isFirstMessage}
-ThreadReseteado: ${isResetThread}
-TipoMensaje: ${messageType}
-PacienteCelular: ${phoneNumber}
-Cliente_id: ${config.cliente_id || "No configurado"}
-sede_id: ${config.sede_id || "No configurado"}
-Sedes_Disponibles: ${sedesInfo}
-[/SISTEMA]`
-}
+    const phoneNumberId = messageData.metadata.phone_number_id
+    const message = messageData.messages[0]
+    const userPhoneNumber = message.from
 
-async function processIndividualMessage(
-  phoneNumber: string,
-  userMessage: string,
-  messageType: string,
-  config: WhatsAppConfig,
-): Promise<void> {
-  // Assuming the rest of the code here is already implemented
-  const threadResult = { isNewThread: true, isResetThread: false } // Example condition
-  const userPhoneNumber = phoneNumber
-  // Preparar mensaje con parámetros iniciales
-  const fechaHora = getArgentinaDateTime()
+    console.log(`[WHATSAPP] 📱 Procesando mensaje de ${userPhoneNumber} para phoneNumberId=${phoneNumberId}`)
 
-  // Obtener información de sedes
-  let sedesInfo = "No disponible"
-  if (config.cliente_id) {
-    try {
-      console.log(`[WHATSAPP] 🏥 Obteniendo datos de sedes para cliente: ${config.cliente_id}`)
-      const sedesResult = await getSedes(config.cliente_id)
-
-      if (sedesResult.success && sedesResult.data) {
-        if (Array.isArray(sedesResult.data)) {
-          sedesInfo = sedesResult.data
-            .map(
-              (sede: any) =>
-                `Nombre: ${sede.Nombre_Completo || sede.nombre || "Sin nombre"}, ` +
-                `Domicilio: ${sede.Domicilio || sede.direccion || "Sin dirección"}, ` +
-                `Telefono: ${sede.Telefono || sede.telefono || "Sin teléfono"}, ` +
-                `Email: ${sede.E_Mail || sede.email || "Sin email"}, ` +
-                `Localidad: ${sede.Localidad || sede.localidad || "Sin localidad"}, ` +
-                `Provincia: ${sede.Provincia || sede.provincia || "Sin provincia"}, ` +
-                `Horario: ${sede.Horario || sede.horario || "Sin horario"}, ` +
-                `Web: ${sede.Dominio_Web || sede.web || "Sin web"}`,
-            )
-            .join(" | ")
-        } else if (sedesResult.data.sedes && Array.isArray(sedesResult.data.sedes)) {
-          sedesInfo = sedesResult.data.sedes
-            .map(
-              (sede: any) =>
-                `Nombre: ${sede.Nombre_Completo || sede.nombre || "Sin nombre"}, ` +
-                `Domicilio: ${sede.Domicilio || sede.direccion || "Sin dirección"}, ` +
-                `Telefono: ${sede.Telefono || sede.telefono || "Sin teléfono"}, ` +
-                `Email: ${sede.E_Mail || sede.email || "Sin email"}, ` +
-                `Localidad: ${sede.Localidad || sede.localidad || "Sin localidad"}, ` +
-                `Provincia: ${sede.Provincia || sede.provincia || "Sin provincia"}, ` +
-                `Horario: ${sede.Horario || sede.horario || "Sin horario"}, ` +
-                `Web: ${sede.Dominio_Web || sede.web || "Sin web"}`,
-            )
-            .join(" | ")
-        } else {
-          const sede = sedesResult.data
-          sedesInfo =
-            `Nombre: ${sede.Nombre_Completo || sede.nombre || "Sin nombre"}, ` +
-            `Domicilio: ${sede.Domicilio || sede.direccion || "Sin dirección"}, ` +
-            `Telefono: ${sede.Telefono || sede.telefono || "Sin teléfono"}, ` +
-            `Email: ${sede.E_Mail || sede.email || "Sin email"}, ` +
-            `Localidad: ${sede.Localidad || sede.localidad || "Sin localidad"}, ` +
-            `Provincia: ${sede.Provincia || sede.provincia || "Sin provincia"}, ` +
-            `Horario: ${sede.Horario || sede.horario || "Sin horario"}, ` +
-            `Web: ${sede.Dominio_Web || sede.web || "Sin web"}`
-        }
-        console.log(`[WHATSAPP] ✅ Sedes obtenidas y formateadas`)
-      } else {
-        console.log(`[WHATSAPP] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
-        sedesInfo = `Error: ${sedesResult.error}`
-      }
-    } catch (error) {
-      console.error(`[WHATSAPP] ❌ Error obteniendo sedes:`, error)
-      sedesInfo = "Error al obtener sedes"
+    // Obtener la configuración de WhatsApp
+    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+    if (!config) {
+      console.error(`[WHATSAPP] ❌ Configuración no encontrada para phoneNumberId=${phoneNumberId}`)
+      await logError("whatsapp_config_not_found", new Error(`Config not found for phoneNumberId: ${phoneNumberId}`))
+      return
     }
+
+    console.log(`[WHATSAPP] ✅ Configuración encontrada: ${config.displayName} (${config.id})`)
+
+    // Obtener información del contacto
+    let userName = "Usuario"
+    if (messageData.contacts && messageData.contacts.length > 0) {
+      const contact = messageData.contacts.find((c: any) => c.wa_id === userPhoneNumber)
+      if (contact && contact.profile && contact.profile.name) {
+        userName = contact.profile.name
+      }
+    }
+
+    console.log(`[WHATSAPP] 👤 Usuario: ${userName} (${userPhoneNumber})`)
+
+    // Verificar que es un mensaje de texto
+    if (message.type !== "text" || !message.text || !message.text.body) {
+      console.log(`[WHATSAPP] ⚠️ Tipo de mensaje no soportado: ${message.type}`)
+
+      // Enviar mensaje de error para tipos no soportados
+      const errorMessage = "Lo siento, solo puedo procesar mensajes de texto por el momento."
+      await sendWhatsAppMessage(userPhoneNumber, errorMessage, config)
+      return
+    }
+
+    const messageText = message.text.body
+    console.log(`[WHATSAPP] 💬 Mensaje: "${messageText}"`)
+
+    // Actualizar estadísticas de mensajes recibidos
+    await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+
+    // Incrementar métrica de mensajes recibidos
+    await incrementMetric("messages_received")
+
+    // Procesar el mensaje con IA
+    console.log(`[WHATSAPP] 🤖 Enviando a procesamiento de IA...`)
+    const response = await processWhatsAppMessage({
+      phoneNumber: userPhoneNumber,
+      message: messageText,
+      config,
+    })
+
+    // Enviar la respuesta
+    if (response) {
+      const sent = await sendWhatsAppMessage(userPhoneNumber, response, config)
+      if (sent) {
+        console.log(`[WHATSAPP] ✅ Respuesta enviada exitosamente`)
+        await incrementMetric("messages_sent")
+      } else {
+        console.error(`[WHATSAPP] ❌ Error enviando respuesta`)
+        await incrementMetric("message_send_errors")
+      }
+    }
+
+    console.log(`[WHATSAPP] ✅ Mensaje procesado exitosamente`)
+  } catch (error) {
+    console.error("[WHATSAPP] ❌ Error procesando mensaje:", error)
+    await logError("whatsapp_message_processing", error instanceof Error ? error : new Error(String(error)))
+    throw error
   }
-
-  let messageToSend = `[SISTEMA]
-Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
-PrimerMensaje: ${threadResult.isNewThread}
-TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}
-Cliente_id: ${config.cliente_id}
-sede_id: ${config.sede_id}
-Sedes_Disponibles: ${sedesInfo}
-[/SISTEMA]
-
-${userMessage}`
-
-  // Si es un thread reseteado, indicarlo
-  if (threadResult.isResetThread) {
-    messageToSend = `[SISTEMA]
-Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
-PrimerMensaje: true
-ThreadReseteado: true
-TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}
-Cliente_id: ${config.cliente_id}
-sede_id: ${config.sede_id}
-Sedes_Disponibles: ${sedesInfo}
-[/SISTEMA]
-
-${userMessage}`
-  }
-  console.log(messageToSend)
 }
 
-async function processUserQueue(queue: MessageQueue): Promise<void> {
-  for (const messageData of queue) {
-    const phoneNumber = messageData.phoneNumber
-    await processIndividualMessage(phoneNumber, messageData.userMessage, messageData.messageType, messageData.config)
+// Función para enviar mensajes de WhatsApp
+export async function sendWhatsAppMessage(phoneNumber: string, message: string, config: any): Promise<boolean> {
+  try {
+    console.log(`[WHATSAPP] 📤 Enviando mensaje a ${phoneNumber}`)
+
+    const url = `https://graph.facebook.com/v18.0/${config.phoneNumberId}/messages`
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: phoneNumber,
+      type: "text",
+      text: {
+        body: message,
+      },
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`[WHATSAPP] ❌ Error enviando mensaje: ${response.status} - ${errorText}`)
+      return false
+    }
+
+    const result = await response.json()
+    console.log(`[WHATSAPP] ✅ Mensaje enviado exitosamente:`, result)
+
+    // Incrementar métrica de mensajes enviados
+    await incrementMetric("messages_sent")
+
+    return true
+  } catch (error) {
+    console.error(`[WHATSAPP] ❌ Error enviando mensaje:`, error)
+    await logError("whatsapp_send_message", error instanceof Error ? error : new Error(String(error)))
+    return false
   }
-}
-
-function getArgentinaDateTime(): string {
-  const now = new Date()
-  const options: Intl.DateTimeFormatOptions = {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZone: "America/Buenos_Aires",
-  }
-  return now.toLocaleString("es-AR", options)
-}
-
-interface WhatsAppConfig {
-  displayName: string
-  cliente_id?: string
-  sede_id?: string
-}
-
-interface MessageQueue {
-  phoneNumber: string
-  userMessage: string
-  messageType: string
-  config: WhatsAppConfig
 }
