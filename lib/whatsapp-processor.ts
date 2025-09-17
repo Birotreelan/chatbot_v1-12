@@ -1,14 +1,12 @@
 import { validateDNI, searchTurnos, reserveTurno, getSedes } from "./clinic-api"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import { getThreadForUser, updateWhatsAppStats } from "./db"
-import { sendWhatsAppMessage } from "./whatsapp"
-import { logError, incrementMetric } from "./monitoring"
+import type { WhatsAppConfig } from "./types"
 
 interface ProcessWhatsAppMessageParams {
   message: string
   phoneNumber: string
-  config: any
-  userName?: string
+  config: WhatsAppConfig
 }
 
 // Función para crear el bloque [SISTEMA] para WhatsApp con datos de sedes
@@ -68,15 +66,17 @@ Sedes_Disponibles: ${sedesInfo}
 [/SISTEMA]`
 }
 
-export async function processWhatsAppMessage({
-  phoneNumber,
-  message,
-  config,
-  userName = "Usuario",
-}: ProcessWhatsAppMessageParams): Promise<void> {
-  console.log(`[WHATSAPP-PROCESSOR] 🚀 Iniciando procesamiento para ${phoneNumber}`)
-
+export async function processWhatsAppMessage(params: ProcessWhatsAppMessageParams): Promise<string> {
   try {
+    const { message, phoneNumber, config } = params
+    console.log(`[WHATSAPP-PROCESSOR] ========== PROCESANDO MENSAJE WHATSAPP ==========`)
+    console.log(`[WHATSAPP-PROCESSOR] Teléfono: ${phoneNumber}`)
+    console.log(`[WHATSAPP-PROCESSOR] Cliente: ${config.displayName}`)
+    console.log(`[WHATSAPP-PROCESSOR] Cliente ID: ${config.cliente_id}`)
+    console.log(`[WHATSAPP-PROCESSOR] Sede ID: ${config.sede_id}`)
+    console.log(`[WHATSAPP-PROCESSOR] Mensaje: ${message}`)
+    console.log(`[WHATSAPP-PROCESSOR] ================================================`)
+
     // Validar parámetros
     if (!phoneNumber || !message || !config?.whatsappAssistantId) {
       throw new Error("Parámetros requeridos faltantes")
@@ -93,49 +93,32 @@ export async function processWhatsAppMessage({
 
     // Obtener o crear thread
     const { threadId, isNewThread, isResetThread } = await getThreadForUser(phoneNumber, config.id)
-    console.log(`[WHATSAPP-PROCESSOR] 🧵 Thread: ${threadId} (nuevo: ${isNewThread}, reset: ${isResetThread})`)
+    console.log(`[WHATSAPP-PROCESSOR] 🌐 Usando thread: ${threadId} (nuevo: ${isNewThread}, reset: ${isResetThread})`)
 
-    // Crear el mensaje con bloque [SISTEMA]
+    // Crear el mensaje con bloque [SISTEMA] (ahora es async)
     const systemBlock = await createWhatsAppSystemBlock(config.displayName, phoneNumber, clienteId, sedeId)
     const fullMessage = `${systemBlock}\n\n${message}`
 
-    console.log(`[WHATSAPP-PROCESSOR] 📋 Bloque [SISTEMA] creado`)
+    console.log(`[WHATSAPP-PROCESSOR] 📋 Bloque [SISTEMA] creado:`)
+    console.log(systemBlock)
 
-    // Procesar mensaje con OpenAI
+    // Procesar mensaje
     const response = await processMessageWithOpenAI(threadId, fullMessage, config.whatsappAssistantId, clienteId)
     console.log(`[WHATSAPP-PROCESSOR] ✅ Respuesta: ${response.length} caracteres`)
 
-    // Enviar respuesta por WhatsApp
-    const sent = await sendWhatsAppMessage(phoneNumber, response, config)
+    // Actualizar estadísticas
+    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
 
-    if (sent) {
-      console.log(`[WHATSAPP-PROCESSOR] ✅ Respuesta enviada exitosamente`)
-      await incrementMetric("messages_processed")
-      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-    } else {
-      console.error(`[WHATSAPP-PROCESSOR] ❌ Error enviando respuesta`)
-      await incrementMetric("message_send_errors")
-      await updateWhatsAppStats(config.id, { errors: 1 })
-    }
+    return response
   } catch (error) {
-    console.error(`[WHATSAPP-PROCESSOR] ❌ Error procesando mensaje:`, error)
+    console.error("[WHATSAPP-PROCESSOR] ❌ Error:", error)
 
-    // Enviar mensaje de error al usuario
-    const errorMessage = "Lo siento, hubo un problema procesando tu mensaje. Por favor, intenta nuevamente."
-    try {
-      await sendWhatsAppMessage(phoneNumber, errorMessage, config)
-    } catch (sendError) {
-      console.error(`[WHATSAPP-PROCESSOR] ❌ Error enviando mensaje de error:`, sendError)
+    // Actualizar estadísticas de error
+    if (params.config?.id) {
+      await updateWhatsAppStats(params.config.id, { errors: 1 })
     }
 
-    await logError("whatsapp_processing", error instanceof Error ? error : new Error(String(error)))
-    await incrementMetric("processing_errors")
-
-    if (config?.id) {
-      await updateWhatsAppStats(config.id, { errors: 1 })
-    }
-
-    throw error
+    return "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente."
   }
 }
 
@@ -168,8 +151,7 @@ async function processMessageWithOpenAI(
     })
 
     if (!messageResponse.ok) {
-      const errorText = await messageResponse.text()
-      throw new Error(`Error adding message: ${messageResponse.status} - ${errorText}`)
+      throw new Error(`Error adding message: ${messageResponse.status}`)
     }
 
     const messageData = await messageResponse.json()
@@ -343,8 +325,7 @@ async function processMessageWithOpenAI(
     })
 
     if (!runResponse.ok) {
-      const errorText = await runResponse.text()
-      throw new Error(`Error creating run: ${runResponse.status} - ${errorText}`)
+      throw new Error(`Error creating run: ${runResponse.status}`)
     }
 
     const runData = await runResponse.json()
@@ -361,7 +342,7 @@ async function processMessageWithOpenAI(
 
 async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
   let attempts = 0
-  const maxAttempts = 60 // 60 intentos (60 segundos)
+  const maxAttempts = 30
 
   console.log(`[WHATSAPP-PROCESSOR] ========== ESPERANDO COMPLETACIÓN ==========`)
   console.log(`[WHATSAPP-PROCESSOR] Run ID: ${runId}`)
@@ -381,8 +362,7 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
       })
 
       if (!runResponse.ok) {
-        const errorText = await runResponse.text()
-        throw new Error(`Error checking run: ${runResponse.status} - ${errorText}`)
+        throw new Error(`Error checking run: ${runResponse.status}`)
       }
 
       const run = await runResponse.json()
@@ -402,8 +382,7 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
         )
 
         if (!messagesResponse.ok) {
-          const errorText = await messagesResponse.text()
-          throw new Error(`Error getting messages: ${messagesResponse.status} - ${errorText}`)
+          throw new Error(`Error getting messages: ${messagesResponse.status}`)
         }
 
         const messages = await messagesResponse.json()
@@ -423,9 +402,6 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
         await handleToolCalls(threadId, runId, run, clienteId)
       } else if (run.status === "failed" || run.status === "cancelled" || run.status === "expired") {
         console.error(`[WHATSAPP-PROCESSOR] Run falló con estado: ${run.status}`)
-        if (run.last_error) {
-          console.error(`[WHATSAPP-PROCESSOR] Error details:`, run.last_error)
-        }
         return "Lo siento, ha ocurrido un error procesando tu solicitud."
       }
 
