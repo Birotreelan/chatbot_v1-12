@@ -9,12 +9,13 @@ import OpenAI from "openai"
 import { createWhatsAppSystemBlock as createSystemBlock } from "./openai-tools"
 import { sendWhatsAppMessage } from "./whatsapp-api"
 import { logError } from "./monitoring"
+import { systemDiagnostics } from "./advanced-monitoring"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
-// Sistema de logs mejorado
+// Sistema de logs mejorado con diagnósticos
 class ProcessorLogger {
   private context: string
   private startTime: number
@@ -34,6 +35,14 @@ class ProcessorLogger {
     } else {
       console.log(`${prefix} ${message}`)
     }
+
+    // Enviar al sistema de diagnósticos
+    const diagnosticLevel = level.toLowerCase() as "info" | "error" | "warning" | "success"
+    if (diagnosticLevel === "warning") {
+      systemDiagnostics.warning(this.context, message, data)
+    } else {
+      systemDiagnostics[diagnosticLevel](this.context, message, data)
+    }
   }
 
   info(message: string, data?: any) {
@@ -48,37 +57,63 @@ class ProcessorLogger {
   debug(message: string, data?: any) {
     this.log("DEBUG", message, data)
   }
+  success(message: string, data?: any) {
+    this.log("INFO", message, data)
+    systemDiagnostics.success(this.context, message, data)
+  }
 }
 
-// Función para hacer llamadas robustas a OpenAI API
+// Función para hacer llamadas robustas a OpenAI API con diagnósticos
 async function makeRobustOpenAICall<T>(
   operation: () => Promise<T>,
   operationName: string,
   logger: ProcessorLogger,
   maxRetries = 5,
 ): Promise<T> {
+  const startTime = Date.now()
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       logger.debug(`${operationName} - Intento ${attempt}/${maxRetries}`)
       const result = await operation()
-      logger.debug(`${operationName} - Exitoso en intento ${attempt}`)
+      const duration = Date.now() - startTime
+
+      logger.success(`${operationName} - Exitoso en intento ${attempt}`, { duration })
+      systemDiagnostics.success("OPENAI-API", `${operationName} completado`, {
+        attempt,
+        duration,
+        operationName,
+      })
+
       return result
     } catch (error) {
+      const duration = Date.now() - startTime
       const errorDetails = {
         attempt,
         maxRetries,
+        duration,
+        operationName,
         errorName: error?.constructor?.name || "Unknown",
         errorMessage: error?.message || "No message",
         errorCode: error?.code || "No code",
         errorType: error?.type || "No type",
         errorStatus: error?.status || "No status",
+        isRateLimit: error?.message?.includes("rate limit") || error?.code === "rate_limit_exceeded",
+        isTimeout: error?.message?.includes("timeout") || error?.code === "timeout",
+        isNetworkError: error?.message?.includes("network") || error?.code === "ECONNRESET",
         fullError: error,
       }
 
       logger.error(`${operationName} - Error en intento ${attempt}:`, errorDetails)
+      systemDiagnostics.error("OPENAI-API", `${operationName} falló en intento ${attempt}`, errorDetails)
 
       if (attempt === maxRetries) {
         logger.error(`${operationName} - Todos los intentos fallaron`)
+        systemDiagnostics.error("OPENAI-API", `${operationName} falló completamente`, {
+          totalAttempts: maxRetries,
+          totalDuration: duration,
+          finalError: errorDetails,
+        })
         await logError(
           `openai_${operationName.toLowerCase()}`,
           error instanceof Error ? error : new Error(String(error)),
@@ -86,10 +121,22 @@ async function makeRobustOpenAICall<T>(
         throw error
       }
 
-      // Backoff exponencial con jitter
-      const baseDelay = Math.pow(2, attempt) * 1000
+      // Determinar delay basado en tipo de error
+      let delay = Math.pow(2, attempt) * 1000 // Backoff exponencial base
+
+      if (errorDetails.isRateLimit) {
+        delay = Math.max(delay, 30000) // Mínimo 30 segundos para rate limit
+        logger.warn(`Rate limit detectado, esperando ${delay}ms`)
+      } else if (errorDetails.isTimeout) {
+        delay = Math.max(delay, 10000) // Mínimo 10 segundos para timeout
+        logger.warn(`Timeout detectado, esperando ${delay}ms`)
+      } else if (errorDetails.isNetworkError) {
+        delay = Math.max(delay, 5000) // Mínimo 5 segundos para errores de red
+        logger.warn(`Error de red detectado, esperando ${delay}ms`)
+      }
+
       const jitter = Math.random() * 1000
-      const delay = baseDelay + jitter
+      delay += jitter
 
       logger.warn(`${operationName} - Esperando ${Math.round(delay)}ms antes del siguiente intento...`)
       await new Promise((resolve) => setTimeout(resolve, delay))
@@ -99,7 +146,7 @@ async function makeRobustOpenAICall<T>(
   throw new Error(`Unexpected error in makeRobustOpenAICall for ${operationName}`)
 }
 
-// Función principal para procesar mensajes de WhatsApp
+// Función principal para procesar mensajes de WhatsApp con diagnósticos completos
 export async function processWhatsAppMessage(
   phoneNumber: string,
   message: string,
@@ -108,6 +155,7 @@ export async function processWhatsAppMessage(
   whatsappConfigId: string,
 ): Promise<string> {
   const logger = new ProcessorLogger("WHATSAPP-PROCESSOR")
+  const processingStartTime = Date.now()
 
   logger.info("========== INICIANDO PROCESAMIENTO ==========")
   logger.info("Parámetros de entrada:", {
@@ -115,6 +163,13 @@ export async function processWhatsAppMessage(
     message: message.substring(0, 100),
     userName,
     messageId,
+    whatsappConfigId,
+  })
+
+  systemDiagnostics.info("WHATSAPP-PROCESSOR", "Iniciando procesamiento de mensaje", {
+    phoneNumber,
+    messageLength: message.length,
+    userName,
     whatsappConfigId,
   })
 
@@ -177,7 +232,7 @@ export async function processWhatsAppMessage(
       "CREATE_MESSAGE",
       logger,
     )
-    logger.info("Mensaje agregado al thread:", { messageId: threadMessage.id })
+    logger.success("Mensaje agregado al thread:", { messageId: threadMessage.id })
 
     // Preparar instrucciones adicionales si es necesario
     let additionalInstructions = ""
@@ -187,7 +242,7 @@ export async function processWhatsAppMessage(
         try {
           const systemBlock = await createSystemBlock(config.displayName, config.cliente_id, config.sede_id)
           additionalInstructions = systemBlock
-          logger.info("Información del sistema agregada")
+          logger.success("Información del sistema agregada")
         } catch (error) {
           logger.error("Error obteniendo información del sistema:", error)
         }
@@ -222,7 +277,7 @@ export async function processWhatsAppMessage(
       logger,
     )
 
-    logger.info("Run creado exitosamente:", {
+    logger.success("Run creado exitosamente:", {
       runId: run.id,
       status: run.status,
     })
@@ -237,7 +292,7 @@ export async function processWhatsAppMessage(
     const completedRun = await waitForRunCompletion(threadInfo.threadId, run.id, config.cliente_id, logger)
 
     if (completedRun.status === "completed") {
-      logger.info("Run completado exitosamente")
+      logger.success("Run completado exitosamente")
 
       // Obtener los mensajes del thread
       const messages = await makeRobustOpenAICall(
@@ -254,7 +309,7 @@ export async function processWhatsAppMessage(
         const lastMessage = messages.data[0]
         if (lastMessage.role === "assistant" && lastMessage.content[0]?.type === "text") {
           const response = lastMessage.content[0].text.value
-          logger.info("Respuesta generada:", { length: response.length })
+          logger.success("Respuesta generada:", { length: response.length })
 
           // Agregar respuesta del asistente a la conversación
           await addMessageToConversation(conversation.id, "assistant", response, lastMessage.id)
@@ -262,12 +317,24 @@ export async function processWhatsAppMessage(
           // Enviar respuesta por WhatsApp
           logger.info("Enviando respuesta por WhatsApp...")
           await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, phoneNumber, response)
-          logger.info("Respuesta enviada exitosamente")
+          logger.success("Respuesta enviada exitosamente")
 
           // Actualizar estadísticas
           await updateWhatsAppStats(whatsappConfigId, { messagesProcessed: 1 })
 
-          logger.info("========== PROCESAMIENTO COMPLETADO ==========")
+          const totalProcessingTime = Date.now() - processingStartTime
+          logger.success("========== PROCESAMIENTO COMPLETADO ==========", {
+            totalTime: totalProcessingTime,
+            responseLength: response.length,
+          })
+
+          systemDiagnostics.success("WHATSAPP-PROCESSOR", "Mensaje procesado exitosamente", {
+            phoneNumber,
+            totalTime: totalProcessingTime,
+            responseLength: response.length,
+            runId: run.id,
+          })
+
           return response
         }
       }
@@ -275,11 +342,21 @@ export async function processWhatsAppMessage(
 
     throw new Error(`Run no completado correctamente: ${completedRun.status}`)
   } catch (error) {
+    const totalProcessingTime = Date.now() - processingStartTime
+
     logger.error("Error crítico en procesamiento:", {
       errorName: error?.constructor?.name || "Unknown",
       errorMessage: error?.message || "No message",
       errorStack: error?.stack || "No stack",
+      totalTime: totalProcessingTime,
       fullError: error,
+    })
+
+    systemDiagnostics.error("WHATSAPP-PROCESSOR", "Error crítico en procesamiento", {
+      phoneNumber,
+      errorMessage: error?.message || "No message",
+      totalTime: totalProcessingTime,
+      whatsappConfigId,
     })
 
     // Actualizar estadísticas de error
@@ -289,7 +366,7 @@ export async function processWhatsAppMessage(
   }
 }
 
-// Función mejorada para cancelar runs activos
+// Función mejorada para cancelar runs activos con diagnósticos
 async function cancelActiveRuns(threadId: string, logger: ProcessorLogger): Promise<void> {
   try {
     logger.info("Verificando runs activos...", { threadId })
@@ -306,6 +383,7 @@ async function cancelActiveRuns(threadId: string, logger: ProcessorLogger): Prom
 
     logger.info("Runs encontrados:", { count: runs.data.length })
 
+    let cancelledCount = 0
     for (const run of runs.data) {
       logger.info("Run encontrado:", {
         runId: run.id,
@@ -322,18 +400,28 @@ async function cancelActiveRuns(threadId: string, logger: ProcessorLogger): Prom
             logger,
             3, // Menos reintentos para cancelación
           )
-          logger.info("Run cancelado exitosamente:", { runId: run.id })
+          logger.success("Run cancelado exitosamente:", { runId: run.id })
+          cancelledCount++
         } catch (cancelError) {
           logger.error("Error cancelando run:", { runId: run.id, error: cancelError })
         }
       }
     }
+
+    if (cancelledCount > 0) {
+      systemDiagnostics.info("RUN-MANAGEMENT", `${cancelledCount} runs activos cancelados`, {
+        threadId,
+        cancelledCount,
+        totalRuns: runs.data.length,
+      })
+    }
   } catch (error) {
     logger.error("Error verificando runs activos:", error)
+    systemDiagnostics.error("RUN-MANAGEMENT", "Error verificando runs activos", { threadId, error })
   }
 }
 
-// Función corregida para esperar completación del run
+// Función corregida para esperar completación del run con diagnósticos completos
 async function waitForRunCompletion(
   threadId: string,
   runId: string,
@@ -342,6 +430,7 @@ async function waitForRunCompletion(
   maxAttempts = 60,
 ): Promise<any> {
   const log = logger || new ProcessorLogger("RUN-COMPLETION")
+  const completionStartTime = Date.now()
 
   log.info("Iniciando espera de completación:", { threadId, runId, maxAttempts })
 
@@ -372,13 +461,26 @@ async function waitForRunCompletion(
       })
 
       if (run.status === "completed") {
-        log.info("Run completado exitosamente")
+        const completionTime = Date.now() - completionStartTime
+        log.success("Run completado exitosamente", { completionTime })
+        systemDiagnostics.success("RUN-COMPLETION", "Run completado", {
+          runId,
+          completionTime,
+          attempts: attempt,
+        })
         return run
       }
 
       if (run.status === "failed" || run.status === "cancelled" || run.status === "expired") {
+        const errorMessage = `Run falló: ${run.status} - ${run.last_error?.message || "Sin detalles"}`
         log.error("Run falló:", { status: run.status, lastError: run.last_error })
-        throw new Error(`Run falló: ${run.status} - ${run.last_error?.message || "Sin detalles"}`)
+        systemDiagnostics.error("RUN-COMPLETION", errorMessage, {
+          runId,
+          status: run.status,
+          lastError: run.last_error,
+          attempts: attempt,
+        })
+        throw new Error(errorMessage)
       }
 
       if (run.status === "requires_action" && run.required_action?.type === "submit_tool_outputs") {
@@ -426,11 +528,20 @@ async function waitForRunCompletion(
               output: output,
             })
 
-            log.info("Herramienta ejecutada exitosamente:", { toolName: toolCall.function.name })
+            log.success("Herramienta ejecutada exitosamente:", { toolName: toolCall.function.name })
+            systemDiagnostics.success("TOOL-EXECUTION", `Herramienta ${toolCall.function.name} ejecutada`, {
+              toolName: toolCall.function.name,
+              clienteId,
+            })
           } catch (toolError) {
             log.error("Error ejecutando herramienta:", {
               toolName: toolCall.function.name,
               error: toolError,
+            })
+            systemDiagnostics.error("TOOL-EXECUTION", `Error en herramienta ${toolCall.function.name}`, {
+              toolName: toolCall.function.name,
+              error: toolError,
+              clienteId,
             })
             toolOutputs.push({
               tool_call_id: toolCall.id,
@@ -449,7 +560,7 @@ async function waitForRunCompletion(
           "SUBMIT_TOOL_OUTPUTS",
           log,
         )
-        log.info("Outputs enviados exitosamente")
+        log.success("Outputs enviados exitosamente")
       }
 
       // Esperar antes del siguiente intento
@@ -463,6 +574,13 @@ async function waitForRunCompletion(
       })
 
       if (attempt === maxAttempts) {
+        const totalTime = Date.now() - completionStartTime
+        systemDiagnostics.error("RUN-COMPLETION", "Timeout esperando completación", {
+          runId,
+          totalTime,
+          maxAttempts,
+          finalError: error,
+        })
         throw error
       }
 
