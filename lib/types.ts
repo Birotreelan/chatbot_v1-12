@@ -65,3 +65,41 @@ export interface SystemStats {
   totalThreads: number
   lastUpdated: string
 }
+
+export interface ConversationMessage {
+  id: string
+  conversationId: string
+  sender: "user" | "assistant"
+  message: string
+  timestamp: string
+  messageType?: "text" | "image" | "document" | "audio"
+  metadata?: {
+    whatsappMessageId?: string
+    assistantId?: string
+    functionCalls?: string[]
+    processingTime?: number
+  }
+}
+
+export interface Conversation {
+  id: string
+  phoneNumber: string
+  userName?: string
+  whatsappConfigId: string
+  configDisplayName?: string
+  threadId: string
+  startedAt: string
+  lastMessageAt: string
+  messageCount: number
+  status: "active" | "inactive" | "archived"
+  tags?: string[]
+  summary?: string
+}
+
+export interface ConversationStats {
+  totalConversations: number
+  activeConversations: number
+  totalMessages: number
+  averageMessagesPerConversation: number
+  lastUpdated: string
+}

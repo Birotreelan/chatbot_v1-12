@@ -1,6 +1,62 @@
-import { getWhatsAppConfigByPhoneId, updateWhatsAppStats } from "./db"
+import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser } from "./db"
 import { processWhatsAppMessage } from "./whatsapp-processor"
 import { logError, incrementMetric } from "./monitoring"
+import { getOrCreateConversation, logMessage } from "./conversation-logger"
+
+export async function processIndividualMessage(
+  userMessage: string,
+  phoneNumberId: string,
+  config: any,
+  userPhoneNumber: string,
+  messageType?: string,
+): Promise<void> {
+  console.log(`[WHATSAPP] 🔄 Procesando mensaje individual de ${userPhoneNumber}`)
+
+  try {
+    // Get or create conversation
+    const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
+    const conversation = await getOrCreateConversation(
+      userPhoneNumber,
+      config.id,
+      threadInfo.threadId,
+      "Usuario", // Default name since we don't have contact info here
+      config.displayName,
+    )
+
+    await logMessage(conversation.id, "user", userMessage)
+
+    // Update stats
+    await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+    await incrementMetric("messages_received")
+
+    // Process with AI
+    const startTime = Date.now()
+    const response = await processWhatsAppMessage({
+      phoneNumber: userPhoneNumber,
+      message: userMessage,
+      config,
+    })
+    const processingTime = Date.now() - startTime
+
+    // Send response
+    if (response) {
+      const sent = await sendWhatsAppMessage(userPhoneNumber, response, config)
+      if (sent) {
+        await incrementMetric("messages_sent")
+        await logMessage(conversation.id, "assistant", response, {
+          assistantId: config.whatsappAssistantId,
+          processingTime,
+        })
+      } else {
+        await incrementMetric("message_send_errors")
+      }
+    }
+  } catch (error) {
+    console.error(`[WHATSAPP] ❌ Error procesando mensaje individual:`, error)
+    await logError("whatsapp_individual_message_processing", error instanceof Error ? error : new Error(String(error)))
+    throw error
+  }
+}
 
 // Función principal para manejar mensajes de WhatsApp
 export async function handleMessage(messageData: any): Promise<void> {
@@ -59,6 +115,20 @@ export async function handleMessage(messageData: any): Promise<void> {
     const messageText = message.text.body
     console.log(`[WHATSAPP] 💬 Mensaje: "${messageText}"`)
 
+    const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
+
+    const conversation = await getOrCreateConversation(
+      userPhoneNumber,
+      config.id,
+      threadInfo.threadId,
+      userName,
+      config.displayName,
+    )
+
+    await logMessage(conversation.id, "user", messageText, {
+      whatsappMessageId: message.id,
+    })
+
     // Actualizar estadísticas de mensajes recibidos
     await updateWhatsAppStats(config.id, { messagesReceived: 1 })
 
@@ -67,11 +137,13 @@ export async function handleMessage(messageData: any): Promise<void> {
 
     // Procesar el mensaje con IA
     console.log(`[WHATSAPP] 🤖 Enviando a procesamiento de IA...`)
+    const startTime = Date.now()
     const response = await processWhatsAppMessage({
       phoneNumber: userPhoneNumber,
       message: messageText,
       config,
     })
+    const processingTime = Date.now() - startTime
 
     // Enviar la respuesta
     if (response) {
@@ -79,6 +151,11 @@ export async function handleMessage(messageData: any): Promise<void> {
       if (sent) {
         console.log(`[WHATSAPP] ✅ Respuesta enviada exitosamente`)
         await incrementMetric("messages_sent")
+
+        await logMessage(conversation.id, "assistant", response, {
+          assistantId: config.whatsappAssistantId,
+          processingTime,
+        })
       } else {
         console.error(`[WHATSAPP] ❌ Error enviando respuesta`)
         await incrementMetric("message_send_errors")
