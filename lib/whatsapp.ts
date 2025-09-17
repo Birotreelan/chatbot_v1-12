@@ -72,13 +72,20 @@ export async function handleMessage(data: WhatsAppWebhookData): Promise<void> {
 
     console.log("[WHATSAPP] 🤖 Enviando a procesamiento de IA...")
 
-    // Procesar mensaje con IA - CORREGIDO: pasar parámetros correctamente
-    const response = await processWhatsAppMessage(phoneNumber, messageText, userName, config, message.id)
+    // CORREGIDO: Pasar los parámetros en el orden correcto
+    // processWhatsAppMessage(phoneNumber, message, userName, messageId, whatsappConfigId)
+    const response = await processWhatsAppMessage(
+      phoneNumber, // phoneNumber
+      messageText, // message
+      userName, // userName
+      message.id, // messageId
+      config.id, // whatsappConfigId - ESTE ES EL PARÁMETRO CORRECTO
+    )
 
     console.log(`[WHATSAPP] ✅ Respuesta generada: ${response.length} caracteres`)
 
     // Enviar respuesta
-    await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, phoneNumber, response)
+    await sendWhatsAppMessage(phoneNumberId, config.accessToken, phoneNumber, response)
     console.log("[WHATSAPP] ✅ Respuesta enviada exitosamente")
 
     // Actualizar estadísticas de procesamiento
@@ -136,11 +143,17 @@ export async function processIndividualMessage(
   console.log(`[WHATSAPP] 🔄 Procesando mensaje individual de ${userPhoneNumber}`)
 
   try {
-    // Procesar mensaje con IA
-    const response = await processWhatsAppMessage(userPhoneNumber, userMessage, "Usuario", config)
+    // Procesar mensaje con IA - CORREGIDO: pasar parámetros correctamente
+    const response = await processWhatsAppMessage(
+      userPhoneNumber, // phoneNumber
+      userMessage, // message
+      "Usuario", // userName
+      "individual", // messageId
+      config.id, // whatsappConfigId
+    )
 
     // Enviar respuesta
-    await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, userPhoneNumber, response)
+    await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, response)
 
     console.log(`[WHATSAPP] ✅ Mensaje individual procesado exitosamente`)
   } catch (error) {
