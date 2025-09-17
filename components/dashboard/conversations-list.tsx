@@ -2,11 +2,10 @@
 
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { MessageCircle, Phone, Clock, Search, Filter } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
+import { Search, MessageCircle, Clock, User, Phone } from "lucide-react"
 import type { ConversationSummary, WhatsAppConfig } from "@/lib/types"
 
 interface ConversationsListProps {
@@ -17,72 +16,68 @@ export function ConversationsList({ onSelectConversation }: ConversationsListPro
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [configs, setConfigs] = useState<WhatsAppConfig[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState("")
   const [selectedClient, setSelectedClient] = useState<string>("all")
-  const [searchTerm, setSearchTerm] = useState("")
 
   useEffect(() => {
-    loadData()
-  }, [selectedClient])
+    loadConfigs()
+  }, [])
 
-  const loadData = async () => {
+  useEffect(() => {
+    loadConversations()
+  }, [selectedClient, search])
+
+  const loadConfigs = async () => {
     try {
-      setLoading(true)
-
-      // Cargar configuraciones
-      const configsResponse = await fetch("/api/dashboard/configs")
-      const configsData = await configsResponse.json()
-      if (configsData.success) {
-        setConfigs(configsData.data)
-      }
-
-      // Cargar conversaciones
-      const url =
-        selectedClient === "all"
-          ? "/api/dashboard/conversations"
-          : `/api/dashboard/conversations?cliente_id=${selectedClient}`
-
-      const conversationsResponse = await fetch(url)
-      const conversationsData = await conversationsResponse.json()
-
-      if (conversationsData.success) {
-        setConversations(conversationsData.data)
+      const response = await fetch("/api/dashboard/configs")
+      const data = await response.json()
+      if (data.success) {
+        setConfigs(data.configs)
       }
     } catch (error) {
-      console.error("Error cargando datos:", error)
+      console.error("Error cargando configuraciones:", error)
+    }
+  }
+
+  const loadConversations = async () => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (selectedClient !== "all") {
+        params.append("cliente_id", selectedClient)
+      }
+      if (search.trim()) {
+        params.append("search", search.trim())
+      }
+
+      const response = await fetch(`/api/dashboard/conversations?${params}`)
+      const data = await response.json()
+
+      if (data.success) {
+        setConversations(data.data)
+      } else {
+        console.error("Error cargando conversaciones:", data.error)
+      }
+    } catch (error) {
+      console.error("Error cargando conversaciones:", error)
     } finally {
       setLoading(false)
     }
   }
 
-  const filteredConversations = conversations.filter((conv) => {
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase()
-      return (
-        conv.userName.toLowerCase().includes(searchLower) ||
-        conv.phoneNumber.includes(searchTerm) ||
-        conv.lastMessage.toLowerCase().includes(searchLower)
-      )
-    }
-    return true
-  })
-
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp)
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString)
     const now = new Date()
     const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60)
 
     if (diffInHours < 1) {
-      return "Hace unos minutos"
+      const diffInMinutes = Math.floor(diffInHours * 60)
+      return `hace ${diffInMinutes} min`
     } else if (diffInHours < 24) {
-      return `Hace ${Math.floor(diffInHours)} horas`
+      return `hace ${Math.floor(diffInHours)} h`
     } else {
-      return date.toLocaleDateString("es-AR", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+      const diffInDays = Math.floor(diffInHours / 24)
+      return `hace ${diffInDays} día${diffInDays > 1 ? "s" : ""}`
     }
   }
 
@@ -92,24 +87,24 @@ export function ConversationsList({ onSelectConversation }: ConversationsListPro
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Filtros */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <MessageCircle className="h-5 w-5" />
-            Conversaciones
+            Conversaciones de WhatsApp
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                 <Input
                   placeholder="Buscar por nombre, teléfono o mensaje..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
                   className="pl-10"
                 />
               </div>
@@ -117,7 +112,6 @@ export function ConversationsList({ onSelectConversation }: ConversationsListPro
             <div className="sm:w-64">
               <Select value={selectedClient} onValueChange={setSelectedClient}>
                 <SelectTrigger>
-                  <Filter className="h-4 w-4 mr-2" />
                   <SelectValue placeholder="Filtrar por cliente" />
                 </SelectTrigger>
                 <SelectContent>
@@ -130,63 +124,60 @@ export function ConversationsList({ onSelectConversation }: ConversationsListPro
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={loadData} variant="outline">
-              Actualizar
-            </Button>
           </div>
         </CardContent>
       </Card>
 
       {/* Lista de conversaciones */}
-      <div className="space-y-2">
+      <div className="space-y-4">
         {loading ? (
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-2 text-gray-600">Cargando conversaciones...</p>
+          </div>
+        ) : conversations.length === 0 ? (
           <Card>
-            <CardContent className="p-6">
-              <div className="text-center text-gray-500">Cargando conversaciones...</div>
-            </CardContent>
-          </Card>
-        ) : filteredConversations.length === 0 ? (
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-center text-gray-500">
-                {searchTerm
-                  ? "No se encontraron conversaciones que coincidan con la búsqueda"
-                  : "No hay conversaciones disponibles"}
-              </div>
+            <CardContent className="text-center py-8">
+              <MessageCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No hay conversaciones</h3>
+              <p className="text-gray-600">
+                {selectedClient !== "all" || search.trim()
+                  ? "No se encontraron conversaciones con los filtros aplicados."
+                  : "Aún no hay conversaciones registradas."}
+              </p>
             </CardContent>
           </Card>
         ) : (
-          filteredConversations.map((conversation) => (
+          conversations.map((conversation) => (
             <Card
               key={conversation.id}
-              className="cursor-pointer hover:bg-gray-50 transition-colors"
+              className="cursor-pointer hover:shadow-md transition-shadow"
               onClick={() => onSelectConversation(conversation.id)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
-                      <h3 className="font-semibold text-sm truncate">{conversation.userName}</h3>
-                      <Badge variant="secondary" className="text-xs">
+                      <User className="h-4 w-4 text-gray-500" />
+                      <span className="font-medium text-gray-900">{conversation.userName}</span>
+                      <Badge variant="outline" className="text-xs">
                         {conversation.clienteName}
                       </Badge>
                     </div>
-
-                    <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-                      <Phone className="h-3 w-3" />
-                      <span>{conversation.phoneNumber}</span>
-                      <span>•</span>
-                      <MessageCircle className="h-3 w-3" />
-                      <span>{conversation.messageCount} mensajes</span>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Phone className="h-4 w-4 text-gray-500" />
+                      <span className="text-sm text-gray-600">{conversation.phoneNumber}</span>
                     </div>
-
-                    <p className="text-sm text-gray-600 truncate">{truncateMessage(conversation.lastMessage)}</p>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1 ml-4">
-                    <div className="flex items-center gap-1 text-xs text-gray-400">
-                      <Clock className="h-3 w-3" />
-                      <span>{formatTime(conversation.lastMessageAt)}</span>
+                    <p className="text-sm text-gray-700 mb-2">{truncateMessage(conversation.lastMessage)}</p>
+                    <div className="flex items-center gap-4 text-xs text-gray-500">
+                      <div className="flex items-center gap-1">
+                        <MessageCircle className="h-3 w-3" />
+                        <span>{conversation.messageCount} mensajes</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        <span>{formatDate(conversation.lastMessageAt)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -195,6 +186,23 @@ export function ConversationsList({ onSelectConversation }: ConversationsListPro
           ))
         )}
       </div>
+
+      {/* Información de totales */}
+      {!loading && conversations.length > 0 && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-sm text-gray-600 text-center">
+              Mostrando {conversations.length} conversación{conversations.length !== 1 ? "es" : ""}
+              {selectedClient !== "all" && (
+                <span>
+                  {" "}
+                  para <strong>{configs.find((c) => c.cliente_id === selectedClient)?.displayName || "cliente"}</strong>
+                </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

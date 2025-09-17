@@ -1,11 +1,13 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { Redis } from "@upstash/redis"
 import { incrementMetric, logError } from "@/lib/monitoring"
 import { cleanupOldConversations } from "@/lib/db"
 
 // Función para limpiar datos antiguos
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
+    console.log("[CLEANUP] ========== INICIANDO LIMPIEZA AUTOMÁTICA ==========")
+
     const redis = Redis.fromEnv()
     const now = Date.now()
 
@@ -23,6 +25,7 @@ export async function GET(req: Request) {
 
     // 1. Limpiar conversaciones antiguas (7 días)
     const conversationsDeleted = await cleanupOldConversations()
+    console.log(`[CLEANUP] ✅ Conversaciones eliminadas: ${conversationsDeleted}`)
 
     // 2. Limpiar threads inactivos
     const threadKeys = await redis.keys("whatsapp_thread:*")
@@ -49,6 +52,7 @@ export async function GET(req: Request) {
         }
       }
     }
+    console.log(`[CLEANUP] ✅ Threads eliminados: ${threadsDeleted}`)
 
     // 3. Limpiar métricas antiguas
     const metricKeys = await redis.keys("metrics:*")
@@ -69,6 +73,7 @@ export async function GET(req: Request) {
         }
       }
     }
+    console.log(`[CLEANUP] ✅ Métricas eliminadas: ${metricsCleanedUp}`)
 
     // 4. Limpiar caché de API
     const cacheKeys = await redis.keys("api_cache:*")
@@ -95,6 +100,7 @@ export async function GET(req: Request) {
         }
       }
     }
+    console.log(`[CLEANUP] ✅ Entradas de caché eliminadas: ${cacheEntriesDeleted}`)
 
     // 5. Limpiar datos de rate limiting antiguos
     const rateLimitKeys = await redis.keys("ratelimit:*")
@@ -113,6 +119,7 @@ export async function GET(req: Request) {
         rateLimitEntriesDeleted += oldTokens
       }
     }
+    console.log(`[CLEANUP] ✅ Entradas de rate limiting eliminadas: ${rateLimitEntriesDeleted}`)
 
     // Registrar la limpieza
     await incrementMetric("cleanup_conversations_deleted", conversationsDeleted)
@@ -127,13 +134,16 @@ export async function GET(req: Request) {
     const remainingCache = cacheKeys.length - cacheToProcess.length
     const remainingRateLimit = rateLimitKeys.length - rateLimitToProcess.length
 
-    return NextResponse.json({
+    const result = {
       success: true,
-      conversationsDeleted,
-      threadsDeleted,
-      metricsCleanedUp,
-      cacheEntriesDeleted,
-      rateLimitEntriesDeleted,
+      message: "Limpieza completada exitosamente",
+      deleted: {
+        conversations: conversationsDeleted,
+        threads: threadsDeleted,
+        metrics: metricsCleanedUp,
+        cache: cacheEntriesDeleted,
+        rateLimit: rateLimitEntriesDeleted,
+      },
       remaining: {
         threads: remainingThreads,
         metrics: remainingMetrics,
@@ -141,18 +151,30 @@ export async function GET(req: Request) {
         rateLimit: remainingRateLimit,
       },
       timestamp: new Date().toISOString(),
-    })
+    }
+
+    console.log("[CLEANUP] ========== LIMPIEZA COMPLETADA ==========")
+    console.log(`[CLEANUP] Resultado:`, result)
+
+    return NextResponse.json(result)
   } catch (error) {
-    console.error("Error en la limpieza programada:", error)
-    await logError("cleanup", error instanceof Error ? error : new Error(String(error)))
+    console.error("[CLEANUP] ❌ Error durante la limpieza:", error)
+    await logError("cleanup_cron", error instanceof Error ? error : new Error(String(error)))
+
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Error desconocido",
+        error: error instanceof Error ? error.message : "Error durante la limpieza",
+        timestamp: new Date().toISOString(),
       },
       { status: 500 },
     )
   }
+}
+
+// También permitir POST para compatibilidad con diferentes cron services
+export async function POST(request: NextRequest) {
+  return GET(request)
 }
 
 // Configuración para Vercel Cron
