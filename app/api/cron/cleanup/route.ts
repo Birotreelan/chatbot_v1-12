@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { Redis } from "@upstash/redis"
 import { incrementMetric, logError } from "@/lib/monitoring"
+import { cleanupOldConversations } from "@/lib/db"
 
 // Función para limpiar datos antiguos
 export async function GET(req: Request) {
@@ -20,7 +21,10 @@ export async function GET(req: Request) {
     // Limitar el número de elementos a procesar en cada categoría para evitar timeouts
     const MAX_ITEMS_PER_CATEGORY = 1000
 
-    // 1. Limpiar threads inactivos
+    // 1. Limpiar conversaciones antiguas (7 días)
+    const conversationsDeleted = await cleanupOldConversations()
+
+    // 2. Limpiar threads inactivos
     const threadKeys = await redis.keys("whatsapp_thread:*")
     let threadsDeleted = 0
 
@@ -46,7 +50,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // 2. Limpiar métricas antiguas
+    // 3. Limpiar métricas antiguas
     const metricKeys = await redis.keys("metrics:*")
     let metricsCleanedUp = 0
 
@@ -66,7 +70,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // 3. Limpiar caché de API
+    // 4. Limpiar caché de API
     const cacheKeys = await redis.keys("api_cache:*")
     let cacheEntriesDeleted = 0
 
@@ -92,7 +96,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // 4. Limpiar datos de rate limiting antiguos
+    // 5. Limpiar datos de rate limiting antiguos
     const rateLimitKeys = await redis.keys("ratelimit:*")
     let rateLimitEntriesDeleted = 0
 
@@ -111,6 +115,7 @@ export async function GET(req: Request) {
     }
 
     // Registrar la limpieza
+    await incrementMetric("cleanup_conversations_deleted", conversationsDeleted)
     await incrementMetric("cleanup_threads_deleted", threadsDeleted)
     await incrementMetric("cleanup_metrics_deleted", metricsCleanedUp)
     await incrementMetric("cleanup_cache_deleted", cacheEntriesDeleted)
@@ -124,6 +129,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       success: true,
+      conversationsDeleted,
       threadsDeleted,
       metricsCleanedUp,
       cacheEntriesDeleted,

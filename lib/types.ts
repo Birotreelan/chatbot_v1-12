@@ -65,3 +65,38 @@ export interface SystemStats {
   totalThreads: number
   lastUpdated: string
 }
+
+// Nuevos tipos para conversaciones
+export interface ConversationMessage {
+  id: string
+  conversationId: string
+  role: "user" | "assistant"
+  content: string
+  timestamp: string
+  messageId?: string // ID del mensaje de WhatsApp
+}
+
+export interface Conversation {
+  id: string
+  phoneNumber: string
+  userName: string
+  whatsappConfigId: string
+  clienteId: string
+  clienteName: string
+  threadId: string
+  createdAt: string
+  updatedAt: string
+  lastMessageAt: string
+  messageCount: number
+  messages: ConversationMessage[]
+}
+
+export interface ConversationSummary {
+  id: string
+  phoneNumber: string
+  userName: string
+  clienteName: string
+  lastMessage: string
+  lastMessageAt: string
+  messageCount: number
+}

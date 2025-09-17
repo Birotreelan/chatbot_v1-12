@@ -1,8 +1,35 @@
-import { validateDNI, searchTurnos, reserveTurno, getSedes } from "./clinic-api"
-import { getArgentinaDateTime } from "./utils/date-utils"
-import { getThreadForUser, updateWhatsAppStats } from "./db"
+import { validateDNI, getSedes, getEspecialidades, getTurnos, reservarTurno } from "./clinic-api"
+import { getThreadForUser, updateWhatsAppStats, getOrCreateConversation, addMessageToConversation } from "./db"
 import { logError, incrementMetric } from "./monitoring"
+import OpenAI from "openai"
 import type { WhatsAppConfig } from "./types"
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
+
+interface WhatsAppMessage {
+  from: string
+  text?: { body: string }
+  type: string
+  id: string
+  timestamp: string
+}
+
+interface WhatsAppContact {
+  profile: { name: string }
+  wa_id: string
+}
+
+interface WhatsAppWebhookData {
+  messaging_product: string
+  metadata: {
+    display_phone_number: string
+    phone_number_id: string
+  }
+  contacts?: WhatsAppContact[]
+  messages?: WhatsAppMessage[]
+}
 
 interface ProcessWhatsAppMessageParams {
   message: string
@@ -10,640 +37,379 @@ interface ProcessWhatsAppMessageParams {
   config: WhatsAppConfig
 }
 
-// Función para crear el bloque [SISTEMA] para WhatsApp con datos de sedes
+// Función para crear el bloque de información del sistema
 async function createWhatsAppSystemBlock(
-  clinicName: string,
-  phoneNumber: string,
-  clienteId?: string,
+  clienteId: string,
   sedeId?: string,
+  userName?: string,
+  phoneNumber?: string,
 ): Promise<string> {
-  const fechaHora = getArgentinaDateTime()
+  console.log(`[WHATSAPP-PROCESSOR] 🏥 Obteniendo datos de sedes para cliente: ${clienteId}`)
 
-  let sedesInfo = "No disponible"
-
-  // Obtener datos de sedes si tenemos clienteId
-  if (clienteId) {
-    try {
-      console.log(`[WHATSAPP-PROCESSOR] 🏥 Obteniendo datos de sedes para cliente: ${clienteId}`)
-      const sedesResult = await getSedes(clienteId, sedeId) // Updated line
-
-      if (sedesResult.success && sedesResult.data) {
-        // Formatear los datos de sedes para el bloque [SISTEMA]
-        if (Array.isArray(sedesResult.data)) {
-          sedesInfo = sedesResult.data
-            .map(
-              (sede: any) =>
-                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
-            )
-            .join(" | ")
-        } else if (sedesResult.data.sedes && Array.isArray(sedesResult.data.sedes)) {
-          sedesInfo = sedesResult.data.sedes
-            .map(
-              (sede: any) =>
-                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
-            )
-            .join(" | ")
-        } else {
-          sedesInfo = JSON.stringify(sedesResult.data).substring(0, 200) + "..."
-        }
-        console.log(`[WHATSAPP-PROCESSOR] ✅ Sedes obtenidas y formateadas`)
-      } else {
-        console.log(`[WHATSAPP-PROCESSOR] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
-        sedesInfo = `Error: ${sedesResult.error}`
-      }
-    } catch (error) {
-      console.error(`[WHATSAPP-PROCESSOR] ❌ Error obteniendo sedes:`, error)
-      sedesInfo = "Error al obtener sedes"
-    }
-  }
-
-  return `[SISTEMA]
-Nombre: ${clinicName}
-FechaHora: ${fechaHora}
-CelularPaciente: ${phoneNumber}
-Cliente_id: ${clienteId || "No configurado"}
-sede_id: ${sedeId || "No configurado"}
-Sedes_Disponibles: ${sedesInfo}
-[/SISTEMA]`
-}
-
-export async function processWhatsAppMessage(params: ProcessWhatsAppMessageParams): Promise<string> {
   try {
-    const { message, phoneNumber, config } = params
-    console.log(`[WHATSAPP-PROCESSOR] ========== PROCESANDO MENSAJE WHATSAPP ==========`)
-    console.log(`[WHATSAPP-PROCESSOR] Teléfono: ${phoneNumber}`)
-    console.log(`[WHATSAPP-PROCESSOR] Cliente: ${config.displayName}`)
-    console.log(`[WHATSAPP-PROCESSOR] Cliente ID: ${config.cliente_id}`)
-    console.log(`[WHATSAPP-PROCESSOR] Sede ID: ${config.sede_id}`)
-    console.log(`[WHATSAPP-PROCESSOR] Mensaje: ${message}`)
-    console.log(`[WHATSAPP-PROCESSOR] ================================================`)
+    // Obtener datos de sedes
+    const sedesResult = await getSedes(clienteId, sedeId)
+    let sedesInfo = ""
 
-    // Validar parámetros
-    if (!phoneNumber || !message || !config?.whatsappAssistantId) {
-      throw new Error("Parámetros requeridos faltantes")
+    if (sedesResult.success && sedesResult.data && sedesResult.data.length > 0) {
+      console.log(`[WHATSAPP-PROCESSOR] ✅ Sedes obtenidas: ${sedesResult.data.length}`)
+      sedesInfo = `
+SEDES DISPONIBLES:
+${sedesResult.data
+  .map(
+    (sede: any) => `
+- ${sede.Nombre} (ID: ${sede.Id})
+  Dirección: ${sede.Direccion}
+  Teléfono: ${sede.Telefono}
+  Email: ${sede.Email}`,
+  )
+  .join("\n")}
+`
+    } else {
+      console.log(`[WHATSAPP-PROCESSOR] ⚠️ No se pudieron obtener sedes: ${sedesResult.mensaje}`)
+      sedesInfo = `
+SEDES: No se pudieron cargar las sedes disponibles.
+Error: ${sedesResult.mensaje}
+`
     }
 
-    // Obtener cliente_id de la configuración
-    const clienteId = config.cliente_id || ""
-    const sedeId = config.sede_id || ""
+    // Crear el bloque de sistema
+    const systemBlock = `
+[SISTEMA] - Información del Cliente y Configuración
 
-    if (!clienteId) {
-      console.error(`[WHATSAPP-PROCESSOR] ❌ Cliente ID faltante en configuración`)
-      throw new Error("Cliente ID no configurado")
-    }
+CLIENTE ID: ${clienteId}
+${sedeId ? `SEDE ID: ${sedeId}` : "SEDE ID: No especificada"}
+${userName ? `USUARIO: ${userName}` : ""}
+${phoneNumber ? `TELÉFONO: ${phoneNumber}` : ""}
 
-    // Obtener o crear thread
-    const { threadId, isNewThread, isResetThread } = await getThreadForUser(phoneNumber, config.id)
-    console.log(`[WHATSAPP-PROCESSOR] 🌐 Usando thread: ${threadId} (nuevo: ${isNewThread}, reset: ${isResetThread})`)
+${sedesInfo}
 
-    // Crear el mensaje con bloque [SISTEMA]
-    const systemBlock = await createWhatsAppSystemBlock(config.displayName, phoneNumber, clienteId, sedeId)
-    const fullMessage = `${systemBlock}\n\n${message}`
+INSTRUCCIONES IMPORTANTES:
+- Siempre usa el CLIENTE ID proporcionado para todas las consultas a la API
+- ${sedeId ? `Usa la SEDE ID ${sedeId} para consultas específicas de sede` : "Solicita al usuario que seleccione una sede si es necesario"}
+- Mantén un tono profesional y amigable
+- Si necesitas validar un DNI, usa la función validate_dni
+- Para obtener especialidades, usa get_especialidades
+- Para obtener turnos disponibles, usa get_turnos
+- Para reservar un turno, usa reservar_turno
+
+FECHA Y HORA ACTUAL: ${new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}
+`
 
     console.log(`[WHATSAPP-PROCESSOR] 📋 Bloque [SISTEMA] creado`)
-
-    // Procesar mensaje
-    const response = await processMessageWithOpenAI(threadId, fullMessage, config.whatsappAssistantId, clienteId)
-    console.log(`[WHATSAPP-PROCESSOR] ✅ Respuesta: ${response.length} caracteres`)
-
-    // Actualizar estadísticas
-    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-    await incrementMetric("messages_processed")
-
-    return response
+    return systemBlock
   } catch (error) {
-    console.error("[WHATSAPP-PROCESSOR] ❌ Error:", error)
+    console.error(`[WHATSAPP-PROCESSOR] ❌ Error al crear bloque de sistema:`, error)
+    return `
+[SISTEMA] - Error al cargar información del cliente
 
-    // Actualizar estadísticas de error
-    if (params.config?.id) {
-      await updateWhatsAppStats(params.config.id, { errors: 1 })
-    }
-
-    await logError("whatsapp_processing", error instanceof Error ? error : new Error(String(error)))
-    await incrementMetric("processing_errors")
-
-    return "Lo siento, ha ocurrido un error. Por favor, intenta nuevamente."
+CLIENTE ID: ${clienteId}
+ERROR: No se pudo cargar la información del sistema
+FECHA Y HORA: ${new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}
+`
   }
 }
 
-async function processMessageWithOpenAI(
-  threadId: string,
+// Función principal para procesar mensajes de WhatsApp
+export async function processWhatsAppMessage(
+  phoneNumber: string,
   message: string,
-  whatsappAssistantId: string,
-  clienteId: string,
+  userName: string,
+  whatsappConfig: any,
+  messageId?: string,
 ): Promise<string> {
+  console.log(`[WHATSAPP-PROCESSOR] ========== PROCESANDO MENSAJE WHATSAPP ==========`)
+  console.log(`[WHATSAPP-PROCESSOR] Teléfono: ${phoneNumber}`)
+  console.log(`[WHATSAPP-PROCESSOR] Cliente: ${whatsappConfig.displayName}`)
+  console.log(`[WHATSAPP-PROCESSOR] Cliente ID: ${whatsappConfig.cliente_id}`)
+  console.log(`[WHATSAPP-PROCESSOR] Sede ID: ${whatsappConfig.sede_id}`)
+  console.log(`[WHATSAPP-PROCESSOR] Mensaje: ${message}`)
+  console.log(`[WHATSAPP-PROCESSOR] ================================================`)
+
   try {
+    // Obtener o crear thread
+    const { threadId, isNewThread, isResetThread } = await getThreadForUser(phoneNumber, whatsappConfig.id)
+    console.log(`[WHATSAPP-PROCESSOR] 🌐 Usando thread: ${threadId} (nuevo: ${isNewThread}, reset: ${isResetThread})`)
+
+    // Obtener o crear conversación
+    const conversation = await getOrCreateConversation(
+      phoneNumber,
+      userName,
+      whatsappConfig.id,
+      whatsappConfig.cliente_id,
+      whatsappConfig.displayName,
+      threadId,
+    )
+
+    // Agregar mensaje del usuario a la conversación
+    await addMessageToConversation(conversation.id, "user", message, messageId)
+
+    // Si es un thread nuevo o reseteado, agregar información del sistema
+    if (isNewThread || isResetThread) {
+      const systemBlock = await createWhatsAppSystemBlock(
+        whatsappConfig.cliente_id,
+        whatsappConfig.sede_id,
+        userName,
+        phoneNumber,
+      )
+
+      // Agregar mensaje del sistema al thread
+      await openai.beta.threads.messages.create(threadId, {
+        role: "user",
+        content: systemBlock,
+      })
+    }
+
     console.log(`[WHATSAPP-PROCESSOR] ========== PROCESANDO CON OPENAI ==========`)
     console.log(`[WHATSAPP-PROCESSOR] Thread ID: ${threadId}`)
-    console.log(`[WHATSAPP-PROCESSOR] Assistant ID: ${whatsappAssistantId}`)
-    console.log(`[WHATSAPP-PROCESSOR] Cliente ID: ${clienteId}`)
+    console.log(`[WHATSAPP-PROCESSOR] Assistant ID: ${whatsappConfig.whatsappAssistantId}`)
+    console.log(`[WHATSAPP-PROCESSOR] Cliente ID: ${whatsappConfig.cliente_id}`)
     console.log(`[WHATSAPP-PROCESSOR] ================================================`)
 
-    // 1. Añadir mensaje al thread
+    // Agregar el mensaje del usuario al thread
     console.log(`[WHATSAPP-PROCESSOR] Añadiendo mensaje al thread: ${threadId}`)
-    const messageResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "assistants=v2",
-      },
-      body: JSON.stringify({
-        role: "user",
-        content: message,
-      }),
+    const userMessage = await openai.beta.threads.messages.create(threadId, {
+      role: "user",
+      content: message,
     })
+    console.log(`[WHATSAPP-PROCESSOR] Mensaje añadido: ${userMessage.id}`)
 
-    if (!messageResponse.ok) {
-      const errorText = await messageResponse.text()
-      throw new Error(`Error adding message: ${messageResponse.status} - ${errorText}`)
-    }
-
-    const messageData = await messageResponse.json()
-    console.log(`[WHATSAPP-PROCESSOR] Mensaje añadido: ${messageData.id}`)
-
-    // 2. Crear run
-    console.log(`[WHATSAPP-PROCESSOR] Creando run con assistant: ${whatsappAssistantId}`)
-    const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "assistants=v2",
-      },
-      body: JSON.stringify({
-        assistant_id: whatsappAssistantId,
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "validate_dni",
-              description: "Valida un DNI y obtiene información del paciente",
-              parameters: {
-                type: "object",
-                properties: {
-                  dni: { type: "string", description: "DNI a validar" },
+    // Crear y ejecutar el run
+    console.log(`[WHATSAPP-PROCESSOR] Creando run con assistant: ${whatsappConfig.whatsappAssistantId}`)
+    const run = await openai.beta.threads.runs.create(threadId, {
+      assistant_id: whatsappConfig.whatsappAssistantId,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "validate_dni",
+            description: "Valida un DNI y obtiene información del paciente",
+            parameters: {
+              type: "object",
+              properties: {
+                dni: {
+                  type: "string",
+                  description: "Número de DNI a validar",
                 },
-                required: ["dni"],
               },
+              required: ["dni"],
             },
           },
-          {
-            type: "function",
-            function: {
-              name: "obtener_subespecialidades",
-              description: "Lista las subespecialidades disponibles",
-              parameters: {
-                type: "object",
-                properties: {},
-                required: [],
-              },
+        },
+        {
+          type: "function",
+          function: {
+            name: "get_especialidades",
+            description: "Obtiene la lista de especialidades médicas disponibles",
+            parameters: {
+              type: "object",
+              properties: {},
             },
           },
-          {
-            type: "function",
-            function: {
-              name: "buscar_profesionales",
-              description: "Busca profesionales por nombre o especialidad",
-              parameters: {
-                type: "object",
-                properties: {
-                  busqueda: {
-                    type: "string",
-                    description: "Texto para buscar profesionales por nombre o especialidad",
-                  },
+        },
+        {
+          type: "function",
+          function: {
+            name: "get_turnos",
+            description: "Obtiene turnos disponibles para una especialidad",
+            parameters: {
+              type: "object",
+              properties: {
+                especialidad_id: {
+                  type: "string",
+                  description: "ID de la especialidad",
                 },
-                required: ["busqueda"],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "validar_obra_social",
-              description: "Valida si la obra social ingresada por el paciente existe y permite turnos online",
-              parameters: {
-                type: "object",
-                properties: {
-                  busqueda: {
-                    type: "string",
-                    description: "Nombre de la obra social ingresado por el paciente (ej: 'osde')",
-                  },
+                fecha_desde: {
+                  type: "string",
+                  description: "Fecha desde (YYYY-MM-DD)",
                 },
-                required: ["busqueda"],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "search_turnos",
-              description:
-                "Busca turnos disponibles. Si no se especifica rangoFechas, usa fechas actuales automáticamente.",
-              parameters: {
-                type: "object",
-                properties: {
-                  rangoFechas: {
-                    type: "string",
-                    description:
-                      "Rango de fechas en formato YYYY-MM-DD a YYYY-MM-DD. Si no se especifica, usa fechas actuales.",
-                  },
-                  profesional: {
-                    type: "string",
-                    description: "Nombre del profesional (opcional)",
-                  },
-                  especialidad: {
-                    type: "string",
-                    description: "Nombre de la especialidad (opcional)",
-                  },
-                  profesionalId: {
-                    type: "string",
-                    description: "ID del profesional (opcional)",
-                  },
+                fecha_hasta: {
+                  type: "string",
+                  description: "Fecha hasta (YYYY-MM-DD)",
                 },
-                required: [],
               },
+              required: ["especialidad_id"],
             },
           },
-          {
-            type: "function",
-            function: {
-              name: "reserve_turno",
-              description:
-                "Reserva un turno específico para un paciente usando los datos recopilados durante la conversación",
-              parameters: {
-                type: "object",
-                properties: {
-                  dni: {
-                    type: "string",
-                    description: "DNI del paciente",
-                  },
-                  nombre: {
-                    type: "string",
-                    description: "Nombre del paciente recopilado durante la conversación",
-                  },
-                  apellido: {
-                    type: "string",
-                    description: "Apellido del paciente recopilado durante la conversación",
-                  },
-                  telefono: {
-                    type: "string",
-                    description: "Teléfono del paciente recopilado durante la conversación",
-                  },
-                  email: {
-                    type: "string",
-                    description: "Email del paciente recopilado durante la conversación",
-                  },
-                  fecha: {
-                    type: "string",
-                    description: "Fecha del turno en formato YYYY-MM-DD",
-                  },
-                  hora: {
-                    type: "string",
-                    description: "Hora del turno en formato HH:MM",
-                  },
-                  profesional: {
-                    type: "string",
-                    description: "Nombre del profesional",
-                  },
-                  agendaId: {
-                    type: "string",
-                    description: "ID del turno/agenda a reservar",
-                  },
+        },
+        {
+          type: "function",
+          function: {
+            name: "reservar_turno",
+            description: "Reserva un turno médico",
+            parameters: {
+              type: "object",
+              properties: {
+                paciente_id: {
+                  type: "string",
+                  description: "ID del paciente",
                 },
-                required: [
-                  "dni",
-                  "nombre",
-                  "apellido",
-                  "telefono",
-                  "email",
-                  "fecha",
-                  "hora",
-                  "profesional",
-                  "agendaId",
-                ],
+                turno_id: {
+                  type: "string",
+                  description: "ID del turno a reservar",
+                },
               },
+              required: ["paciente_id", "turno_id"],
             },
           },
-        ],
-      }),
+        },
+      ],
     })
+    console.log(`[WHATSAPP-PROCESSOR] Run creado: ${run.id}`)
 
-    if (!runResponse.ok) {
-      const errorText = await runResponse.text()
-      throw new Error(`Error creating run: ${runResponse.status} - ${errorText}`)
-    }
+    // Esperar a que el run se complete
+    const response = await waitForRunCompletion(run.id, threadId, whatsappConfig.cliente_id)
 
-    const runData = await runResponse.json()
-    console.log(`[WHATSAPP-PROCESSOR] Run creado: ${runData.id}`)
+    // Agregar respuesta del asistente a la conversación
+    await addMessageToConversation(conversation.id, "assistant", response)
 
-    // 3. Esperar completación
-    const finalResponse = await waitForRunCompletion(threadId, runData.id, clienteId)
-    return finalResponse
+    console.log(`[WHATSAPP-PROCESSOR] ✅ Respuesta: ${response.length} caracteres`)
+    return response
   } catch (error) {
-    console.error("[WHATSAPP-PROCESSOR] Error procesando mensaje:", error)
-    throw error
+    console.error(`[WHATSAPP-PROCESSOR] ❌ Error al procesar mensaje:`, error)
+    await logError("whatsapp_processor", error instanceof Error ? error : new Error(String(error)))
+    await incrementMetric("whatsapp_processor_errors")
+
+    // Incrementar contador de errores
+    await updateWhatsAppStats(whatsappConfig.id, { errors: 1 })
+
+    return "Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta nuevamente en unos momentos."
   }
 }
 
-async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<string> {
-  let attempts = 0
-  const maxAttempts = 60 // 60 intentos (60 segundos)
-
+// Función para esperar a que el run se complete
+async function waitForRunCompletion(runId: string, threadId: string, clienteId: string): Promise<string> {
   console.log(`[WHATSAPP-PROCESSOR] ========== ESPERANDO COMPLETACIÓN ==========`)
   console.log(`[WHATSAPP-PROCESSOR] Run ID: ${runId}`)
   console.log(`[WHATSAPP-PROCESSOR] Cliente ID: ${clienteId}`)
   console.log(`[WHATSAPP-PROCESSOR] ================================================`)
 
+  const maxAttempts = 60 // 5 minutos máximo
+  let attempts = 0
+
   while (attempts < maxAttempts) {
+    attempts++
+    console.log(`[WHATSAPP-PROCESSOR] Verificando run ${runId} (intento ${attempts}/${maxAttempts})`)
+
     try {
-      console.log(`[WHATSAPP-PROCESSOR] Verificando run ${runId} (intento ${attempts + 1}/${maxAttempts})`)
-
-      const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "assistants=v2",
-        },
-      })
-
-      if (!runResponse.ok) {
-        const errorText = await runResponse.text()
-        throw new Error(`Error checking run: ${runResponse.status} - ${errorText}`)
-      }
-
-      const run = await runResponse.json()
+      const run = await openai.beta.threads.runs.retrieve(threadId, runId)
       console.log(`[WHATSAPP-PROCESSOR] Estado del run: ${run.status}`)
 
       if (run.status === "completed") {
-        // Obtener mensajes
-        const messagesResponse = await fetch(
-          `https://api.openai.com/v1/threads/${threadId}/messages?limit=1&order=desc`,
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-              "Content-Type": "application/json",
-              "OpenAI-Beta": "assistants=v2",
-            },
-          },
-        )
+        // Obtener los mensajes del thread
+        const messages = await openai.beta.threads.messages.list(threadId, {
+          order: "desc",
+          limit: 1,
+        })
 
-        if (!messagesResponse.ok) {
-          const errorText = await messagesResponse.text()
-          throw new Error(`Error getting messages: ${messagesResponse.status} - ${errorText}`)
-        }
-
-        const messages = await messagesResponse.json()
         if (messages.data.length > 0) {
           const lastMessage = messages.data[0]
-          if (lastMessage.content[0]?.type === "text") {
+          if (lastMessage.content[0].type === "text") {
             const response = lastMessage.content[0].text.value
-
             console.log(`[WHATSAPP-PROCESSOR] ✅ Respuesta final: ${response.length} caracteres`)
             return response
           }
         }
 
-        return "Respuesta procesada correctamente."
+        return "No se pudo obtener la respuesta del asistente."
       } else if (run.status === "requires_action") {
         console.log(`[WHATSAPP-PROCESSOR] Run requiere acción - procesando tool calls`)
-        await handleToolCalls(threadId, runId, run, clienteId)
+        await handleToolCalls(run, threadId, clienteId)
       } else if (run.status === "failed" || run.status === "cancelled" || run.status === "expired") {
-        console.error(`[WHATSAPP-PROCESSOR] Run falló con estado: ${run.status}`)
-        if (run.last_error) {
-          console.error(`[WHATSAPP-PROCESSOR] Error details:`, run.last_error)
-        }
-        return "Lo siento, ha ocurrido un error procesando tu solicitud."
+        console.error(`[WHATSAPP-PROCESSOR] ❌ Run falló con estado: ${run.status}`)
+        return "Lo siento, hubo un error al procesar tu solicitud. Por favor, intenta nuevamente."
       }
 
-      attempts++
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      // Esperar 5 segundos antes del siguiente intento
+      await new Promise((resolve) => setTimeout(resolve, 5000))
     } catch (error) {
-      console.error(`[WHATSAPP-PROCESSOR] Error en intento ${attempts + 1}:`, error)
-      attempts++
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      console.error(`[WHATSAPP-PROCESSOR] ❌ Error al verificar run:`, error)
+      await new Promise((resolve) => setTimeout(resolve, 5000))
     }
   }
 
-  return "La solicitud está tomando más tiempo del esperado. Por favor, intenta nuevamente."
+  console.error(`[WHATSAPP-PROCESSOR] ❌ Timeout esperando completación del run`)
+  return "Lo siento, la respuesta está tardando más de lo esperado. Por favor, intenta nuevamente."
 }
 
-async function handleToolCalls(threadId: string, runId: string, run: any, clienteId: string): Promise<void> {
-  try {
-    console.log(`[WHATSAPP-PROCESSOR] ========== PROCESANDO TOOL CALLS ==========`)
-    console.log(`[WHATSAPP-PROCESSOR] Cantidad: ${run.required_action.submit_tool_outputs.tool_calls.length}`)
-    console.log(`[WHATSAPP-PROCESSOR] Cliente ID: ${clienteId}`)
-    console.log(`[WHATSAPP-PROCESSOR] ================================================`)
+// Función para manejar tool calls
+async function handleToolCalls(run: any, threadId: string, clienteId: string): Promise<void> {
+  console.log(`[WHATSAPP-PROCESSOR] ========== PROCESANDO TOOL CALLS ==========`)
+  console.log(`[WHATSAPP-PROCESSOR] Cantidad: ${run.required_action.submit_tool_outputs.tool_calls.length}`)
+  console.log(`[WHATSAPP-PROCESSOR] Cliente ID: ${clienteId}`)
+  console.log(`[WHATSAPP-PROCESSOR] ================================================`)
 
-    const toolOutputs = []
+  const toolOutputs = []
 
-    for (const toolCall of run.required_action.submit_tool_outputs.tool_calls) {
-      console.log(`[WHATSAPP-PROCESSOR] ========== TOOL CALL ==========`)
-      console.log(`[WHATSAPP-PROCESSOR] Función: ${toolCall.function.name}`)
-      console.log(`[WHATSAPP-PROCESSOR] Argumentos: ${toolCall.function.arguments}`)
-      console.log(`[WHATSAPP-PROCESSOR] ================================`)
+  for (const toolCall of run.required_action.submit_tool_outputs.tool_calls) {
+    console.log(`[WHATSAPP-PROCESSOR] ========== TOOL CALL ==========`)
+    console.log(`[WHATSAPP-PROCESSOR] Función: ${toolCall.function.name}`)
+    console.log(`[WHATSAPP-PROCESSOR] Argumentos: ${toolCall.function.arguments}`)
+    console.log(`[WHATSAPP-PROCESSOR] ================================`)
 
-      try {
-        let output = ""
-        const args = JSON.parse(toolCall.function.arguments)
+    let result: any = { error: "Función no implementada" }
 
-        switch (toolCall.function.name) {
-          case "validate_dni":
-            console.log(`[WHATSAPP-PROCESSOR] 🔍 Validando DNI: ${args.dni} con cliente: ${clienteId}`)
+    try {
+      const args = JSON.parse(toolCall.function.arguments)
 
-            try {
-              const dniResult = await validateDNI(args.dni, clienteId)
-              console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado DNI:`, dniResult)
-              output = JSON.stringify(dniResult)
-            } catch (error) {
-              console.error(`[WHATSAPP-PROCESSOR] ❌ Error validando DNI:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para gestionar tu turno.",
-                fallback: true,
-              })
-            }
-            break
+      switch (toolCall.function.name) {
+        case "validate_dni":
+          console.log(`[WHATSAPP-PROCESSOR] 🔍 Validando DNI: ${args.dni} con cliente: ${clienteId}`)
+          result = await validateDNI(args.dni, clienteId)
+          console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado DNI:`, result)
+          break
 
-          case "obtener_subespecialidades":
-            console.log(`[WHATSAPP-PROCESSOR] 📋 Obteniendo subespecialidades con cliente: ${clienteId}`)
+        case "get_especialidades":
+          console.log(`[WHATSAPP-PROCESSOR] 🏥 Obteniendo especialidades para cliente: ${clienteId}`)
+          result = await getEspecialidades(clienteId)
+          console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado especialidades:`, result)
+          break
 
-            try {
-              const { obtenerSubespecialidades } = await import("@/lib/api-tools/api-functions")
-              const subespecialidadesResult = await obtenerSubespecialidades(clienteId)
-              console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado subespecialidades:`, subespecialidadesResult)
-              output = JSON.stringify(subespecialidadesResult)
-            } catch (error) {
-              console.error(`[WHATSAPP-PROCESSOR] ❌ Error obteniendo subespecialidades:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar especialidades.",
-                fallback: true,
-              })
-            }
-            break
+        case "get_turnos":
+          console.log(
+            `[WHATSAPP-PROCESSOR] 📅 Obteniendo turnos para especialidad: ${args.especialidad_id} con cliente: ${clienteId}`,
+          )
+          result = await getTurnos(clienteId, args.especialidad_id, args.fecha_desde, args.fecha_hasta)
+          console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado turnos:`, result)
+          break
 
-          case "buscar_profesionales":
-            console.log(`[WHATSAPP-PROCESSOR] 👨‍⚕️ Buscando profesionales con cliente: ${clienteId}`)
-            console.log(`[WHATSAPP-PROCESSOR] 📋 Búsqueda: ${args.busqueda}`)
+        case "reservar_turno":
+          console.log(
+            `[WHATSAPP-PROCESSOR] 📝 Reservando turno: ${args.turno_id} para paciente: ${args.paciente_id} con cliente: ${clienteId}`,
+          )
+          result = await reservarTurno(clienteId, args.paciente_id, args.turno_id)
+          console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado reserva:`, result)
+          break
 
-            try {
-              const { buscarProfesionales } = await import("@/lib/api-tools/api-functions")
-              const profesionalesResult = await buscarProfesionales(clienteId, args.busqueda || "")
-              console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado profesionales:`, profesionalesResult)
-              output = JSON.stringify(profesionalesResult)
-            } catch (error) {
-              console.error(`[WHATSAPP-PROCESSOR] ❌ Error buscando profesionales:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar profesionales.",
-                fallback: true,
-              })
-            }
-            break
-
-          case "validar_obra_social":
-            console.log(`[WHATSAPP-PROCESSOR] 🏥 Validando obra social con cliente: ${clienteId}`)
-            console.log(`[WHATSAPP-PROCESSOR] 📋 Búsqueda: ${args.busqueda}`)
-
-            try {
-              const { validarObraSocial } = await import("@/lib/api-tools/api-functions")
-              const obraSocialResult = await validarObraSocial(clienteId, args.busqueda || "")
-              console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado obra social:`, obraSocialResult)
-
-              if (typeof obraSocialResult === "object") {
-                output = JSON.stringify(obraSocialResult)
-              } else {
-                output = String(obraSocialResult)
-              }
-            } catch (error) {
-              console.error(`[WHATSAPP-PROCESSOR] ❌ Error validando obra social:`, error)
-              output = JSON.stringify({
-                exito: false,
-                error: {
-                  codigo: "ERROR_VALIDACION_OBRA_SOCIAL",
-                  mensaje:
-                    "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar obras sociales.",
-                },
-                fallback: true,
-              })
-            }
-            break
-
-          case "search_turnos":
-            console.log(`[WHATSAPP-PROCESSOR] 📅 Buscando turnos con cliente: ${clienteId}`)
-            console.log(`[WHATSAPP-PROCESSOR] 📋 Parámetros:`, args)
-
-            try {
-              const turnosResult = await searchTurnos(
-                {
-                  rangoFechas: args.rangoFechas,
-                  profesional: args.profesional,
-                  especialidad: args.especialidad,
-                  profesionalId: args.profesionalId,
-                },
-                clienteId,
-              )
-              console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado turnos:`, turnosResult)
-              output = JSON.stringify(turnosResult)
-            } catch (error) {
-              console.error(`[WHATSAPP-PROCESSOR] ❌ Error buscando turnos:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para consultar turnos disponibles.",
-                fallback: true,
-              })
-            }
-            break
-
-          case "reserve_turno":
-            console.log(`[WHATSAPP-PROCESSOR] 🎯 Reservando turno con cliente: ${clienteId}`)
-            console.log(`[WHATSAPP-PROCESSOR] 📋 Datos de reserva:`, args)
-
-            try {
-              const reserveResult = await reserveTurno(
-                {
-                  agendaId: args.agendaId,
-                  dni: args.dni,
-                  nombre: args.nombre,
-                  apellido: args.apellido,
-                  telefono: args.telefono,
-                  email: args.email,
-                  fecha: args.fecha,
-                  hora: args.hora,
-                  profesional: args.profesional,
-                },
-                clienteId,
-              )
-              console.log(`[WHATSAPP-PROCESSOR] 📋 Resultado reserva:`, reserveResult)
-              output = JSON.stringify(reserveResult)
-            } catch (error) {
-              console.error(`[WHATSAPP-PROCESSOR] ❌ Error reservando turno:`, error)
-              output = JSON.stringify({
-                success: false,
-                error:
-                  "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica para reservar tu turno.",
-                fallback: true,
-              })
-            }
-            break
-
-          default:
-            console.log(`[WHATSAPP-PROCESSOR] ❌ Tool call no reconocido: ${toolCall.function.name}`)
-            output = JSON.stringify({ error: "Función no disponible" })
-        }
-
-        toolOutputs.push({
-          tool_call_id: toolCall.id,
-          output: output,
-        })
-
-        console.log(`[WHATSAPP-PROCESSOR] ✅ Tool call procesado: ${toolCall.function.name}`)
-      } catch (error) {
-        console.error(`[WHATSAPP-PROCESSOR] ❌ Error en tool call ${toolCall.function.name}:`, error)
-        toolOutputs.push({
-          tool_call_id: toolCall.id,
-          output: JSON.stringify({
-            error: "Servicio temporalmente no disponible. Por favor, contacta directamente a la clínica.",
-            fallback: true,
-          }),
-        })
+        default:
+          console.log(`[WHATSAPP-PROCESSOR] ❌ Función desconocida: ${toolCall.function.name}`)
+          result = { error: `Función ${toolCall.function.name} no implementada` }
       }
+    } catch (error) {
+      console.error(`[WHATSAPP-PROCESSOR] ❌ Error ejecutando tool call:`, error)
+      result = { error: `Error ejecutando función: ${error instanceof Error ? error.message : String(error)}` }
     }
 
-    // Enviar tool outputs
-    console.log(`[WHATSAPP-PROCESSOR] ========== ENVIANDO TOOL OUTPUTS ==========`)
-    console.log(`[WHATSAPP-PROCESSOR] Cantidad: ${toolOutputs.length}`)
+    toolOutputs.push({
+      tool_call_id: toolCall.id,
+      output: JSON.stringify(result),
+    })
 
-    const submitResponse = await fetch(
-      `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "assistants=v2",
-        },
-        body: JSON.stringify({
-          tool_outputs: toolOutputs,
-        }),
-      },
-    )
+    console.log(`[WHATSAPP-PROCESSOR] ✅ Tool call procesado: ${toolCall.function.name}`)
+  }
 
-    if (!submitResponse.ok) {
-      const errorText = await submitResponse.text()
-      console.error(`[WHATSAPP-PROCESSOR] ❌ Error submitting tool outputs: ${submitResponse.status} ${errorText}`)
-      throw new Error(`Error submitting tool outputs: ${submitResponse.status}`)
-    }
+  console.log(`[WHATSAPP-PROCESSOR] ========== ENVIANDO TOOL OUTPUTS ==========`)
+  console.log(`[WHATSAPP-PROCESSOR] Cantidad: ${toolOutputs.length}`)
 
+  try {
+    await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
+      tool_outputs: toolOutputs,
+    })
     console.log(`[WHATSAPP-PROCESSOR] ✅ Tool outputs enviados correctamente`)
-    console.log(`[WHATSAPP-PROCESSOR] ================================================`)
   } catch (error) {
-    console.error("[WHATSAPP-PROCESSOR] ❌ Error en handleToolCalls:", error)
+    console.error(`[WHATSAPP-PROCESSOR] ❌ Error enviando tool outputs:`, error)
     throw error
   }
+
+  console.log(`[WHATSAPP-PROCESSOR] ================================================`)
 }
