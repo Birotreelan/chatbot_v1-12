@@ -3,88 +3,52 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Search, MessageCircle, User, Calendar, Filter } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { Conversation } from "@/lib/types"
+import { Search, MessageCircle, User, Clock } from "lucide-react"
+
+interface ConversationSummary {
+  id: string
+  phoneNumber: string
+  userName: string
+  clienteName: string
+  lastMessage: string
+  lastMessageAt: string
+  messageCount: number
+}
 
 interface ConversationsListProps {
-  onSelectConversation: (conversation: Conversation) => void
+  onSelectConversation: (conversationId: string) => void
   selectedConversationId?: string
 }
 
-export default function ConversationsList({ onSelectConversation, selectedConversationId }: ConversationsListProps) {
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [filteredConversations, setFilteredConversations] = useState<Conversation[]>([])
+export function ConversationsList({ onSelectConversation, selectedConversationId }: ConversationsListProps) {
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedClient, setSelectedClient] = useState<string>("all")
-  const [clients, setClients] = useState<Array<{ id: string; name: string }>>([])
+  const [search, setSearch] = useState("")
+  const [clienteFilter, setClienteFilter] = useState("")
 
   useEffect(() => {
     fetchConversations()
-  }, [])
-
-  useEffect(() => {
-    filterConversations()
-  }, [conversations, searchTerm, selectedClient])
+  }, [search, clienteFilter])
 
   const fetchConversations = async () => {
     try {
       setLoading(true)
-      const response = await fetch("/api/dashboard/conversations", {
-        headers: {
-          Authorization: `Basic ${btoa(`${process.env.NEXT_PUBLIC_ADMIN_USERNAME || "admin"}:${process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "password"}`)}`,
-        },
-      })
+      const params = new URLSearchParams()
+      if (search) params.append("search", search)
+      if (clienteFilter) params.append("cliente_id", clienteFilter)
 
-      if (!response.ok) {
-        throw new Error("Error al cargar conversaciones")
-      }
-
+      const response = await fetch(`/api/dashboard/conversations?${params}`)
       const data = await response.json()
+
       if (data.success) {
         setConversations(data.conversations)
-
-        // Extraer clientes únicos
-        const uniqueClients = Array.from(
-          new Map(
-            data.conversations.map((conv: Conversation) => [
-              conv.clienteId,
-              { id: conv.clienteId, name: conv.clienteName },
-            ]),
-          ).values(),
-        )
-        setClients(uniqueClients)
       }
     } catch (error) {
       console.error("Error fetching conversations:", error)
     } finally {
       setLoading(false)
     }
-  }
-
-  const filterConversations = () => {
-    let filtered = conversations
-
-    // Filtrar por cliente
-    if (selectedClient !== "all") {
-      filtered = filtered.filter((conv) => conv.clienteId === selectedClient)
-    }
-
-    // Filtrar por término de búsqueda
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase()
-      filtered = filtered.filter(
-        (conv) =>
-          conv.userName.toLowerCase().includes(term) ||
-          conv.phoneNumber.includes(term) ||
-          conv.lastMessage.toLowerCase().includes(term),
-      )
-    }
-
-    setFilteredConversations(filtered)
   }
 
   const formatDate = (dateString: string) => {
@@ -100,135 +64,93 @@ export default function ConversationsList({ onSelectConversation, selectedConver
       return date.toLocaleDateString("es-ES", {
         day: "2-digit",
         month: "2-digit",
-        year: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
+        year: "numeric",
       })
     }
   }
 
-  if (loading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MessageCircle className="h-5 w-5" />
-            Conversaciones
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center py-8">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-              <p className="text-gray-500">Cargando conversaciones...</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
+  const uniqueClients = Array.from(new Set(conversations.map((conv) => conv.clienteName))).filter(Boolean)
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <MessageCircle className="h-5 w-5" />
-          Conversaciones ({filteredConversations.length})
+          Conversaciones ({conversations.length})
         </CardTitle>
 
-        {/* Filtros */}
         <div className="space-y-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
             <Input
               placeholder="Buscar por nombre, teléfono o mensaje..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
               className="pl-10"
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-gray-500" />
-            <Select value={selectedClient} onValueChange={setSelectedClient}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Filtrar por cliente" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los clientes</SelectItem>
-                {clients.map((client) => (
-                  <SelectItem key={client.id} value={client.id}>
-                    {client.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <select
+            value={clienteFilter}
+            onChange={(e) => setClienteFilter(e.target.value)}
+            className="w-full p-2 border rounded-md"
+          >
+            <option value="">Todos los clientes</option>
+            {uniqueClients.map((client) => (
+              <option key={client} value={client}>
+                {client}
+              </option>
+            ))}
+          </select>
         </div>
       </CardHeader>
 
       <CardContent className="p-0">
-        {filteredConversations.length === 0 ? (
-          <div className="text-center py-8 px-4">
-            <MessageCircle className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500">
-              {searchTerm || selectedClient !== "all"
-                ? "No se encontraron conversaciones con los filtros aplicados"
-                : "No hay conversaciones disponibles"}
-            </p>
-            {(searchTerm || selectedClient !== "all") && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSearchTerm("")
-                  setSelectedClient("all")
-                }}
-                className="mt-2"
-              >
-                Limpiar filtros
-              </Button>
-            )}
-          </div>
-        ) : (
-          <div className="max-h-96 overflow-y-auto">
-            {filteredConversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                onClick={() => onSelectConversation(conversation)}
-                className={`p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors ${
-                  selectedConversationId === conversation.id ? "bg-blue-50 border-blue-200" : ""
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <User className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                      <span className="font-medium text-gray-900 truncate">{conversation.userName}</span>
-                      <Badge variant="secondary" className="text-xs">
-                        {conversation.clienteName}
-                      </Badge>
+        <div className="max-h-[600px] overflow-y-auto">
+          {loading ? (
+            <div className="p-4 text-center text-gray-500">Cargando conversaciones...</div>
+          ) : conversations.length === 0 ? (
+            <div className="p-4 text-center text-gray-500">No se encontraron conversaciones</div>
+          ) : (
+            <div className="space-y-1">
+              {conversations.map((conversation) => (
+                <div
+                  key={conversation.id}
+                  onClick={() => onSelectConversation(conversation.id)}
+                  className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors ${
+                    selectedConversationId === conversation.id ? "bg-blue-50 border-blue-200" : ""
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <User className="h-4 w-4 text-gray-400" />
+                        <span className="font-medium text-sm truncate">{conversation.userName}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {conversation.clienteName}
+                        </Badge>
+                      </div>
+
+                      <div className="text-xs text-gray-500 mb-1">{conversation.phoneNumber}</div>
+
+                      <div className="text-sm text-gray-600 truncate mb-2">{conversation.lastMessage}</div>
+
+                      <div className="flex items-center justify-between text-xs text-gray-400">
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {formatDate(conversation.lastMessageAt)}
+                        </div>
+                        <Badge variant="secondary" className="text-xs">
+                          {conversation.messageCount} mensajes
+                        </Badge>
+                      </div>
                     </div>
-
-                    <p className="text-sm text-gray-600 mb-1">📱 {conversation.phoneNumber}</p>
-
-                    <p className="text-sm text-gray-500 line-clamp-2">{conversation.lastMessage || "Sin mensajes"}</p>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1 ml-2">
-                    <div className="flex items-center gap-1 text-xs text-gray-400">
-                      <Calendar className="h-3 w-3" />
-                      {formatDate(conversation.lastMessageAt)}
-                    </div>
-
-                    <Badge variant="outline" className="text-xs">
-                      {conversation.messageCount} mensajes
-                    </Badge>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   )

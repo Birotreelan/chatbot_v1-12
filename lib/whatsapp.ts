@@ -78,7 +78,7 @@ export async function handleMessage(data: WhatsAppWebhookData): Promise<void> {
     console.log(`[WHATSAPP] ✅ Respuesta generada: ${response.length} caracteres`)
 
     // Enviar respuesta
-    await sendWhatsAppMessage(phoneNumber, response, config.accessToken, phoneNumberId)
+    await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, phoneNumber, response)
     console.log("[WHATSAPP] ✅ Respuesta enviada exitosamente")
 
     // Actualizar estadísticas de procesamiento
@@ -123,4 +123,28 @@ export async function verifyWebhook(mode: string, token: string, challenge: stri
 
   console.log("[WHATSAPP] ❌ Token de verificación inválido")
   return null
+}
+
+// Función para procesar mensajes individuales
+export async function processIndividualMessage(
+  userMessage: string,
+  phoneNumberId: string,
+  config: any,
+  userPhoneNumber: string,
+  messageType?: string,
+): Promise<void> {
+  console.log(`[WHATSAPP] 🔄 Procesando mensaje individual de ${userPhoneNumber}`)
+
+  try {
+    // Procesar mensaje con IA
+    const response = await processWhatsAppMessage(userPhoneNumber, userMessage, "Usuario", config)
+
+    // Enviar respuesta
+    await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, userPhoneNumber, response)
+
+    console.log(`[WHATSAPP] ✅ Mensaje individual procesado exitosamente`)
+  } catch (error) {
+    console.error(`[WHATSAPP] ❌ Error procesando mensaje individual:`, error)
+    throw error
+  }
 }

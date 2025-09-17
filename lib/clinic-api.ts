@@ -67,7 +67,7 @@ async function makeRequest(clienteId: string, action: string, params: Record<str
 }
 
 // Validar DNI y obtener información del paciente
-export async function validateDni(dni: string, clienteId: string): Promise<any> {
+export async function validateDNI(dni: string, clienteId: string): Promise<any> {
   console.log(`[VALIDATE-DNI] Validando DNI: ${dni} para cliente: ${clienteId}`)
 
   try {
@@ -133,64 +133,30 @@ export async function getSedes(clienteId: string, sedeId?: string): Promise<any>
   }
 }
 
-// Obtener especialidades disponibles
-export async function getEspecialidades(clienteId: string): Promise<any> {
-  console.log(`[GET-ESPECIALIDADES] Obteniendo especialidades para cliente: ${clienteId}`)
-
-  try {
-    const result = await makeRequest(clienteId, "get_especialidades")
-
-    if (result.success && result.data) {
-      console.log(`[GET-ESPECIALIDADES] ✅ Especialidades obtenidas:`, result.data)
-      return {
-        success: true,
-        data: Array.isArray(result.data) ? result.data : [result.data],
-      }
-    } else {
-      console.log(`[GET-ESPECIALIDADES] ❌ No se encontraron especialidades`)
-      return {
-        success: false,
-        codigo: "ESPECIALIDADES_NOT_FOUND",
-        mensaje: "No se encontraron especialidades disponibles",
-      }
-    }
-  } catch (error) {
-    console.error(`[GET-ESPECIALIDADES] ❌ Error obteniendo especialidades:`, error)
-    return {
-      success: false,
-      codigo: "ESPECIALIDADES_ERROR",
-      mensaje: "Error al obtener las especialidades",
-    }
-  }
-}
-
-// Obtener turnos disponibles
-export async function getTurnos(
+// Buscar turnos disponibles
+export async function searchTurnos(
+  params: {
+    rangoFechas?: string
+    profesional?: string
+    especialidad?: string
+    profesionalId?: string
+  },
   clienteId: string,
-  especialidadId: string,
-  fechaDesde?: string,
-  fechaHasta?: string,
 ): Promise<any> {
-  console.log(`[GET-TURNOS] Obteniendo turnos para cliente: ${clienteId}, especialidad: ${especialidadId}`)
+  console.log(`[SEARCH-TURNOS] Buscando turnos para cliente: ${clienteId}`)
+  console.log(`[SEARCH-TURNOS] Parámetros:`, params)
 
   try {
-    const params: Record<string, any> = {
-      especialidad_id: especialidadId,
-    }
-
-    if (fechaDesde) params.fecha_desde = fechaDesde
-    if (fechaHasta) params.fecha_hasta = fechaHasta
-
-    const result = await makeRequest(clienteId, "get_turnos", params)
+    const result = await makeRequest(clienteId, "search_turnos", params)
 
     if (result.success && result.data) {
-      console.log(`[GET-TURNOS] ✅ Turnos obtenidos:`, result.data)
+      console.log(`[SEARCH-TURNOS] ✅ Turnos encontrados:`, result.data)
       return {
         success: true,
         data: Array.isArray(result.data) ? result.data : [result.data],
       }
     } else {
-      console.log(`[GET-TURNOS] ❌ No se encontraron turnos`)
+      console.log(`[SEARCH-TURNOS] ❌ No se encontraron turnos`)
       return {
         success: false,
         codigo: "TURNOS_NOT_FOUND",
@@ -198,34 +164,45 @@ export async function getTurnos(
       }
     }
   } catch (error) {
-    console.error(`[GET-TURNOS] ❌ Error obteniendo turnos:`, error)
+    console.error(`[SEARCH-TURNOS] ❌ Error buscando turnos:`, error)
     return {
       success: false,
       codigo: "TURNOS_ERROR",
-      mensaje: "Error al obtener los turnos",
+      mensaje: "Error al buscar turnos",
     }
   }
 }
 
 // Reservar un turno
-export async function reservarTurno(clienteId: string, pacienteId: string, turnoId: string): Promise<any> {
-  console.log(`[RESERVAR-TURNO] Reservando turno: ${turnoId} para paciente: ${pacienteId}, cliente: ${clienteId}`)
+export async function reserveTurno(
+  params: {
+    agendaId: string
+    dni: string
+    nombre: string
+    apellido: string
+    telefono: string
+    email: string
+    fecha: string
+    hora: string
+    profesional: string
+  },
+  clienteId: string,
+): Promise<any> {
+  console.log(`[RESERVE-TURNO] Reservando turno para cliente: ${clienteId}`)
+  console.log(`[RESERVE-TURNO] Parámetros:`, params)
 
   try {
-    const result = await makeRequest(clienteId, "reservar_turno", {
-      paciente_id: pacienteId,
-      turno_id: turnoId,
-    })
+    const result = await makeRequest(clienteId, "reserve_turno", params)
 
     if (result.success) {
-      console.log(`[RESERVAR-TURNO] ✅ Turno reservado exitosamente:`, result.data)
+      console.log(`[RESERVE-TURNO] ✅ Turno reservado exitosamente:`, result.data)
       return {
         success: true,
         data: result.data,
         mensaje: "Turno reservado exitosamente",
       }
     } else {
-      console.log(`[RESERVAR-TURNO] ❌ Error al reservar turno:`, result)
+      console.log(`[RESERVE-TURNO] ❌ Error al reservar turno:`, result)
       return {
         success: false,
         codigo: result.codigo || "RESERVA_ERROR",
@@ -233,7 +210,7 @@ export async function reservarTurno(clienteId: string, pacienteId: string, turno
       }
     }
   } catch (error) {
-    console.error(`[RESERVAR-TURNO] ❌ Error reservando turno:`, error)
+    console.error(`[RESERVE-TURNO] ❌ Error reservando turno:`, error)
     return {
       success: false,
       codigo: "RESERVA_ERROR",

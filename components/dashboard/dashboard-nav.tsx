@@ -28,7 +28,7 @@ const navigation = [
   },
 ]
 
-export default function DashboardNav() {
+export function DashboardNav() {
   const pathname = usePathname()
 
   return (
