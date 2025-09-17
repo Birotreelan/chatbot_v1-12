@@ -25,7 +25,7 @@ async function createWhatsAppSystemBlock(
   if (clienteId) {
     try {
       console.log(`[WHATSAPP-PROCESSOR] 🏥 Obteniendo datos de sedes para cliente: ${clienteId}`)
-      const sedesResult = await getSedes(clienteId)
+      const sedesResult = await getSedes(clienteId, sedeId) // Updated line
 
       if (sedesResult.success && sedesResult.data) {
         // Formatear los datos de sedes para el bloque [SISTEMA]
