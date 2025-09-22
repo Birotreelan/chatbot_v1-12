@@ -16,29 +16,31 @@ export interface WhatsAppConfig {
   proxy?: string
 
   // Widget configuration
-  widgetEnabled: boolean
-  widgetTitle: string
-  widgetPrimaryColor: string
-  widgetSecondaryColor: string
-  widgetPosition: "bottom-right" | "bottom-left" | "top-right" | "top-left"
-  widgetWelcomeMessage: string
-  widgetPlaceholder: string
-  widgetButtonText: string
-  widgetHeaderText: string
-  widgetSubtitle: string
-  widgetBrandingEnabled: boolean
-  widgetBrandingText: string
-  widgetMaxHeight: number
-  widgetMaxWidth: number
-  widgetBorderRadius: number
-  widgetShadow: boolean
-  widgetAnimation: boolean
-  widgetSoundEnabled: boolean
-  widgetTheme: "light" | "dark"
-  widgetFloatingButtonText: string
-  widgetShowFloatingText: boolean
+  widgetEnabled?: boolean
+  widgetTitle?: string
+  widgetPrimaryColor?: string
+  widgetSecondaryColor?: string
+  widgetPosition?: "bottom-right" | "bottom-left" | "top-right" | "top-left"
+  widgetWelcomeMessage?: string
+  widgetPlaceholder?: string
+  widgetButtonText?: string
+  widgetHeaderText?: string
+  widgetSubtitle?: string
+  widgetBrandingEnabled?: boolean
+  widgetBrandingText?: string
+  widgetMaxHeight?: number
+  widgetMaxWidth?: number
+  widgetBorderRadius?: number
+  widgetShadow?: boolean
+  widgetAnimation?: boolean
+  widgetSoundEnabled?: boolean
+  widgetTheme?: "light" | "dark" | "auto"
 
-  stats: {
+  // Nuevos campos para el botón flotante
+  widgetFloatingButtonText?: string
+  widgetShowFloatingText?: boolean
+
+  stats?: {
     messagesReceived: number
     messagesProcessed: number
     errors: number
@@ -62,38 +64,4 @@ export interface SystemStats {
   totalMessages: number
   totalThreads: number
   lastUpdated: string
-}
-
-export interface Conversation {
-  id: string
-  phoneNumber: string
-  userName: string
-  configId: string
-  clienteId: string
-  clienteName: string
-  threadId: string
-  lastMessage: string
-  lastMessageAt: string
-  messageCount: number
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ConversationMessage {
-  id: string
-  conversationId: string
-  role: "user" | "assistant"
-  content: string
-  messageId?: string
-  createdAt: string
-}
-
-export interface ConversationSummary {
-  id: string
-  phoneNumber: string
-  userName: string
-  clienteName: string
-  lastMessage: string
-  lastMessageAt: string
-  messageCount: number
 }

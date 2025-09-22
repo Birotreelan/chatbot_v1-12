@@ -2,10 +2,151 @@ import OpenAI from "openai"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
 import { incrementMetric, logError } from "@/lib/monitoring"
-import { getSedes, getMedicos, type Sede } from "./api-tools/api-functions"
 
 // Definición de las herramientas
-export const openAITools = createOpenAITools()
+export const openAITools = [
+  {
+    type: "function" as const,
+    function: {
+      name: "validar_dni",
+      description: "Valida DNI del paciente.",
+      parameters: {
+        type: "object",
+        properties: {
+          dni: {
+            type: "string",
+            description: "Número de DNI del paciente, compuesto solo por dígitos. Por ejemplo: 12345678",
+          },
+        },
+        required: ["dni"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "buscar_turnos_disponibles",
+      description: "Busca turnos disponibles.",
+      parameters: {
+        type: "object",
+        properties: {
+          profesional: {
+            type: "string",
+            description: "Nombre del profesional (opcional)",
+          },
+          profesional_id: {
+            type: "string",
+            description: "ID del profesional (opcional, tiene prioridad sobre el nombre)",
+          },
+          especialidad: {
+            type: "string",
+            description: "Nombre de la especialidad (opcional)",
+          },
+          rango_fechas: {
+            type: "string",
+            description: "Rango de fechas en formato YYYY-MM-DD a YYYY-MM-DD",
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "reservar_turno",
+      description: "Reserva el turno seleccionado usando los datos del paciente recopilados durante la conversación.",
+      parameters: {
+        type: "object",
+        properties: {
+          dni: {
+            type: "string",
+            description: "DNI del paciente",
+          },
+          nombre: {
+            type: "string",
+            description: "Nombre del paciente recopilado durante la conversación",
+          },
+          apellido: {
+            type: "string",
+            description: "Apellido del paciente recopilado durante la conversación",
+          },
+          telefono: {
+            type: "string",
+            description: "Teléfono del paciente recopilado durante la conversación",
+          },
+          email: {
+            type: "string",
+            description: "Email del paciente recopilado durante la conversación",
+          },
+          agenda_id: {
+            type: "string",
+            description: "ID de la agenda del turno a reservar, obtenido de la búsqueda de turnos disponibles",
+          },
+          fecha: {
+            type: "string",
+            description: "Fecha del turno en formato YYYY-MM-DD",
+          },
+          hora: {
+            type: "string",
+            description: "Hora del turno en formato HH:MM",
+          },
+          profesional: {
+            type: "string",
+            description: "Nombre del profesional",
+          },
+        },
+        required: ["dni", "nombre", "apellido", "telefono", "email", "agenda_id"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "obtener_subespecialidades",
+      description: "Lista subespecialidades.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "buscar_profesionales",
+      description: "Busca profesionales.",
+      parameters: {
+        type: "object",
+        properties: {
+          busqueda: {
+            type: "string",
+            description: "Texto para buscar profesionales por nombre o especialidad",
+          },
+        },
+        required: ["busqueda"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "validar_obra_social",
+      description: "Valida si la obra social ingresada por el paciente existe y permite turnos online.",
+      parameters: {
+        type: "object",
+        properties: {
+          busqueda: {
+            type: "string",
+            description: "Nombre de la obra social ingresado por el paciente (ej: 'osde')",
+          },
+        },
+        required: ["busqueda"],
+      },
+    },
+  },
+]
 
 // Mensajes predefinidos para cada función
 const FUNCTION_MESSAGES = {
@@ -15,11 +156,6 @@ const FUNCTION_MESSAGES = {
   obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
   buscar_profesionales: "Buscando profesionales, aguardá unos instantes.",
   validar_obra_social: "Verificando la obra social, aguardá unos instantes.",
-  buscarPaciente: "Buscando paciente, aguardá unos instantes.",
-  getTurnos: "Obteniendo turnos disponibles, aguardá unos instantes.",
-  crearTurno: "Creando turno, aguardá unos instantes.",
-  getMedicos: "Obteniendo médicos disponibles, aguardá unos instantes.",
-  getHorariosDisponibles: "Obteniendo horarios disponibles, aguardá unos instantes.",
   default: "Estoy procesando tu solicitud, dame un momento por favor.",
 }
 
@@ -256,117 +392,6 @@ export async function executeOpenAITool(
         if (toolArgs.hora) requestBody.Hora = toolArgs.hora
         if (toolArgs.profesional) requestBody.Profesional_Nombre = toolArgs.profesional
         break
-
-      case "getSedes":
-        // Implementación directa para getSedes
-        const sedesResponse = await fetch(proxyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            Cliente_Id: clienteId.trim(),
-            Action: "get_sedes",
-            sede_id: toolArgs.sede_id,
-          }),
-        })
-        const sedesData = JSON.parse(await sedesResponse.text())
-        return truncateToolResponse({
-          exito: sedesResponse.ok,
-          datos: sedesData.sedes || [],
-        })
-
-      case "getTurnos":
-        // Implementación directa para getTurnos
-        const turnosResponse = await fetch(proxyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            Cliente_Id: clienteId.trim(),
-            Action: "get_turnos",
-            sede_id: toolArgs.sede_id,
-            fecha_desde: toolArgs.fecha_desde,
-            fecha_hasta: toolArgs.fecha_hasta,
-          }),
-        })
-        const turnosData = JSON.parse(await turnosResponse.text())
-        return truncateToolResponse({
-          exito: turnosResponse.ok,
-          datos: turnosData.turnos || [],
-        })
-
-      case "crearTurno":
-        // Implementación directa para crearTurno
-        const crearTurnoResponse = await fetch(proxyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            Cliente_Id: clienteId.trim(),
-            Action: "crear_turno",
-            fecha: toolArgs.fecha,
-            hora: toolArgs.hora,
-            paciente_id: toolArgs.paciente_id,
-            medico_id: toolArgs.medico_id,
-            sede_id: toolArgs.sede_id,
-            observaciones: toolArgs.observaciones,
-          }),
-        })
-        const crearTurnoData = JSON.parse(await crearTurnoResponse.text())
-        return truncateToolResponse({
-          exito: crearTurnoResponse.ok,
-          datos: crearTurnoData.confirmacion || "Turno creado exitosamente",
-        })
-
-      case "buscarPaciente":
-        // Implementación directa para buscarPaciente
-        const buscarPacienteResponse = await fetch(proxyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            Cliente_Id: clienteId.trim(),
-            Action: "get_paciente",
-            dni: toolArgs.dni,
-          }),
-        })
-        const buscarPacienteData = JSON.parse(await buscarPacienteResponse.text())
-        return truncateToolResponse({
-          exito: buscarPacienteResponse.ok,
-          datos: buscarPacienteData.paciente || null,
-        })
-
-      case "getMedicos":
-        // Implementación directa para getMedicos
-        const medicosResponse = await fetch(proxyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            Cliente_Id: clienteId.trim(),
-            Action: "get_medicos",
-            sede_id: toolArgs.sede_id,
-          }),
-        })
-        const medicosData = JSON.parse(await medicosResponse.text())
-        return truncateToolResponse({
-          exito: medicosResponse.ok,
-          datos: medicosData.medicos || [],
-        })
-
-      case "getHorariosDisponibles":
-        // Implementación directa para getHorariosDisponibles
-        const horariosResponse = await fetch(proxyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            Cliente_Id: clienteId.trim(),
-            Action: "get_horarios",
-            medico_id: toolArgs.medico_id,
-            sede_id: toolArgs.sede_id,
-            fecha: toolArgs.fecha,
-          }),
-        })
-        const horariosData = JSON.parse(await horariosResponse.text())
-        return truncateToolResponse({
-          exito: horariosResponse.ok,
-          datos: horariosData.horarios || [],
-        })
 
       default:
         return {
@@ -1015,264 +1040,3 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
   console.log(`[OPENAI] ⏱️ Run completado en ${totalTime}ms (${pollCount} polls)`)
   return run
 }
-
-// Función para crear el bloque [SISTEMA] con datos de sedes
-export async function createWhatsAppSystemBlock(
-  clientName: string,
-  clienteId: string,
-  sedeId: string,
-): Promise<string> {
-  console.log(`[SYSTEM-BLOCK] Creando bloque del sistema para ${clientName}`)
-  console.log(`[SYSTEM-BLOCK] Cliente ID: ${clienteId}, Sede ID: ${sedeId}`)
-
-  const systemParts: string[] = []
-
-  // Información básica del cliente
-  systemParts.push(`=== INFORMACIÓN DEL CLIENTE ===`)
-  systemParts.push(`Cliente: ${clientName}`)
-  systemParts.push(`Cliente ID: ${clienteId}`)
-  systemParts.push(`Sede ID: ${sedeId}`)
-  systemParts.push(``)
-
-  // Intentar obtener información de sedes
-  try {
-    console.log(`[SYSTEM-BLOCK] 🏥 Obteniendo información de sedes...`)
-
-    // Primero intentar obtener la sede específica
-    let sedesResult = await getSedes(clienteId, sedeId)
-
-    // Si falla, intentar obtener todas las sedes
-    if (!sedesResult.success) {
-      console.log(`[SYSTEM-BLOCK] ⚠️ Error obteniendo sede específica, intentando obtener todas las sedes`)
-      sedesResult = await getSedes(clienteId)
-    }
-
-    if (sedesResult.success && sedesResult.data && sedesResult.data.length > 0) {
-      systemParts.push(`=== SEDES DISPONIBLES ===`)
-
-      sedesResult.data.forEach((sede: Sede) => {
-        systemParts.push(`- ${sede.nombre} (ID: ${sede.id})`)
-        if (sede.direccion) {
-          systemParts.push(`  Dirección: ${sede.direccion}`)
-        }
-        if (sede.telefono) {
-          systemParts.push(`  Teléfono: ${sede.telefono}`)
-        }
-        systemParts.push(`  Estado: ${sede.activa ? "Activa" : "Inactiva"}`)
-        systemParts.push(``)
-      })
-
-      console.log(`[SYSTEM-BLOCK] ✅ ${sedesResult.data.length} sede(s) agregada(s) al bloque del sistema`)
-    } else {
-      console.log(`[SYSTEM-BLOCK] ⚠️ No se pudieron obtener sedes: ${sedesResult.error || "Sin datos"}`)
-      systemParts.push(`=== INFORMACIÓN DE SEDES ===`)
-      systemParts.push(`⚠️ No se pudo obtener información de sedes en este momento.`)
-      systemParts.push(`Sede principal ID: ${sedeId}`)
-      systemParts.push(``)
-    }
-  } catch (error) {
-    console.error(`[SYSTEM-BLOCK] ❌ Error obteniendo sedes:`, error)
-    systemParts.push(`=== INFORMACIÓN DE SEDES ===`)
-    systemParts.push(`⚠️ Error obteniendo información de sedes.`)
-    systemParts.push(`Sede principal ID: ${sedeId}`)
-    systemParts.push(``)
-  }
-
-  // Intentar obtener información de médicos
-  try {
-    console.log(`[SYSTEM-BLOCK] 👨‍⚕️ Obteniendo información de médicos...`)
-
-    const medicosResult = await getMedicos(clienteId, sedeId)
-
-    if (medicosResult.success && medicosResult.data && medicosResult.data.length > 0) {
-      systemParts.push(`=== MÉDICOS DISPONIBLES ===`)
-
-      medicosResult.data.slice(0, 10).forEach((medico: any) => {
-        systemParts.push(`- ${medico.nombre || medico.apellido || "Médico"} (ID: ${medico.id})`)
-        if (medico.especialidad) {
-          systemParts.push(`  Especialidad: ${medico.especialidad}`)
-        }
-        systemParts.push(``)
-      })
-
-      if (medicosResult.data.length > 10) {
-        systemParts.push(`... y ${medicosResult.data.length - 10} médicos más disponibles`)
-        systemParts.push(``)
-      }
-
-      console.log(`[SYSTEM-BLOCK] ✅ ${medicosResult.data.length} médico(s) agregado(s) al bloque del sistema`)
-    } else {
-      console.log(`[SYSTEM-BLOCK] ⚠️ No se pudieron obtener médicos: ${medicosResult.error || "Sin datos"}`)
-      systemParts.push(`=== INFORMACIÓN DE MÉDICOS ===`)
-      systemParts.push(`⚠️ No se pudo obtener información de médicos en este momento.`)
-      systemParts.push(``)
-    }
-  } catch (error) {
-    console.error(`[SYSTEM-BLOCK] ❌ Error obteniendo médicos:`, error)
-    systemParts.push(`=== INFORMACIÓN DE MÉDICOS ===`)
-    systemParts.push(`⚠️ Error obteniendo información de médicos.`)
-    systemParts.push(``)
-  }
-
-  // Instrucciones generales
-  systemParts.push(`=== INSTRUCCIONES IMPORTANTES ===`)
-  systemParts.push(`1. Siempre usa las herramientas disponibles para obtener información actualizada`)
-  systemParts.push(`2. Para buscar pacientes, usa la herramienta buscarPaciente con el DNI`)
-  systemParts.push(`3. Para obtener turnos, usa la herramienta getTurnos con sede_id, fecha_desde y fecha_hasta`)
-  systemParts.push(`4. Para crear turnos, usa la herramienta crearTurno con todos los datos requeridos`)
-  systemParts.push(`5. Si hay errores con las herramientas, informa al usuario y sugiere alternativas`)
-  systemParts.push(``)
-
-  const systemBlock = systemParts.join("\n")
-
-  console.log(`[SYSTEM-BLOCK] 📋 Bloque del sistema creado (${systemBlock.length} caracteres)`)
-
-  return systemBlock
-}
-
-// Función para crear herramientas de OpenAI
-export function createOpenAITools() {
-  return [
-    {
-      type: "function" as const,
-      function: {
-        name: "getSedes",
-        description: "Obtiene información de las sedes/sucursales disponibles",
-        parameters: {
-          type: "object",
-          properties: {
-            sede_id: {
-              type: "string",
-              description: "ID específico de la sede (opcional). Si no se proporciona, obtiene todas las sedes.",
-            },
-          },
-          required: [],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "getTurnos",
-        description: "Obtiene los turnos disponibles en un rango de fechas",
-        parameters: {
-          type: "object",
-          properties: {
-            sede_id: {
-              type: "string",
-              description: "ID de la sede donde buscar turnos",
-            },
-            fecha_desde: {
-              type: "string",
-              description: "Fecha de inicio en formato YYYY-MM-DD",
-            },
-            fecha_hasta: {
-              type: "string",
-              description: "Fecha de fin en formato YYYY-MM-DD",
-            },
-          },
-          required: ["sede_id", "fecha_desde", "fecha_hasta"],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "crearTurno",
-        description: "Crea un nuevo turno médico",
-        parameters: {
-          type: "object",
-          properties: {
-            fecha: {
-              type: "string",
-              description: "Fecha del turno en formato YYYY-MM-DD",
-            },
-            hora: {
-              type: "string",
-              description: "Hora del turno en formato HH:MM",
-            },
-            paciente_id: {
-              type: "string",
-              description: "ID del paciente",
-            },
-            medico_id: {
-              type: "string",
-              description: "ID del médico",
-            },
-            sede_id: {
-              type: "string",
-              description: "ID de la sede",
-            },
-            observaciones: {
-              type: "string",
-              description: "Observaciones adicionales (opcional)",
-            },
-          },
-          required: ["fecha", "hora", "paciente_id", "medico_id", "sede_id"],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "buscarPaciente",
-        description: "Busca un paciente por su número de DNI",
-        parameters: {
-          type: "object",
-          properties: {
-            dni: {
-              type: "string",
-              description: "Número de DNI del paciente a buscar",
-            },
-          },
-          required: ["dni"],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "getMedicos",
-        description: "Obtiene la lista de médicos disponibles",
-        parameters: {
-          type: "object",
-          properties: {
-            sede_id: {
-              type: "string",
-              description: "ID de la sede para filtrar médicos (opcional)",
-            },
-          },
-          required: [],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "getHorariosDisponibles",
-        description: "Obtiene los horarios disponibles para un médico en una fecha específica",
-        parameters: {
-          type: "object",
-          properties: {
-            medico_id: {
-              type: "string",
-              description: "ID del médico",
-            },
-            sede_id: {
-              type: "string",
-              description: "ID de la sede",
-            },
-            fecha: {
-              type: "string",
-              description: "Fecha en formato YYYY-MM-DD",
-            },
-          },
-          required: ["medico_id", "sede_id", "fecha"],
-        },
-      },
-    },
-  ]
-}
-
-// Alias para compatibilidad
-export const createSystemBlock = createWhatsAppSystemBlock
