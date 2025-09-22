@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
-import { handleMessage } from "@/lib/whatsapp"
+import { processWhatsAppMessage } from "@/lib/whatsapp-processor"
 import { logError, incrementMetric } from "@/lib/monitoring"
+import { getWhatsAppConfig } from "@/lib/db"
 
 // Permitir que la función se ejecute durante más tiempo
 export const maxDuration = 60
@@ -17,11 +18,31 @@ async function processMessage(req: Request) {
     // Incrementar métrica de mensajes procesados
     await incrementMetric("messages_processed_async")
 
-    // Procesar el mensaje
-    await handleMessage(body)
+    if (!body.messages || !body.messages[0]) {
+      throw new Error("No message data found")
+    }
+
+    const message = body.messages[0]
+    const phoneNumber = message.from
+    const messageText = message.text?.body || ""
+
+    // Get WhatsApp config (assuming we have a default config or need to determine it)
+    // For now, we'll need to get the config based on the phone number or use a default
+    const config = await getWhatsAppConfig() // This might need to be adjusted based on your config logic
+
+    if (!config) {
+      throw new Error("WhatsApp configuration not found")
+    }
+
+    // Process the message with correct parameters
+    const response = await processWhatsAppMessage({
+      message: messageText,
+      phoneNumber: phoneNumber,
+      config: config,
+    })
 
     console.log("[PROCESS-MESSAGE] Mensaje procesado exitosamente")
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, response })
   } catch (error) {
     console.error("[PROCESS-MESSAGE] Error al procesar mensaje:", error)
     await logError("process_message", error instanceof Error ? error : new Error(String(error)))

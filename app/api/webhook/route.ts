@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
-import { handleMessage } from "@/lib/whatsapp"
+import { handleMessage } from "@/lib/whatsapp-processor"
 import { enqueueMessage } from "@/lib/queue"
 import { incrementMetric, logError } from "@/lib/monitoring"
 import { rateLimit } from "@/lib/rate-limit"
