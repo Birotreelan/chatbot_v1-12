@@ -90,3 +90,14 @@ export async function requireAuth() {
 
   return session
 }
+
+// Verificar si está autenticado (para APIs)
+export async function isAuthenticated(): Promise<boolean> {
+  try {
+    const session = await getSession()
+    return !!session
+  } catch (error) {
+    console.error("Error verificando autenticación:", error)
+    return false
+  }
+}

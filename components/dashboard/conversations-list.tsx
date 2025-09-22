@@ -1,231 +1,157 @@
 "use client"
 
-import { useState } from "react"
-import { MessageCircle, User, Clock, Eye } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import type { Conversation, ConversationMessage, ConversationStats } from "@/lib/types"
+import { Search, MessageCircle, User, Clock } from "lucide-react"
 
-interface ConversationsListProps {
-  conversations: Conversation[]
-  stats: ConversationStats
-  onRefresh: () => void
+interface ConversationSummary {
+  id: string
+  phoneNumber: string
+  userName: string
+  clienteName: string
+  lastMessage: string
+  lastMessageAt: string
+  messageCount: number
 }
 
-export function ConversationsList({ conversations, stats, onRefresh }: ConversationsListProps) {
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
-  const [messages, setMessages] = useState<ConversationMessage[]>([])
-  const [loadingMessages, setLoadingMessages] = useState(false)
+interface ConversationsListProps {
+  onSelectConversation: (conversationId: string) => void
+  selectedConversationId?: string
+}
 
-  const loadMessages = async (conversationId: string) => {
-    setLoadingMessages(true)
+export function ConversationsList({ onSelectConversation, selectedConversationId }: ConversationsListProps) {
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState("")
+  const [clienteFilter, setClienteFilter] = useState("")
+
+  useEffect(() => {
+    fetchConversations()
+  }, [search, clienteFilter])
+
+  const fetchConversations = async () => {
     try {
-      const response = await fetch(`/api/conversations/${conversationId}/messages`)
-      if (response.ok) {
-        const data = await response.json()
-        setMessages(data.messages || [])
+      setLoading(true)
+      const params = new URLSearchParams()
+      if (search) params.append("search", search)
+      if (clienteFilter) params.append("cliente_id", clienteFilter)
+
+      const response = await fetch(`/api/dashboard/conversations?${params}`)
+      const data = await response.json()
+
+      if (data.success) {
+        setConversations(data.conversations)
       }
     } catch (error) {
-      console.error("Error loading messages:", error)
+      console.error("Error fetching conversations:", error)
     } finally {
-      setLoadingMessages(false)
+      setLoading(false)
     }
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString("es-ES", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-  }
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60)
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "active":
-        return (
-          <Badge variant="default" className="bg-green-100 text-green-800">
-            Activa
-          </Badge>
-        )
-      case "inactive":
-        return <Badge variant="secondary">Inactiva</Badge>
-      case "archived":
-        return <Badge variant="outline">Archivada</Badge>
-      default:
-        return <Badge variant="secondary">{status}</Badge>
+    if (diffInHours < 1) {
+      return "Hace unos minutos"
+    } else if (diffInHours < 24) {
+      return `Hace ${Math.floor(diffInHours)} horas`
+    } else {
+      return date.toLocaleDateString("es-ES", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      })
     }
   }
 
+  const uniqueClients = Array.from(new Set(conversations.map((conv) => conv.clienteName))).filter(Boolean)
+
   return (
-    <div className="space-y-6">
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Conversaciones</CardTitle>
-            <MessageCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalConversations}</div>
-          </CardContent>
-        </Card>
+    <Card className="h-full">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <MessageCircle className="h-5 w-5" />
+          Conversaciones ({conversations.length})
+        </CardTitle>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Conversaciones Activas</CardTitle>
-            <User className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.activeConversations}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Mensajes</CardTitle>
-            <MessageCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalMessages}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Promedio Mensajes</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.averageMessagesPerConversation}</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Conversations Table */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Conversaciones</CardTitle>
-              <CardDescription>Lista de todas las conversaciones registradas en el sistema</CardDescription>
-            </div>
-            <Button onClick={onRefresh} variant="outline" size="sm">
-              Actualizar
-            </Button>
+        <div className="space-y-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Input
+              placeholder="Buscar por nombre, teléfono o mensaje..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-10"
+            />
           </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Usuario</TableHead>
-                <TableHead>Teléfono</TableHead>
-                <TableHead>Configuración</TableHead>
-                <TableHead>Mensajes</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Última Actividad</TableHead>
-                <TableHead>Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+
+          <select
+            value={clienteFilter}
+            onChange={(e) => setClienteFilter(e.target.value)}
+            className="w-full p-2 border rounded-md"
+          >
+            <option value="">Todos los clientes</option>
+            {uniqueClients.map((client) => (
+              <option key={client} value={client}>
+                {client}
+              </option>
+            ))}
+          </select>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-0">
+        <div className="max-h-[600px] overflow-y-auto">
+          {loading ? (
+            <div className="p-4 text-center text-gray-500">Cargando conversaciones...</div>
+          ) : conversations.length === 0 ? (
+            <div className="p-4 text-center text-gray-500">No se encontraron conversaciones</div>
+          ) : (
+            <div className="space-y-1">
               {conversations.map((conversation) => (
-                <TableRow key={conversation.id}>
-                  <TableCell className="font-medium">{conversation.userName || "Usuario Anónimo"}</TableCell>
-                  <TableCell>{conversation.phoneNumber}</TableCell>
-                  <TableCell>{conversation.configDisplayName || "N/A"}</TableCell>
-                  <TableCell>{conversation.messageCount}</TableCell>
-                  <TableCell>{getStatusBadge(conversation.status)}</TableCell>
-                  <TableCell>{formatDate(conversation.lastMessageAt)}</TableCell>
-                  <TableCell>
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedConversation(conversation)
-                            loadMessages(conversation.id)
-                          }}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          Ver
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-4xl max-h-[80vh]">
-                        <DialogHeader>
-                          <DialogTitle>
-                            Conversación con {selectedConversation?.userName || "Usuario Anónimo"}
-                          </DialogTitle>
-                          <DialogDescription>
-                            {selectedConversation?.phoneNumber} • {selectedConversation?.configDisplayName}
-                          </DialogDescription>
-                        </DialogHeader>
-                        <ScrollArea className="h-[60vh] w-full">
-                          {loadingMessages ? (
-                            <div className="flex items-center justify-center p-8">
-                              <div className="text-muted-foreground">Cargando mensajes...</div>
-                            </div>
-                          ) : (
-                            <div className="space-y-4 p-4">
-                              {messages.map((message) => (
-                                <div
-                                  key={message.id}
-                                  className={`flex ${message.sender === "user" ? "justify-start" : "justify-end"}`}
-                                >
-                                  <div
-                                    className={`max-w-[70%] rounded-lg p-3 ${
-                                      message.sender === "user"
-                                        ? "bg-muted text-muted-foreground"
-                                        : "bg-primary text-primary-foreground"
-                                    }`}
-                                  >
-                                    <div className="text-sm font-medium mb-1">
-                                      {message.sender === "user" ? "Usuario" : "Asistente"}
-                                    </div>
-                                    <div className="text-sm">{message.message}</div>
-                                    <div className="text-xs opacity-70 mt-2">
-                                      {formatDate(message.timestamp)}
-                                      {message.metadata?.processingTime && (
-                                        <span className="ml-2">• {message.metadata.processingTime}ms</span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                              {messages.length === 0 && (
-                                <div className="text-center text-muted-foreground p-8">
-                                  No hay mensajes en esta conversación
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </ScrollArea>
-                      </DialogContent>
-                    </Dialog>
-                  </TableCell>
-                </TableRow>
+                <div
+                  key={conversation.id}
+                  onClick={() => onSelectConversation(conversation.id)}
+                  className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors ${
+                    selectedConversationId === conversation.id ? "bg-blue-50 border-blue-200" : ""
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <User className="h-4 w-4 text-gray-400" />
+                        <span className="font-medium text-sm truncate">{conversation.userName}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {conversation.clienteName}
+                        </Badge>
+                      </div>
+
+                      <div className="text-xs text-gray-500 mb-1">{conversation.phoneNumber}</div>
+
+                      <div className="text-sm text-gray-600 truncate mb-2">{conversation.lastMessage}</div>
+
+                      <div className="flex items-center justify-between text-xs text-gray-400">
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {formatDate(conversation.lastMessageAt)}
+                        </div>
+                        <Badge variant="secondary" className="text-xs">
+                          {conversation.messageCount} mensajes
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
-          {conversations.length === 0 && (
-            <div className="text-center text-muted-foreground p-8">No hay conversaciones registradas</div>
+            </div>
           )}
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

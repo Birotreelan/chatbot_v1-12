@@ -1,5 +1,12 @@
 import { Redis } from "@upstash/redis"
-import type { WhatsAppConfig, ThreadInfo, SystemStats } from "./types"
+import type {
+  WhatsAppConfig,
+  ThreadInfo,
+  SystemStats,
+  Conversation,
+  ConversationMessage,
+  ConversationSummary,
+} from "./types"
 import { nanoid } from "nanoid"
 
 // Inicializar el cliente de Redis
@@ -25,6 +32,7 @@ const memoryStorage = {
   configs: new Map<string, WhatsAppConfig>(),
   phoneToConfig: new Map<string, string>(),
   threads: new Map<string, ThreadInfo>(),
+  conversations: new Map<string, Conversation>(),
   stats: null as SystemStats | null,
 }
 
@@ -32,6 +40,8 @@ const memoryStorage = {
 const CONFIG_PREFIX = "whatsapp_config:"
 const THREAD_PREFIX = "thread:"
 const PHONE_TO_CONFIG_PREFIX = "phone_to_config:"
+const CONVERSATION_PREFIX = "conversation:"
+const CONVERSATION_INDEX_PREFIX = "conv_index:"
 const STATS_KEY = "system_stats"
 
 // Función auxiliar para manejar la serialización/deserialización segura
@@ -587,6 +597,302 @@ export async function getAllThreads(): Promise<ThreadInfo[]> {
     // Fallback a memoria
     return Array.from(memoryStorage.threads.values())
   }
+}
+
+// NUEVAS FUNCIONES PARA CONVERSACIONES
+
+// Crear o obtener una conversación
+export async function getOrCreateConversation(
+  phoneNumber: string,
+  userName: string,
+  whatsappConfigId: string,
+  clienteId: string,
+  clienteName: string,
+  threadId: string,
+): Promise<Conversation> {
+  const conversationId = `${phoneNumber}:${whatsappConfigId}`
+  const redisClient = getRedisClient()
+
+  console.log(`[DB] 🔍 Obteniendo conversación para ${phoneNumber}`)
+
+  if (redisClient) {
+    const conversationData = await redisClient.get(`${CONVERSATION_PREFIX}${conversationId}`)
+    const conversation = safeJsonParse(conversationData)
+
+    if (conversation) {
+      console.log(`[DB] ✅ Conversación encontrada: ${conversationId}`)
+      return conversation
+    }
+  } else {
+    const conversation = memoryStorage.conversations.get(conversationId)
+    if (conversation) {
+      console.log(`[DB] ✅ Conversación encontrada en memoria: ${conversationId}`)
+      return conversation
+    }
+  }
+
+  // Crear nueva conversación
+  console.log(`[DB] 📝 Creando nueva conversación: ${conversationId}`)
+  const now = new Date().toISOString()
+
+  const newConversation: Conversation = {
+    id: conversationId,
+    phoneNumber,
+    userName,
+    whatsappConfigId,
+    clienteId,
+    clienteName,
+    threadId,
+    createdAt: now,
+    updatedAt: now,
+    lastMessageAt: now,
+    messageCount: 0,
+    messages: [],
+  }
+
+  if (redisClient) {
+    await redisClient.set(`${CONVERSATION_PREFIX}${conversationId}`, JSON.stringify(newConversation))
+    // Crear índice por cliente para búsquedas rápidas
+    await redisClient.sadd(`${CONVERSATION_INDEX_PREFIX}${clienteId}`, conversationId)
+  } else {
+    memoryStorage.conversations.set(conversationId, newConversation)
+  }
+
+  console.log(`[DB] ✅ Nueva conversación creada: ${conversationId}`)
+  return newConversation
+}
+
+// Agregar mensaje a conversación
+export async function addMessageToConversation(
+  conversationId: string,
+  role: "user" | "assistant",
+  content: string,
+  messageId?: string,
+): Promise<void> {
+  const redisClient = getRedisClient()
+
+  console.log(`[DB] 💬 Agregando mensaje a conversación ${conversationId}`)
+
+  let conversation: Conversation | null = null
+
+  if (redisClient) {
+    const conversationData = await redisClient.get(`${CONVERSATION_PREFIX}${conversationId}`)
+    conversation = safeJsonParse(conversationData)
+  } else {
+    conversation = memoryStorage.conversations.get(conversationId) || null
+  }
+
+  if (!conversation) {
+    console.error(`[DB] ❌ Conversación no encontrada: ${conversationId}`)
+    return
+  }
+
+  const now = new Date().toISOString()
+  const newMessage: ConversationMessage = {
+    id: nanoid(),
+    conversationId,
+    role,
+    content,
+    timestamp: now,
+    messageId,
+  }
+
+  conversation.messages.push(newMessage)
+  conversation.messageCount = conversation.messages.length
+  conversation.lastMessageAt = now
+  conversation.updatedAt = now
+
+  if (redisClient) {
+    await redisClient.set(`${CONVERSATION_PREFIX}${conversationId}`, JSON.stringify(conversation))
+  } else {
+    memoryStorage.conversations.set(conversationId, conversation)
+  }
+
+  console.log(`[DB] ✅ Mensaje agregado a conversación ${conversationId}`)
+}
+
+// Obtener conversaciones por cliente
+export async function getConversationsByClient(clienteId: string): Promise<ConversationSummary[]> {
+  const redisClient = getRedisClient()
+
+  console.log(`[DB] 🔍 Obteniendo conversaciones para cliente: ${clienteId}`)
+
+  if (redisClient) {
+    // Obtener IDs de conversaciones del índice
+    const conversationIds = await redisClient.smembers(`${CONVERSATION_INDEX_PREFIX}${clienteId}`)
+
+    if (conversationIds.length === 0) {
+      console.log(`[DB] ⚠️ No hay conversaciones para cliente: ${clienteId}`)
+      return []
+    }
+
+    const conversations = await Promise.all(
+      conversationIds.map(async (id) => {
+        const conversationData = await redisClient.get(`${CONVERSATION_PREFIX}${id}`)
+        return safeJsonParse(conversationData)
+      }),
+    )
+
+    const validConversations = conversations.filter(Boolean) as Conversation[]
+
+    return validConversations
+      .map((conv) => ({
+        id: conv.id,
+        phoneNumber: conv.phoneNumber,
+        userName: conv.userName,
+        clienteName: conv.clienteName,
+        lastMessage: conv.messages.length > 0 ? conv.messages[conv.messages.length - 1].content : "",
+        lastMessageAt: conv.lastMessageAt,
+        messageCount: conv.messageCount,
+      }))
+      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+  } else {
+    // Fallback a memoria
+    const allConversations = Array.from(memoryStorage.conversations.values())
+    const clientConversations = allConversations.filter((conv) => conv.clienteId === clienteId)
+
+    return clientConversations
+      .map((conv) => ({
+        id: conv.id,
+        phoneNumber: conv.phoneNumber,
+        userName: conv.userName,
+        clienteName: conv.clienteName,
+        lastMessage: conv.messages.length > 0 ? conv.messages[conv.messages.length - 1].content : "",
+        lastMessageAt: conv.lastMessageAt,
+        messageCount: conv.messageCount,
+      }))
+      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+  }
+}
+
+// Obtener todas las conversaciones
+export async function getAllConversations(): Promise<ConversationSummary[]> {
+  const redisClient = getRedisClient()
+
+  console.log(`[DB] 📋 Obteniendo todas las conversaciones`)
+
+  if (redisClient) {
+    const keys = await redisClient.keys(`${CONVERSATION_PREFIX}*`)
+
+    if (keys.length === 0) {
+      console.log(`[DB] ⚠️ No hay conversaciones`)
+      return []
+    }
+
+    const conversations = await Promise.all(
+      keys.map(async (key) => {
+        const conversationData = await redisClient.get(key)
+        return safeJsonParse(conversationData)
+      }),
+    )
+
+    const validConversations = conversations.filter(Boolean) as Conversation[]
+
+    return validConversations
+      .map((conv) => ({
+        id: conv.id,
+        phoneNumber: conv.phoneNumber,
+        userName: conv.userName,
+        clienteName: conv.clienteName,
+        lastMessage: conv.messages.length > 0 ? conv.messages[conv.messages.length - 1].content : "",
+        lastMessageAt: conv.lastMessageAt,
+        messageCount: conv.messageCount,
+      }))
+      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+  } else {
+    // Fallback a memoria
+    const allConversations = Array.from(memoryStorage.conversations.values())
+
+    return allConversations
+      .map((conv) => ({
+        id: conv.id,
+        phoneNumber: conv.phoneNumber,
+        userName: conv.userName,
+        clienteName: conv.clienteName,
+        lastMessage: conv.messages.length > 0 ? conv.messages[conv.messages.length - 1].content : "",
+        lastMessageAt: conv.lastMessageAt,
+        messageCount: conv.messageCount,
+      }))
+      .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+  }
+}
+
+// Obtener conversación completa por ID
+export async function getConversationById(conversationId: string): Promise<Conversation | null> {
+  const redisClient = getRedisClient()
+
+  console.log(`[DB] 🔍 Obteniendo conversación: ${conversationId}`)
+
+  if (redisClient) {
+    const conversationData = await redisClient.get(`${CONVERSATION_PREFIX}${conversationId}`)
+    const conversation = safeJsonParse(conversationData)
+
+    if (conversation) {
+      console.log(`[DB] ✅ Conversación encontrada: ${conversationId}`)
+      return conversation
+    }
+  } else {
+    const conversation = memoryStorage.conversations.get(conversationId)
+    if (conversation) {
+      console.log(`[DB] ✅ Conversación encontrada en memoria: ${conversationId}`)
+      return conversation
+    }
+  }
+
+  console.log(`[DB] ❌ Conversación no encontrada: ${conversationId}`)
+  return null
+}
+
+// Limpiar conversaciones antiguas (más de 7 días)
+export async function cleanupOldConversations(): Promise<number> {
+  const redisClient = getRedisClient()
+  const cutoffDate = new Date()
+  cutoffDate.setDate(cutoffDate.getDate() - 7) // 7 días atrás
+  const cutoffTime = cutoffDate.getTime()
+
+  console.log(`[DB] 🧹 Limpiando conversaciones anteriores a: ${cutoffDate.toISOString()}`)
+
+  let deletedCount = 0
+
+  if (redisClient) {
+    const keys = await redisClient.keys(`${CONVERSATION_PREFIX}*`)
+
+    for (const key of keys) {
+      try {
+        const conversationData = await redisClient.get(key)
+        const conversation = safeJsonParse(conversationData)
+
+        if (conversation && new Date(conversation.lastMessageAt).getTime() < cutoffTime) {
+          // Eliminar conversación
+          await redisClient.del(key)
+          // Eliminar del índice
+          await redisClient.srem(`${CONVERSATION_INDEX_PREFIX}${conversation.clienteId}`, conversation.id)
+          deletedCount++
+          console.log(`[DB] 🗑️ Conversación eliminada: ${conversation.id}`)
+        }
+      } catch (error) {
+        console.error(`[DB] Error al procesar ${key}:`, error)
+      }
+    }
+  } else {
+    // Fallback a memoria
+    const conversationsToDelete: string[] = []
+
+    for (const [id, conversation] of memoryStorage.conversations.entries()) {
+      if (new Date(conversation.lastMessageAt).getTime() < cutoffTime) {
+        conversationsToDelete.push(id)
+      }
+    }
+
+    conversationsToDelete.forEach((id) => {
+      memoryStorage.conversations.delete(id)
+      deletedCount++
+      console.log(`[DB] 🗑️ Conversación eliminada de memoria: ${id}`)
+    })
+  }
+
+  console.log(`[DB] ✅ Limpieza completada. Conversaciones eliminadas: ${deletedCount}`)
+  return deletedCount
 }
 
 // Funciones para estadísticas del sistema

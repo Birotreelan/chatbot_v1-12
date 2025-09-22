@@ -1,589 +1,417 @@
-import { Redis } from "@upstash/redis"
-import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse } from "./types"
+import { logError } from "../monitoring"
 
-// Obtener la URL del proxy desde las variables de entorno
-function getProxyUrl(): string {
-  const proxyUrl = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL
-  if (!proxyUrl) {
-    throw new Error("PROXY_API_URL o CLINIC_PROXY_URL debe estar configurada en las variables de entorno")
-  }
-  return proxyUrl
+interface APIResponse<T = any> {
+  success: boolean
+  data?: T
+  error?: string
+  message?: string
 }
 
-// Prefijo para las claves de caché
-const CACHE_PREFIX = "api_cache:"
-// TTL para la caché (en segundos)
-const CACHE_TTL = 60 * 5 // 5 minutos
-
-// Obtener cliente de Redis
-function getRedisClient() {
-  try {
-    return Redis.fromEnv()
-  } catch (error) {
-    console.warn("Upstash Redis no está disponible:", error)
-    return null
-  }
+interface Sede {
+  id: string
+  nombre: string
+  direccion?: string
+  telefono?: string
+  activa: boolean
 }
 
-// Función para generar clave de caché
-function getCacheKey(action: string, params: Record<string, any>): string {
-  return `${CACHE_PREFIX}${action}:${JSON.stringify(params)}`
+interface Turno {
+  id: string
+  fecha: string
+  hora: string
+  paciente_id: string
+  medico_id: string
+  sede_id: string
+  estado: string
+  observaciones?: string
 }
 
-// Función principal para hacer peticiones al proxy
-async function fetchProxyApi<T>(
-  clienteId: string,
+interface Paciente {
+  id: string
+  dni: string
+  nombre: string
+  apellido: string
+  telefono?: string
+  email?: string
+  fecha_nacimiento?: string
+}
+
+// Función base para hacer requests a la API
+async function makeAPIRequest<T>(
   action: string,
+  clienteId: string,
   params: Record<string, any> = {},
-  useCache = true,
-): Promise<ApiResponse<T>> {
-  // Generar clave de caché
-  const cacheKey = getCacheKey(action, { clienteId, ...params })
-  const redis = getRedisClient()
-
-  // Verificar caché si está habilitada
-  if (useCache && redis) {
-    const cachedData = await redis.get(cacheKey)
-    if (cachedData) {
-      console.log(`[CACHE] ✅ Hit para ${action}`)
-      // Verificar si cachedData ya es un objeto o es una cadena JSON
-      if (typeof cachedData === "string") {
-        return JSON.parse(cachedData)
-      } else {
-        // Si ya es un objeto, devolverlo directamente
-        return cachedData as ApiResponse<T>
-      }
+  timeout = 30000,
+): Promise<APIResponse<T>> {
+  const proxyUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
+  if (!proxyUrl) {
+    console.error("❌ CLINIC_PROXY_URL o PROXY_API_URL no configurada")
+    return {
+      success: false,
+      error: "URL del proxy no configurada",
     }
   }
 
+  console.log(`Realizando petición POST a: ${proxyUrl}`)
+  console.log(`Action: ${action}, Cliente_Id: ${clienteId}`)
+  console.log(`Parámetros:`, JSON.stringify(params, null, 2))
+
+  const requestBody = {
+    Cliente_Id: clienteId,
+    Action: action,
+    ...params,
+  }
+
+  console.log(`Cuerpo de la solicitud:`, JSON.stringify(requestBody))
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeout)
+
   try {
-    const proxyUrl = getProxyUrl()
-
-    // Preparar el cuerpo de la solicitud
-    const requestBody = {
-      Cliente_Id: clienteId.trim(),
-      Action: action,
-      ...params,
-    }
-
-    console.log(`[API] 📤 ${action} → ${proxyUrl}`)
-    console.log(`[API] 📋 Params: ${JSON.stringify(params)}`)
-
-    // Hacer la petición POST
     const response = await fetch(proxyUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(requestBody),
+      signal: controller.signal,
     })
 
-    // Obtener el texto de la respuesta
+    clearTimeout(timeoutId)
+
     const responseText = await response.text()
-    console.log(
-      `[API] 📥 ${response.status} ${responseText.substring(0, 200)}${responseText.length > 200 ? "..." : ""}`,
-    )
+    console.log(`Respuesta (texto) recibida:`, responseText)
 
-    // Intentar parsear la respuesta como JSON
-    let data
-    try {
-      data = JSON.parse(responseText)
-    } catch (e) {
-      console.error(`[API] ❌ JSON inválido:`, e)
-      return {
-        exito: false,
-        error: {
-          codigo: "FORMATO_INVALIDO",
-          mensaje: `Respuesta inválida: ${responseText.substring(0, 100)}...`,
-        },
-      }
-    }
-
-    // Verificar errores específicos
-    if (data.error && typeof data.error === "string" && data.error.includes("Cliente_Id")) {
-      console.error(`[API] ❌ Error Cliente_Id:`, data.error)
-      return {
-        exito: false,
-        error: {
-          codigo: "CLIENTE_ID_INVALIDO",
-          mensaje: data.error,
-        },
-      }
-    }
-
-    // Verificar errores HTTP
     if (!response.ok) {
-      console.error(`[API] ❌ HTTP ${response.status}:`, data?.error || response.statusText)
+      console.error(`❌ Error HTTP ${response.status}: ${responseText}`)
       return {
-        exito: false,
-        error: {
-          codigo: `HTTP_${response.status}`,
-          mensaje: data?.message || data?.error || response.statusText || "Error desconocido",
-        },
+        success: false,
+        error: `HTTP ${response.status}: ${responseText}`,
       }
     }
 
-    // Verificar errores de la API
-    if (data.error) {
-      console.error(`[API] ❌ API Error:`, data.error)
-      return {
-        exito: false,
-        error: {
-          codigo: "API_ERROR",
-          mensaje: typeof data.error === "string" ? data.error : data.error.message || "Error desconocido",
-        },
-      }
-    }
+    try {
+      const data = JSON.parse(responseText)
+      console.log(`Respuesta (JSON) parseada:`, JSON.stringify(data, null, 2))
 
-    // Verificar campo success
-    if (data.success !== undefined) {
-      if (!data.success) {
-        console.error(`[API] ❌ Success=false:`, data)
+      // Verificar si hay error en la respuesta
+      if (data.error) {
+        console.error(`Error en los datos de la respuesta:`, data.error)
         return {
-          exito: false,
-          error: {
-            codigo: "API_ERROR",
-            mensaje: data.message || "Error desconocido",
-          },
+          success: false,
+          error: data.error,
         }
       }
 
-      // Guardar en caché si es exitoso
-      if (useCache && redis) {
-        const result = { exito: true, datos: data.data }
-        await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
-        console.log(`[CACHE] 💾 Guardado ${action}`)
+      // Verificar si hay datos válidos
+      if (data.data || Array.isArray(data) || (typeof data === "object" && !data.error)) {
+        console.log(`✅ Respuesta exitosa`)
+        return {
+          success: true,
+          data: data.data || data,
+        }
       }
 
+      console.error(`❌ Respuesta sin datos válidos:`, data)
       return {
-        exito: true,
-        datos: data.data,
+        success: false,
+        error: "Respuesta sin datos válidos",
+      }
+    } catch (parseError) {
+      console.error(`❌ Error parseando JSON:`, parseError)
+      console.error(`Texto de respuesta:`, responseText.substring(0, 500))
+      return {
+        success: false,
+        error: "Error parseando respuesta JSON",
       }
     }
-
-    // Si llegamos aquí, asumimos que la respuesta es exitosa
-    const result = { exito: true, datos: data }
-
-    // Guardar en caché
-    if (useCache && redis) {
-      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
-      console.log(`[CACHE] 💾 Guardado ${action}`)
-    }
-
-    return result
   } catch (error) {
-    console.error(`[API] ❌ Error de red:`, error)
-    return {
-      exito: false,
-      error: {
-        codigo: "ERROR_RED",
-        mensaje: error instanceof Error ? error.message : "Error de red desconocido",
-      },
-    }
-  }
-}
+    clearTimeout(timeoutId)
 
-// Función para buscar paciente por DNI o teléfono
-export async function buscarPaciente(
-  clienteId: string,
-  params: { dni?: string; telefono?: string },
-  useCache = true,
-): Promise<ApiResponse<Paciente | null>> {
-  if (!params.dni && !params.telefono) {
-    return {
-      exito: false,
-      error: {
-        codigo: "PARAMETROS_INVALIDOS",
-        mensaje: "Se requiere al menos un parámetro: dni o telefono",
-      },
-    }
-  }
-
-  // Convertir los parámetros al formato esperado por el API
-  const apiParams: Record<string, any> = {}
-  if (params.dni) apiParams.dni = params.dni
-  if (params.telefono) apiParams.telefono = params.telefono
-
-  return fetchProxyApi<Paciente | null>(clienteId, "get_paciente", apiParams, useCache)
-}
-
-// Función para obtener subespecialidades
-export async function obtenerSubespecialidades(
-  clienteId: string,
-  useCache = true,
-): Promise<ApiResponse<{ id: string; nombre: string }[]>> {
-  return fetchProxyApi<{ id: string; nombre: string }[]>(clienteId, "get_subespecialidades", {}, useCache)
-}
-
-// Función para buscar profesionales por nombre o especialidad
-export async function buscarProfesionales(
-  clienteId: string,
-  busqueda: string,
-  useCache = true,
-): Promise<ApiResponse<{ id: string; nombre: string; especialidad?: string }[]>> {
-  return fetchProxyApi<{ id: string; nombre: string; especialidad?: string }[]>(
-    clienteId,
-    "get_profesionales",
-    { busqueda },
-    useCache,
-  )
-}
-
-// Función para obtener turnos disponibles o agendados
-export async function obtenerTurnos(
-  clienteId: string,
-  fechaDesde: string,
-  fechaHasta: string,
-  profesionalId?: string,
-  pacienteDNI?: string,
-  useCache = true,
-): Promise<ApiResponse<any>> {
-  const params: Record<string, any> = {
-    Fecha_Desde: fechaDesde,
-    Fecha_Hasta: fechaHasta,
-  }
-
-  if (profesionalId) {
-    params.Profesional_Id = profesionalId
-  }
-
-  if (pacienteDNI) {
-    params.Paciente_DNI = pacienteDNI
-  }
-
-  return fetchProxyApi<any>(clienteId, "get_turnos", params, useCache)
-}
-
-// Función para reservar un turno
-export async function reservarTurno(
-  clienteId: string,
-  agendaId: string,
-  pacienteData: {
-    nombre?: string
-    apellido?: string
-    dni?: string
-    telefono: string
-    email: string
-    fechaNacimiento?: string
-    direccion?: string
-    localidad?: string
-    provincia?: string
-    sexo?: string
-    tipoDoc?: string
-    deudorId?: string
-    planId?: string
-    nroAfiliado?: string
-    turnoMotivo?: string
-    comentarios?: string
-  },
-  useCache = false, // Reservar turno no debería cachearse
-): Promise<ApiResponse<any>> {
-  const params: Record<string, any> = {
-    Agenda_Id: agendaId,
-    Paciente_Telefono: pacienteData.telefono,
-    Paciente_Email: pacienteData.email,
-  }
-
-  // Añadir campos opcionales si están presentes
-  if (pacienteData.nombre) params.Paciente_Nombre = pacienteData.nombre
-  if (pacienteData.apellido) params.Paciente_Apellido = pacienteData.apellido
-  if (pacienteData.dni) params.Paciente_DNI = pacienteData.dni
-  if (pacienteData.fechaNacimiento) params.Paciente_Fecha_Nac = pacienteData.fechaNacimiento
-  if (pacienteData.direccion) params.Paciente_Direccion = pacienteData.direccion
-  if (pacienteData.localidad) params.Paciente_Localidad = pacienteData.localidad
-  if (pacienteData.provincia) params.Paciente_Provincia = pacienteData.provincia
-  if (pacienteData.sexo) params.Paciente_Sexo = pacienteData.sexo
-  if (pacienteData.tipoDoc) params.Paciente_Tipo_Doc = pacienteData.tipoDoc
-  if (pacienteData.deudorId) params.Deudor_Id = pacienteData.deudorId
-  if (pacienteData.planId) params.Plan_Id = pacienteData.planId
-  if (pacienteData.nroAfiliado) params.Nro_Afiliado = pacienteData.nroAfiliado
-  if (pacienteData.turnoMotivo) params.Turno_Motivo = pacienteData.turnoMotivo
-  if (pacienteData.comentarios) params.Comentarios = pacienteData.comentarios
-
-  return fetchProxyApi<any>(clienteId, "set_turno", params, useCache)
-}
-
-// Función para validar obra social
-export async function validarObraSocial(
-  clienteId: string,
-  busqueda: string,
-  useCache = true,
-): Promise<
-  ApiResponse<{
-    obras_sociales: Array<{
-      id: string
-      nombre: string
-      razon_social: string
-      permite_turnos_online: boolean
-      permite_turnos_online_texto: string
-    }>
-    total_encontradas: number
-    busqueda_realizada: string
-  }>
-> {
-  return fetchProxyApi<{
-    obras_sociales: Array<{
-      id: string
-      nombre: string
-      razon_social: string
-      permite_turnos_online: boolean
-      permite_turnos_online_texto: string
-    }>
-    total_encontradas: number
-    busqueda_realizada: string
-  }>(clienteId, "get_obras_sociales", { busqueda }, useCache)
-}
-
-// Funciones de compatibilidad con el código anterior
-
-// Compatibilidad: buscar paciente por DNI
-export async function paciente_dni(dni: string, clienteId: string): Promise<ApiResponse<Paciente | null>> {
-  return buscarPaciente(clienteId, { dni })
-}
-
-// Compatibilidad: buscar paciente por DNI
-export async function buscarPacientePorDNI(dni: string, clienteId: string): Promise<ApiResponse<Paciente | null>> {
-  return buscarPaciente(clienteId, { dni })
-}
-
-// Compatibilidad: obtener citas de un paciente
-export async function obtenerCitasPaciente(
-  pacienteDNI: string,
-  fechaDesde: string,
-  fechaHasta: string,
-  clienteId: string,
-): Promise<ApiResponse<Cita[]>> {
-  return obtenerTurnos(clienteId, fechaDesde, fechaHasta, undefined, pacienteDNI)
-}
-
-// Compatibilidad: obtener agenda
-export async function obtenerAgenda(
-  fechaDesde: string,
-  fechaHasta: string,
-  profesionalId?: string,
-  clienteId?: string,
-): Promise<ApiResponse<Cita[]>> {
-  if (!clienteId) {
-    return {
-      exito: false,
-      error: {
-        codigo: "CLIENTE_ID_FALTANTE",
-        mensaje: "Se requiere el ID del cliente",
-      },
-    }
-  }
-  return obtenerTurnos(clienteId, fechaDesde, fechaHasta, profesionalId)
-}
-
-// Compatibilidad: verificar disponibilidad
-export async function verificarDisponibilidad(
-  fecha: string,
-  profesionalId?: string,
-  clienteId?: string,
-): Promise<ApiResponse<DisponibilidadHoraria>> {
-  if (!clienteId) {
-    return {
-      exito: false,
-      error: {
-        codigo: "CLIENTE_ID_FALTANTE",
-        mensaje: "Se requiere el ID del cliente",
-      },
-    }
-  }
-  // Usar la misma fecha como inicio y fin para obtener los turnos de un solo día
-  return obtenerTurnos(clienteId, fecha, fecha, profesionalId)
-}
-
-// Compatibilidad: obtener subespecialidades
-export async function obtenerDoctores(clienteId: string): Promise<ApiResponse<{ id: string; nombre: string }[]>> {
-  return buscarProfesionales(clienteId, "")
-}
-
-// Compatibilidad: buscar turnos disponibles
-export async function buscarTurnosDisponibles(
-  rangoFechas: string,
-  profesional?: string,
-  especialidad?: string,
-  profesionalId?: string,
-  clienteId?: string,
-): Promise<ApiResponse<any>> {
-  if (!clienteId) {
-    return {
-      exito: false,
-      error: {
-        codigo: "CLIENTE_ID_FALTANTE",
-        mensaje: "Se requiere el ID del cliente",
-      },
-    }
-  }
-
-  // Extraer fechas desde y hasta del rango
-  const [fechaDesde, fechaHasta] = rangoFechas.split(" a ")
-
-  // Si tenemos el ID del profesional, usarlo directamente
-  if (profesionalId) {
-    return obtenerTurnos(clienteId, fechaDesde, fechaHasta || fechaDesde, profesionalId)
-  }
-
-  // Si tenemos el nombre del profesional o especialidad, primero buscar el profesional
-  if (profesional || especialidad) {
-    const busqueda = profesional || especialidad || ""
-    const profesionalesResponse = await buscarProfesionales(clienteId, busqueda)
-
-    if (!profesionalesResponse.exito || !profesionalesResponse.datos || profesionalesResponse.datos.length === 0) {
+    if (error.name === "AbortError") {
+      console.error(`❌ Timeout después de ${timeout}ms`)
       return {
-        exito: false,
-        error: {
-          codigo: "PROFESIONAL_NO_ENCONTRADO",
-          mensaje: `No se encontraron profesionales con el criterio: ${busqueda}`,
-        },
+        success: false,
+        error: `Timeout después de ${timeout}ms`,
       }
     }
 
-    // Si hay múltiples profesionales, devolver la lista para que el usuario elija
-    if (profesionalesResponse.datos.length > 1) {
-      return {
-        exito: true,
-        datos: {
-          multiple: true,
-          profesionales: profesionalesResponse.datos,
-          mensaje: "Se encontraron múltiples profesionales. Por favor, seleccione uno.",
-        },
-      }
+    console.error(`❌ Error en request:`, error)
+    return {
+      success: false,
+      error: error.message || "Error desconocido",
     }
-
-    // Si solo hay un profesional, usar su ID para buscar turnos
-    const profesionalEncontrado = profesionalesResponse.datos[0]
-    return obtenerTurnos(clienteId, fechaDesde, fechaHasta || fechaDesde, profesionalEncontrado.id)
   }
-
-  // Si no tenemos ni profesional ni especialidad, buscar todos los turnos disponibles
-  return obtenerTurnos(clienteId, fechaDesde, fechaHasta || fechaDesde)
 }
 
-// Compatibilidad: procesar reserva de turno
-export async function procesarReservaTurno(
-  dni: string,
-  fecha: string,
-  hora: string,
-  profesional: string,
-  clienteId?: string,
-): Promise<ApiResponse<any>> {
-  if (!clienteId) {
-    return {
-      exito: false,
-      error: {
-        codigo: "CLIENTE_ID_FALTANTE",
-        mensaje: "Se requiere el ID del cliente",
-      },
-    }
+// Función para obtener sedes - CORREGIDA
+export async function getSedes(clienteId: string, sedeId?: string): Promise<APIResponse<Sede[]>> {
+  console.log(`[GET-SEDES] Obteniendo sedes para cliente: ${clienteId}`)
+  if (sedeId) {
+    console.log(`[GET-SEDES] Sede específica solicitada: ${sedeId}`)
+  } else {
+    console.log(`[GET-SEDES] Obteniendo todas las sedes`)
   }
 
   try {
-    console.log(`[API] 🎯 Reservando turno: DNI=${dni}, fecha=${fecha}, hora=${hora}, profesional=${profesional}`)
+    // Si se proporciona sede_id, usar get_data_sede (singular)
+    // Si no se proporciona, usar get_data_sedes_all o similar
+    const action = sedeId ? "get_data_sede" : "get_data_sedes_all"
+    const params = sedeId ? { sede_id: sedeId } : {}
 
-    // 1. Primero obtenemos los datos del paciente
-    const pacienteResponse = await buscarPaciente(clienteId, { dni })
-    if (!pacienteResponse.exito || !pacienteResponse.datos) {
+    console.log(`[GET-SEDES] Usando action: ${action}`)
+    console.log(`[GET-SEDES] Parámetros:`, params)
+
+    const result = await makeAPIRequest<Sede[]>(action, clienteId, params)
+
+    if (result.success) {
+      const sedes = Array.isArray(result.data) ? result.data : [result.data]
+      console.log(`[GET-SEDES] ✅ ${sedes.length} sede(s) obtenida(s)`)
       return {
-        exito: false,
-        error: {
-          codigo: "PACIENTE_NO_ENCONTRADO",
-          mensaje: "No se encontró información del paciente con el DNI proporcionado",
-        },
+        success: true,
+        data: sedes,
       }
-    }
+    } else {
+      console.log(`[GET-SEDES] ❌ No se encontraron sedes o error: ${JSON.stringify(result)}`)
 
-    const paciente = pacienteResponse.datos
+      // Si falló con get_data_sedes_all, intentar con get_data_sedes y sede_id
+      if (!sedeId && action === "get_data_sedes_all") {
+        console.log(`[GET-SEDES] Intentando con get_data_sedes y sede_id por defecto`)
 
-    // 2. Buscar el profesional por nombre
-    const profesionalesResponse = await buscarProfesionales(clienteId, profesional)
-    if (!profesionalesResponse.exito || !profesionalesResponse.datos || profesionalesResponse.datos.length === 0) {
-      return {
-        exito: false,
-        error: {
-          codigo: "PROFESIONAL_NO_ENCONTRADO",
-          mensaje: `No se encontró el profesional: ${profesional}`,
-        },
+        // Intentar con una sede por defecto si está disponible
+        const fallbackResult = await makeAPIRequest<Sede[]>("get_data_sedes", clienteId, {})
+
+        if (fallbackResult.success) {
+          const sedes = Array.isArray(fallbackResult.data) ? fallbackResult.data : [fallbackResult.data]
+          console.log(`[GET-SEDES] ✅ ${sedes.length} sede(s) obtenida(s) con fallback`)
+          return {
+            success: true,
+            data: sedes,
+          }
+        }
       }
+
+      return result
     }
-
-    // Tomar el primer profesional que coincida con el nombre
-    const profesionalEncontrado = profesionalesResponse.datos.find((p) =>
-      p.nombre.toLowerCase().includes(profesional.toLowerCase()),
-    )
-
-    if (!profesionalEncontrado) {
-      return {
-        exito: false,
-        error: {
-          codigo: "PROFESIONAL_NO_ENCONTRADO",
-          mensaje: `No se encontró el profesional: ${profesional}`,
-        },
-      }
-    }
-
-    // 3. Buscar turnos disponibles para ese profesional en esa fecha
-    const turnosResponse = await obtenerTurnos(clienteId, fecha, fecha, profesionalEncontrado.id)
-
-    if (!turnosResponse.exito || !turnosResponse.datos) {
-      return {
-        exito: false,
-        error: {
-          codigo: "TURNOS_NO_ENCONTRADOS",
-          mensaje: "No se encontraron turnos disponibles para la fecha y profesional indicados",
-        },
-      }
-    }
-
-    // 4. Buscar el turno específico por hora
-    let agendaId = null
-    const turnos = turnosResponse.datos
-
-    // La estructura exacta dependerá de cómo devuelve los datos tu API
-    for (const turno of turnos) {
-      if (turno.hora === hora || turno.hora.startsWith(hora)) {
-        agendaId = turno.id || turno.agenda_id
-        break
-      }
-    }
-
-    if (!agendaId) {
-      return {
-        exito: false,
-        error: {
-          codigo: "TURNO_NO_ENCONTRADO",
-          mensaje: "No se encontró un turno disponible para la fecha, hora y profesional indicados",
-        },
-      }
-    }
-
-    // 5. Reservar el turno
-    const reservaResponse = await reservarTurno(clienteId, agendaId, {
-      nombre: paciente.nombre || "",
-      apellido: paciente.apellido || "",
-      dni: dni,
-      telefono: paciente.telefono || "0000000000", // Campo obligatorio
-      email: paciente.email || "sin-email@example.com", // Campo obligatorio
-    })
-
-    return reservaResponse
   } catch (error) {
-    console.error("[API] ❌ Error al procesar reserva:", error)
+    console.error(`[GET-SEDES] ❌ Error obteniendo sedes:`, error)
+    await logError("get_sedes", error instanceof Error ? error : new Error(String(error)))
     return {
-      exito: false,
-      error: {
-        codigo: "ERROR_PROCESAMIENTO",
-        mensaje: error instanceof Error ? error.message : "Error desconocido al procesar la reserva",
-      },
+      success: false,
+      error: error.message || "Error desconocido",
     }
   }
 }
 
-// Función para obtener especialidades (alias para subespecialidades)
-export async function obtenerEspecialidades(
+// Función para obtener turnos
+export async function getTurnos(
   clienteId: string,
-  useCache = true,
-): Promise<ApiResponse<{ id: string; nombre: string }[]>> {
-  return obtenerSubespecialidades(clienteId, useCache)
+  sedeId: string,
+  fechaDesde: string,
+  fechaHasta: string,
+): Promise<APIResponse<Turno[]>> {
+  console.log(`[GET-TURNOS] Obteniendo turnos para cliente: ${clienteId}, sede: ${sedeId}`)
+  console.log(`[GET-TURNOS] Rango de fechas: ${fechaDesde} - ${fechaHasta}`)
+
+  try {
+    const params = {
+      sede_id: sedeId,
+      fecha_desde: fechaDesde,
+      fecha_hasta: fechaHasta,
+    }
+
+    const result = await makeAPIRequest<Turno[]>("get_turnos", clienteId, params)
+
+    if (result.success) {
+      const turnos = Array.isArray(result.data) ? result.data : []
+      console.log(`[GET-TURNOS] ✅ ${turnos.length} turno(s) obtenido(s)`)
+      return {
+        success: true,
+        data: turnos,
+      }
+    } else {
+      console.log(`[GET-TURNOS] ❌ Error obteniendo turnos: ${JSON.stringify(result)}`)
+      return result
+    }
+  } catch (error) {
+    console.error(`[GET-TURNOS] ❌ Error obteniendo turnos:`, error)
+    await logError("get_turnos", error instanceof Error ? error : new Error(String(error)))
+    return {
+      success: false,
+      error: error.message || "Error desconocido",
+    }
+  }
 }
+
+// Función para crear turno
+export async function crearTurno(
+  clienteId: string,
+  turnoData: {
+    fecha: string
+    hora: string
+    paciente_id: string
+    medico_id: string
+    sede_id: string
+    observaciones?: string
+  },
+): Promise<APIResponse<Turno>> {
+  console.log(`[CREAR-TURNO] Creando turno para cliente: ${clienteId}`)
+  console.log(`[CREAR-TURNO] Datos del turno:`, JSON.stringify(turnoData, null, 2))
+
+  try {
+    const result = await makeAPIRequest<Turno>("crear_turno", clienteId, turnoData)
+
+    if (result.success) {
+      console.log(`[CREAR-TURNO] ✅ Turno creado exitosamente`)
+      return result
+    } else {
+      console.log(`[CREAR-TURNO] ❌ Error creando turno: ${JSON.stringify(result)}`)
+      return result
+    }
+  } catch (error) {
+    console.error(`[CREAR-TURNO] ❌ Error creando turno:`, error)
+    await logError("crear_turno", error instanceof Error ? error : new Error(String(error)))
+    return {
+      success: false,
+      error: error.message || "Error desconocido",
+    }
+  }
+}
+
+// Función para buscar paciente
+export async function buscarPaciente(clienteId: string, dni: string): Promise<APIResponse<Paciente[]>> {
+  console.log(`[BUSCAR-PACIENTE] Buscando paciente con DNI: ${dni} para cliente: ${clienteId}`)
+
+  try {
+    const params = {
+      dni: dni,
+    }
+
+    const result = await makeAPIRequest<Paciente[]>("buscar_paciente", clienteId, params)
+
+    if (result.success) {
+      const pacientes = Array.isArray(result.data) ? result.data : [result.data]
+      console.log(`[BUSCAR-PACIENTE] ✅ ${pacientes.length} paciente(s) encontrado(s)`)
+      return {
+        success: true,
+        data: pacientes,
+      }
+    } else {
+      console.log(`[BUSCAR-PACIENTE] ❌ Error buscando paciente: ${JSON.stringify(result)}`)
+      return result
+    }
+  } catch (error) {
+    console.error(`[BUSCAR-PACIENTE] ❌ Error buscando paciente:`, error)
+    await logError("buscar_paciente", error instanceof Error ? error : new Error(String(error)))
+    return {
+      success: false,
+      error: error.message || "Error desconocido",
+    }
+  }
+}
+
+// Función para obtener médicos
+export async function getMedicos(clienteId: string, sedeId?: string): Promise<APIResponse<any[]>> {
+  console.log(`[GET-MEDICOS] Obteniendo médicos para cliente: ${clienteId}`)
+  if (sedeId) {
+    console.log(`[GET-MEDICOS] Sede específica: ${sedeId}`)
+  }
+
+  try {
+    const params = sedeId ? { sede_id: sedeId } : {}
+
+    const result = await makeAPIRequest<any[]>("get_medicos", clienteId, params)
+
+    if (result.success) {
+      const medicos = Array.isArray(result.data) ? result.data : []
+      console.log(`[GET-MEDICOS] ✅ ${medicos.length} médico(s) obtenido(s)`)
+      return {
+        success: true,
+        data: medicos,
+      }
+    } else {
+      console.log(`[GET-MEDICOS] ❌ Error obteniendo médicos: ${JSON.stringify(result)}`)
+      return result
+    }
+  } catch (error) {
+    console.error(`[GET-MEDICOS] ❌ Error obteniendo médicos:`, error)
+    await logError("get_medicos", error instanceof Error ? error : new Error(String(error)))
+    return {
+      success: false,
+      error: error.message || "Error desconocido",
+    }
+  }
+}
+
+// Función para obtener horarios disponibles
+export async function getHorariosDisponibles(
+  clienteId: string,
+  medicoId: string,
+  sedeId: string,
+  fecha: string,
+): Promise<APIResponse<string[]>> {
+  console.log(`[GET-HORARIOS] Obteniendo horarios disponibles`)
+  console.log(`[GET-HORARIOS] Cliente: ${clienteId}, Médico: ${medicoId}, Sede: ${sedeId}, Fecha: ${fecha}`)
+
+  try {
+    const params = {
+      medico_id: medicoId,
+      sede_id: sedeId,
+      fecha: fecha,
+    }
+
+    const result = await makeAPIRequest<string[]>("get_horarios_disponibles", clienteId, params)
+
+    if (result.success) {
+      const horarios = Array.isArray(result.data) ? result.data : []
+      console.log(`[GET-HORARIOS] ✅ ${horarios.length} horario(s) disponible(s)`)
+      return {
+        success: true,
+        data: horarios,
+      }
+    } else {
+      console.log(`[GET-HORARIOS] ❌ Error obteniendo horarios: ${JSON.stringify(result)}`)
+      return result
+    }
+  } catch (error) {
+    console.error(`[GET-HORARIOS] ❌ Error obteniendo horarios:`, error)
+    await logError("get_horarios_disponibles", error instanceof Error ? error : new Error(String(error)))
+    return {
+      success: false,
+      error: error.message || "Error desconocido",
+    }
+  }
+}
+
+// Función de utilidad para validar datos de turno
+export function validateTurnoData(turnoData: any): { valid: boolean; errors: string[] } {
+  const errors: string[] = []
+
+  if (!turnoData.fecha) {
+    errors.push("Fecha es requerida")
+  }
+
+  if (!turnoData.hora) {
+    errors.push("Hora es requerida")
+  }
+
+  if (!turnoData.paciente_id) {
+    errors.push("ID de paciente es requerido")
+  }
+
+  if (!turnoData.medico_id) {
+    errors.push("ID de médico es requerido")
+  }
+
+  if (!turnoData.sede_id) {
+    errors.push("ID de sede es requerido")
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  }
+}
+
+// Exportar tipos para uso externo
+export type { Sede, Turno, Paciente, APIResponse }

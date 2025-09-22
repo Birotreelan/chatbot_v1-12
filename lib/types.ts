@@ -16,31 +16,29 @@ export interface WhatsAppConfig {
   proxy?: string
 
   // Widget configuration
-  widgetEnabled?: boolean
-  widgetTitle?: string
-  widgetPrimaryColor?: string
-  widgetSecondaryColor?: string
-  widgetPosition?: "bottom-right" | "bottom-left" | "top-right" | "top-left"
-  widgetWelcomeMessage?: string
-  widgetPlaceholder?: string
-  widgetButtonText?: string
-  widgetHeaderText?: string
-  widgetSubtitle?: string
-  widgetBrandingEnabled?: boolean
-  widgetBrandingText?: string
-  widgetMaxHeight?: number
-  widgetMaxWidth?: number
-  widgetBorderRadius?: number
-  widgetShadow?: boolean
-  widgetAnimation?: boolean
-  widgetSoundEnabled?: boolean
-  widgetTheme?: "light" | "dark" | "auto"
+  widgetEnabled: boolean
+  widgetTitle: string
+  widgetPrimaryColor: string
+  widgetSecondaryColor: string
+  widgetPosition: "bottom-right" | "bottom-left" | "top-right" | "top-left"
+  widgetWelcomeMessage: string
+  widgetPlaceholder: string
+  widgetButtonText: string
+  widgetHeaderText: string
+  widgetSubtitle: string
+  widgetBrandingEnabled: boolean
+  widgetBrandingText: string
+  widgetMaxHeight: number
+  widgetMaxWidth: number
+  widgetBorderRadius: number
+  widgetShadow: boolean
+  widgetAnimation: boolean
+  widgetSoundEnabled: boolean
+  widgetTheme: "light" | "dark"
+  widgetFloatingButtonText: string
+  widgetShowFloatingText: boolean
 
-  // Nuevos campos para el botón flotante
-  widgetFloatingButtonText?: string
-  widgetShowFloatingText?: boolean
-
-  stats?: {
+  stats: {
     messagesReceived: number
     messagesProcessed: number
     errors: number
@@ -66,40 +64,36 @@ export interface SystemStats {
   lastUpdated: string
 }
 
-export interface ConversationMessage {
-  id: string
-  conversationId: string
-  sender: "user" | "assistant"
-  message: string
-  timestamp: string
-  messageType?: "text" | "image" | "document" | "audio"
-  metadata?: {
-    whatsappMessageId?: string
-    assistantId?: string
-    functionCalls?: string[]
-    processingTime?: number
-  }
-}
-
 export interface Conversation {
   id: string
   phoneNumber: string
-  userName?: string
-  whatsappConfigId: string
-  configDisplayName?: string
+  userName: string
+  configId: string
+  clienteId: string
+  clienteName: string
   threadId: string
-  startedAt: string
+  lastMessage: string
   lastMessageAt: string
   messageCount: number
-  status: "active" | "inactive" | "archived"
-  tags?: string[]
-  summary?: string
+  createdAt: string
+  updatedAt: string
 }
 
-export interface ConversationStats {
-  totalConversations: number
-  activeConversations: number
-  totalMessages: number
-  averageMessagesPerConversation: number
-  lastUpdated: string
+export interface ConversationMessage {
+  id: string
+  conversationId: string
+  role: "user" | "assistant"
+  content: string
+  messageId?: string
+  createdAt: string
+}
+
+export interface ConversationSummary {
+  id: string
+  phoneNumber: string
+  userName: string
+  clienteName: string
+  lastMessage: string
+  lastMessageAt: string
+  messageCount: number
 }
