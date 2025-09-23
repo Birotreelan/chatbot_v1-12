@@ -9,13 +9,12 @@ import OpenAI from "openai"
 import { createWhatsAppSystemBlock as createSystemBlock } from "./openai-tools"
 import { sendWhatsAppMessage } from "./whatsapp-api"
 import { logError } from "./monitoring"
-import { systemDiagnostics } from "./advanced-monitoring"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
-// Sistema de logs mejorado con diagnósticos
+// Sistema de logs simplificado
 class ProcessorLogger {
   private context: string
   private startTime: number
@@ -35,14 +34,6 @@ class ProcessorLogger {
     } else {
       console.log(`${prefix} ${message}`)
     }
-
-    // Enviar al sistema de diagnósticos
-    const diagnosticLevel = level.toLowerCase() as "info" | "error" | "warning" | "success"
-    if (diagnosticLevel === "warning") {
-      systemDiagnostics.warning(this.context, message, data)
-    } else {
-      systemDiagnostics[diagnosticLevel](this.context, message, data)
-    }
   }
 
   info(message: string, data?: any) {
@@ -58,8 +49,7 @@ class ProcessorLogger {
     this.log("DEBUG", message, data)
   }
   success(message: string, data?: any) {
-    this.log("INFO", message, data)
-    systemDiagnostics.success(this.context, message, data)
+    this.log("INFO", `✅ ${message}`, data)
   }
 }
 
@@ -79,11 +69,6 @@ async function makeRobustOpenAICall<T>(
       const duration = Date.now() - startTime
 
       logger.success(`${operationName} - Exitoso en intento ${attempt}`, { duration })
-      systemDiagnostics.success("OPENAI-API", `${operationName} completado`, {
-        attempt,
-        duration,
-        operationName,
-      })
 
       return result
     } catch (error) {
@@ -105,15 +90,9 @@ async function makeRobustOpenAICall<T>(
       }
 
       logger.error(`${operationName} - Error en intento ${attempt}:`, errorDetails)
-      systemDiagnostics.error("OPENAI-API", `${operationName} falló en intento ${attempt}`, errorDetails)
 
       if (attempt === maxRetries) {
         logger.error(`${operationName} - Todos los intentos fallaron`)
-        systemDiagnostics.error("OPENAI-API", `${operationName} falló completamente`, {
-          totalAttempts: maxRetries,
-          totalDuration: duration,
-          finalError: errorDetails,
-        })
         await logError(
           `openai_${operationName.toLowerCase()}`,
           error instanceof Error ? error : new Error(String(error)),
@@ -163,13 +142,6 @@ export async function processWhatsAppMessage(
     message: message.substring(0, 100),
     userName,
     messageId,
-    whatsappConfigId,
-  })
-
-  systemDiagnostics.info("WHATSAPP-PROCESSOR", "Iniciando procesamiento de mensaje", {
-    phoneNumber,
-    messageLength: message.length,
-    userName,
     whatsappConfigId,
   })
 
@@ -328,13 +300,6 @@ export async function processWhatsAppMessage(
             responseLength: response.length,
           })
 
-          systemDiagnostics.success("WHATSAPP-PROCESSOR", "Mensaje procesado exitosamente", {
-            phoneNumber,
-            totalTime: totalProcessingTime,
-            responseLength: response.length,
-            runId: run.id,
-          })
-
           return response
         }
       }
@@ -350,13 +315,6 @@ export async function processWhatsAppMessage(
       errorStack: error?.stack || "No stack",
       totalTime: totalProcessingTime,
       fullError: error,
-    })
-
-    systemDiagnostics.error("WHATSAPP-PROCESSOR", "Error crítico en procesamiento", {
-      phoneNumber,
-      errorMessage: error?.message || "No message",
-      totalTime: totalProcessingTime,
-      whatsappConfigId,
     })
 
     // Actualizar estadísticas de error
@@ -409,7 +367,7 @@ async function cancelActiveRuns(threadId: string, logger: ProcessorLogger): Prom
     }
 
     if (cancelledCount > 0) {
-      systemDiagnostics.info("RUN-MANAGEMENT", `${cancelledCount} runs activos cancelados`, {
+      logger.info(`${cancelledCount} runs activos cancelados`, {
         threadId,
         cancelledCount,
         totalRuns: runs.data.length,
@@ -417,7 +375,6 @@ async function cancelActiveRuns(threadId: string, logger: ProcessorLogger): Prom
     }
   } catch (error) {
     logger.error("Error verificando runs activos:", error)
-    systemDiagnostics.error("RUN-MANAGEMENT", "Error verificando runs activos", { threadId, error })
   }
 }
 
@@ -463,23 +420,12 @@ async function waitForRunCompletion(
       if (run.status === "completed") {
         const completionTime = Date.now() - completionStartTime
         log.success("Run completado exitosamente", { completionTime })
-        systemDiagnostics.success("RUN-COMPLETION", "Run completado", {
-          runId,
-          completionTime,
-          attempts: attempt,
-        })
         return run
       }
 
       if (run.status === "failed" || run.status === "cancelled" || run.status === "expired") {
         const errorMessage = `Run falló: ${run.status} - ${run.last_error?.message || "Sin detalles"}`
         log.error("Run falló:", { status: run.status, lastError: run.last_error })
-        systemDiagnostics.error("RUN-COMPLETION", errorMessage, {
-          runId,
-          status: run.status,
-          lastError: run.last_error,
-          attempts: attempt,
-        })
         throw new Error(errorMessage)
       }
 
@@ -532,19 +478,10 @@ async function waitForRunCompletion(
             })
 
             log.success("Herramienta ejecutada exitosamente:", { toolName: toolCall.function.name })
-            systemDiagnostics.success("TOOL-EXECUTION", `Herramienta ${toolCall.function.name} ejecutada`, {
-              toolName: toolCall.function.name,
-              clienteId,
-            })
           } catch (toolError) {
             log.error("Error ejecutando herramienta:", {
               toolName: toolCall.function.name,
               error: toolError,
-            })
-            systemDiagnostics.error("TOOL-EXECUTION", `Error en herramienta ${toolCall.function.name}`, {
-              toolName: toolCall.function.name,
-              error: toolError,
-              clienteId,
             })
             toolOutputs.push({
               tool_call_id: toolCall.id,
@@ -578,7 +515,7 @@ async function waitForRunCompletion(
 
       if (attempt === maxAttempts) {
         const totalTime = Date.now() - completionStartTime
-        systemDiagnostics.error("RUN-COMPLETION", "Timeout esperando completación", {
+        log.error("Timeout esperando completación", {
           runId,
           totalTime,
           maxAttempts,
