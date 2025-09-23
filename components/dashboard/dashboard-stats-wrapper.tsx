@@ -9,7 +9,7 @@ export default function DashboardStatsWrapper() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetchStats = async () => {
+    async function fetchStats() {
       try {
         const response = await fetch("/api/dashboard/stats")
         if (response.ok) {

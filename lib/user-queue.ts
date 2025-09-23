@@ -1,5 +1,5 @@
 import { getRedisClient } from "./redis"
-import { processIndividualMessage } from "./whatsapp-processor"
+import { processIndividualMessage } from "./whatsapp"
 
 interface QueuedMessage {
   userMessage: string

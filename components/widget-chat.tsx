@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useRef, Suspense } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Send, MessageCircle } from "lucide-react"
@@ -20,7 +20,7 @@ interface WidgetChatProps {
   hideHeader?: boolean
 }
 
-function WidgetChatContent({ clienteId, config = {}, hideHeader = false }: WidgetChatProps) {
+export function WidgetChat({ clienteId, config = {}, hideHeader = false }: WidgetChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -33,6 +33,7 @@ function WidgetChatContent({ clienteId, config = {}, hideHeader = false }: Widge
   console.log("[WIDGET-CHAT] 📅 Timestamp:", new Date().toISOString())
   console.log("[WIDGET-CHAT] 🆔 Cliente ID:", clienteId)
 
+  // Función para obtener la configuración actualizada con cache busting
   const fetchWidgetConfig = async () => {
     try {
       console.log("[WIDGET-CHAT] 🔄 Obteniendo configuración actualizada...")
@@ -82,30 +83,28 @@ function WidgetChatContent({ clienteId, config = {}, hideHeader = false }: Widge
   console.log("[WIDGET-CHAT] 📋 Config obtenido de API:", widgetConfig)
   console.log("[WIDGET-CHAT] 📋 Configuración final:", defaultConfig)
 
+  // Inicialización
   useEffect(() => {
-    let isMounted = true
     console.log("[WIDGET-CHAT] 🔄 useEffect de inicialización ejecutándose...")
 
     // Obtener configuración actualizada
-    const initializeConfig = async () => {
-      if (isMounted) {
-        await fetchWidgetConfig()
-      }
-    }
-
-    initializeConfig()
+    fetchWidgetConfig()
 
     // Generar session_id único
     const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    if (isMounted) {
-      setSessionId(newSessionId)
-      console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
-    }
+    setSessionId(newSessionId)
+    console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
+
+    // Configurar actualización periódica de la configuración
+    const configInterval = setInterval(() => {
+      console.log("[WIDGET-CHAT] 🔄 Actualizando configuración periódicamente...")
+      fetchWidgetConfig()
+    }, 5000) // Actualizar cada 5 segundos
 
     console.log("[WIDGET-CHAT] ✅ Inicialización completada")
 
     return () => {
-      isMounted = false
+      clearInterval(configInterval)
     }
   }, [clienteId])
 
@@ -328,14 +327,6 @@ function WidgetChatContent({ clienteId, config = {}, hideHeader = false }: Widge
         <p className="text-xs text-gray-500 text-center">Powered by Treelan</p>
       </div>
     </div>
-  )
-}
-
-export function WidgetChat(props: WidgetChatProps) {
-  return (
-    <Suspense fallback={<div className="flex items-center justify-center h-screen">Cargando chat...</div>}>
-      <WidgetChatContent {...props} />
-    </Suspense>
   )
 }
 

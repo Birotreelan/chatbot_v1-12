@@ -10,7 +10,7 @@ export default function WhatsAppConfigsWrapper() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const fetchConfigs = async () => {
+    async function fetchConfigs() {
       try {
         const response = await fetch("/api/dashboard/configs")
         if (response.ok) {

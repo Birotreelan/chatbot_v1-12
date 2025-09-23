@@ -47,68 +47,53 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    let isMounted = true
-
-    const fetchTemplates = async () => {
-      if (!config.wabaId) {
-        if (isMounted) {
-          setLoading(false)
-          setError("No se ha configurado un WABA ID para este número.")
-        }
-        return
-      }
-
-      try {
-        if (isMounted) {
-          setLoading(true)
-          setError(null)
-        }
-
-        const url = `/api/whatsapp/templates?wabaId=${config.wabaId}&configId=${config.id}`
-        console.log(`Fetching templates from: ${url}`)
-
-        const response = await fetch(url)
-        const data = await response.json()
-
-        if (!response.ok) {
-          throw new Error(data.error || `Error ${response.status}: ${response.statusText}`)
-        }
-
-        if (data.success && data.templates && isMounted) {
-          setTemplates(data.templates)
-          console.log(`Loaded ${data.templates.length} templates`)
-        } else if (isMounted) {
-          throw new Error(data.error || "Error al obtener plantillas")
-        }
-      } catch (error) {
-        if (isMounted) {
-          console.error("Error al cargar plantillas:", error)
-          const errorMessage = error instanceof Error ? error.message : "Error al cargar plantillas"
-          setError(errorMessage)
-          toast({
-            title: "Error",
-            description: errorMessage,
-            variant: "destructive",
-          })
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false)
-        }
-      }
-    }
-
     fetchTemplates()
+  }, [config.id])
 
-    return () => {
-      isMounted = false
+  async function fetchTemplates() {
+    if (!config.wabaId) {
+      setLoading(false)
+      setError("No se ha configurado un WABA ID para este número.")
+      return
     }
-  }, [config.id, config.wabaId, toast])
 
-  const handleRefresh = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      const url = `/api/whatsapp/templates?wabaId=${config.wabaId}&configId=${config.id}`
+      console.log(`Fetching templates from: ${url}`)
+
+      const response = await fetch(url)
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || `Error ${response.status}: ${response.statusText}`)
+      }
+
+      if (data.success && data.templates) {
+        setTemplates(data.templates)
+        console.log(`Loaded ${data.templates.length} templates`)
+      } else {
+        throw new Error(data.error || "Error al obtener plantillas")
+      }
+    } catch (error) {
+      console.error("Error al cargar plantillas:", error)
+      const errorMessage = error instanceof Error ? error.message : "Error al cargar plantillas"
+      setError(errorMessage)
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleRefresh() {
     setRefreshing(true)
-    // Re-trigger the useEffect by updating a dependency
-    setLoading(true)
+    await fetchTemplates()
     setRefreshing(false)
   }
 
@@ -253,7 +238,7 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
             size="sm"
             onClick={handleRefresh}
             disabled={refreshing}
-            className="flex items-center gap-1 bg-transparent"
+            className="flex items-center gap-1"
           >
             <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             Reintentar
@@ -284,7 +269,7 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
           size="sm"
           onClick={handleRefresh}
           disabled={refreshing}
-          className="flex items-center gap-1 bg-transparent"
+          className="flex items-center gap-1"
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
           {refreshing ? "Actualizando..." : "Actualizar"}
