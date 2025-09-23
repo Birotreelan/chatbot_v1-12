@@ -1,503 +1,163 @@
-import type { WhatsAppValue } from "@/lib/types"
-import {
-  getWhatsAppConfigByPhoneId,
-  updateWhatsAppStats,
-  getThreadForUser,
-  resetThreadForUser,
-  updateWhatsAppConfig,
-} from "@/lib/db"
-import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
-import { getAssistantResponse } from "@/lib/openai-tools"
-import { getArgentinaDateTime } from "@/lib/utils/date-utils"
-import { getRedisClient } from "./redis"
-import { enqueueUserMessage } from "./user-queue"
+import { sendWhatsAppMessage } from "./whatsapp-api"
+import { getWhatsAppConfigByPhoneId, updateWhatsAppStats } from "./db"
+import { processWhatsAppMessage } from "./whatsapp-processor"
+import { logError, incrementMetric } from "./monitoring"
 
-// Función para extraer el contenido del mensaje según su tipo
-function extractMessageContent(message: any): string {
-  switch (message.type) {
-    case "text":
-      return message.text?.body || ""
-    case "button":
-      return message.button?.text || message.button?.payload || ""
-    case "interactive":
-      if (message.interactive?.type === "button_reply") {
-        return message.interactive.button_reply?.title || message.interactive.button_reply?.id || ""
-      } else if (message.interactive?.type === "list_reply") {
-        return message.interactive.list_reply?.title || message.interactive.list_reply?.id || ""
-      }
-      return ""
-    default:
-      return ""
-  }
+interface WhatsAppMessage {
+  from: string
+  text?: { body: string }
+  type: string
+  id: string
+  timestamp: string
 }
 
-// Modificar la función handleMessage para usar la cola por usuario
-export async function handleMessage(value: WhatsAppValue) {
-  console.log("[WHATSAPP] Iniciando handleMessage con datos:", JSON.stringify(value, null, 2))
+interface WhatsAppContact {
+  profile: { name: string }
+  wa_id: string
+}
+
+interface WhatsAppWebhookData {
+  messaging_product: string
+  metadata: {
+    display_phone_number: string
+    phone_number_id: string
+  }
+  contacts?: WhatsAppContact[]
+  messages?: WhatsAppMessage[]
+}
+
+export async function handleMessage(data: WhatsAppWebhookData): Promise<void> {
+  console.log("[WHATSAPP] ========== PROCESANDO WEBHOOK ==========")
+  console.log("[WHATSAPP] Datos recibidos:", JSON.stringify(data, null, 2))
 
   try {
-    // Verificar si hay mensajes
-    if (!value.messages || value.messages.length === 0) {
-      console.warn("[WHATSAPP] No se encontraron mensajes en el webhook.")
+    // Validar estructura del webhook
+    if (!data.messages || data.messages.length === 0) {
+      console.log("[WHATSAPP] ⚠️ No hay mensajes para procesar")
       return
     }
 
-    // Extraer información del mensaje
-    const message = value.messages[0]
-    const userPhoneNumber = message.from
-    let userMessage = extractMessageContent(message)
-    const originalMessage = userMessage
+    const message = data.messages[0]
+    const phoneNumberId = data.metadata.phone_number_id
+    const phoneNumber = message.from
 
-    console.log(`[WHATSAPP] Procesando mensaje de ${userPhoneNumber}: "${userMessage}" (tipo: ${message.type})`)
+    console.log(`[WHATSAPP] 📱 Procesando mensaje de ${phoneNumber} para phoneNumberId=${phoneNumberId}`)
 
-    // Obtener la configuración de WhatsApp
-    console.log(`[WHATSAPP] Buscando configuración para phone_number_id: ${value.metadata.phone_number_id}`)
-    const config = await getWhatsAppConfigByPhoneId(value.metadata.phone_number_id)
-
+    // Obtener configuración de WhatsApp
+    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
     if (!config) {
-      console.error(
-        `[WHATSAPP] Configuración no encontrada para el número de teléfono ID: ${value.metadata.phone_number_id}`,
-      )
+      console.error(`[WHATSAPP] ❌ No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
+      await logError("whatsapp_config_not_found", new Error(`Config not found for phone: ${phoneNumberId}`))
       return
     }
 
-    console.log(`[WHATSAPP] Configuración encontrada: ${config.displayName} (ID: ${config.id})`)
+    console.log(`[WHATSAPP] ✅ Configuración encontrada: ${config.displayName} (${config.id})`)
 
-    // Actualizar estadísticas - mensaje recibido
+    // Obtener nombre del usuario
+    const userName = data.contacts?.[0]?.profile?.name || "Usuario"
+    console.log(`[WHATSAPP] 👤 Usuario: ${userName} (${phoneNumber})`)
+
+    // Validar que el mensaje tenga texto
+    if (message.type !== "text" || !message.text?.body) {
+      console.log(`[WHATSAPP] ⚠️ Mensaje no es de texto o está vacío. Tipo: ${message.type}`)
+      return
+    }
+
+    const messageText = message.text.body
+    console.log(`[WHATSAPP] 💬 Mensaje: "${messageText}"`)
+
+    // Actualizar estadísticas
     await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+    await incrementMetric("messages_received")
 
-    // Guardar el número de teléfono del usuario en la configuración
-    if (config.lastUserPhoneNumber !== userPhoneNumber) {
-      console.log(`[WHATSAPP] Actualizando número de teléfono del usuario: ${userPhoneNumber}`)
-      await updateWhatsAppConfig(config.id, { lastUserPhoneNumber: userPhoneNumber })
-    }
+    console.log("[WHATSAPP] 🤖 Enviando a procesamiento de IA...")
 
-    // Detectar si es una respuesta de botón y enviarla al proxy
-    if (message.type === "button" && message.button) {
-      console.log(
-        `[WHATSAPP] Detectada respuesta de botón: ${message.button.text} (payload: ${message.button.payload})`,
-      )
+    // CORREGIDO: Pasar los parámetros en el orden correcto
+    // processWhatsAppMessage(phoneNumber, message, userName, messageId, whatsappConfigId)
+    const response = await processWhatsAppMessage(
+      phoneNumber, // phoneNumber
+      messageText, // message
+      userName, // userName
+      message.id, // messageId
+      config.id, // whatsappConfigId - ESTE ES EL PARÁMETRO CORRECTO
+    )
 
-      let proxyResponse = null
-      try {
-        const proxyPayload = {
-          action: "template_response",
-          Cliente_Id: config.cliente_id,
-          Phone_Number_Id: value.metadata.phone_number_id,
-          ...value, // Enviar toda la estructura de WhatsApp
-        }
+    console.log(`[WHATSAPP] ✅ Respuesta generada: ${response.length} caracteres`)
 
-        console.log(`[WHATSAPP] Enviando al proxy: ${config.proxy}`)
-        console.log(`[WHATSAPP] Payload del proxy:`, JSON.stringify(proxyPayload, null, 2))
+    // Enviar respuesta
+    await sendWhatsAppMessage(phoneNumberId, config.accessToken, phoneNumber, response)
+    console.log("[WHATSAPP] ✅ Respuesta enviada exitosamente")
 
-        // Enviar la respuesta completa al proxy
-        const response = await fetch(`${config.proxy}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(proxyPayload),
-        })
+    // Actualizar estadísticas de procesamiento
+    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+    await incrementMetric("messages_sent")
 
-        console.log(`[WHATSAPP] Respuesta del proxy - Status: ${response.status}`)
-        console.log(`[WHATSAPP] Respuesta del proxy - StatusText: ${response.statusText}`)
-
-        if (response.ok) {
-          const responseText = await response.text()
-          console.log(`[WHATSAPP] Respuesta del proxy - Body:`, responseText)
-          console.log(`[WHATSAPP] Respuesta de botón enviada al proxy exitosamente`)
-
-          // Parsear la respuesta del proxy para enviarla a OpenAI
-          try {
-            proxyResponse = JSON.parse(responseText)
-          } catch (parseError) {
-            console.error(`[WHATSAPP] Error al parsear respuesta del proxy:`, parseError)
-            proxyResponse = { success: false, error: "PARSE_ERROR", raw: responseText }
-          }
-        } else {
-          const errorText = await response.text()
-          console.error(`[WHATSAPP] Error al enviar respuesta de botón al proxy: ${response.status} - ${errorText}`)
-          proxyResponse = { success: false, error: "PROXY_ERROR", status: response.status, message: errorText }
-        }
-      } catch (error) {
-        console.error(`[WHATSAPP] Error al enviar respuesta de botón al proxy:`, error)
-        console.error(`[WHATSAPP] Error details:`, {
-          message: error.message,
-          stack: error.stack,
-          name: error.name,
-        })
-        proxyResponse = { success: false, error: "NETWORK_ERROR", message: error.message }
-      }
-
-      // Modificar el mensaje para incluir la respuesta del proxy de forma más específica
-      if (proxyResponse) {
-        console.log(`[WHATSAPP] Procesando respuesta del proxy:`, JSON.stringify(proxyResponse, null, 2))
-
-        if (proxyResponse.success) {
-          // Si el proxy responde exitosamente
-          if (proxyResponse.action_type) {
-            // Usar la información específica del proxy para crear el mensaje
-            switch (proxyResponse.action_type) {
-              case "confirmacion_turno":
-                userMessage = `El paciente confirmó su turno presionando "${originalMessage}".
-
-[CONFIRMACION_TURNO_EXITOSA]
-Accion: Confirmación de turno
-Estado: ${proxyResponse.status}
-Mensaje: ${proxyResponse.message}
-Instrucciones: ${proxyResponse.next_steps}
-Timestamp: ${proxyResponse.timestamp}
-[/CONFIRMACION_TURNO_EXITOSA]
-
-IMPORTANTE: Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno confirmado (fecha, hora, profesional, lugar).`
-                break
-
-              case "cancelacion_turno":
-                userMessage = `El paciente canceló su turno presionando "${originalMessage}".
-
-[CANCELACION_TURNO_EXITOSA]
-Accion: Cancelación de turno
-Estado: ${proxyResponse.status}
-Mensaje: ${proxyResponse.message}
-Instrucciones: ${proxyResponse.next_steps}
-Timestamp: ${proxyResponse.timestamp}
-[/CANCELACION_TURNO_EXITOSA]
-
-IMPORTANTE: Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno cancelado.`
-                break
-
-              case "reprogramacion_turno":
-                userMessage = `El paciente solicitó reprogramar su turno presionando "${originalMessage}".
-
-[REPROGRAMACION_TURNO_SOLICITADA]
-Accion: Reprogramación de turno
-Estado: ${proxyResponse.status}
-Mensaje: ${proxyResponse.message}
-Instrucciones: ${proxyResponse.next_steps}
-Timestamp: ${proxyResponse.timestamp}
-[/REPROGRAMACION_TURNO_SOLICITADA]
-
-IMPORTANTE: Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno a reprogramar.`
-                break
-
-              default:
-                userMessage = `El paciente respondió "${originalMessage}" a una plantilla.
-
-[RESPUESTA_BOTON_PROCESADA]
-Accion: ${proxyResponse.action_type}
-Estado: ${proxyResponse.status || "procesado"}
-Mensaje: ${proxyResponse.message || "Respuesta procesada exitosamente"}
-Instrucciones: ${proxyResponse.next_steps || "Continuar con la conversación normal"}
-Timestamp: ${proxyResponse.timestamp || new Date().toISOString()}
-[/RESPUESTA_BOTON_PROCESADA]
-
-Responde de manera apropiada según la acción realizada.`
-            }
-          } else {
-            // Si success es true pero no hay action_type específico
-            const accionDetectada = originalMessage.toLowerCase().includes("confirmar")
-              ? "confirmacion"
-              : originalMessage.toLowerCase().includes("cancelar")
-                ? "cancelacion"
-                : "respuesta_generica"
-
-            userMessage = `El paciente respondió "${originalMessage}" a una plantilla.
-
-[RESPUESTA_BOTON_PROCESADA]
-Accion: ${accionDetectada}
-Estado: procesado
-Mensaje: Respuesta "${originalMessage}" procesada exitosamente por el proxy
-Instrucciones: Seguir las reglas específicas del system prompt para respuestas de tipo "${accionDetectada}"
-Timestamp: ${new Date().toISOString()}
-[/RESPUESTA_BOTON_PROCESADA]
-
-IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno.`
-          }
-        } else {
-          // Si hay error en el proxy, manejar casos específicos
-          const errorType = proxyResponse.error
-          const userAction = proxyResponse.user_action || originalMessage
-
-          switch (errorType) {
-            case "CANNOT_CANCEL":
-              userMessage = `El paciente intentó cancelar su turno presionando "${userAction}" pero no es posible.
-
-[ERROR_ESTADO_TURNO]
-Accion_Solicitada: Cancelación
-Error: ${errorType}
-Mensaje: ${proxyResponse.message || "No se puede cancelar un turno que ya fue confirmado"}
-Razon: El turno ya fue confirmado y no puede ser cancelado por este medio
-Solucion_Sugerida: Contactar directamente con la clínica
-[/ERROR_ESTADO_TURNO]
-
-Explica que no se puede cancelar un turno ya confirmado y que debe contactar a la clínica si cometió un error.`
-              break
-
-            case "CANNOT_CONFIRM":
-              userMessage = `El paciente intentó confirmar su turno presionando "${userAction}" pero no es posible.
-
-[ERROR_ESTADO_TURNO]
-Accion_Solicitada: Confirmación
-Error: ${errorType}
-Mensaje: ${proxyResponse.message || "No se puede confirmar un turno que ya fue cancelado"}
-Razon: El turno ya fue cancelado y no puede ser confirmado por este medio
-Solucion_Sugerida: Contactar directamente con la clínica
-[/ERROR_ESTADO_TURNO]
-
-Explica que no se puede confirmar un turno ya cancelado y que debe contactar a la clínica si cometió un error.`
-              break
-
-            case "TURNO_EXPIRED":
-              userMessage = `El paciente intentó gestionar su turno presionando "${userAction}" pero el turno ya expiró.
-
-[ERROR_ESTADO_TURNO]
-Accion_Solicitada: ${userAction}
-Error: ${errorType}
-Mensaje: ${proxyResponse.message || "El turno ya expiró"}
-Razon: El turno ya pasó la fecha/hora programada
-Solucion_Sugerida: Contactar directamente con la clínica para reagendar
-[/ERROR_ESTADO_TURNO]
-
-Explica que el turno ya expiró y que debe contactar a la clínica para reagendar.`
-              break
-
-            default:
-              // Error genérico
-              userMessage = `El paciente presionó "${originalMessage}" pero hubo un error en el procesamiento.
-
-[ERROR_PROCESAMIENTO_BOTON]
-Accion: ${originalMessage}
-Estado: Error
-Error: ${JSON.stringify(proxyResponse)}
-[/ERROR_PROCESAMIENTO_BOTON]
-
-Informa que hubo un problema técnico y ofrece alternativas de contacto.`
-          }
-        }
-      }
-    }
-
-    // Comandos especiales
-    if (userMessage.toLowerCase() === "reset" || userMessage.toLowerCase() === "tree reset") {
-      try {
-        console.log(`[WHATSAPP] Procesando comando de reset para el usuario ${userPhoneNumber}`)
-
-        // Usar la función resetThreadForUser para reiniciar la conversación
-        const resetResult = await resetThreadForUser(userPhoneNumber, config.id)
-        console.log(`[WHATSAPP] Thread reseteado: ${resetResult.threadId}, isNewThread: ${resetResult.isNewThread}`)
-
-        // Enviar mensaje de confirmación
-        await sendWhatsAppMessage(
-          value.metadata.phone_number_id,
-          config.accessToken,
-          userPhoneNumber,
-          "Conversación reiniciada. ¿En qué puedo ayudarte?",
-        )
-
-        // Actualizar estadísticas - mensaje procesado
-        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-
-        return // Importante: salir de la función después de procesar el reset
-      } catch (error) {
-        console.error("[WHATSAPP] Error al resetear conversación:", error)
-
-        // Enviar mensaje de error
-        await sendWhatsAppMessage(
-          value.metadata.phone_number_id,
-          config.accessToken,
-          userPhoneNumber,
-          "No se pudo reiniciar la conversación. Por favor, intenta de nuevo.",
-        )
-
-        // Actualizar estadísticas - error
-        await updateWhatsAppStats(config.id, { errors: 1 })
-
-        return // Salir de la función después de manejar el error
-      }
-    }
-
-    // Encolar el mensaje para procesamiento secuencial por usuario
-    console.log(`[WHATSAPP] Encolando mensaje para usuario ${userPhoneNumber}`)
-    await enqueueUserMessage(userPhoneNumber, {
-      userMessage,
-      messageType: message.type,
-      phoneNumberId: value.metadata.phone_number_id,
-      config,
-    })
-
-    console.log(`[WHATSAPP] Mensaje encolado exitosamente para usuario ${userPhoneNumber}`)
+    console.log("[WHATSAPP] ========== PROCESAMIENTO COMPLETADO ==========")
   } catch (error) {
-    console.error("[WHATSAPP] Error al procesar el mensaje:", error)
+    console.error("[WHATSAPP] ❌ Error procesando mensaje:", error)
+    await logError("whatsapp_processing", error instanceof Error ? error : new Error(String(error)))
+    await incrementMetric("whatsapp_errors")
+
+    // Si tenemos configuración, actualizar estadísticas de error
+    if (data.metadata?.phone_number_id) {
+      const config = await getWhatsAppConfigByPhoneId(data.metadata.phone_number_id)
+      if (config) {
+        await updateWhatsAppStats(config.id, { errors: 1 })
+      }
+    }
+
+    throw error
   }
 }
 
-// Función para procesar un mensaje individual (llamada desde la cola)
+export async function verifyWebhook(mode: string, token: string, challenge: string): Promise<string | null> {
+  console.log("[WHATSAPP] ========== VERIFICANDO WEBHOOK ==========")
+  console.log(`[WHATSAPP] Mode: ${mode}`)
+  console.log(`[WHATSAPP] Token: ${token}`)
+  console.log(`[WHATSAPP] Challenge: ${challenge}`)
+
+  // Obtener todas las configuraciones para verificar el token
+  const { getAllWhatsAppConfigs } = await import("./db")
+  const configs = await getAllWhatsAppConfigs()
+
+  // Buscar configuración que coincida con el token
+  const matchingConfig = configs.find((config) => config.verifyToken === token)
+
+  if (mode === "subscribe" && matchingConfig) {
+    console.log(`[WHATSAPP] ✅ Token verificado para configuración: ${matchingConfig.displayName}`)
+    return challenge
+  }
+
+  console.log("[WHATSAPP] ❌ Token de verificación inválido")
+  return null
+}
+
+// Función para procesar mensajes individuales
 export async function processIndividualMessage(
   userMessage: string,
   phoneNumberId: string,
   config: any,
   userPhoneNumber: string,
-  messageType = "text",
-) {
-  console.log(
-    `[WHATSAPP] Procesando mensaje individual para usuario ${userPhoneNumber}: "${userMessage}" (tipo: ${messageType})`,
-  )
+  messageType?: string,
+): Promise<void> {
+  console.log(`[WHATSAPP] 🔄 Procesando mensaje individual de ${userPhoneNumber}`)
 
   try {
-    // Obtener o crear un thread para este usuario
-    let threadResult
-    try {
-      console.log(`[WHATSAPP] Obteniendo thread para usuario ${userPhoneNumber} y config ${config.id}`)
-      threadResult = await getThreadForUser(userPhoneNumber, config.id)
-      console.log(`[WHATSAPP] Thread obtenido: ${threadResult.threadId}, isNewThread: ${threadResult.isNewThread}`)
-    } catch (error) {
-      console.error("[WHATSAPP] Error al obtener thread ID:", error)
-      await sendWhatsAppMessage(
-        phoneNumberId,
-        config.accessToken,
-        userPhoneNumber,
-        "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde.",
-      )
-      // Actualizar estadísticas - error
-      await updateWhatsAppStats(config.id, { errors: 1 })
-      return
-    }
+    // Procesar mensaje con IA - CORREGIDO: pasar parámetros correctamente
+    const response = await processWhatsAppMessage(
+      userPhoneNumber, // phoneNumber
+      userMessage, // message
+      "Usuario", // userName
+      "individual", // messageId
+      config.id, // whatsappConfigId
+    )
 
-    // Preparar mensaje con parámetros iniciales
-    const fechaHora = getArgentinaDateTime()
-    let messageToSend = `[SISTEMA]
-Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
-PrimerMensaje: ${threadResult.isNewThread}
-TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}
-Cliente_id: ${config.cliente_id}
-sede_id: ${config.sede_id}
-[/SISTEMA]
+    // Enviar respuesta
+    await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, response)
 
-${userMessage}`
-
-    // Si es un thread reseteado, indicarlo
-    if (threadResult.isResetThread) {
-      messageToSend = `[SISTEMA]
-Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
-PrimerMensaje: true
-ThreadReseteado: true
-TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}
-Cliente_id: ${config.cliente_id}
-sede_id: ${config.sede_id}
-[/SISTEMA]
-
-${userMessage}`
-    }
-
-    console.log(`[WHATSAPP] Mensaje preparado para OpenAI:`, messageToSend)
-
-    // Obtener respuesta del asistente
-    try {
-      console.log(`[WHATSAPP] Llamando a getAssistantResponse...`)
-      // Usar el ID de asistente específico para esta configuración y pasar el phoneNumberId
-      await getAssistantResponse(threadResult.threadId, messageToSend, phoneNumberId, config.whatsappAssistantId)
-
-      console.log(`[WHATSAPP] getAssistantResponse completado exitosamente`)
-
-      // Actualizar estadísticas - mensaje procesado
-      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-    } catch (error) {
-      console.error("[WHATSAPP] Error al obtener respuesta del asistente:", error)
-
-      // Actualizar estadísticas - error
-      await updateWhatsAppStats(config.id, { errors: 1 })
-
-      // Si el error es 404 (thread no encontrado), intentar crear uno nuevo
-      if (error.status === 404 && error.error?.type === "invalid_request_error") {
-        try {
-          console.log("[WHATSAPP] Thread no encontrado, creando uno nuevo...")
-          // Crear un nuevo thread directamente con OpenAI
-          const openai = new (await import("openai")).default({
-            apiKey: process.env.OPENAI_API_KEY,
-          })
-
-          const newThread = await openai.beta.threads.create()
-          console.log(`[WHATSAPP] Nuevo thread creado: ${newThread.id}`)
-
-          // Actualizar en la base de datos
-          const key = `thread:${userPhoneNumber}:${config.id}`
-          const redisClient = getRedisClient()
-
-          // Guardar el nuevo thread
-          const threadInfo = {
-            threadId: newThread.id,
-            phoneNumber: userPhoneNumber,
-            whatsappConfigId: config.id,
-            lastMessageAt: new Date().toISOString(),
-            messageCount: 1,
-            isResetThread: true, // Añadir este flag para identificar que es un thread recién creado
-          }
-
-          if (redisClient) {
-            await redisClient.set(key, JSON.stringify(threadInfo))
-          }
-
-          // Preparar mensaje con parámetros iniciales
-          const fechaHora = getArgentinaDateTime()
-          messageToSend = `[SISTEMA]
-Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
-PrimerMensaje: true
-TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}
-Cliente_id: ${config.cliente_id}
-sede_id: ${config.sede_id}
-[/SISTEMA]
-
-${userMessage}`
-
-          console.log(`[WHATSAPP] Reintentando con nuevo thread...`)
-          await getAssistantResponse(newThread.id, messageToSend, phoneNumberId, config.whatsappAssistantId)
-
-          // Actualizar estadísticas - mensaje procesado
-          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-        } catch (retryError) {
-          console.error("[WHATSAPP] Error al reintentar con nuevo thread:", retryError)
-
-          // Enviar mensaje de error al usuario
-          await sendWhatsAppMessage(
-            phoneNumberId,
-            config.accessToken,
-            userPhoneNumber,
-            "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde.",
-          )
-
-          // Actualizar estadísticas - error
-          await updateWhatsAppStats(config.id, { errors: 1 })
-        }
-      } else {
-        // Enviar mensaje de error al usuario
-        await sendWhatsAppMessage(
-          phoneNumberId,
-          config.accessToken,
-          userPhoneNumber,
-          "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde.",
-        )
-      }
-    }
-
-    console.log(`[WHATSAPP] Procesamiento individual completado para usuario ${userPhoneNumber}`)
+    console.log(`[WHATSAPP] ✅ Mensaje individual procesado exitosamente`)
   } catch (error) {
-    console.error(`[WHATSAPP] Error al procesar mensaje individual para usuario ${userPhoneNumber}:`, error)
-    // Enviar mensaje de error al usuario
-    try {
-      await sendWhatsAppMessage(
-        phoneNumberId,
-        config.accessToken,
-        userPhoneNumber,
-        "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde.",
-      )
-    } catch (sendError) {
-      console.error("[WHATSAPP] Error al enviar mensaje de error:", sendError)
-    }
+    console.error(`[WHATSAPP] ❌ Error procesando mensaje individual:`, error)
+    throw error
   }
 }
