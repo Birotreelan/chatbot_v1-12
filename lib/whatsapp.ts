@@ -64,9 +64,11 @@ function extractMessageContent(message: WhatsAppMessage): string {
 }
 
 export async function handleMessage(data: WhatsAppWebhookData): Promise<void> {
+  console.log("=".repeat(80))
   console.log("[WHATSAPP] ========== PROCESANDO MENSAJE WHATSAPP ==========")
   console.log("[WHATSAPP] Timestamp:", new Date().toISOString())
   console.log("[WHATSAPP] Datos recibidos:", JSON.stringify(data, null, 2))
+  console.log("=".repeat(80))
 
   try {
     // Validar estructura del webhook
@@ -143,12 +145,17 @@ export async function handleMessage(data: WhatsAppWebhookData): Promise<void> {
 
     // Actualizar estadísticas
     console.log(`[WHATSAPP] 📊 Actualizando estadísticas...`)
-    await updateWhatsAppStats(config.id, { messagesReceived: 1 })
-    await incrementMetric("messages_received")
-    console.log(`[WHATSAPP] ✅ Estadísticas actualizadas`)
+    try {
+      await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+      await incrementMetric("messages_received")
+      console.log(`[WHATSAPP] ✅ Estadísticas actualizadas`)
+    } catch (statsError) {
+      console.error(`[WHATSAPP] Error actualizando estadísticas:`, statsError)
+    }
 
     // Verificar comandos especiales
-    if (messageText.toLowerCase() === "reset" || messageText.toLowerCase() === "tree reset") {
+    const lowerMessage = messageText.toLowerCase().trim()
+    if (lowerMessage === "reset" || lowerMessage === "tree reset") {
       console.log(`[WHATSAPP] 🔄 Comando de reset detectado`)
       try {
         // Resetear thread
@@ -193,29 +200,41 @@ export async function handleMessage(data: WhatsAppWebhookData): Promise<void> {
     console.log("[WHATSAPP] 🤖 Enviando a procesamiento de IA...")
 
     // Procesar mensaje con IA
-    const response = await processWhatsAppMessage(phoneNumber, messageText, userName, message.id, config.id)
-
-    console.log(`[WHATSAPP] ✅ Respuesta generada: ${response.length} caracteres`)
-    console.log(`[WHATSAPP] Respuesta: "${response.substring(0, 200)}${response.length > 200 ? "..." : ""}"`)
+    let response: string
+    try {
+      response = await processWhatsAppMessage(phoneNumber, messageText, userName, message.id, config.id)
+      console.log(`[WHATSAPP] ✅ Respuesta generada: ${response.length} caracteres`)
+      console.log(`[WHATSAPP] Respuesta preview: "${response.substring(0, 200)}${response.length > 200 ? "..." : ""}"`)
+    } catch (aiError) {
+      console.error(`[WHATSAPP] ❌ Error en procesamiento de IA:`, aiError)
+      response = "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
+    }
 
     // Enviar respuesta
     console.log(`[WHATSAPP] 📤 Enviando respuesta por WhatsApp...`)
-    await sendWhatsAppMessage(phoneNumberId, config.accessToken, phoneNumber, response)
-    console.log("[WHATSAPP] ✅ Respuesta enviada exitosamente")
+    try {
+      await sendWhatsAppMessage(phoneNumberId, config.accessToken, phoneNumber, response)
+      console.log("[WHATSAPP] ✅ Respuesta enviada exitosamente")
 
-    // Actualizar estadísticas de procesamiento
-    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-    await incrementMetric("messages_sent")
+      // Actualizar estadísticas de procesamiento
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      await incrementMetric("messages_sent")
+    } catch (sendError) {
+      console.error("[WHATSAPP] ❌ Error enviando respuesta:", sendError)
+      await updateWhatsAppStats(config.id, { errors: 1 })
+      throw sendError
+    }
 
+    console.log("=".repeat(80))
     console.log("[WHATSAPP] ========== PROCESAMIENTO COMPLETADO ==========")
+    console.log("=".repeat(80))
   } catch (error) {
-    console.error("[WHATSAPP] ❌ Error crítico procesando mensaje:", error)
+    console.error("=".repeat(80))
+    console.error("[WHATSAPP] ❌ ERROR CRÍTICO PROCESANDO MENSAJE:")
+    console.error("[WHATSAPP] Error name:", error?.constructor?.name || "Unknown")
+    console.error("[WHATSAPP] Error message:", error?.message || "No message")
     console.error("[WHATSAPP] Stack trace:", error instanceof Error ? error.stack : "No stack trace")
-    console.error("[WHATSAPP] Error details:", {
-      name: error?.constructor?.name || "Unknown",
-      message: error?.message || "No message",
-      code: error?.code || "No code",
-    })
+    console.error("=".repeat(80))
 
     await logError("whatsapp_processing", error instanceof Error ? error : new Error(String(error)))
     await incrementMetric("whatsapp_errors")
