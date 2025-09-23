@@ -25,6 +25,7 @@ const memoryStorage = {
   configs: new Map<string, WhatsAppConfig>(),
   phoneToConfig: new Map<string, string>(),
   threads: new Map<string, ThreadInfo>(),
+  conversations: new Map<string, any>(),
   stats: null as SystemStats | null,
 }
 
@@ -32,6 +33,7 @@ const memoryStorage = {
 const CONFIG_PREFIX = "whatsapp_config:"
 const THREAD_PREFIX = "thread:"
 const PHONE_TO_CONFIG_PREFIX = "phone_to_config:"
+const CONVERSATION_PREFIX = "conversation:"
 const STATS_KEY = "system_stats"
 
 // Función auxiliar para manejar la serialización/deserialización segura
@@ -188,47 +190,62 @@ export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | nu
 
 // Obtener una configuración por ID de número de teléfono
 export async function getWhatsAppConfigByPhoneId(phoneNumberId: string): Promise<WhatsAppConfig | null> {
+  console.log(`[DB] 🔍 Buscando configuración por phoneNumberId: ${phoneNumberId}`)
+
   const redisClient = getRedisClient()
 
   if (redisClient) {
     // Intentar obtener el ID de configuración directamente
     const key = `${PHONE_TO_CONFIG_PREFIX}${phoneNumberId}`
+    console.log(`[DB] 🔍 Buscando mapeo en Redis: ${key}`)
     const configId = await redisClient.get(key)
 
     if (!configId) {
+      console.log(`[DB] ❌ No se encontró mapeo directo, buscando manualmente...`)
       // Si no encontramos el ID, intentamos buscar manualmente
       const allConfigs = await getAllWhatsAppConfigs()
+      console.log(`[DB] 🔍 Buscando entre ${allConfigs.length} configuraciones`)
+
       const manualMatch = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
 
       if (manualMatch) {
+        console.log(`[DB] ✅ Configuración encontrada manualmente: ${manualMatch.displayName}`)
         // Corregir el mapeo en Redis
         await redisClient.set(key, manualMatch.id)
+        console.log(`[DB] ✅ Mapeo corregido en Redis`)
         return manualMatch
       }
 
+      console.log(`[DB] ❌ No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
       return null
     }
 
+    console.log(`[DB] ✅ Mapeo encontrado: ${configId}`)
     const config = await getWhatsAppConfig(configId as string)
     return config
   } else {
+    console.log(`[DB] 🔍 Buscando en memoria`)
     // Fallback a memoria
     const configId = memoryStorage.phoneToConfig.get(phoneNumberId)
 
     if (!configId) {
+      console.log(`[DB] ❌ No se encontró mapeo en memoria, buscando manualmente...`)
       // Si no encontramos el ID, intentamos buscar manualmente
       const allConfigs = Array.from(memoryStorage.configs.values())
       const manualMatch = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
 
       if (manualMatch) {
+        console.log(`[DB] ✅ Configuración encontrada manualmente en memoria: ${manualMatch.displayName}`)
         // Corregir el mapeo en memoria
         memoryStorage.phoneToConfig.set(phoneNumberId, manualMatch.id)
         return manualMatch
       }
 
+      console.log(`[DB] ❌ No se encontró configuración en memoria para phoneNumberId: ${phoneNumberId}`)
       return null
     }
 
+    console.log(`[DB] ✅ Mapeo encontrado en memoria: ${configId}`)
     return memoryStorage.configs.get(configId) || null
   }
 }
@@ -373,7 +390,7 @@ export async function deleteWhatsAppConfig(id: string): Promise<boolean> {
   return true
 }
 
-// Función para obtener configuración por clienteId - NUEVA FUNCIÓN AGREGADA
+// Función para obtener configuración por clienteId
 export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppConfig | null> {
   try {
     console.log(`[DB] 🔍 Buscando configuración para cliente_id: ${clienteId}`)
@@ -507,7 +524,7 @@ export async function getThreadForUser(
   return { threadId: thread.id, isNewThread: true }
 }
 
-// Resetear un thread para un usuario - OPTIMIZADO
+// Resetear un thread para un usuario
 export async function resetThreadForUser(
   phoneNumber: string,
   whatsappConfigId: string,
@@ -589,6 +606,74 @@ export async function getAllThreads(): Promise<ThreadInfo[]> {
   }
 }
 
+// Funciones para conversaciones (nuevas)
+export async function getOrCreateConversation(
+  phoneNumber: string,
+  userName: string,
+  whatsappConfigId: string,
+  clienteId: string,
+  clinicName: string,
+  threadId: string,
+): Promise<any> {
+  const conversationKey = `${CONVERSATION_PREFIX}${phoneNumber}:${whatsappConfigId}`
+  const redisClient = getRedisClient()
+
+  console.log(`[DB] 🔍 Obteniendo conversación para ${phoneNumber}`)
+
+  if (redisClient) {
+    const conversationData = await redisClient.get(conversationKey)
+    const conversation = safeJsonParse(conversationData)
+
+    if (conversation) {
+      console.log(`[DB] ✅ Conversación encontrada: ${conversation.id}`)
+      return conversation
+    }
+  } else {
+    const conversation = memoryStorage.conversations.get(conversationKey)
+    if (conversation) {
+      console.log(`[DB] ✅ Conversación encontrada en memoria: ${conversation.id}`)
+      return conversation
+    }
+  }
+
+  // Crear nueva conversación
+  const newConversation = {
+    id: nanoid(),
+    phoneNumber,
+    userName,
+    whatsappConfigId,
+    clienteId,
+    clinicName,
+    threadId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    messages: [],
+  }
+
+  if (redisClient) {
+    await redisClient.set(conversationKey, JSON.stringify(newConversation))
+  } else {
+    memoryStorage.conversations.set(conversationKey, newConversation)
+  }
+
+  console.log(`[DB] ✅ Nueva conversación creada: ${newConversation.id}`)
+  return newConversation
+}
+
+export async function addMessageToConversation(
+  conversationId: string,
+  role: "user" | "assistant",
+  content: string,
+  messageId: string,
+): Promise<void> {
+  console.log(`[DB] 📝 Agregando mensaje a conversación ${conversationId}`)
+
+  // Esta función es un placeholder - en una implementación real
+  // buscarías la conversación y agregarías el mensaje
+  // Por ahora solo logueamos para debug
+  console.log(`[DB] Mensaje agregado: ${role} - ${content.substring(0, 100)}...`)
+}
+
 // Funciones para estadísticas del sistema
 
 // Actualizar estadísticas del sistema
@@ -646,8 +731,13 @@ export async function updateWhatsAppStats(
   configId: string,
   updates: { messagesReceived?: number; messagesProcessed?: number; errors?: number },
 ): Promise<void> {
+  console.log(`[DB] 📊 Actualizando estadísticas para config ${configId}:`, updates)
+
   const config = await getWhatsAppConfig(configId)
-  if (!config) return
+  if (!config) {
+    console.log(`[DB] ❌ No se encontró configuración para actualizar estadísticas: ${configId}`)
+    return
+  }
 
   const updatedStats = {
     ...config.stats,
@@ -658,6 +748,7 @@ export async function updateWhatsAppStats(
   }
 
   await updateWhatsAppConfig(configId, { stats: updatedStats })
+  console.log(`[DB] ✅ Estadísticas actualizadas para ${config.displayName}`)
 }
 
 // Función adicional para obtener configuración por ID (alias para compatibilidad)
