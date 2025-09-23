@@ -22,10 +22,12 @@ export function ErrorLog() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
 
   useEffect(() => {
-    async function fetchErrorLog() {
+    let isMounted = true
+
+    const fetchErrorLog = async () => {
       try {
         const response = await fetch("/api/dashboard/errors")
-        if (response.ok) {
+        if (response.ok && isMounted) {
           const data = await response.json()
           setErrorData(data)
 
@@ -35,17 +37,29 @@ export function ErrorLog() {
           }
         }
       } catch (error) {
-        console.error("Error al cargar log de errores:", error)
+        if (isMounted) {
+          console.error("Error al cargar log de errores:", error)
+        }
       } finally {
-        setLoading(false)
+        if (isMounted) {
+          setLoading(false)
+        }
       }
     }
 
     fetchErrorLog()
 
     // Actualizar cada minuto
-    const interval = setInterval(fetchErrorLog, 60000)
-    return () => clearInterval(interval)
+    const interval = setInterval(() => {
+      if (isMounted) {
+        fetchErrorLog()
+      }
+    }, 60000)
+
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+    }
   }, [selectedCategory])
 
   const getCategoryBadgeVariant = (category: string) => {

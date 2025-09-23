@@ -11,25 +11,39 @@ export function PerformanceMetrics() {
   const [period, setPeriod] = useState("day")
 
   useEffect(() => {
-    async function fetchMetrics() {
+    let isMounted = true
+
+    const fetchMetrics = async () => {
       try {
         const response = await fetch(`/api/dashboard/metrics?period=${period}`)
-        if (response.ok) {
+        if (response.ok && isMounted) {
           const data = await response.json()
           setMetrics(data)
         }
       } catch (error) {
-        console.error("Error al cargar métricas:", error)
+        if (isMounted) {
+          console.error("Error al cargar métricas:", error)
+        }
       } finally {
-        setLoading(false)
+        if (isMounted) {
+          setLoading(false)
+        }
       }
     }
 
     fetchMetrics()
 
     // Actualizar cada minuto
-    const interval = setInterval(fetchMetrics, 60000)
-    return () => clearInterval(interval)
+    const interval = setInterval(() => {
+      if (isMounted) {
+        fetchMetrics()
+      }
+    }, 60000)
+
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+    }
   }, [period])
 
   if (loading) {

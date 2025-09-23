@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { processWhatsAppMessage } from "@/lib/whatsapp-processor"
 import { logError, incrementMetric } from "@/lib/monitoring"
-import { getWhatsAppConfig } from "@/lib/db"
+import { getWhatsAppConfigByPhoneId } from "@/lib/db"
 
 // Permitir que la función se ejecute durante más tiempo
 export const maxDuration = 60
@@ -26,13 +26,20 @@ async function processMessage(req: Request) {
     const phoneNumber = message.from
     const messageText = message.text?.body || ""
 
-    // Get WhatsApp config (assuming we have a default config or need to determine it)
-    // For now, we'll need to get the config based on the phone number or use a default
-    const config = await getWhatsAppConfig() // This might need to be adjusted based on your config logic
+    const phoneNumberId = body.metadata?.phone_number_id
+
+    if (!phoneNumberId) {
+      throw new Error("Phone number ID not found in webhook data")
+    }
+
+    console.log(`[PROCESS-MESSAGE] Buscando configuración para phoneNumberId: ${phoneNumberId}`)
+    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
 
     if (!config) {
-      throw new Error("WhatsApp configuration not found")
+      throw new Error(`WhatsApp configuration not found for phoneNumberId: ${phoneNumberId}`)
     }
+
+    console.log(`[PROCESS-MESSAGE] Configuración encontrada: ${config.displayName} (${config.id})`)
 
     // Process the message with correct parameters
     const response = await processWhatsAppMessage({

@@ -20,38 +20,40 @@ export function MonitoringStats() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    async function fetchMonitoringData() {
+    let isMounted = true
+
+    const fetchMonitoringData = async () => {
       try {
         const response = await fetch("/api/dashboard/monitoring")
-        if (response.ok) {
+        if (response.ok && isMounted) {
           const monitoringData = await response.json()
           setData(monitoringData)
         }
       } catch (error) {
-        console.error("Error al cargar datos de monitoreo:", error)
+        if (isMounted) {
+          console.error("Error al cargar datos de monitoreo:", error)
+        }
       } finally {
-        setLoading(false)
+        if (isMounted) {
+          setLoading(false)
+        }
       }
     }
 
     fetchMonitoringData()
 
     // Actualizar cada 30 segundos
-    const interval = setInterval(fetchMonitoringData, 30000)
-    return () => clearInterval(interval)
+    const interval = setInterval(() => {
+      if (isMounted) {
+        fetchMonitoringData()
+      }
+    }, 30000)
+
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+    }
   }, [])
-
-  if (loading) {
-    return <div className="p-4 border rounded-md">Cargando estadísticas de monitoreo...</div>
-  }
-
-  if (!data) {
-    return (
-      <div className="p-4 border rounded-md text-center">
-        No se pudieron cargar las estadísticas de monitoreo. Por favor, intenta de nuevo más tarde.
-      </div>
-    )
-  }
 
   const getHealthBadgeVariant = (health: string) => {
     switch (health) {
@@ -77,6 +79,18 @@ export function MonitoringStats() {
       default:
         return "text-gray-600"
     }
+  }
+
+  if (loading) {
+    return <div className="p-4 border rounded-md">Cargando estadísticas de monitoreo...</div>
+  }
+
+  if (!data) {
+    return (
+      <div className="p-4 border rounded-md text-center">
+        No se pudieron cargar las estadísticas de monitoreo. Por favor, intenta de nuevo más tarde.
+      </div>
+    )
   }
 
   return (
