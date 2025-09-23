@@ -146,67 +146,6 @@ export const openAITools = [
       },
     },
   },
-  {
-    type: "function" as const,
-    function: {
-      name: "get_sedes",
-      description: "Obtiene información de sedes.",
-      parameters: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "create_turno",
-      description: "Crea un nuevo turno.",
-      parameters: {
-        type: "object",
-        properties: {
-          dni: {
-            type: "string",
-            description: "DNI del paciente",
-          },
-          nombre: {
-            type: "string",
-            description: "Nombre del paciente",
-          },
-          apellido: {
-            type: "string",
-            description: "Apellido del paciente",
-          },
-          telefono: {
-            type: "string",
-            description: "Teléfono del paciente",
-          },
-          email: {
-            type: "string",
-            description: "Email del paciente",
-          },
-          sede_id: {
-            type: "string",
-            description: "ID de la sede",
-          },
-          fecha: {
-            type: "string",
-            description: "Fecha del turno en formato YYYY-MM-DD",
-          },
-          hora: {
-            type: "string",
-            description: "Hora del turno en formato HH:MM",
-          },
-          profesional: {
-            type: "string",
-            description: "Nombre del profesional",
-          },
-        },
-        required: ["dni", "nombre", "apellido", "telefono", "email", "sede_id", "fecha", "hora", "profesional"],
-      },
-    },
-  },
 ]
 
 // Mensajes predefinidos para cada función
@@ -217,8 +156,6 @@ const FUNCTION_MESSAGES = {
   obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
   buscar_profesionales: "Buscando profesionales, aguardá unos instantes.",
   validar_obra_social: "Verificando la obra social, aguardá unos instantes.",
-  get_sedes: "Obteniendo información de sedes, aguardá unos instantes.",
-  create_turno: "Creando nuevo turno, aguardá unos instantes.",
   default: "Estoy procesando tu solicitud, dame un momento por favor.",
 }
 
@@ -454,18 +391,6 @@ export async function executeOpenAITool(
         if (toolArgs.fecha) requestBody.Fecha = toolArgs.fecha
         if (toolArgs.hora) requestBody.Hora = toolArgs.hora
         if (toolArgs.profesional) requestBody.Profesional_Nombre = toolArgs.profesional
-        break
-
-      case "get_sedes":
-        requestBody.Action = "get_sedes"
-        break
-
-      case "create_turno":
-        requestBody.Action = "create_turno"
-        requestBody.Sede_Id = toolArgs.sede_id
-        requestBody.Fecha = toolArgs.fecha
-        requestBody.Hora = toolArgs.hora
-        requestBody.Profesional_Nombre = toolArgs.profesional
         break
 
       default:
@@ -713,59 +638,6 @@ export async function executeOpenAITool(
           return {
             exito: true,
             datos: data, // Devolver toda la respuesta original sin modificaciones
-          }
-        }
-
-      case "get_sedes":
-        if (data.sedes) {
-          return truncateToolResponse({
-            exito: true,
-            datos: data.sedes.slice(0, 5).map((sede: any) => ({
-              id: sede.Id,
-              nombre: sede.Nombre,
-              direccion: sede.Direccion,
-              telefono: sede.Telefono,
-            })),
-          })
-        } else if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-            },
-          }
-        } else {
-          return {
-            exito: true,
-            datos: [],
-          }
-        }
-
-      case "create_turno":
-        if (data.success || data.exito) {
-          return {
-            exito: true,
-            datos: {
-              mensaje: "Turno creado exitosamente",
-              confirmacion: data.confirmacion || "Turno confirmado",
-            },
-          }
-        } else if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error al crear el turno",
-            },
-          }
-        } else {
-          return {
-            exito: false,
-            error: {
-              codigo: "RESPUESTA_INESPERADA",
-              mensaje: "La API devolvió una respuesta inesperada al crear el turno",
-            },
           }
         }
 
@@ -1167,99 +1039,4 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
   const totalTime = Date.now() - startTime
   console.log(`[OPENAI] ⏱️ Run completado en ${totalTime}ms (${pollCount} polls)`)
   return run
-}
-
-interface SystemBlockParams {
-  clienteId?: string
-  sedeId?: string
-  sedesData?: any
-  isNewThread?: boolean
-  userName?: string
-}
-
-export function createWhatsAppSystemBlock({
-  clienteId,
-  sedeId,
-  sedesData,
-  isNewThread = false,
-  userName = "Usuario",
-}: SystemBlockParams): string {
-  const now = new Date()
-  const dateStr = now.toLocaleDateString("es-AR", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  })
-  const timeStr = now.toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-
-  let systemBlock = `[SISTEMA]
-Fecha y hora actual: ${dateStr} a las ${timeStr}
-Usuario: ${userName}
-${isNewThread ? "NUEVA CONVERSACIÓN INICIADA" : "CONVERSACIÓN EXISTENTE"}
-
-COMANDOS ESPECIALES:
-- Si el usuario escribe "tree reset", debes responder que la conversación ha sido reiniciada y preguntar en qué puedes ayudar.
-
-INFORMACIÓN DEL CLIENTE:`
-
-  if (clienteId) {
-    systemBlock += `
-Cliente ID: ${clienteId}`
-  }
-
-  if (sedeId) {
-    systemBlock += `
-Sede ID: ${sedeId}`
-  }
-
-  // Agregar información de sedes si está disponible
-  if (sedesData && !sedesData.error) {
-    systemBlock += `
-
-SEDES DISPONIBLES:`
-
-    if (Array.isArray(sedesData)) {
-      sedesData.forEach((sede: any, index: number) => {
-        systemBlock += `
-${index + 1}. ${sede.nombre || sede.descripcion || `Sede ${sede.id}`}
-   - ID: ${sede.id}
-   - Dirección: ${sede.direccion || "No especificada"}
-   - Teléfono: ${sede.telefono || "No especificado"}`
-      })
-    } else if (sedesData.id) {
-      systemBlock += `
-- ${sedesData.nombre || sedesData.descripcion || `Sede ${sedesData.id}`}
-  - ID: ${sedesData.id}
-  - Dirección: ${sedesData.direccion || "No especificada"}
-  - Teléfono: ${sedesData.telefono || "No especificado"}`
-    }
-  } else if (sedesData?.error) {
-    systemBlock += `
-
-NOTA: No se pudieron cargar los datos de sedes (${sedesData.mensaje || "Error desconocido"})`
-  }
-
-  systemBlock += `
-
-INSTRUCCIONES:
-1. Saluda de manera amigable y profesional
-2. Identifica qué necesita el usuario (información, turno, etc.)
-3. Usa las herramientas disponibles para ayudar al usuario
-4. Proporciona información clara y precisa
-5. Si necesitas datos del usuario, pregunta de manera cortés
-6. Confirma siempre los datos antes de crear un turno
-
-HERRAMIENTAS DISPONIBLES:
-- get_sedes: Para obtener información de sedes
-- get_turnos: Para consultar turnos disponibles
-- get_dni: Para validar datos de DNI
-- create_turno: Para crear un nuevo turno
-
-¡Ayuda al usuario de la mejor manera posible!`
-
-  return systemBlock
 }
