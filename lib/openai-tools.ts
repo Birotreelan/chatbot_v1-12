@@ -2,6 +2,7 @@ import OpenAI from "openai"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
 import { incrementMetric, logError } from "@/lib/monitoring"
+import { getArgentinaDateTime } from "./utils/date-utils"
 
 // Definición de las herramientas
 export const openAITools = [
@@ -1039,4 +1040,61 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
   const totalTime = Date.now() - startTime
   console.log(`[OPENAI] ⏱️ Run completado en ${totalTime}ms (${pollCount} polls)`)
   return run
+}
+
+export async function createWhatsAppSystemBlock(
+  clinicName: string,
+  clienteId?: string,
+  sedeId?: string,
+): Promise<string> {
+  const fechaHora = getArgentinaDateTime()
+
+  let sedesInfo = "No disponible"
+
+  // Obtener datos de sedes si tenemos clienteId
+  if (clienteId) {
+    try {
+      console.log(`[OPENAI-TOOLS] Obteniendo datos de sedes para cliente: ${clienteId}`)
+
+      // Importar getSedes dinámicamente
+      const { getSedes } = await import("./api-tools/api-functions")
+      const sedesResult = await getSedes(clienteId)
+
+      if (sedesResult.success && sedesResult.data) {
+        // Formatear los datos de sedes para el bloque [SISTEMA]
+        if (Array.isArray(sedesResult.data)) {
+          sedesInfo = sedesResult.data
+            .map(
+              (sede: any) =>
+                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
+            )
+            .join(" | ")
+        } else if (sedesResult.data.sedes && Array.isArray(sedesResult.data.sedes)) {
+          sedesInfo = sedesResult.data.sedes
+            .map(
+              (sede: any) =>
+                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
+            )
+            .join(" | ")
+        } else {
+          sedesInfo = JSON.stringify(sedesResult.data).substring(0, 200) + "..."
+        }
+        console.log(`[OPENAI-TOOLS] Sedes obtenidas y formateadas`)
+      } else {
+        console.log(`[OPENAI-TOOLS] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
+        sedesInfo = `Error: ${sedesResult.error}`
+      }
+    } catch (error) {
+      console.error(`[OPENAI-TOOLS] ❌ Error obteniendo sedes:`, error)
+      sedesInfo = "Error al obtener sedes"
+    }
+  }
+
+  return `[SISTEMA]
+Nombre: ${clinicName}
+FechaHora: ${fechaHora}
+Cliente_id: ${clienteId || "No configurado"}
+sede_id: ${sedeId || "No configurado"}
+Sedes_Disponibles: ${sedesInfo}
+[/SISTEMA]`
 }

@@ -349,7 +349,7 @@ async function cancelActiveRuns(threadId: string, logger: ProcessorLogger): Prom
         createdAt: run.created_at,
       })
 
-      if (run.status === "in_progress" || run.status === "queued") {
+      if (run.status === "in_progress" || run.status === "queued" || run.status === "requires_action") {
         logger.warn("Cancelando run activo:", { runId: run.id, status: run.status })
         try {
           await makeRobustOpenAICall(
@@ -494,7 +494,7 @@ async function waitForRunCompletion(
         log.info("Enviando outputs de herramientas...")
         await makeRobustOpenAICall(
           () =>
-            openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
+            openai.beta.threads.runs.submitToolOutputs(runId, threadId, {
               tool_outputs: toolOutputs,
             }),
           "SUBMIT_TOOL_OUTPUTS",
