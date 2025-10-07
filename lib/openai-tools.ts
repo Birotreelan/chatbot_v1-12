@@ -797,13 +797,49 @@ export async function getAssistantResponse(
 
     try {
       const assistant = await openai.beta.assistants.retrieve(assistantId)
-      if (!assistant.tools || assistant.tools.length === 0) {
-        console.log(`[OPENAI] ⚠️ Asistente sin herramientas, sincronizando...`)
+      console.log(`[OPENAI] 🔍 Asistente tiene ${assistant.tools?.length || 0} herramientas configuradas`)
+
+      // Log the tool names
+      if (assistant.tools && assistant.tools.length > 0) {
+        const toolNames = assistant.tools
+          .filter((t: any) => t.type === "function")
+          .map((t: any) => t.function?.name)
+          .filter(Boolean)
+        console.log(`[OPENAI] 🔧 Herramientas actuales: ${toolNames.join(", ")}`)
+      }
+
+      // Get expected tool names
+      const expectedToolNames = Object.keys(openaiTools)
+      console.log(`[OPENAI] 🔧 Herramientas esperadas: ${expectedToolNames.join(", ")}`)
+
+      // Check if we need to sync
+      const currentToolNames =
+        assistant.tools
+          ?.filter((t: any) => t.type === "function")
+          .map((t: any) => t.function?.name)
+          .filter(Boolean) || []
+
+      const needsSync =
+        expectedToolNames.some((name) => !currentToolNames.includes(name)) ||
+        currentToolNames.some((name) => !expectedToolNames.includes(name))
+
+      if (!assistant.tools || assistant.tools.length === 0 || needsSync) {
+        console.log(`[OPENAI] ⚠️ Sincronizando herramientas...`)
         await syncAssistantTools(assistantId)
+        console.log(`[OPENAI] ✅ Herramientas sincronizadas`)
+      } else {
+        console.log(`[OPENAI] ✅ Herramientas ya están sincronizadas`)
       }
     } catch (error) {
       console.error("[OPENAI] ⚠️ Error verificando herramientas del asistente:", error)
-      // Continue anyway, don't block the conversation
+      // Try to sync anyway
+      try {
+        console.log(`[OPENAI] 🔄 Intentando sincronizar herramientas de todas formas...`)
+        await syncAssistantTools(assistantId)
+        console.log(`[OPENAI] ✅ Herramientas sincronizadas exitosamente`)
+      } catch (syncError) {
+        console.error("[OPENAI] ❌ Error sincronizando herramientas:", syncError)
+      }
     }
 
     // Añadir el mensaje al thread
