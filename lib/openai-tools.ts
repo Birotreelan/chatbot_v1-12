@@ -7,6 +7,7 @@ import {
   confirmarTurno,
   obtenerDatosSede,
   formatearDatosSede,
+  buscarPaciente,
 } from "./api-tools/api-functions"
 import { AbortSignal } from "abort-controller"
 
@@ -111,6 +112,19 @@ export const openaiTools = {
       required: ["turno_id", "paciente_datos", "cliente_id"],
     },
   },
+  validar_dni: {
+    description: "Valida el DNI de un paciente",
+    parameters: {
+      type: "object",
+      properties: {
+        dni: {
+          type: "string",
+          description: "DNI del paciente",
+        },
+      },
+      required: ["dni"],
+    },
+  },
 }
 
 // Mensajes predefinidos para cada función
@@ -206,6 +220,9 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
 
   try {
     switch (toolName) {
+      case "validar_dni":
+        return await validarDni(clienteId, args.dni)
+
       case "obtener_turnos_disponibles":
         return await obtenerTurnosDisponibles(clienteId, args.especialidad_id, args.obra_social_id)
 
@@ -418,6 +435,36 @@ export async function obtenerDatosSedeHerramienta(clienteId: string, sedeId: str
   } catch (error) {
     console.error("[TOOLS] ❌ Error obteniendo datos de sede:", error)
     return "Error al obtener los datos de la sede"
+  }
+}
+
+// Función para validar DNI
+export async function validarDni(clienteId: string, dni: string): Promise<string> {
+  try {
+    console.log(`[TOOLS] 🔍 Validando DNI: ${dni} para cliente: ${clienteId}`)
+
+    const resultado = await buscarPaciente(clienteId, { dni })
+
+    if (resultado.exito && resultado.datos) {
+      console.log(`[TOOLS] ✅ DNI validado exitosamente: ${dni}`)
+      return JSON.stringify({
+        exito: true,
+        paciente: resultado.datos,
+        mensaje: "DNI validado correctamente",
+      })
+    } else {
+      console.log(`[TOOLS] ⚠️ DNI no encontrado: ${dni}`)
+      return JSON.stringify({
+        exito: false,
+        mensaje: "No se encontró un paciente con ese DNI",
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error validando DNI:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error al validar el DNI",
+    })
   }
 }
 
