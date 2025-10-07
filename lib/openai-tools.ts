@@ -8,8 +8,12 @@ import {
   obtenerDatosSede,
   formatearDatosSede,
   buscarPaciente,
+  buscarProfesionales,
 } from "./api-tools/api-functions"
 import { AbortSignal } from "abort-controller"
+
+// Re-export functions for compatibility
+export { obtenerTurnosDisponibles } from "./api-tools/api-functions"
 
 // Definición de las herramientas
 export const openaiTools = {
@@ -125,6 +129,19 @@ export const openaiTools = {
       required: ["dni"],
     },
   },
+  buscar_profesionales: {
+    description: "Busca profesionales médicos según un criterio de búsqueda",
+    parameters: {
+      type: "object",
+      properties: {
+        busqueda: {
+          type: "string",
+          description: "Criterio de búsqueda para profesionales",
+        },
+      },
+      required: ["busqueda"],
+    },
+  },
 }
 
 // Mensajes predefinidos para cada función
@@ -222,6 +239,9 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
     switch (toolName) {
       case "validar_dni":
         return await validarDni(clienteId, args.dni)
+
+      case "buscar_profesionales":
+        return await buscarProfesionalesHerramienta(clienteId, args.busqueda)
 
       case "obtener_turnos_disponibles":
         return await obtenerTurnosDisponibles(clienteId, args.especialidad_id, args.obra_social_id)
@@ -464,6 +484,37 @@ export async function validarDni(clienteId: string, dni: string): Promise<string
     return JSON.stringify({
       exito: false,
       mensaje: "Error al validar el DNI",
+    })
+  }
+}
+
+// Función para buscar profesionales
+export async function buscarProfesionalesHerramienta(clienteId: string, busqueda: string): Promise<string> {
+  try {
+    console.log(`[TOOLS] 👨‍⚕️ Buscando profesionales: "${busqueda}" para cliente: ${clienteId}`)
+
+    const resultado = await buscarProfesionales(clienteId, busqueda)
+
+    if (resultado.exito && resultado.datos) {
+      console.log(`[TOOLS] ✅ Profesionales encontrados: ${resultado.datos.length}`)
+      return JSON.stringify({
+        exito: true,
+        profesionales: resultado.datos,
+        total: resultado.datos.length,
+        mensaje: `Se encontraron ${resultado.datos.length} profesionales`,
+      })
+    } else {
+      console.log(`[TOOLS] ⚠️ No se encontraron profesionales para: "${busqueda}"`)
+      return JSON.stringify({
+        exito: false,
+        mensaje: "No se encontraron profesionales con ese criterio de búsqueda",
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error buscando profesionales:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error al buscar profesionales",
     })
   }
 }
