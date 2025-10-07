@@ -1,5 +1,6 @@
 import { Redis } from "@upstash/redis"
-import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse } from "./types"
+import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse, SedeResponse } from "./types"
+import { getClinicApiConfig } from "./types"
 
 // Obtener la URL del proxy desde las variables de entorno
 function getProxyUrl(): string {
@@ -332,6 +333,161 @@ export async function validarObraSocial(
     total_encontradas: number
     busqueda_realizada: string
   }>(clienteId, "get_obras_sociales", { busqueda }, useCache)
+}
+
+// Función para obtener datos de una sede específica
+export async function obtenerDatosSede(clienteId: string, sedeId: string): Promise<SedeResponse | null> {
+  try {
+    console.log(`[API] 🏥 Obteniendo datos de sede: ${sedeId} para cliente: ${clienteId}`)
+
+    const config = getClinicApiConfig()
+
+    if (!config.baseUrl) {
+      console.error("[API] ❌ URL de API no configurada")
+      return null
+    }
+
+    const requestBody = {
+      Cliente_Id: clienteId,
+      Action: "get_data_sedes",
+      sede_id: sedeId,
+    }
+
+    console.log("[API] 📤 Enviando request:", requestBody)
+
+    const response = await fetch(config.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(config.timeout),
+    })
+
+    if (!response.ok) {
+      console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
+      return null
+    }
+
+    const data = (await response.json()) as SedeResponse
+    console.log("[API] 📥 Respuesta recibida:", data)
+
+    if (data.success && data.sede) {
+      console.log(`[API] ✅ Datos de sede obtenidos: ${data.sede.Nombre_Completo}`)
+      return data
+    } else {
+      console.error("[API] ❌ Respuesta no exitosa:", data)
+      return null
+    }
+  } catch (error) {
+    console.error("[API] ❌ Error al obtener datos de sede:", error)
+    return null
+  }
+}
+
+// Función auxiliar para formatear los datos de sede para el bloque SISTEMA
+export function formatearDatosSede(sedeData: SedeResponse["sede"]): string {
+  return `Sede: ${sedeData.Nombre_Completo}
+Domicilio: ${sedeData.Domicilio}
+Telefono: ${sedeData.Telefono}
+Email: ${sedeData.E_Mail}
+Horario: ${sedeData.Horario}
+Web: ${sedeData.Dominio_Web}`
+}
+
+// Función para obtener turnos disponibles
+export async function obtenerTurnosDisponibles(
+  clienteId: string,
+  especialidadId: string,
+  profesionalId?: string,
+): Promise<ApiResponse<any>> {
+  try {
+    console.log(`[API] 🕒 Obteniendo turnos disponibles para especialidad: ${especialidadId}`)
+
+    const config = getClinicApiConfig()
+
+    const requestBody = {
+      Cliente_Id: clienteId,
+      Action: "get_turnos_disponibles",
+      especialidad_id: especialidadId,
+      ...(profesionalId && { profesional_id: profesionalId }),
+    }
+
+    console.log("[API] 📤 Enviando request:", requestBody)
+
+    const response = await fetch(config.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...config.headers,
+      },
+      body: JSON.stringify(requestBody),
+    })
+
+    if (!response.ok) {
+      console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
+      return {
+        exito: false,
+        error: `Error HTTP ${response.status}`,
+      }
+    }
+
+    const data = await response.json()
+    console.log("[API] 📥 Respuesta recibida:", data)
+
+    return data
+  } catch (error) {
+    console.error("[API] ❌ Error al obtener turnos:", error)
+    return {
+      exito: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
+  }
+}
+
+// Función para confirmar turno
+export async function confirmarTurno(clienteId: string, turnoData: any): Promise<ApiResponse<any>> {
+  try {
+    console.log(`[API] 🎯 Confirmando turno:`, turnoData)
+
+    const config = getClinicApiConfig()
+
+    const requestBody = {
+      Cliente_Id: clienteId,
+      Action: "confirmar_turno",
+      ...turnoData,
+    }
+
+    console.log("[API] 📤 Enviando request:", requestBody)
+
+    const response = await fetch(config.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...config.headers,
+      },
+      body: JSON.stringify(requestBody),
+    })
+
+    if (!response.ok) {
+      console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
+      return {
+        exito: false,
+        error: `Error HTTP ${response.status}`,
+      }
+    }
+
+    const data = await response.json()
+    console.log("[API] 📥 Respuesta recibida:", data)
+
+    return data
+  } catch (error) {
+    console.error("[API] ❌ Error al confirmar turno:", error)
+    return {
+      exito: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+    }
+  }
 }
 
 // Funciones de compatibilidad con el código anterior

@@ -11,3 +11,33 @@ export interface ObrasSocialesResponse {
   total_encontradas: number
   busqueda_realizada: string
 }
+
+export interface SedeData {
+  Id: string
+  Nombre_Completo: string
+  Domicilio: string
+  Telefono: string
+  E_Mail: string
+  Localidad: string
+  Provincia: string
+  Horario: string
+  Dominio_Web: string
+}
+
+export interface SedeResponse {
+  success: boolean
+  sede: SedeData
+}
+
+export interface ApiConfig {
+  baseUrl: string
+  timeout: number
+}
+
+// Función para obtener la configuración de la API de la clínica
+export function getClinicApiConfig(): ApiConfig {
+  return {
+    baseUrl: process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL || "",
+    timeout: 30000,
+  }
+}

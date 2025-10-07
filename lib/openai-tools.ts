@@ -2,152 +2,116 @@ import OpenAI from "openai"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
 import { incrementMetric, logError } from "@/lib/monitoring"
-import { getArgentinaDateTime } from "./utils/date-utils"
+import {
+  obtenerTurnosDisponibles,
+  confirmarTurno,
+  obtenerDatosSede,
+  formatearDatosSede,
+} from "./api-tools/api-functions"
+import { AbortSignal } from "abort-controller"
 
 // Definición de las herramientas
-export const openAITools = [
-  {
-    type: "function" as const,
-    function: {
-      name: "validar_dni",
-      description: "Valida DNI del paciente.",
-      parameters: {
-        type: "object",
-        properties: {
-          dni: {
-            type: "string",
-            description: "Número de DNI del paciente, compuesto solo por dígitos. Por ejemplo: 12345678",
+export const openaiTools = {
+  obtener_turnos_disponibles: {
+    description: "Obtiene los turnos disponibles para una especialidad específica",
+    parameters: {
+      type: "object",
+      properties: {
+        especialidad_id: {
+          type: "string",
+          description: "ID de la especialidad médica",
+        },
+        profesional_id: {
+          type: "string",
+          description: "ID del profesional (opcional)",
+        },
+        obra_social_id: {
+          type: "string",
+          description: "ID de la obra social (opcional)",
+        },
+      },
+      required: ["especialidad_id"],
+    },
+  },
+  confirmar_turno: {
+    description: "Confirma un turno médico",
+    parameters: {
+      type: "object",
+      properties: {
+        turno_id: {
+          type: "string",
+          description: "ID del turno a confirmar",
+        },
+        paciente_datos: {
+          type: "object",
+          description: "Datos del paciente",
+          properties: {
+            nombre: { type: "string" },
+            apellido: { type: "string" },
+            dni: { type: "string" },
+            telefono: { type: "string" },
+            email: { type: "string" },
           },
         },
-        required: ["dni"],
       },
+      required: ["turno_id", "paciente_datos"],
     },
   },
-  {
-    type: "function" as const,
-    function: {
-      name: "buscar_turnos_disponibles",
-      description: "Busca turnos disponibles.",
-      parameters: {
-        type: "object",
-        properties: {
-          profesional: {
-            type: "string",
-            description: "Nombre del profesional (opcional)",
-          },
-          profesional_id: {
-            type: "string",
-            description: "ID del profesional (opcional, tiene prioridad sobre el nombre)",
-          },
-          especialidad: {
-            type: "string",
-            description: "Nombre de la especialidad (opcional)",
-          },
-          rango_fechas: {
-            type: "string",
-            description: "Rango de fechas en formato YYYY-MM-DD a YYYY-MM-DD",
+  obtener_datos_sede: {
+    description: "Obtiene información detallada de una sede específica",
+    parameters: {
+      type: "object",
+      properties: {
+        sede_id: {
+          type: "string",
+          description: "ID de la sede",
+        },
+      },
+      required: ["sede_id"],
+    },
+  },
+  obtener_obras_sociales: {
+    description: "Obtiene las obras sociales disponibles para un cliente",
+    parameters: {
+      type: "object",
+      properties: {
+        cliente_id: {
+          type: "string",
+          description: "ID del cliente",
+        },
+      },
+      required: ["cliente_id"],
+    },
+  },
+  reservar_turno: {
+    description: "Reserva un turno médico",
+    parameters: {
+      type: "object",
+      properties: {
+        turno_id: {
+          type: "string",
+          description: "ID del turno a reservar",
+        },
+        paciente_datos: {
+          type: "object",
+          description: "Datos del paciente",
+          properties: {
+            nombre: { type: "string" },
+            apellido: { type: "string" },
+            dni: { type: "string" },
+            telefono: { type: "string" },
+            email: { type: "string" },
           },
         },
-        required: [],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "reservar_turno",
-      description: "Reserva el turno seleccionado usando los datos del paciente recopilados durante la conversación.",
-      parameters: {
-        type: "object",
-        properties: {
-          dni: {
-            type: "string",
-            description: "DNI del paciente",
-          },
-          nombre: {
-            type: "string",
-            description: "Nombre del paciente recopilado durante la conversación",
-          },
-          apellido: {
-            type: "string",
-            description: "Apellido del paciente recopilado durante la conversación",
-          },
-          telefono: {
-            type: "string",
-            description: "Teléfono del paciente recopilado durante la conversación",
-          },
-          email: {
-            type: "string",
-            description: "Email del paciente recopilado durante la conversación",
-          },
-          agenda_id: {
-            type: "string",
-            description: "ID de la agenda del turno a reservar, obtenido de la búsqueda de turnos disponibles",
-          },
-          fecha: {
-            type: "string",
-            description: "Fecha del turno en formato YYYY-MM-DD",
-          },
-          hora: {
-            type: "string",
-            description: "Hora del turno en formato HH:MM",
-          },
-          profesional: {
-            type: "string",
-            description: "Nombre del profesional",
-          },
+        cliente_id: {
+          type: "string",
+          description: "ID del cliente",
         },
-        required: ["dni", "nombre", "apellido", "telefono", "email", "agenda_id"],
       },
+      required: ["turno_id", "paciente_datos", "cliente_id"],
     },
   },
-  {
-    type: "function" as const,
-    function: {
-      name: "obtener_subespecialidades",
-      description: "Lista subespecialidades.",
-      parameters: {
-        type: "object",
-        properties: {},
-        required: [],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "buscar_profesionales",
-      description: "Busca profesionales.",
-      parameters: {
-        type: "object",
-        properties: {
-          busqueda: {
-            type: "string",
-            description: "Texto para buscar profesionales por nombre o especialidad",
-          },
-        },
-        required: ["busqueda"],
-      },
-    },
-  },
-  {
-    type: "function" as const,
-    function: {
-      name: "validar_obra_social",
-      description: "Valida si la obra social ingresada por el paciente existe y permite turnos online.",
-      parameters: {
-        type: "object",
-        properties: {
-          busqueda: {
-            type: "string",
-            description: "Nombre de la obra social ingresado por el paciente (ej: 'osde')",
-          },
-        },
-        required: ["busqueda"],
-      },
-    },
-  },
-]
+}
 
 // Mensajes predefinidos para cada función
 const FUNCTION_MESSAGES = {
@@ -157,6 +121,8 @@ const FUNCTION_MESSAGES = {
   obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
   buscar_profesionales: "Buscando profesionales, aguardá unos instantes.",
   validar_obra_social: "Verificando la obra social, aguardá unos instantes.",
+  obtener_datos_sede: "Consultando información de la sede, aguardá unos instantes.",
+  obtener_obras_sociales: "Consultando obras sociales disponibles, aguardá unos instantes.",
   default: "Estoy procesando tu solicitud, dame un momento por favor.",
 }
 
@@ -235,437 +201,38 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
 }
 
 // Implementación directa de todas las funciones
-export async function executeOpenAITool(
-  toolName: string,
-  toolArgs: Record<string, any>,
-  clienteId?: string,
-): Promise<any> {
-  const proxy = "https://treelan.net/managment/proxy_service/"
-
-  if (!clienteId) {
-    return {
-      exito: false,
-      error: {
-        codigo: "CLIENTE_ID_FALTANTE",
-        mensaje: "No se ha configurado un ID de cliente",
-      },
-    }
-  }
-
-  const proxyUrl = proxy.endsWith("/") ? proxy : `${proxy}/`
+export async function executeOpenAITool(toolName: string, args: any, clienteId: string) {
+  console.log(`[OPENAI-TOOLS] Ejecutando tool: ${toolName} con args:`, args)
 
   try {
-    console.log(`[TOOL] 🔧 ${toolName}(${JSON.stringify(toolArgs)})`)
-
-    // Preparar el cuerpo de la solicitud según la función
-    const requestBody: Record<string, any> = {
-      Cliente_Id: clienteId.trim(),
-      Action: "",
-    }
-
     switch (toolName) {
-      case "validar_dni":
-        requestBody.Action = "get_paciente"
-        requestBody.dni = toolArgs.dni
-        break
+      case "obtener_turnos_disponibles":
+        return await obtenerTurnosDisponibles(clienteId, args.especialidad_id, args.obra_social_id)
 
-      case "obtener_subespecialidades":
-        requestBody.Action = "get_subespecialidades"
-        break
-
-      case "buscar_profesionales":
-        requestBody.Action = "get_profesionales"
-        requestBody.busqueda = toolArgs.busqueda || ""
-        break
-
-      case "validar_obra_social":
-        requestBody.Action = "get_obras_sociales"
-        requestBody.busqueda = toolArgs.busqueda || ""
-        break
-
-      case "buscar_turnos_disponibles":
-        requestBody.Action = "get_turnos"
-        // Extraer fechas desde y hasta del rango
-        if (toolArgs.rango_fechas) {
-          let fechaDesde, fechaHasta
-          if (toolArgs.rango_fechas.includes(" a ")) {
-            ;[fechaDesde, fechaHasta] = toolArgs.rango_fechas.split(" a ")
-          } else if (toolArgs.rango_fechas.includes(" to ")) {
-            ;[fechaDesde, fechaHasta] = toolArgs.rango_fechas.split(" to ")
-          } else {
-            fechaDesde = toolArgs.rango_fechas
-            fechaHasta = toolArgs.rango_fechas
-          }
-
-          requestBody.Fecha_Desde = fechaDesde.trim()
-          requestBody.Fecha_Hasta = fechaHasta ? fechaHasta.trim() : fechaDesde.trim()
-        } else {
-          const hoy = new Date()
-          const fechaDesde = hoy.toISOString().split("T")[0]
-          const unMesDespues = new Date(hoy.setMonth(hoy.getMonth() + 1)).toISOString().split("T")[0]
-          requestBody.Fecha_Desde = fechaDesde
-          requestBody.Fecha_Hasta = unMesDespues
-        }
-
-        if (toolArgs.profesional_id) {
-          requestBody.Profesional_Id = toolArgs.profesional_id
-        } else if (toolArgs.profesional) {
-          // Buscar profesional primero
-          const profesionalRequestBody = {
-            Cliente_Id: clienteId.trim(),
-            Action: "get_profesionales",
-            busqueda: toolArgs.profesional,
-          }
-
-          console.log(`[PROXY] 🔍 Buscando profesional: ${toolArgs.profesional}`)
-          const profesionalResponse = await fetch(proxyUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(profesionalRequestBody),
-          })
-
-          const profesionalData = JSON.parse(await profesionalResponse.text())
-          if (profesionalData.profesionales && profesionalData.profesionales.length > 0) {
-            if (profesionalData.profesionales.length > 1) {
-              return {
-                exito: true,
-                datos: {
-                  multiple: true,
-                  profesionales: profesionalData.profesionales.map((p: any) => ({
-                    id: p.Id,
-                    nombre: p.Nombre,
-                    especialidad: p.Especialidad,
-                  })),
-                  mensaje: "Se encontraron múltiples profesionales. Por favor, seleccione uno.",
-                },
-              }
-            }
-            requestBody.Profesional_Id = profesionalData.profesionales[0].Id
-          }
-        } else if (toolArgs.especialidad) {
-          // Buscar subespecialidad primero
-          const subespecialidadRequestBody = {
-            Cliente_Id: clienteId.trim(),
-            Action: "get_subespecialidades",
-          }
-
-          console.log(`[PROXY] 🔍 Buscando especialidad: ${toolArgs.especialidad}`)
-          const subespecialidadResponse = await fetch(proxyUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(subespecialidadRequestBody),
-          })
-
-          const subespecialidadData = JSON.parse(await subespecialidadResponse.text())
-          if (subespecialidadData.subespecialidades && subespecialidadData.subespecialidades.length > 0) {
-            const subespecialidadEncontrada = subespecialidadData.subespecialidades.find((e: any) =>
-              e.Nombre.toLowerCase().includes(toolArgs.especialidad.toLowerCase()),
-            )
-
-            if (subespecialidadEncontrada) {
-              requestBody.Subespecialidad_Id = subespecialidadEncontrada.Id
-            } else {
-              return {
-                exito: false,
-                error: {
-                  codigo: "SUBESPECIALIDAD_NO_ENCONTRADA",
-                  mensaje: `No se encontró la subespecialidad: ${toolArgs.especialidad}`,
-                },
-              }
-            }
-          }
-        }
-        break
-
-      case "reservar_turno":
-        requestBody.Action = "set_turno"
-        requestBody.Agenda_Id = toolArgs.agenda_id || toolArgs.agendaId
-
-        // También agregar los otros campos requeridos
-        requestBody.Paciente_DNI = toolArgs.dni
-        requestBody.Paciente_Nombre = toolArgs.nombre
-        requestBody.Paciente_Apellido = toolArgs.apellido
-        requestBody.Paciente_Telefono = toolArgs.telefono
-        requestBody.Paciente_Email = toolArgs.email
-
-        // Campos opcionales adicionales si están disponibles
-        if (toolArgs.fecha) requestBody.Fecha = toolArgs.fecha
-        if (toolArgs.hora) requestBody.Hora = toolArgs.hora
-        if (toolArgs.profesional) requestBody.Profesional_Nombre = toolArgs.profesional
-        break
-
-      default:
-        return {
-          exito: false,
-          error: {
-            codigo: "HERRAMIENTA_DESCONOCIDA",
-            mensaje: `Herramienta no implementada: ${toolName}`,
-          },
-        }
-    }
-
-    console.log(`[PROXY] 📤 POST ${requestBody.Action} → ${proxyUrl}`)
-
-    // Hacer la petición con reintentos
-    let response = null
-    const maxRetries = 3
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        response = await fetch(proxyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(30000),
+      case "confirmar_turno":
+        return await confirmarTurno(clienteId, {
+          turno_id: args.turno_id,
+          paciente_datos: args.paciente_datos,
         })
-        break
-      } catch (error) {
-        console.error(`[PROXY] ❌ Intento ${attempt}/${maxRetries} falló:`, error)
-        if (attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
-        }
-      }
-    }
 
-    if (!response) {
-      throw new Error("Todos los intentos de conexión fallaron")
-    }
+      case "obtener_datos_sede":
+        return await obtenerDatosSedeHerramienta(clienteId, args.sede_id)
 
-    const responseText = await response.text()
-    console.log(
-      `[PROXY] 📥 ${response.status} ${responseText.substring(0, 200)}${responseText.length > 200 ? "..." : ""}`,
-    )
-
-    let data
-    try {
-      data = JSON.parse(responseText)
-    } catch (e) {
-      return {
-        exito: false,
-        error: {
-          codigo: "FORMATO_INVALIDO",
-          mensaje: `Respuesta inválida: ${responseText.substring(0, 100)}...`,
-        },
-      }
-    }
-
-    // Procesar la respuesta según la función
-    switch (toolName) {
-      case "validar_dni":
-        if (data.paciente) {
-          const turnosProximos = data.turnos_proximos || []
-          return truncateToolResponse({
-            exito: true,
-            datos: {
-              paciente: {
-                id: data.paciente.Id,
-                nombre: data.paciente.Nombres,
-                apellido: data.paciente.Apellido,
-                dni: data.paciente.Nrodoc,
-                telefono: data.paciente.Celular,
-                email: data.paciente.Mail,
-                fecha_nacimiento: data.paciente.Fecha_Nac,
-                obra_social: data.paciente.Deudor_Nombre,
-                plan: data.paciente.Plan_Nombre,
-                nro_afiliado: data.paciente.Nro_Afiliado_Ppal,
-              },
-              turnos_proximos: turnosProximos.slice(0, 1).map((turno: any) => ({
-                id: turno.Id,
-                fecha: turno.Fecha,
-                hora: turno.Hora,
-                profesional_nombre: turno.Profesional_Nombre,
-                centro_nombre: turno.Centro_Nombre,
-                motivo_nombre: turno.Motivo_Nombre,
-              })),
-              es_nuevo: false,
-              permite_pacientes_nuevos: data.permite_pacientes_nuevos !== false,
-            },
-          })
-        } else if (data.error) {
-          if (
-            data.error.toLowerCase().includes("paciente no encontrado") ||
-            data.error.toLowerCase().includes("no encontrado")
-          ) {
-            return {
-              exito: true,
-              datos: {
-                paciente: null,
-                turnos_proximos: [],
-                es_nuevo: true,
-                permite_pacientes_nuevos: data.permite_pacientes_nuevos === true,
-                mensaje_error: data.error,
-              },
-            }
-          }
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-              permite_pacientes_nuevos: data.permite_pacientes_nuevos,
-            },
-          }
-        } else {
-          return {
-            exito: true,
-            datos: {
-              paciente: null,
-              turnos_proximos: [],
-              es_nuevo: true,
-              permite_pacientes_nuevos: data.permite_pacientes_nuevos !== false,
-            },
-          }
-        }
-
-      case "obtener_subespecialidades":
-        if (data.subespecialidades) {
-          return truncateToolResponse({
-            exito: true,
-            datos: data.subespecialidades.slice(0, 5).map((e: any) => ({
-              id: e.Id,
-              nombre: e.Nombre,
-            })),
-          })
-        } else if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-            },
-          }
-        } else {
-          return { exito: true, datos: [] }
-        }
-
-      case "buscar_profesionales":
-        if (data.profesionales) {
-          return truncateToolResponse({
-            exito: true,
-            datos: data.profesionales.slice(0, 3).map((p: any) => ({
-              id: p.Id,
-              nombre: p.Nombre_Completo,
-              especialidad: p.Especialidad,
-            })),
-          })
-        } else if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-            },
-          }
-        } else {
-          return { exito: true, datos: [] }
-        }
-
-      case "validar_obra_social":
-        if (data.obras_sociales) {
-          console.log(`[TOOL] ✅ ${data.total_encontradas} obras sociales encontradas`)
-          return truncateToolResponse({
-            exito: true,
-            datos: {
-              obras_sociales: data.obras_sociales.slice(0, 5).map((os: any) => ({
-                id: os.Id,
-                nombre: os.Nombre,
-                razon_social: os.Razon_Social,
-                permite_turnos_online: os.Permite_Turnos_Online,
-                permite_turnos_online_texto: os.Permite_Turnos_Online_Texto,
-              })),
-              total_encontradas: data.total_encontradas,
-              busqueda_realizada: data.busqueda_realizada,
-            },
-          })
-        } else if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-            },
-          }
-        } else {
-          return {
-            exito: true,
-            datos: {
-              obras_sociales: [],
-              total_encontradas: 0,
-              busqueda_realizada: toolArgs.busqueda || "",
-            },
-          }
-        }
+      case "obtener_obras_sociales":
+        return await obtenerObrasSociales(clienteId)
 
       case "reservar_turno":
-        if (data.success || data.exito) {
-          return {
-            exito: true,
-            datos: {
-              mensaje: "Turno reservado exitosamente",
-              confirmacion: data.confirmacion || "Reserva confirmada",
-            },
-          }
-        } else if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error al reservar el turno",
-            },
-          }
-        } else {
-          return {
-            exito: false,
-            error: {
-              codigo: "RESPUESTA_INESPERADA",
-              mensaje: "La API devolvió una respuesta inesperada al reservar el turno",
-            },
-          }
-        }
-
-      case "buscar_turnos_disponibles":
-        console.log(`[TOOL] ✅ Respuesta original del proxy para buscar_turnos_disponibles:`, data)
-
-        // Devolver la respuesta exactamente como llega del proxy
-        if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-            },
-          }
-        } else {
-          return {
-            exito: true,
-            datos: data, // Devolver toda la respuesta original sin modificaciones
-          }
-        }
+        return await reservarTurno(clienteId, args.turno_id, args.paciente_datos)
 
       default:
-        if (data.error) {
-          return {
-            exito: false,
-            error: {
-              codigo: "API_ERROR",
-              mensaje: typeof data.error === "string" ? data.error : "Error desconocido",
-            },
-          }
-        } else {
-          return truncateToolResponse({
-            exito: true,
-            datos: data,
-          })
-        }
+        console.warn(`[OPENAI-TOOLS] Tool desconocido: ${toolName}`)
+        return { success: false, error: `Tool desconocido: ${toolName}` }
     }
   } catch (error) {
-    console.error(`[TOOL] ❌ ${toolName} falló:`, error)
+    console.error(`[OPENAI-TOOLS] Error ejecutando tool ${toolName}:`, error)
     return {
-      exito: false,
-      error: {
-        codigo: "ERROR_EJECUCION",
-        mensaje: error instanceof Error ? error.message : "Error desconocido al ejecutar la herramienta",
-      },
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
     }
   }
 }
@@ -756,6 +323,101 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
     }
   } else if (run.status === "failed") {
     throw new Error(`Run falló: ${run.last_error?.message}`)
+  }
+}
+
+// Función para obtener obras sociales
+export async function obtenerObrasSociales(clienteId: string): Promise<string> {
+  try {
+    console.log(`[TOOLS] 🏥 Obteniendo obras sociales para cliente: ${clienteId}`)
+
+    const baseUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
+    if (!baseUrl) {
+      return "Error: URL de API no configurada"
+    }
+
+    const response = await fetch(baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        Cliente_Id: clienteId,
+        Action: "get_obras_sociales",
+      }),
+      signal: AbortSignal.timeout(30000),
+    })
+
+    if (!response.ok) {
+      return `Error HTTP: ${response.status}`
+    }
+
+    const data = await response.json()
+    console.log(`[TOOLS] ✅ Obras sociales obtenidas: ${data.obras_sociales?.length || 0}`)
+
+    return JSON.stringify(data)
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error obteniendo obras sociales:", error)
+    return "Error al obtener obras sociales"
+  }
+}
+
+// Función para reservar turno
+export async function reservarTurno(clienteId: string, turnoId: string, pacienteDatos: any): Promise<string> {
+  try {
+    console.log(`[TOOLS] 📝 Reservando turno ${turnoId} para cliente: ${clienteId}`)
+
+    const baseUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
+    if (!baseUrl) {
+      return "Error: URL de API no configurada"
+    }
+
+    const response = await fetch(baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        Cliente_Id: clienteId,
+        Action: "reservar_turno",
+        turno_id: turnoId,
+        paciente_datos: pacienteDatos,
+      }),
+      signal: AbortSignal.timeout(30000),
+    })
+
+    if (!response.ok) {
+      return `Error HTTP: ${response.status}`
+    }
+
+    const data = await response.json()
+    console.log(`[TOOLS] ✅ Turno reservado exitosamente`)
+
+    return JSON.stringify(data)
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error reservando turno:", error)
+    return "Error al reservar el turno"
+  }
+}
+
+// Función para obtener datos de sede (nueva herramienta)
+export async function obtenerDatosSedeHerramienta(clienteId: string, sedeId: string): Promise<string> {
+  try {
+    console.log(`[TOOLS] 🏥 Obteniendo datos de sede: ${sedeId} para cliente: ${clienteId}`)
+
+    const sedeData = await obtenerDatosSede(clienteId, sedeId)
+
+    if (sedeData && sedeData.success && sedeData.sede) {
+      const datosFormateados = formatearDatosSede(sedeData.sede)
+      console.log(`[TOOLS] ✅ Datos de sede obtenidos: ${sedeData.sede.Nombre_Completo}`)
+      return datosFormateados
+    } else {
+      console.log(`[TOOLS] ⚠️ No se pudieron obtener datos de sede`)
+      return "No se pudieron obtener los datos de la sede solicitada"
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error obteniendo datos de sede:", error)
+    return "Error al obtener los datos de la sede"
   }
 }
 
@@ -1040,64 +702,4 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
   const totalTime = Date.now() - startTime
   console.log(`[OPENAI] ⏱️ Run completado en ${totalTime}ms (${pollCount} polls)`)
   return run
-}
-
-export async function createWhatsAppSystemBlock(
-  clinicName: string,
-  clienteId?: string,
-  sedeId?: string,
-): Promise<string> {
-  const fechaHora = getArgentinaDateTime()
-
-  let sedesInfo = "No disponible"
-
-  // Obtener datos de sedes si tenemos clienteId
-  if (clienteId) {
-    try {
-      console.log(
-        `[OPENAI-TOOLS] Obteniendo datos de sedes para cliente: ${clienteId}${sedeId ? `, sede: ${sedeId}` : ""}`,
-      )
-
-      const { getSedes } = await import("./clinic-api")
-      const sedesResult = await getSedes(clienteId, sedeId)
-
-      if (sedesResult.success && sedesResult.data) {
-        // Formatear los datos de sedes para el bloque [SISTEMA]
-        if (Array.isArray(sedesResult.data)) {
-          sedesInfo = sedesResult.data
-            .map(
-              (sede: any) =>
-                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
-            )
-            .join(" | ")
-        } else if (sedesResult.data.sedes && Array.isArray(sedesResult.data.sedes)) {
-          sedesInfo = sedesResult.data.sedes
-            .map(
-              (sede: any) =>
-                `ID: ${sede.Id || sede.id}, Nombre: ${sede.Nombre || sede.nombre || "Sin nombre"}, Direccion: ${sede.Direccion || sede.direccion || "Sin dirección"}`,
-            )
-            .join(" | ")
-        } else {
-          // Si los datos no están en el formato esperado, intentar extraer información útil
-          const dataStr = JSON.stringify(sedesResult.data)
-          sedesInfo = dataStr.length > 200 ? dataStr.substring(0, 200) + "..." : dataStr
-        }
-        console.log(`[OPENAI-TOOLS] ✅ Sedes obtenidas y formateadas`)
-      } else {
-        console.log(`[OPENAI-TOOLS] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
-        sedesInfo = "No se pudieron cargar las sedes"
-      }
-    } catch (error) {
-      console.error(`[OPENAI-TOOLS] ❌ Error obteniendo sedes:`, error)
-      sedesInfo = "Error al obtener sedes"
-    }
-  }
-
-  return `[SISTEMA]
-Nombre: ${clinicName}
-FechaHora: ${fechaHora}
-Cliente_id: ${clienteId || "No configurado"}
-sede_id: ${sedeId || "No configurado"}
-Sedes_Disponibles: ${sedesInfo}
-[/SISTEMA]`
 }

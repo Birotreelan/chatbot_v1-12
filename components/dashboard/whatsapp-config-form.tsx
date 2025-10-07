@@ -1,429 +1,336 @@
 "use client"
 
 import type React from "react"
+
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
-import { Copy, Eye, ExternalLink } from "lucide-react"
 import type { WhatsAppConfig } from "@/lib/types"
 
 interface WhatsAppConfigFormProps {
   config?: WhatsAppConfig
-  isNew?: boolean
+  onSave: (config: Partial<WhatsAppConfig>) => Promise<void>
+  onCancel: () => void
+  isLoading?: boolean
 }
 
-export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigFormProps) {
-  const [mounted, setMounted] = useState(false)
-  const [baseUrl, setBaseUrl] = useState("")
-  const [formData, setFormData] = useState({
-    displayName: config?.displayName || "",
-    phoneNumberId: config?.phoneNumberId || "",
-    wabaId: config?.wabaId || "",
-    // Reemplazar esta línea:
-    // assistantId: config?.assistantId || "",
-    // Con estas líneas:
-    whatsappAssistantId: config?.whatsappAssistantId || "",
-    widgetAssistantId: config?.widgetAssistantId || "",
-    accessToken: config?.accessToken || "",
-    verifyToken: config?.verifyToken || "",
-    active: config?.active !== undefined ? config.active : true,
-    cliente_id: config?.cliente_id || "",
-    sede_id: config?.sede_id || "",
-    proxy: config?.proxy || "",
-    // Configuraciones del widget
-    widgetEnabled: config?.widgetEnabled !== undefined ? config.widgetEnabled : true,
-    widgetTitle: config?.widgetTitle || "Asistente Virtual",
-    widgetPrimaryColor: config?.widgetPrimaryColor || "#0ea5e9",
-    widgetSecondaryColor: config?.widgetSecondaryColor || "#f0f9ff",
-    widgetPosition: config?.widgetPosition || "bottom-right",
-    widgetWelcomeMessage: config?.widgetWelcomeMessage || "¡Hola! ¿En qué puedo ayudarte hoy?",
-    widgetPlaceholder: config?.widgetPlaceholder || "Escribe tu mensaje...",
-    widgetButtonText: config?.widgetButtonText || "Enviar",
-    widgetHeaderText: config?.widgetHeaderText || "Chat en vivo",
-    widgetSubtitle: config?.widgetSubtitle || "Estamos aquí para ayudarte",
-    widgetBrandingEnabled: config?.widgetBrandingEnabled !== undefined ? config.widgetBrandingEnabled : true,
-    widgetBrandingText: config?.widgetBrandingText || "Powered by AI Assistant",
-    widgetMaxHeight: config?.widgetMaxHeight || 600,
-    widgetMaxWidth: config?.widgetMaxWidth || 400,
-    widgetBorderRadius: config?.widgetBorderRadius || 12,
-    widgetShadow: config?.widgetShadow !== undefined ? config.widgetShadow : true,
-    widgetAnimation: config?.widgetAnimation !== undefined ? config.widgetAnimation : true,
-    widgetSoundEnabled: config?.widgetSoundEnabled !== undefined ? config.widgetSoundEnabled : true,
-    widgetTheme: config?.widgetTheme || "light",
-    // Nuevos campos para el botón flotante
-    widgetFloatingButtonText: config?.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual",
-    widgetShowFloatingText: config?.widgetShowFloatingText !== undefined ? config.widgetShowFloatingText : true,
-  })
-  const [isLoading, setIsLoading] = useState(false)
+export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: WhatsAppConfigFormProps) {
   const { toast } = useToast()
+  const [formData, setFormData] = useState<Partial<WhatsAppConfig>>({
+    displayName: "",
+    phoneNumberId: "",
+    wabaId: "",
+    whatsappAssistantId: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
+    widgetAssistantId: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
+    active: true,
+    verifyToken: "",
+    accessToken: "",
+    webhookUrl: "",
+    cliente_id: "",
+    sede_id: "", // Nuevo campo
+    proxy: "",
+    // Widget settings
+    widgetEnabled: true,
+    widgetTitle: "Asistente Virtual",
+    widgetPrimaryColor: "#0ea5e9",
+    widgetSecondaryColor: "#f0f9ff",
+    widgetPosition: "bottom-right",
+    widgetWelcomeMessage: "¡Hola! ¿En qué puedo ayudarte hoy?",
+    widgetPlaceholder: "Escribe tu mensaje...",
+    widgetButtonText: "Enviar",
+    widgetHeaderText: "Chat de Soporte",
+    widgetSubtitle: "Estamos aquí para ayudarte",
+    widgetBrandingEnabled: true,
+    widgetBrandingText: "Powered by AI",
+    widgetMaxHeight: 600,
+    widgetMaxWidth: 400,
+    widgetBorderRadius: 12,
+    widgetShadow: true,
+    widgetAnimation: true,
+    widgetSoundEnabled: true,
+    widgetTheme: "light",
+    widgetFloatingButtonText: "Obtené tu turno con nuestro asistente virtual",
+    widgetShowFloatingText: true,
+    ...config,
+  })
+
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    setMounted(true)
-    if (typeof window !== "undefined") {
-      setBaseUrl(window.location.origin)
+    if (config) {
+      setFormData({ ...formData, ...config })
     }
-  }, [])
+  }, [config])
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value, type } = e.target
-    const checked = (e.target as HTMLInputElement).checked
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : type === "number" ? Number(value) : value,
-    }))
-  }
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {}
 
-  const handleSwitchChange = (name: string, checked: boolean) => {
-    setFormData((prev) => ({
-      ...prev,
-      [name]: checked,
-    }))
-  }
+    if (!formData.displayName?.trim()) {
+      newErrors.displayName = "El nombre es requerido"
+    }
 
-  const handleSelectChange = (name: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }))
+    if (!formData.phoneNumberId?.trim()) {
+      newErrors.phoneNumberId = "El Phone Number ID es requerido"
+    }
+
+    if (!formData.whatsappAssistantId?.trim()) {
+      newErrors.whatsappAssistantId = "El Assistant ID de WhatsApp es requerido"
+    }
+
+    if (!formData.widgetAssistantId?.trim()) {
+      newErrors.widgetAssistantId = "El Assistant ID del Widget es requerido"
+    }
+
+    if (!formData.cliente_id?.trim()) {
+      newErrors.cliente_id = "El Cliente ID es requerido"
+    }
+
+    // Validar colores hex
+    const hexColorRegex = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/
+    if (formData.widgetPrimaryColor && !hexColorRegex.test(formData.widgetPrimaryColor)) {
+      newErrors.widgetPrimaryColor = "Debe ser un color hexadecimal válido (ej: #0ea5e9)"
+    }
+
+    if (formData.widgetSecondaryColor && !hexColorRegex.test(formData.widgetSecondaryColor)) {
+      newErrors.widgetSecondaryColor = "Debe ser un color hexadecimal válido (ej: #f0f9ff)"
+    }
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
 
-    try {
-      console.log(`[FORM] Enviando ${isNew ? "creación" : "actualización"} de configuración:`, formData)
-
-      let response: Response
-      if (isNew) {
-        response = await fetch("/api/dashboard/configs", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(formData),
-        })
-      } else {
-        // Intentar primero con la ruta dinámica
-        response = await fetch(`/api/dashboard/configs/${config?.id}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(formData),
-        })
-
-        // Si falla con 405, intentar con la ruta alternativa
-        if (response.status === 405) {
-          console.log(`[FORM] Ruta dinámica falló, intentando ruta alternativa`)
-          response = await fetch(`/api/dashboard/configs/update`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ id: config?.id, ...formData }),
-          })
-        }
-      }
-
-      console.log(`[FORM] Respuesta del servidor:`, response.status, response.statusText)
-
-      if (!response.ok) {
-        let errorDetails = "Error desconocido"
-        try {
-          const errorData = await response.json()
-          errorDetails = errorData.details || errorData.error || errorDetails
-          console.error(`[FORM] Error del servidor:`, errorData)
-        } catch (parseError) {
-          console.error(`[FORM] Error al parsear respuesta de error:`, parseError)
-          errorDetails = `Error ${response.status}: ${response.statusText}`
-        }
-        throw new Error(errorDetails)
-      }
-
-      const result = await response.json()
-      console.log(`[FORM] Configuración ${isNew ? "creada" : "actualizada"} exitosamente:`, result)
-
+    if (!validateForm()) {
       toast({
-        title: isNew ? "Configuración creada" : "Configuración actualizada",
-        description: `La configuración se ha ${isNew ? "creado" : "actualizado"} correctamente.`,
-      })
-
-      if (isNew && result.id && mounted) {
-        // Redirigir a la página de edición
-        window.location.href = `/dashboard/config/${result.id}`
-      }
-    } catch (error) {
-      console.error(`[FORM] Error al ${isNew ? "crear" : "actualizar"} configuración:`, error)
-
-      const errorMessage = error instanceof Error ? error.message : "Error desconocido"
-
-      toast({
-        title: `Error al ${isNew ? "crear" : "actualizar"}`,
-        description: `No se pudo ${isNew ? "crear" : "actualizar"} la configuración: ${errorMessage}`,
+        title: "Error de validación",
+        description: "Por favor, corrige los errores en el formulario.",
         variant: "destructive",
       })
-    } finally {
-      setIsLoading(false)
+      return
     }
-  }
-
-  const copyToClipboard = async (text: string) => {
-    if (!mounted || typeof window === "undefined") return
 
     try {
-      await navigator.clipboard.writeText(text)
+      await onSave(formData)
       toast({
-        title: "Copiado",
-        description: "El texto se ha copiado al portapapeles.",
+        title: "Configuración guardada",
+        description: "La configuración se ha guardado exitosamente.",
       })
-    } catch (err) {
-      console.error("Error al copiar:", err)
+    } catch (error) {
+      console.error("Error saving config:", error)
       toast({
         title: "Error",
-        description: "No se pudo copiar el texto.",
+        description: "No se pudo guardar la configuración.",
         variant: "destructive",
       })
     }
   }
 
-  const openInNewTab = (url: string) => {
-    if (!mounted || typeof window === "undefined") return
-    window.open(url, "_blank", "noopener,noreferrer")
-  }
-
-  const getWidgetUrl = () => {
-    if (!config?.id || !baseUrl) return ""
-    return `${baseUrl}/widget/${config.id}`
-  }
-
-  const getChatUrl = () => {
-    if (!config?.id || !baseUrl) return ""
-    return `${baseUrl}/chat/${config.id}`
-  }
-
-  const getEmbedCode = () => {
-    if (!config?.id || !baseUrl) return ""
-    return `<iframe src="${getWidgetUrl()}" width="400" height="600" frameborder="0" style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></iframe>`
-  }
-
-  const getJavaScriptCode = () => {
-    if (!config?.id || !config?.cliente_id || !baseUrl) return "// Se requiere cliente_id para generar el código"
-
-    return `<script src="${baseUrl}/widget-loader.js" data-client-id="${config.cliente_id}"></script>`
-  }
-
-  // Mostrar loading hasta que el componente esté montado
-  if (!mounted) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Cargando configuración...</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
-            <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
-            <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
-          </div>
-        </CardContent>
-      </Card>
-    )
+  const updateFormData = (field: keyof WhatsAppConfig, value: any) => {
+    setFormData((prev) => ({ ...prev, [field]: value }))
+    // Limpiar error del campo si existe
+    if (errors[field]) {
+      setErrors((prev) => ({ ...prev, [field]: "" }))
+    }
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{isNew ? "Nueva Configuración" : "Editar Configuración"}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <Tabs defaultValue="general" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="general">General</TabsTrigger>
-              <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
-              <TabsTrigger value="widget">Widget</TabsTrigger>
-              <TabsTrigger value="integration">Integración</TabsTrigger>
-            </TabsList>
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <Tabs defaultValue="general" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+          <TabsTrigger value="widget">Widget</TabsTrigger>
+          <TabsTrigger value="advanced">Avanzado</TabsTrigger>
+        </TabsList>
 
-            <TabsContent value="general" className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <TabsContent value="general" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Configuración General</CardTitle>
+              <CardDescription>Configuración básica de la instancia de WhatsApp</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="displayName">Nombre de la configuración</Label>
+                  <Label htmlFor="displayName">Nombre de la Configuración *</Label>
                   <Input
                     id="displayName"
-                    name="displayName"
-                    value={formData.displayName}
-                    onChange={handleChange}
-                    placeholder="Mi WhatsApp Bot"
-                    required
+                    value={formData.displayName || ""}
+                    onChange={(e) => updateFormData("displayName", e.target.value)}
+                    placeholder="Ej: WhatsApp Clínica Central"
+                    className={errors.displayName ? "border-red-500" : ""}
                   />
-                </div>
-
-                {/* Reemplazar este div completo:
-                <div className="space-y-2">
-                  <Label htmlFor="assistantId">Assistant ID</Label>
-                  <Input
-                    id="assistantId"
-                    name="assistantId"
-                    value={formData.assistantId}
-                    onChange={handleChange}
-                    placeholder="asst_..."
-                    required
-                  />
-                </div>
-
-                // Con estos dos divs: */}
-                <div className="space-y-2">
-                  <Label htmlFor="whatsappAssistantId">Assistant ID para WhatsApp</Label>
-                  <Input
-                    id="whatsappAssistantId"
-                    name="whatsappAssistantId"
-                    value={formData.whatsappAssistantId}
-                    onChange={handleChange}
-                    placeholder="asst_... (para WhatsApp)"
-                    required
-                  />
+                  {errors.displayName && <p className="text-sm text-red-500">{errors.displayName}</p>}
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="widgetAssistantId">Assistant ID para Widget</Label>
-                  <Input
-                    id="widgetAssistantId"
-                    name="widgetAssistantId"
-                    value={formData.widgetAssistantId}
-                    onChange={handleChange}
-                    placeholder="asst_... (para Widget Web)"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="cliente_id">Cliente ID</Label>
+                  <Label htmlFor="cliente_id">Cliente ID *</Label>
                   <Input
                     id="cliente_id"
-                    name="cliente_id"
-                    value={formData.cliente_id}
-                    onChange={handleChange}
-                    placeholder="ID del cliente para la API"
+                    value={formData.cliente_id || ""}
+                    onChange={(e) => updateFormData("cliente_id", e.target.value)}
+                    placeholder="a9454478-89c1-11e3-a751-081012379997"
+                    className={errors.cliente_id ? "border-red-500" : ""}
                   />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="sede_id">Sede ID</Label>
-                  <Input
-                    id="sede_id"
-                    name="sede_id"
-                    value={formData.sede_id}
-                    onChange={handleChange}
-                    placeholder="ID de la sede"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="proxy">URL del Proxy</Label>
-                  <Input
-                    id="proxy"
-                    name="proxy"
-                    value={formData.proxy}
-                    onChange={handleChange}
-                    placeholder="https://proxy.ejemplo.com"
-                  />
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="active"
-                    name="active"
-                    checked={formData.active}
-                    onCheckedChange={(checked) => handleSwitchChange("active", checked)}
-                  />
-                  <Label htmlFor="active">Configuración activa</Label>
+                  {errors.cliente_id && <p className="text-sm text-red-500">{errors.cliente_id}</p>}
+                  <p className="text-sm text-muted-foreground">
+                    ID único del cliente para identificar la configuración
+                  </p>
                 </div>
               </div>
-            </TabsContent>
 
-            <TabsContent value="whatsapp" className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="sede_id">Sede ID</Label>
+                <Input
+                  id="sede_id"
+                  value={formData.sede_id || ""}
+                  onChange={(e) => updateFormData("sede_id", e.target.value)}
+                  placeholder="cfe6a025-1b9d-102d-b564-6096d05021b3"
+                />
+                <p className="text-sm text-muted-foreground">
+                  ID de la sede para obtener información específica (domicilio, teléfono, horarios, etc.)
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="active"
+                  checked={formData.active || false}
+                  onCheckedChange={(checked) => updateFormData("active", checked)}
+                />
+                <Label htmlFor="active">Configuración activa</Label>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="whatsapp" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Configuración de WhatsApp</CardTitle>
+              <CardDescription>Configuración específica para la integración con WhatsApp Business API</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="phoneNumberId">Phone Number ID</Label>
+                  <Label htmlFor="phoneNumberId">Phone Number ID *</Label>
                   <Input
                     id="phoneNumberId"
-                    name="phoneNumberId"
-                    value={formData.phoneNumberId}
-                    onChange={handleChange}
+                    value={formData.phoneNumberId || ""}
+                    onChange={(e) => updateFormData("phoneNumberId", e.target.value)}
                     placeholder="123456789012345"
-                    required
+                    className={errors.phoneNumberId ? "border-red-500" : ""}
                   />
+                  {errors.phoneNumberId && <p className="text-sm text-red-500">{errors.phoneNumberId}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="wabaId">WABA ID</Label>
                   <Input
                     id="wabaId"
-                    name="wabaId"
-                    value={formData.wabaId}
-                    onChange={handleChange}
+                    value={formData.wabaId || ""}
+                    onChange={(e) => updateFormData("wabaId", e.target.value)}
                     placeholder="123456789012345"
                   />
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="accessToken">Access Token</Label>
-                  <Input
-                    id="accessToken"
-                    name="accessToken"
-                    type="password"
-                    value={formData.accessToken}
-                    onChange={handleChange}
-                    placeholder="EAAxxxxx..."
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="verifyToken">Verify Token</Label>
-                  <Input
-                    id="verifyToken"
-                    name="verifyToken"
-                    value={formData.verifyToken}
-                    onChange={handleChange}
-                    placeholder="mi_token_secreto"
-                    required
-                  />
-                </div>
               </div>
-            </TabsContent>
 
-            <TabsContent value="widget" className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="whatsappAssistantId">Assistant ID para WhatsApp *</Label>
+                <Input
+                  id="whatsappAssistantId"
+                  value={formData.whatsappAssistantId || ""}
+                  onChange={(e) => updateFormData("whatsappAssistantId", e.target.value)}
+                  placeholder="asst_..."
+                  className={errors.whatsappAssistantId ? "border-red-500" : ""}
+                />
+                {errors.whatsappAssistantId && <p className="text-sm text-red-500">{errors.whatsappAssistantId}</p>}
+                <p className="text-sm text-muted-foreground">ID del asistente de OpenAI que se usará para WhatsApp</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="accessToken">Access Token</Label>
+                <Input
+                  id="accessToken"
+                  type="password"
+                  value={formData.accessToken || ""}
+                  onChange={(e) => updateFormData("accessToken", e.target.value)}
+                  placeholder="Token de acceso de WhatsApp"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="verifyToken">Verify Token</Label>
+                <Input
+                  id="verifyToken"
+                  value={formData.verifyToken || ""}
+                  onChange={(e) => updateFormData("verifyToken", e.target.value)}
+                  placeholder="Token de verificación del webhook"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="webhookUrl">Webhook URL</Label>
+                <Input
+                  id="webhookUrl"
+                  value={formData.webhookUrl || ""}
+                  onChange={(e) => updateFormData("webhookUrl", e.target.value)}
+                  placeholder="https://tu-dominio.com/api/webhook"
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="widget" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Configuración del Widget</CardTitle>
+              <CardDescription>Personaliza la apariencia y comportamiento del widget de chat</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="flex items-center space-x-2">
                 <Switch
                   id="widgetEnabled"
-                  checked={formData.widgetEnabled}
-                  onCheckedChange={(checked) => handleSwitchChange("widgetEnabled", checked)}
+                  checked={formData.widgetEnabled || false}
+                  onCheckedChange={(checked) => updateFormData("widgetEnabled", checked)}
                 />
-                <Label htmlFor="widgetEnabled">Habilitar Widget Web</Label>
+                <Label htmlFor="widgetEnabled">Widget habilitado</Label>
               </div>
 
               <Separator />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="widgetAssistantId">Assistant ID para Widget *</Label>
+                <Input
+                  id="widgetAssistantId"
+                  value={formData.widgetAssistantId || ""}
+                  onChange={(e) => updateFormData("widgetAssistantId", e.target.value)}
+                  placeholder="asst_..."
+                  className={errors.widgetAssistantId ? "border-red-500" : ""}
+                />
+                {errors.widgetAssistantId && <p className="text-sm text-red-500">{errors.widgetAssistantId}</p>}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="widgetTitle">Título del Widget</Label>
                   <Input
                     id="widgetTitle"
-                    name="widgetTitle"
-                    value={formData.widgetTitle}
-                    onChange={handleChange}
+                    value={formData.widgetTitle || ""}
+                    onChange={(e) => updateFormData("widgetTitle", e.target.value)}
                     placeholder="Asistente Virtual"
                   />
                 </div>
@@ -432,21 +339,42 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                   <Label htmlFor="widgetHeaderText">Texto del Header</Label>
                   <Input
                     id="widgetHeaderText"
-                    name="widgetHeaderText"
-                    value={formData.widgetHeaderText}
-                    onChange={handleChange}
-                    placeholder="Chat en vivo"
+                    value={formData.widgetHeaderText || ""}
+                    onChange={(e) => updateFormData("widgetHeaderText", e.target.value)}
+                    placeholder="Chat de Soporte"
                   />
                 </div>
+              </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="widgetSubtitle">Subtítulo</Label>
+                <Input
+                  id="widgetSubtitle"
+                  value={formData.widgetSubtitle || ""}
+                  onChange={(e) => updateFormData("widgetSubtitle", e.target.value)}
+                  placeholder="Estamos aquí para ayudarte"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="widgetWelcomeMessage">Mensaje de Bienvenida</Label>
+                <Textarea
+                  id="widgetWelcomeMessage"
+                  value={formData.widgetWelcomeMessage || ""}
+                  onChange={(e) => updateFormData("widgetWelcomeMessage", e.target.value)}
+                  placeholder="¡Hola! ¿En qué puedo ayudarte hoy?"
+                  rows={3}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="widgetSubtitle">Subtítulo</Label>
+                  <Label htmlFor="widgetPlaceholder">Placeholder del Input</Label>
                   <Input
-                    id="widgetSubtitle"
-                    name="widgetSubtitle"
-                    value={formData.widgetSubtitle}
-                    onChange={handleChange}
-                    placeholder="Estamos aquí para ayudarte"
+                    id="widgetPlaceholder"
+                    value={formData.widgetPlaceholder || ""}
+                    onChange={(e) => updateFormData("widgetPlaceholder", e.target.value)}
+                    placeholder="Escribe tu mensaje..."
                   />
                 </div>
 
@@ -454,29 +382,106 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                   <Label htmlFor="widgetButtonText">Texto del Botón</Label>
                   <Input
                     id="widgetButtonText"
-                    name="widgetButtonText"
-                    value={formData.widgetButtonText}
-                    onChange={handleChange}
+                    value={formData.widgetButtonText || ""}
+                    onChange={(e) => updateFormData("widgetButtonText", e.target.value)}
                     placeholder="Enviar"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="widgetFloatingButtonText">Texto del Botón Flotante</Label>
+                <Textarea
+                  id="widgetFloatingButtonText"
+                  value={formData.widgetFloatingButtonText || ""}
+                  onChange={(e) => updateFormData("widgetFloatingButtonText", e.target.value)}
+                  placeholder="Obtené tu turno con nuestro asistente virtual"
+                  rows={2}
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="widgetShowFloatingText"
+                  checked={formData.widgetShowFloatingText || false}
+                  onCheckedChange={(checked) => updateFormData("widgetShowFloatingText", checked)}
+                />
+                <Label htmlFor="widgetShowFloatingText">Mostrar texto en botón flotante</Label>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Apariencia del Widget</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="widgetPrimaryColor">Color Primario</Label>
+                  <div className="flex space-x-2">
+                    <Input
+                      id="widgetPrimaryColor"
+                      value={formData.widgetPrimaryColor || ""}
+                      onChange={(e) => updateFormData("widgetPrimaryColor", e.target.value)}
+                      placeholder="#0ea5e9"
+                      className={errors.widgetPrimaryColor ? "border-red-500" : ""}
+                    />
+                    <input
+                      type="color"
+                      value={formData.widgetPrimaryColor || "#0ea5e9"}
+                      onChange={(e) => updateFormData("widgetPrimaryColor", e.target.value)}
+                      className="w-12 h-10 border rounded"
+                    />
+                  </div>
+                  {errors.widgetPrimaryColor && <p className="text-sm text-red-500">{errors.widgetPrimaryColor}</p>}
+                </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="widgetPlaceholder">Placeholder del Input</Label>
-                  <Input
-                    id="widgetPlaceholder"
-                    name="widgetPlaceholder"
-                    value={formData.widgetPlaceholder}
-                    onChange={handleChange}
-                    placeholder="Escribe tu mensaje..."
-                  />
+                  <Label htmlFor="widgetSecondaryColor">Color Secundario</Label>
+                  <div className="flex space-x-2">
+                    <Input
+                      id="widgetSecondaryColor"
+                      value={formData.widgetSecondaryColor || ""}
+                      onChange={(e) => updateFormData("widgetSecondaryColor", e.target.value)}
+                      placeholder="#f0f9ff"
+                      className={errors.widgetSecondaryColor ? "border-red-500" : ""}
+                    />
+                    <input
+                      type="color"
+                      value={formData.widgetSecondaryColor || "#f0f9ff"}
+                      onChange={(e) => updateFormData("widgetSecondaryColor", e.target.value)}
+                      className="w-12 h-10 border rounded"
+                    />
+                  </div>
+                  {errors.widgetSecondaryColor && <p className="text-sm text-red-500">{errors.widgetSecondaryColor}</p>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="widgetPosition">Posición</Label>
+                  <Select
+                    value={formData.widgetPosition || "bottom-right"}
+                    onValueChange={(value) => updateFormData("widgetPosition", value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bottom-right">Abajo Derecha</SelectItem>
+                      <SelectItem value="bottom-left">Abajo Izquierda</SelectItem>
+                      <SelectItem value="top-right">Arriba Derecha</SelectItem>
+                      <SelectItem value="top-left">Arriba Izquierda</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="widgetTheme">Tema</Label>
                   <Select
-                    value={formData.widgetTheme}
-                    onValueChange={(value) => handleSelectChange("widgetTheme", value)}
+                    value={formData.widgetTheme || "light"}
+                    onValueChange={(value) => updateFormData("widgetTheme", value)}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -488,137 +493,28 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="widgetWelcomeMessage">Mensaje de Bienvenida</Label>
-                <Textarea
-                  id="widgetWelcomeMessage"
-                  name="widgetWelcomeMessage"
-                  value={formData.widgetWelcomeMessage}
-                  onChange={handleChange}
-                  placeholder="¡Hola! ¿En qué puedo ayudarte hoy?"
-                  rows={3}
-                />
-              </div>
-
-              <Separator />
-
-              {/* Sección del Botón Flotante */}
-              <div className="space-y-4">
-                <h4 className="text-lg font-medium">Configuración del Botón Flotante</h4>
-
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="widgetShowFloatingText"
-                    checked={formData.widgetShowFloatingText}
-                    onCheckedChange={(checked) => handleSwitchChange("widgetShowFloatingText", checked)}
+                <div className="space-y-2">
+                  <Label htmlFor="widgetBorderRadius">Border Radius</Label>
+                  <Input
+                    id="widgetBorderRadius"
+                    type="number"
+                    value={formData.widgetBorderRadius || 12}
+                    onChange={(e) => updateFormData("widgetBorderRadius", Number.parseInt(e.target.value))}
+                    min="0"
+                    max="50"
                   />
-                  <Label htmlFor="widgetShowFloatingText">Mostrar texto junto al botón flotante</Label>
-                </div>
-
-                {formData.widgetShowFloatingText && (
-                  <div className="space-y-2">
-                    <Label htmlFor="widgetFloatingButtonText">Texto del Botón Flotante</Label>
-                    <Input
-                      id="widgetFloatingButtonText"
-                      name="widgetFloatingButtonText"
-                      value={formData.widgetFloatingButtonText}
-                      onChange={handleChange}
-                      placeholder="Obtené tu turno con nuestro asistente virtual"
-                    />
-                    <p className="text-sm text-gray-500">
-                      Este texto aparecerá junto al botón flotante para invitar a los usuarios a interactuar
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <Separator />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="widgetPrimaryColor">Color Primario</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      type="color"
-                      value={formData.widgetPrimaryColor}
-                      onChange={(e) =>
-                        handleChange({
-                          target: { name: "widgetPrimaryColor", value: e.target.value, type: "text" },
-                        } as any)
-                      }
-                      className="w-12 h-10 p-1"
-                    />
-                    <Input
-                      type="text"
-                      value={formData.widgetPrimaryColor}
-                      onChange={(e) =>
-                        handleChange({
-                          target: { name: "widgetPrimaryColor", value: e.target.value, type: "text" },
-                        } as any)
-                      }
-                      className="flex-1"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="widgetSecondaryColor">Color Secundario</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      type="color"
-                      value={formData.widgetSecondaryColor}
-                      onChange={(e) =>
-                        handleChange({
-                          target: { name: "widgetSecondaryColor", value: e.target.value, type: "text" },
-                        } as any)
-                      }
-                      className="w-12 h-10 p-1"
-                    />
-                    <Input
-                      type="text"
-                      value={formData.widgetSecondaryColor}
-                      onChange={(e) =>
-                        handleChange({
-                          target: { name: "widgetSecondaryColor", value: e.target.value, type: "text" },
-                        } as any)
-                      }
-                      className="flex-1"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Posición del Widget</Label>
-                  <RadioGroup
-                    value={formData.widgetPosition}
-                    onValueChange={(value) => handleSelectChange("widgetPosition", value)}
-                    className="flex gap-4"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="bottom-right" id="bottom-right" />
-                      <Label htmlFor="bottom-right">Inferior Derecha</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="bottom-left" id="bottom-left" />
-                      <Label htmlFor="bottom-left">Inferior Izquierda</Label>
-                    </div>
-                  </RadioGroup>
                 </div>
               </div>
 
-              <Separator />
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="widgetMaxWidth">Ancho Máximo (px)</Label>
                   <Input
                     id="widgetMaxWidth"
-                    name="widgetMaxWidth"
                     type="number"
-                    value={formData.widgetMaxWidth}
-                    onChange={handleChange}
+                    value={formData.widgetMaxWidth || 400}
+                    onChange={(e) => updateFormData("widgetMaxWidth", Number.parseInt(e.target.value))}
                     min="300"
                     max="800"
                   />
@@ -628,67 +524,58 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                   <Label htmlFor="widgetMaxHeight">Alto Máximo (px)</Label>
                   <Input
                     id="widgetMaxHeight"
-                    name="widgetMaxHeight"
                     type="number"
-                    value={formData.widgetMaxHeight}
-                    onChange={handleChange}
+                    value={formData.widgetMaxHeight || 600}
+                    onChange={(e) => updateFormData("widgetMaxHeight", Number.parseInt(e.target.value))}
                     min="400"
                     max="800"
                   />
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="widgetBorderRadius">Radio del Borde (px)</Label>
-                  <Input
-                    id="widgetBorderRadius"
-                    name="widgetBorderRadius"
-                    type="number"
-                    value={formData.widgetBorderRadius}
-                    onChange={handleChange}
-                    min="0"
-                    max="50"
-                  />
-                </div>
               </div>
 
-              <Separator />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex flex-wrap gap-4">
                 <div className="flex items-center space-x-2">
                   <Switch
                     id="widgetShadow"
-                    checked={formData.widgetShadow}
-                    onCheckedChange={(checked) => handleSwitchChange("widgetShadow", checked)}
+                    checked={formData.widgetShadow || false}
+                    onCheckedChange={(checked) => updateFormData("widgetShadow", checked)}
                   />
-                  <Label htmlFor="widgetShadow">Mostrar Sombra</Label>
+                  <Label htmlFor="widgetShadow">Sombra</Label>
                 </div>
 
                 <div className="flex items-center space-x-2">
                   <Switch
                     id="widgetAnimation"
-                    checked={formData.widgetAnimation}
-                    onCheckedChange={(checked) => handleSwitchChange("widgetAnimation", checked)}
+                    checked={formData.widgetAnimation || false}
+                    onCheckedChange={(checked) => updateFormData("widgetAnimation", checked)}
                   />
-                  <Label htmlFor="widgetAnimation">Habilitar Animaciones</Label>
+                  <Label htmlFor="widgetAnimation">Animaciones</Label>
                 </div>
 
                 <div className="flex items-center space-x-2">
                   <Switch
                     id="widgetSoundEnabled"
-                    checked={formData.widgetSoundEnabled}
-                    onCheckedChange={(checked) => handleSwitchChange("widgetSoundEnabled", checked)}
+                    checked={formData.widgetSoundEnabled || false}
+                    onCheckedChange={(checked) => updateFormData("widgetSoundEnabled", checked)}
                   />
-                  <Label htmlFor="widgetSoundEnabled">Sonidos de Notificación</Label>
+                  <Label htmlFor="widgetSoundEnabled">Sonidos</Label>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
 
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="widgetBrandingEnabled"
-                    checked={formData.widgetBrandingEnabled}
-                    onCheckedChange={(checked) => handleSwitchChange("widgetBrandingEnabled", checked)}
-                  />
-                  <Label htmlFor="widgetBrandingEnabled">Mostrar Branding</Label>
-                </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Branding</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="widgetBrandingEnabled"
+                  checked={formData.widgetBrandingEnabled || false}
+                  onCheckedChange={(checked) => updateFormData("widgetBrandingEnabled", checked)}
+                />
+                <Label htmlFor="widgetBrandingEnabled">Mostrar branding</Label>
               </div>
 
               {formData.widgetBrandingEnabled && (
@@ -696,142 +583,66 @@ export function WhatsAppConfigForm({ config, isNew = false }: WhatsAppConfigForm
                   <Label htmlFor="widgetBrandingText">Texto del Branding</Label>
                   <Input
                     id="widgetBrandingText"
-                    name="widgetBrandingText"
-                    value={formData.widgetBrandingText}
-                    onChange={handleChange}
-                    placeholder="Powered by AI Assistant"
+                    value={formData.widgetBrandingText || ""}
+                    onChange={(e) => updateFormData("widgetBrandingText", e.target.value)}
+                    placeholder="Powered by AI"
                   />
                 </div>
               )}
-            </TabsContent>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-            <TabsContent value="integration" className="space-y-6">
-              {!isNew && config?.id && baseUrl && (
-                <>
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold">URLs del Widget</h3>
+        <TabsContent value="advanced" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Configuración Avanzada</CardTitle>
+              <CardDescription>Configuraciones técnicas y de desarrollo</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="proxy">Proxy URL</Label>
+                <Input
+                  id="proxy"
+                  value={formData.proxy || ""}
+                  onChange={(e) => updateFormData("proxy", e.target.value)}
+                  placeholder="https://proxy.ejemplo.com"
+                />
+                <p className="text-sm text-muted-foreground">URL del proxy para las llamadas a la API (opcional)</p>
+              </div>
 
-                    <div className="space-y-3">
-                      <div>
-                        <Label className="text-sm font-medium">URL del Widget</Label>
-                        <div className="flex gap-2 mt-1">
-                          <Input value={getWidgetUrl()} readOnly className="flex-1" />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => copyToClipboard(getWidgetUrl())}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openInNewTab(getWidgetUrl())}
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <Label className="text-sm font-medium">Página de Demostración</Label>
-                        <div className="flex gap-2 mt-1">
-                          <Input value={getChatUrl()} readOnly className="flex-1" />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => copyToClipboard(getChatUrl())}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                          <Button type="button" variant="outline" size="sm" onClick={() => openInNewTab(getChatUrl())}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
+              {config && (
+                <Alert>
+                  <AlertDescription>
+                    <div className="space-y-2">
+                      <p>
+                        <strong>ID:</strong> <Badge variant="outline">{config.id}</Badge>
+                      </p>
+                      <p>
+                        <strong>Creado:</strong>{" "}
+                        {config.createdAt ? new Date(config.createdAt).toLocaleString() : "N/A"}
+                      </p>
+                      <p>
+                        <strong>Actualizado:</strong>{" "}
+                        {config.updatedAt ? new Date(config.updatedAt).toLocaleString() : "N/A"}
+                      </p>
                     </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold">Código de Integración</h3>
-
-                    <div className="space-y-4">
-                      <div>
-                        <Label className="text-sm font-medium">Código HTML (iframe)</Label>
-                        <div className="mt-2">
-                          <Textarea value={getEmbedCode()} readOnly rows={3} className="font-mono text-sm" />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="mt-2 bg-transparent"
-                            onClick={() => copyToClipboard(getEmbedCode())}
-                          >
-                            <Copy className="h-4 w-4 mr-2" />
-                            Copiar Código HTML
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <Label className="text-sm font-medium">Código JavaScript</Label>
-                        <div className="mt-2">
-                          <Textarea value={getJavaScriptCode()} readOnly rows={8} className="font-mono text-sm" />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="mt-2 bg-transparent"
-                            onClick={() => copyToClipboard(getJavaScriptCode())}
-                          >
-                            <Copy className="h-4 w-4 mr-2" />
-                            Copiar Código JavaScript
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h4 className="font-medium text-blue-900 mb-2">Instrucciones de Integración</h4>
-                    <ul className="text-sm text-blue-800 space-y-1">
-                      <li>• Para integrar como iframe: Copia y pega el código HTML en tu sitio web</li>
-                      <li>
-                        • Para integrar como widget flotante: Copia y pega el código JavaScript antes del cierre del tag
-                        &lt;/body&gt;
-                      </li>
-                      <li>• El widget se posicionará automáticamente según la configuración seleccionada</li>
-                      <li>• Puedes personalizar todos los aspectos visuales desde la pestaña "Widget"</li>
-                      <li>• El texto del botón flotante aparecerá automáticamente si está habilitado</li>
-                    </ul>
-                  </div>
-                </>
+                  </AlertDescription>
+                </Alert>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
-              {(isNew || !config?.id || !baseUrl) && (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
-                  <p className="text-gray-600">
-                    {isNew
-                      ? "Los códigos de integración estarán disponibles después de guardar la configuración."
-                      : "Cargando códigos de integración..."}
-                  </p>
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
-
-          <div className="flex justify-end">
-            <Button type="submit" disabled={isLoading} className="min-w-[120px]">
-              {isLoading ? "Guardando..." : isNew ? "Crear Configuración" : "Actualizar Configuración"}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+      <div className="flex justify-end space-x-2">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancelar
+        </Button>
+        <Button type="submit" disabled={isLoading}>
+          {isLoading ? "Guardando..." : "Guardar Configuración"}
+        </Button>
+      </div>
+    </form>
   )
 }
