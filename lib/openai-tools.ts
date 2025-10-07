@@ -1082,46 +1082,5 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
 
   const totalTime = Date.now() - startTime
   console.log(`[OPENAI] ⏱️ Run completado en ${totalTime}ms (${pollCount} polls)`)
-
-  try {
-    const stepsUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/steps`
-    const stepsResponse = await fetch(stepsUrl, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "assistants=v2",
-      },
-    })
-
-    if (stepsResponse.ok) {
-      const stepsData = await stepsResponse.json()
-      console.log(`[OPENAI] 📋 Run tuvo ${stepsData.data?.length || 0} pasos`)
-
-      if (stepsData.data && stepsData.data.length > 0) {
-        for (const step of stepsData.data) {
-          console.log(`[OPENAI] 📍 Paso ${step.id}: tipo=${step.type}, status=${step.status}`)
-
-          if (step.type === "tool_calls" && step.step_details?.tool_calls) {
-            for (const toolCall of step.step_details.tool_calls) {
-              if (toolCall.type === "function") {
-                console.log(`[OPENAI] 🔧 Tool llamado: ${toolCall.function?.name}`)
-                console.log(`[OPENAI] 📝 Args: ${toolCall.function?.arguments}`)
-              }
-            }
-          } else if (step.type === "message_creation") {
-            console.log(`[OPENAI] 💬 Mensaje creado: ${step.step_details?.message_creation?.message_id}`)
-          }
-        }
-      } else {
-        console.log(`[OPENAI] ⚠️ No se encontraron pasos en el run`)
-      }
-    } else {
-      console.log(`[OPENAI] ⚠️ No se pudieron obtener los pasos del run: ${stepsResponse.status}`)
-    }
-  } catch (error) {
-    console.error(`[OPENAI] ❌ Error obteniendo pasos del run:`, error)
-  }
-
   return run
 }
