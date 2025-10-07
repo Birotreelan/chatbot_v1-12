@@ -559,18 +559,30 @@ export async function buscarProfesionalesHerramienta(clienteId: string, busqueda
     const resultado = await buscarProfesionales(clienteId, busqueda)
 
     if (resultado.exito && resultado.datos) {
-      console.log(`[TOOLS] ✅ Profesionales encontrados: ${resultado.datos.length}`)
-      return JSON.stringify({
-        exito: true,
-        profesionales: resultado.datos,
-        total: resultado.datos.length,
-        mensaje: `Se encontraron ${resultado.datos.length} profesionales`,
-      })
+      // Check if datos has a profesionales property (API response structure)
+      const profesionales = resultado.datos.profesionales || resultado.datos
+
+      // Ensure profesionales is an array
+      if (Array.isArray(profesionales)) {
+        console.log(`[TOOLS] ✅ Profesionales encontrados: ${profesionales.length}`)
+        return JSON.stringify({
+          exito: true,
+          profesionales: profesionales,
+          total: profesionales.length,
+          mensaje: `Se encontraron ${profesionales.length} profesionales`,
+        })
+      } else {
+        console.log(`[TOOLS] ⚠️ Datos no es un array:`, resultado.datos)
+        return JSON.stringify({
+          exito: false,
+          mensaje: "Formato de respuesta inesperado",
+        })
+      }
     } else {
       console.log(`[TOOLS] ⚠️ No se encontraron profesionales para: "${busqueda}"`)
       return JSON.stringify({
         exito: false,
-        mensaje: "No se encontraron profesionales con ese criterio de búsqueda",
+        mensaje: resultado.error?.mensaje || "No se encontraron profesionales con ese criterio de búsqueda",
       })
     }
   } catch (error) {
