@@ -403,9 +403,9 @@ async function waitForRunCompletion(
     try {
       log.debug(`Intento ${attempt}/${maxAttempts} - Verificando run...`)
 
-      // CRÍTICO: Usar la función robusta para llamadas a OpenAI
+      // El SDK espera: retrieve(runId, { thread_id: threadId })
       const run = await makeRobustOpenAICall(
-        () => openai.beta.threads.runs.retrieve(threadId, runId),
+        () => openai.beta.threads.runs.retrieve(runId, { thread_id: threadId }),
         "RETRIEVE_RUN",
         log,
         3, // Menos reintentos por intento individual
