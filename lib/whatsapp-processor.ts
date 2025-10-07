@@ -494,7 +494,7 @@ async function waitForRunCompletion(
         log.info("Enviando outputs de herramientas...")
         await makeRobustOpenAICall(
           () =>
-            openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
+            openai.beta.threads.runs.submitToolOutputs(run.thread_id, run.id, {
               tool_outputs: toolOutputs,
             }),
           "SUBMIT_TOOL_OUTPUTS",
@@ -519,17 +519,11 @@ async function waitForRunCompletion(
           runId,
           totalTime,
           maxAttempts,
-          finalError: error,
         })
-        throw error
+        throw new Error(`Timeout esperando completación del run después de ${totalTime}ms`)
       }
-
-      // Esperar antes de reintentar con backoff exponencial
-      const delay = Math.min(Math.pow(2, attempt) * 1000, 10000) // Max 10 segundos
-      log.warn(`Esperando ${delay}ms antes de reintentar...`)
-      await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
 
-  throw new Error(`Timeout esperando completación del run después de ${maxAttempts} intentos`)
+  throw new Error("No se pudo completar el run")
 }

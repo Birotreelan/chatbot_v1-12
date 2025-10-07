@@ -378,8 +378,9 @@ export class ClinicAPI {
   /**
    * Obtiene los datos de sedes disponibles
    */
-  async obtenerSedes(): Promise<ApiResponse<any>> {
-    return this.fetchProxyApi<any>("get_data_sedes")
+  async obtenerSedes(sedeId?: string): Promise<ApiResponse<any>> {
+    const params = sedeId ? { sede_id: sedeId } : {}
+    return this.fetchProxyApi<any>("get_data_sedes", params)
   }
 }
 
@@ -570,13 +571,16 @@ export async function reserveTurno(
 /**
  * Obtiene los datos de sedes usando la API de la clínica
  */
-export async function getSedes(clienteId: string): Promise<{
+export async function getSedes(
+  clienteId: string,
+  sedeId?: string,
+): Promise<{
   success: boolean
   data?: any
   error?: string
 }> {
   try {
-    console.log(`[GET-SEDES] Obteniendo sedes para cliente: ${clienteId}`)
+    console.log(`[GET-SEDES] Obteniendo sedes para cliente: ${clienteId}${sedeId ? `, sede: ${sedeId}` : ""}`)
 
     if (!clienteId) {
       console.error(`[GET-SEDES] ❌ Cliente ID faltante`)
@@ -587,7 +591,7 @@ export async function getSedes(clienteId: string): Promise<{
     }
 
     const clinicAPI = createClinicAPI(clienteId)
-    const response = await clinicAPI.obtenerSedes()
+    const response = await clinicAPI.obtenerSedes(sedeId)
 
     if (response.exito && response.datos) {
       console.log(`[GET-SEDES] ✅ Sedes obtenidas:`, response.datos)

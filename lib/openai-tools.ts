@@ -1054,10 +1054,12 @@ export async function createWhatsAppSystemBlock(
   // Obtener datos de sedes si tenemos clienteId
   if (clienteId) {
     try {
-      console.log(`[OPENAI-TOOLS] Obteniendo datos de sedes para cliente: ${clienteId}`)
+      console.log(
+        `[OPENAI-TOOLS] Obteniendo datos de sedes para cliente: ${clienteId}${sedeId ? `, sede: ${sedeId}` : ""}`,
+      )
 
       const { getSedes } = await import("./clinic-api")
-      const sedesResult = await getSedes(clienteId)
+      const sedesResult = await getSedes(clienteId, sedeId)
 
       if (sedesResult.success && sedesResult.data) {
         // Formatear los datos de sedes para el bloque [SISTEMA]
@@ -1076,12 +1078,14 @@ export async function createWhatsAppSystemBlock(
             )
             .join(" | ")
         } else {
-          sedesInfo = JSON.stringify(sedesResult.data).substring(0, 200) + "..."
+          // Si los datos no están en el formato esperado, intentar extraer información útil
+          const dataStr = JSON.stringify(sedesResult.data)
+          sedesInfo = dataStr.length > 200 ? dataStr.substring(0, 200) + "..." : dataStr
         }
-        console.log(`[OPENAI-TOOLS] Sedes obtenidas y formateadas`)
+        console.log(`[OPENAI-TOOLS] ✅ Sedes obtenidas y formateadas`)
       } else {
         console.log(`[OPENAI-TOOLS] ⚠️ No se pudieron obtener sedes: ${sedesResult.error}`)
-        sedesInfo = `Error: ${sedesResult.error}`
+        sedesInfo = "No se pudieron cargar las sedes"
       }
     } catch (error) {
       console.error(`[OPENAI-TOOLS] ❌ Error obteniendo sedes:`, error)
