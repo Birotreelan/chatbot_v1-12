@@ -745,6 +745,35 @@ function getOpenAIClient() {
 // Función para esperar un tiempo determinado
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// Función para sincronizar herramientas con el asistente
+export async function syncAssistantTools(assistantId: string): Promise<void> {
+  console.log(`[OPENAI] 🔧 Sincronizando herramientas con asistente ${assistantId}`)
+
+  const openai = getOpenAIClient()
+
+  try {
+    // Convert our tool definitions to OpenAI format
+    const tools = Object.entries(openaiTools).map(([name, tool]) => ({
+      type: "function" as const,
+      function: {
+        name,
+        description: tool.description,
+        parameters: tool.parameters,
+      },
+    }))
+
+    // Update the assistant with the tools
+    await openai.beta.assistants.update(assistantId, {
+      tools,
+    })
+
+    console.log(`[OPENAI] ✅ ${tools.length} herramientas sincronizadas exitosamente`)
+  } catch (error) {
+    console.error("[OPENAI] ❌ Error sincronizando herramientas:", error)
+    throw error
+  }
+}
+
 // Función principal para obtener respuesta del asistente
 export async function getAssistantResponse(
   threadId: string,
@@ -765,6 +794,17 @@ export async function getAssistantResponse(
     }
 
     console.log(`[OPENAI] ⚙️ Config: ${config.displayName} | Cliente: ${config.cliente_id}`)
+
+    try {
+      const assistant = await openai.beta.assistants.retrieve(assistantId)
+      if (!assistant.tools || assistant.tools.length === 0) {
+        console.log(`[OPENAI] ⚠️ Asistente sin herramientas, sincronizando...`)
+        await syncAssistantTools(assistantId)
+      }
+    } catch (error) {
+      console.error("[OPENAI] ⚠️ Error verificando herramientas del asistente:", error)
+      // Continue anyway, don't block the conversation
+    }
 
     // Añadir el mensaje al thread
     const messageResponse = await openai.beta.threads.messages.create(threadId, {
