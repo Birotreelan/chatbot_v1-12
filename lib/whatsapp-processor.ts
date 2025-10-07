@@ -494,7 +494,7 @@ async function waitForRunCompletion(
         log.info("Enviando outputs de herramientas...")
         await makeRobustOpenAICall(
           () =>
-            openai.beta.threads.runs.submitToolOutputs(runId, threadId, {
+            openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
               tool_outputs: toolOutputs,
             }),
           "SUBMIT_TOOL_OUTPUTS",

@@ -1056,8 +1056,7 @@ export async function createWhatsAppSystemBlock(
     try {
       console.log(`[OPENAI-TOOLS] Obteniendo datos de sedes para cliente: ${clienteId}`)
 
-      // Importar getSedes dinámicamente
-      const { getSedes } = await import("./api-tools/api-functions")
+      const { getSedes } = await import("./clinic-api")
       const sedesResult = await getSedes(clienteId)
 
       if (sedesResult.success && sedesResult.data) {
