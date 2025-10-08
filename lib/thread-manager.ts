@@ -121,11 +121,18 @@ export async function safelyAddMessageToThread(
   maxRetries = 5,
   retryDelay = 2000,
 ): Promise<any> {
+  if (!threadId) {
+    throw new Error("[THREAD-MANAGER] threadId is required but was undefined")
+  }
+
+  console.log(`[THREAD-MANAGER] 🔍 Iniciando safelyAddMessageToThread para thread: ${threadId}`)
+
   let attempts = 0
 
   while (attempts < maxRetries) {
     try {
       // Check if there are any active runs on this thread
+      console.log(`[THREAD-MANAGER] 🔎 Verificando runs activos en thread ${threadId}`)
       const runs = await openai.beta.threads.runs.list(threadId, {
         limit: 10,
         order: "desc",
@@ -158,11 +165,18 @@ export async function safelyAddMessageToThread(
           waitAttempts < maxWaitAttempts
         ) {
           await new Promise((resolve) => setTimeout(resolve, 1000))
+
+          console.log(`[THREAD-MANAGER] 🔄 Recuperando estado del run. ThreadId: ${threadId}, RunId: ${activeRun.id}`)
+
+          if (!threadId || !activeRun.id) {
+            throw new Error(`[THREAD-MANAGER] Parámetros inválidos - threadId: ${threadId}, runId: ${activeRun.id}`)
+          }
+
           const updatedRun = await openai.beta.threads.runs.retrieve(threadId, activeRun.id)
           runStatus = updatedRun.status
           waitAttempts++
           console.log(
-            `[THREAD-MANAGER] 🔄 Esperando run ${activeRun.id} (estado: ${runStatus}, intento ${waitAttempts})`,
+            `[THREAD-MANAGER] 🔄 Esperando run ${activeRun.id} (estado: ${runStatus}, intento ${waitAttempts}/${maxWaitAttempts})`,
           )
         }
 
@@ -179,22 +193,33 @@ export async function safelyAddMessageToThread(
             console.log(`[THREAD-MANAGER] ✅ Run cancelado exitosamente`)
             // Wait a bit for cancellation to complete
             await new Promise((resolve) => setTimeout(resolve, 2000))
-          } catch (cancelError) {
-            console.error(`[THREAD-MANAGER] ❌ Error al cancelar run:`, cancelError)
+          } catch (cancelError: any) {
+            console.error(`[THREAD-MANAGER] ❌ Error al cancelar run:`, cancelError.message)
           }
         } else {
           console.log(`[THREAD-MANAGER] ✅ Run completado con estado: ${runStatus}`)
         }
+      } else {
+        console.log(`[THREAD-MANAGER] ✅ No hay runs activos en el thread`)
       }
 
       // Now try to add the message
       console.log(`[THREAD-MANAGER] 📝 Agregando mensaje al thread ${threadId}`)
       const createdMessage = await openai.beta.threads.messages.create(threadId, message)
-      console.log(`[THREAD-MANAGER] ✅ Mensaje agregado exitosamente`)
+      console.log(`[THREAD-MANAGER] ✅ Mensaje agregado exitosamente (ID: ${createdMessage.id})`)
       return createdMessage
     } catch (error: any) {
       attempts++
-      console.error(`[THREAD-MANAGER] ❌ Error agregando mensaje (intento ${attempts}/${maxRetries}):`, error.message)
+      console.error(
+        `[THREAD-MANAGER] ❌ Error agregando mensaje (intento ${attempts}/${maxRetries}):`,
+        error.message || error,
+      )
+
+      if (error.message?.includes("Path parameters")) {
+        console.error(`[THREAD-MANAGER] ❌ Error de parámetros detectado. ThreadId actual: ${threadId}`)
+        console.error(`[THREAD-MANAGER] ❌ Tipo de threadId: ${typeof threadId}`)
+        console.error(`[THREAD-MANAGER] ❌ ThreadId es undefined: ${threadId === undefined}`)
+      }
 
       // If it's still the "run is active" error and we have retries left, wait and try again
       if (error.message?.includes("while a run") && error.message?.includes("is active") && attempts < maxRetries) {
@@ -204,6 +229,9 @@ export async function safelyAddMessageToThread(
       }
 
       // For other errors or if we're out of retries, throw
+      if (attempts >= maxRetries) {
+        console.error(`[THREAD-MANAGER] ❌ Se agotaron los ${maxRetries} intentos`)
+      }
       throw error
     }
   }

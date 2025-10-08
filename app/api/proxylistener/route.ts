@@ -355,7 +355,15 @@ async function handleTemplateSend(data: any) {
           console.log("[PROXYLISTENER] Notificando a OpenAI sobre plantilla enviada...")
 
           const threadResult = await getThreadForUser(cleanPhoneNumber, config.id)
+
+          if (!threadResult || !threadResult.threadId) {
+            console.error("[PROXYLISTENER] ❌ No se pudo obtener threadId válido")
+            console.error("[PROXYLISTENER] threadResult:", threadResult)
+            throw new Error("ThreadId no disponible")
+          }
+
           console.log("[PROXYLISTENER] Thread obtenido:", threadResult.threadId)
+          console.log("[PROXYLISTENER] Tipo de threadId:", typeof threadResult.threadId)
 
           // Extraer información del turno desde el template
           const appointmentInfo = extractAppointmentInfo(Body)
@@ -415,14 +423,21 @@ Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
           notificationMessage += `
 [/SISTEMA_PLANTILLA]`
 
+          console.log("[PROXYLISTENER] 🔍 Validando threadId antes de agregar mensaje:", threadResult.threadId)
+
+          if (!threadResult.threadId || typeof threadResult.threadId !== "string") {
+            throw new Error(`ThreadId inválido: ${threadResult.threadId} (tipo: ${typeof threadResult.threadId})`)
+          }
+
           await safelyAddMessageToThread(threadResult.threadId, {
             role: "user",
             content: notificationMessage,
           })
 
           console.log("[PROXYLISTENER] Notificación enviada a OpenAI exitosamente")
-        } catch (error) {
+        } catch (error: any) {
           console.error("[PROXYLISTENER] Error al notificar a OpenAI:", error)
+          console.error("[PROXYLISTENER] Stack trace:", error.stack)
         }
       }
     }
