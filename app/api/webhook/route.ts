@@ -91,6 +91,8 @@ export async function POST(req: Request) {
             continue
           }
 
+          console.log("[WEBHOOK] Respondiendo inmediatamente con 200 OK")
+
           // Usar Promise.resolve().then() para ejecutar después de responder
           Promise.resolve().then(async () => {
             try {
@@ -99,33 +101,46 @@ export async function POST(req: Request) {
               // Determinar si debemos usar QStash o procesar directamente
               const useQStash = process.env.USE_QSTASH === "true"
               console.log(`[WEBHOOK-BG] Usando QStash: ${useQStash}`)
+              console.log(`[WEBHOOK-BG] USE_QSTASH env var: ${process.env.USE_QSTASH}`)
 
               if (useQStash) {
                 // Encolar el mensaje para procesamiento asíncrono
                 console.log(`[WEBHOOK-BG] Encolando mensaje para procesamiento asíncrono`)
                 try {
                   const result = await enqueueMessage(change.value)
+                  console.log(`[WEBHOOK-BG] Resultado del encolado:`, JSON.stringify(result, null, 2))
+
                   if (result.success && result.messageId) {
-                    console.log(`[WEBHOOK-BG] Mensaje encolado con ID: ${result.messageId}`)
+                    console.log(`[WEBHOOK-BG] ✅ Mensaje encolado exitosamente con ID: ${result.messageId}`)
                   } else {
-                    console.error(`[WEBHOOK-BG] Error al encolar mensaje, procesando directamente como fallback`)
+                    console.error(
+                      `[WEBHOOK-BG] ❌ Error al encolar mensaje (success=false), procesando directamente como fallback`,
+                    )
                     await handleMessage(change.value)
                   }
                 } catch (error) {
-                  console.error(`[WEBHOOK-BG] Error al encolar mensaje:`, error)
+                  console.error(`[WEBHOOK-BG] ❌ Excepción al encolar mensaje:`, error)
+                  if (error instanceof Error) {
+                    console.error(`[WEBHOOK-BG] - Error message:`, error.message)
+                    console.error(`[WEBHOOK-BG] - Error stack:`, error.stack)
+                  }
                   // Si falla el encolamiento, procesar de forma directa como fallback
                   console.log(`[WEBHOOK-BG] Procesando mensaje directamente como fallback`)
                   await handleMessage(change.value)
                 }
               } else {
                 // Procesar el mensaje directamente
-                console.log(`[WEBHOOK-BG] Procesando mensaje directamente`)
+                console.log(`[WEBHOOK-BG] Procesando mensaje directamente (QStash deshabilitado)`)
                 await handleMessage(change.value)
               }
 
-              console.log(`[WEBHOOK-BG] Procesamiento completado para ${userPhoneNumber}`)
+              console.log(`[WEBHOOK-BG] ✅ Procesamiento completado para ${userPhoneNumber}`)
             } catch (error) {
-              console.error(`[WEBHOOK-BG] Error en procesamiento background:`, error)
+              console.error(`[WEBHOOK-BG] ❌ Error en procesamiento background:`, error)
+              if (error instanceof Error) {
+                console.error(`[WEBHOOK-BG] - Error message:`, error.message)
+                console.error(`[WEBHOOK-BG] - Error stack:`, error.stack)
+              }
               await logError("webhook_background", error instanceof Error ? error : new Error(String(error)))
             }
           })
@@ -133,7 +148,6 @@ export async function POST(req: Request) {
       }
     }
 
-    console.log("[WEBHOOK] Respondiendo inmediatamente con 200 OK")
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("[WEBHOOK] Error al procesar webhook:", error)
