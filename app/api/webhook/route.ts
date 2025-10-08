@@ -5,7 +5,6 @@ import { enqueueMessage } from "@/lib/queue"
 import { incrementMetric, logError } from "@/lib/monitoring"
 import { rateLimit } from "@/lib/rate-limit"
 
-// Permitir que la función se ejecute durante más tiempo
 export const maxDuration = 60
 
 // Manejar la verificación del webhook (GET)
@@ -74,7 +73,9 @@ export async function POST(req: Request) {
     // Incrementar métrica de mensajes recibidos
     await incrementMetric("messages_received")
 
-    // Procesar cada entrada y cambio
+    // Esto evita el timeout de 60 segundos
+
+    // Procesar cada entrada y cambio de forma asíncrona
     for (const entry of body.entry || []) {
       for (const change of entry.changes || []) {
         if (change.field === "messages" && change.value && change.value.messages && change.value.messages.length > 0) {
@@ -90,36 +91,49 @@ export async function POST(req: Request) {
             continue
           }
 
-          // Determinar si debemos usar QStash o procesar directamente
-          const useQStash = process.env.USE_QSTASH === "true"
-          console.log(`[WEBHOOK] Usando QStash: ${useQStash}`)
-
-          if (useQStash) {
-            // Encolar el mensaje para procesamiento asíncrono
-            console.log(`[WEBHOOK] Encolando mensaje para procesamiento asíncrono`)
+          // Usar Promise.resolve().then() para ejecutar después de responder
+          Promise.resolve().then(async () => {
             try {
-              const result = await enqueueMessage(change.value)
-              if (result.success && result.messageId) {
-                console.log(`[WEBHOOK] Mensaje encolado con ID: ${result.messageId}`)
+              console.log(`[WEBHOOK-BG] Iniciando procesamiento en background para ${userPhoneNumber}`)
+
+              // Determinar si debemos usar QStash o procesar directamente
+              const useQStash = process.env.USE_QSTASH === "true"
+              console.log(`[WEBHOOK-BG] Usando QStash: ${useQStash}`)
+
+              if (useQStash) {
+                // Encolar el mensaje para procesamiento asíncrono
+                console.log(`[WEBHOOK-BG] Encolando mensaje para procesamiento asíncrono`)
+                try {
+                  const result = await enqueueMessage(change.value)
+                  if (result.success && result.messageId) {
+                    console.log(`[WEBHOOK-BG] Mensaje encolado con ID: ${result.messageId}`)
+                  } else {
+                    console.error(`[WEBHOOK-BG] Error al encolar mensaje, procesando directamente como fallback`)
+                    await handleMessage(change.value)
+                  }
+                } catch (error) {
+                  console.error(`[WEBHOOK-BG] Error al encolar mensaje:`, error)
+                  // Si falla el encolamiento, procesar de forma directa como fallback
+                  console.log(`[WEBHOOK-BG] Procesando mensaje directamente como fallback`)
+                  await handleMessage(change.value)
+                }
               } else {
-                console.error(`[WEBHOOK] Error al encolar mensaje, procesando directamente como fallback`)
+                // Procesar el mensaje directamente
+                console.log(`[WEBHOOK-BG] Procesando mensaje directamente`)
                 await handleMessage(change.value)
               }
+
+              console.log(`[WEBHOOK-BG] Procesamiento completado para ${userPhoneNumber}`)
             } catch (error) {
-              console.error(`[WEBHOOK] Error al encolar mensaje:`, error)
-              // Si falla el encolamiento, procesar de forma síncrona como fallback
-              console.log(`[WEBHOOK] Procesando mensaje directamente como fallback`)
-              await handleMessage(change.value)
+              console.error(`[WEBHOOK-BG] Error en procesamiento background:`, error)
+              await logError("webhook_background", error instanceof Error ? error : new Error(String(error)))
             }
-          } else {
-            // Procesar el mensaje directamente
-            console.log(`[WEBHOOK] Procesando mensaje directamente`)
-            await handleMessage(change.value)
-          }
+          })
         }
       }
     }
 
+    console.log("[WEBHOOK] Respondiendo inmediatamente con 200 OK")
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("[WEBHOOK] Error al procesar webhook:", error)

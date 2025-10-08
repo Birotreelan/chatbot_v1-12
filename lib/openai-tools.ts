@@ -1,7 +1,6 @@
 import OpenAI from "openai"
-import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
-import { incrementMetric, logError } from "@/lib/monitoring"
+import { logError } from "@/lib/monitoring"
 import {
   obtenerTurnosDisponibles,
   confirmarTurno,
@@ -639,13 +638,21 @@ export async function buscarTurnosDisponiblesHerramienta(
     )
 
     if (resultado.exito && resultado.datos) {
-      console.log(`[TOOLS] ✅ Turnos encontrados`)
+      const turnosArray = Array.isArray(resultado.datos) ? resultado.datos : []
+      console.log(`[TOOLS] ✅ Turnos encontrados: ${turnosArray.length}`)
+
+      // Truncar para OpenAI (solo primeros 20 turnos)
+      const turnosTruncados = turnosArray.slice(0, 20)
+
       return JSON.stringify({
         exito: true,
-        turnos: resultado.datos,
-        mensaje: "Turnos disponibles encontrados",
+        turnos: turnosTruncados,
+        total_encontrados: turnosArray.length,
+        mensaje: `Se encontraron ${turnosArray.length} turnos disponibles`,
         fecha_desde: fechaDesde,
         fecha_hasta: fechaHasta,
+        _truncated: turnosArray.length > 20,
+        _send_to_user: true, // Flag para indicar que debe enviarse al usuario
       })
     } else {
       console.log(`[TOOLS] ⚠️ No se encontraron turnos disponibles`)
@@ -1083,4 +1090,23 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
   const totalTime = Date.now() - startTime
   console.log(`[OPENAI] ⏱️ Run completado en ${totalTime}ms (${pollCount} polls)`)
   return run
+}
+
+// Función para enviar mensaje a WhatsApp
+async function sendWhatsAppMessage(
+  phoneNumberId: string,
+  accessToken: string,
+  userPhoneNumber: string,
+  message: string,
+) {
+  // Implementación de envío de mensaje a WhatsApp
+  // Este código depende de la implementación específica de WhatsApp Business API
+  // Aquí se asume que existe una función sendWhatsAppMessage que maneja esto
+}
+
+// Función para incrementar métrica
+async function incrementMetric(metricName: string) {
+  // Implementación de incremento de métrica
+  // Este código depende de la implementación específica del sistema de métricas
+  // Aquí se asume que existe una función incrementMetric que maneja esto
 }

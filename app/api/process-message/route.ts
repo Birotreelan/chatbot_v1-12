@@ -2,8 +2,7 @@ import { NextResponse } from "next/server"
 import { handleMessage } from "@/lib/whatsapp"
 import { logError, incrementMetric } from "@/lib/monitoring"
 
-// Permitir que la función se ejecute durante más tiempo
-export const maxDuration = 60
+export const maxDuration = 300
 
 // Función para procesar mensajes
 async function processMessage(req: Request) {
