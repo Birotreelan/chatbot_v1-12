@@ -544,13 +544,25 @@ export async function obtenerSubespecialidadesHerramienta(clienteId: string): Pr
     const resultado = await obtenerSubespecialidades(clienteId)
 
     if (resultado.exito && resultado.datos) {
-      console.log(`[TOOLS] ✅ Subespecialidades obtenidas: ${resultado.datos.length}`)
-      return JSON.stringify({
-        exito: true,
-        especialidades: resultado.datos,
-        total: resultado.datos.length,
-        mensaje: `Se encontraron ${resultado.datos.length} especialidades`,
-      })
+      // The API returns { subespecialidades: [...] }, so we need to extract the array
+      const especialidades = resultado.datos.subespecialidades || resultado.datos
+
+      // Check if especialidades is an array
+      if (Array.isArray(especialidades)) {
+        console.log(`[TOOLS] ✅ Subespecialidades obtenidas: ${especialidades.length}`)
+        return JSON.stringify({
+          exito: true,
+          especialidades: especialidades,
+          total: especialidades.length,
+          mensaje: `Se encontraron ${especialidades.length} especialidades`,
+        })
+      } else {
+        console.log(`[TOOLS] ⚠️ Datos no son un array:`, resultado.datos)
+        return JSON.stringify({
+          exito: false,
+          mensaje: "Formato de respuesta inesperado",
+        })
+      }
     } else {
       console.log(`[TOOLS] ⚠️ No se encontraron subespecialidades`)
       return JSON.stringify({
