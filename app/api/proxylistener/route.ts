@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppConfigByPhoneId, getAllWhatsAppConfigs, getThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp-api"
-import OpenAI from "openai"
+import { safelyAddMessageToThread } from "@/lib/thread-manager"
 
 export async function POST(request: Request) {
   try {
@@ -415,11 +415,7 @@ Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
           notificationMessage += `
 [/SISTEMA_PLANTILLA]`
 
-          const openai = new OpenAI({
-            apiKey: process.env.OPENAI_API_KEY,
-          })
-
-          await openai.beta.threads.messages.create(threadResult.threadId, {
+          await safelyAddMessageToThread(threadResult.threadId, {
             role: "user",
             content: notificationMessage,
           })

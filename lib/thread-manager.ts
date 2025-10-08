@@ -115,14 +115,104 @@ export async function createNewThread(userIdentifier: string, configId: string) 
   }
 }
 
-export async function addMessageToThread(threadId: string, message: Message) {
-  try {
-    const createdMessage = await openai.beta.threads.messages.create(threadId, message)
-    return createdMessage
-  } catch (error: any) {
-    console.error("Error adding message to thread:", error)
-    throw new Error(error)
+export async function safelyAddMessageToThread(
+  threadId: string,
+  message: Message,
+  maxRetries = 5,
+  retryDelay = 2000,
+): Promise<any> {
+  let attempts = 0
+
+  while (attempts < maxRetries) {
+    try {
+      // Check if there are any active runs on this thread
+      const runs = await openai.beta.threads.runs.list(threadId, {
+        limit: 10,
+        order: "desc",
+      })
+
+      // Find any active or in-progress runs
+      const activeRun = runs.data.find(
+        (run) =>
+          run.status === "in_progress" ||
+          run.status === "queued" ||
+          run.status === "requires_action" ||
+          run.status === "cancelling",
+      )
+
+      if (activeRun) {
+        console.log(
+          `[THREAD-MANAGER] ⚠️ Run activo detectado (${activeRun.id}, estado: ${activeRun.status}). Esperando...`,
+        )
+
+        // Wait for the run to complete
+        let runStatus = activeRun.status
+        let waitAttempts = 0
+        const maxWaitAttempts = 30 // 30 seconds max wait
+
+        while (
+          (runStatus === "in_progress" ||
+            runStatus === "queued" ||
+            runStatus === "requires_action" ||
+            runStatus === "cancelling") &&
+          waitAttempts < maxWaitAttempts
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          const updatedRun = await openai.beta.threads.runs.retrieve(threadId, activeRun.id)
+          runStatus = updatedRun.status
+          waitAttempts++
+          console.log(
+            `[THREAD-MANAGER] 🔄 Esperando run ${activeRun.id} (estado: ${runStatus}, intento ${waitAttempts})`,
+          )
+        }
+
+        // If still active after max wait, try to cancel it
+        if (
+          runStatus === "in_progress" ||
+          runStatus === "queued" ||
+          runStatus === "requires_action" ||
+          runStatus === "cancelling"
+        ) {
+          console.log(`[THREAD-MANAGER] ⏱️ Timeout esperando run. Intentando cancelar...`)
+          try {
+            await openai.beta.threads.runs.cancel(threadId, activeRun.id)
+            console.log(`[THREAD-MANAGER] ✅ Run cancelado exitosamente`)
+            // Wait a bit for cancellation to complete
+            await new Promise((resolve) => setTimeout(resolve, 2000))
+          } catch (cancelError) {
+            console.error(`[THREAD-MANAGER] ❌ Error al cancelar run:`, cancelError)
+          }
+        } else {
+          console.log(`[THREAD-MANAGER] ✅ Run completado con estado: ${runStatus}`)
+        }
+      }
+
+      // Now try to add the message
+      console.log(`[THREAD-MANAGER] 📝 Agregando mensaje al thread ${threadId}`)
+      const createdMessage = await openai.beta.threads.messages.create(threadId, message)
+      console.log(`[THREAD-MANAGER] ✅ Mensaje agregado exitosamente`)
+      return createdMessage
+    } catch (error: any) {
+      attempts++
+      console.error(`[THREAD-MANAGER] ❌ Error agregando mensaje (intento ${attempts}/${maxRetries}):`, error.message)
+
+      // If it's still the "run is active" error and we have retries left, wait and try again
+      if (error.message?.includes("while a run") && error.message?.includes("is active") && attempts < maxRetries) {
+        console.log(`[THREAD-MANAGER] ⏳ Esperando ${retryDelay}ms antes de reintentar...`)
+        await new Promise((resolve) => setTimeout(resolve, retryDelay))
+        continue
+      }
+
+      // For other errors or if we're out of retries, throw
+      throw error
+    }
   }
+
+  throw new Error(`No se pudo agregar el mensaje después de ${maxRetries} intentos`)
+}
+
+export async function addMessageToThread(threadId: string, message: Message) {
+  return safelyAddMessageToThread(threadId, message)
 }
 
 export async function getMessagesFromThread(threadId: string) {

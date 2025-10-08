@@ -3,6 +3,7 @@ import { getWhatsAppConfigByClienteId } from "./db"
 import { obtenerDatosSede, formatearDatosSede, obtenerSubespecialidades } from "./api-tools/api-functions"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import { obtenerObrasSociales, obtenerTurnosDisponibles, reservarTurno } from "./openai-tools"
+import { safelyAddMessageToThread } from "./thread-manager"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -68,8 +69,7 @@ export async function processWebChatMessage(
     console.log(`[WEB-CHAT] 📋 Bloque SISTEMA creado:`)
     console.log(systemBlock)
 
-    // Agregar el mensaje del usuario al thread
-    await openai.beta.threads.messages.create(threadId, {
+    await safelyAddMessageToThread(threadId, {
       role: "user",
       content: `${systemBlock}\n\n${message}`,
     })
