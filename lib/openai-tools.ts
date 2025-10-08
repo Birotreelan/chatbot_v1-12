@@ -10,6 +10,8 @@ import {
   buscarPaciente,
   buscarProfesionales,
   obtenerSubespecialidades,
+  buscarTurnosDisponibles,
+  validarObraSocial,
 } from "./api-tools/api-functions"
 import { AbortSignal } from "abort-controller"
 
@@ -37,6 +39,32 @@ export const openaiTools = {
         },
       },
       required: ["especialidad_id"],
+    },
+  },
+  buscar_turnos_disponibles: {
+    description:
+      "Busca turnos disponibles según criterios de búsqueda flexibles (rango de fechas, profesional, especialidad)",
+    parameters: {
+      type: "object",
+      properties: {
+        rango_fechas: {
+          type: "string",
+          description: "Rango de fechas en formato 'YYYY-MM-DD a YYYY-MM-DD' o una sola fecha 'YYYY-MM-DD'",
+        },
+        profesional: {
+          type: "string",
+          description: "Nombre del profesional (opcional)",
+        },
+        especialidad: {
+          type: "string",
+          description: "Nombre de la especialidad (opcional)",
+        },
+        profesional_id: {
+          type: "string",
+          description: "ID del profesional (opcional)",
+        },
+      },
+      required: ["rango_fechas"],
     },
   },
   confirmar_turno: {
@@ -156,6 +184,19 @@ export const openaiTools = {
       required: ["busqueda"],
     },
   },
+  validar_obra_social: {
+    description: "Valida y busca una obra social por nombre",
+    parameters: {
+      type: "object",
+      properties: {
+        busqueda: {
+          type: "string",
+          description: "Nombre o parte del nombre de la obra social a buscar",
+        },
+      },
+      required: ["busqueda"],
+    },
+  },
 }
 
 // Mensajes predefinidos para cada función
@@ -227,6 +268,15 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
       case "obtener_turnos_disponibles":
         return await obtenerTurnosDisponibles(clienteId, args.especialidad_id, args.obra_social_id)
 
+      case "buscar_turnos_disponibles":
+        return await buscarTurnosDisponiblesHerramienta(
+          clienteId,
+          args.rango_fechas,
+          args.profesional,
+          args.especialidad,
+          args.profesional_id,
+        )
+
       case "confirmar_turno":
         return await confirmarTurno(clienteId, {
           turno_id: args.turno_id,
@@ -241,6 +291,9 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
 
       case "reservar_turno":
         return await reservarTurno(clienteId, args.turno_id, args.paciente_datos)
+
+      case "validar_obra_social":
+        return await validarObraSocialHerramienta(clienteId, args.busqueda)
 
       default:
         console.warn(`[OPENAI-TOOLS] Tool desconocido: ${toolName}`)
@@ -538,6 +591,100 @@ export async function obtenerSubespecialidadesHerramienta(clienteId: string): Pr
     return JSON.stringify({
       exito: false,
       mensaje: "Error al obtener las especialidades",
+    })
+  }
+}
+
+// Función para buscar turnos disponibles
+export async function buscarTurnosDisponiblesHerramienta(
+  clienteId: string,
+  rangoFechas: string,
+  profesional?: string,
+  especialidad?: string,
+  profesionalId?: string,
+): Promise<string> {
+  try {
+    console.log(
+      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}`,
+    )
+
+    const resultado = await buscarTurnosDisponibles(rangoFechas, profesional, especialidad, profesionalId, clienteId)
+
+    if (resultado.exito && resultado.datos) {
+      // Check if we got multiple professionals to choose from
+      if (resultado.datos.multiple) {
+        console.log(`[TOOLS] ⚠️ Múltiples profesionales encontrados: ${resultado.datos.profesionales.length}`)
+        return JSON.stringify({
+          exito: true,
+          multiple: true,
+          profesionales: resultado.datos.profesionales,
+          mensaje: resultado.datos.mensaje,
+        })
+      }
+
+      // Check if we got appointments
+      if (Array.isArray(resultado.datos)) {
+        console.log(`[TOOLS] ✅ Turnos encontrados: ${resultado.datos.length}`)
+        return JSON.stringify({
+          exito: true,
+          turnos: resultado.datos,
+          total: resultado.datos.length,
+          mensaje: `Se encontraron ${resultado.datos.length} turnos disponibles`,
+        })
+      }
+
+      // Return the data as-is if it's in a different format
+      return JSON.stringify({
+        exito: true,
+        datos: resultado.datos,
+      })
+    } else {
+      console.log(`[TOOLS] ⚠️ No se encontraron turnos disponibles`)
+      return JSON.stringify({
+        exito: false,
+        mensaje: resultado.error?.mensaje || "No se encontraron turnos disponibles para los criterios especificados",
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error buscando turnos disponibles:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error al buscar turnos disponibles",
+    })
+  }
+}
+
+// Función para validar obra social
+export async function validarObraSocialHerramienta(clienteId: string, busqueda: string): Promise<string> {
+  try {
+    console.log(`[TOOLS] 🏥 Validando obra social: "${busqueda}" para cliente: ${clienteId}`)
+
+    const resultado = await validarObraSocial(clienteId, busqueda)
+
+    if (resultado.exito && resultado.datos) {
+      const { obras_sociales, total_encontradas, busqueda_realizada } = resultado.datos
+
+      console.log(`[TOOLS] ✅ Obras sociales encontradas: ${total_encontradas}`)
+
+      return JSON.stringify({
+        exito: true,
+        obras_sociales: obras_sociales,
+        total: total_encontradas,
+        busqueda: busqueda_realizada,
+        mensaje: `Se encontraron ${total_encontradas} obras sociales que coinciden con "${busqueda_realizada}"`,
+      })
+    } else {
+      console.log(`[TOOLS] ⚠️ No se encontraron obras sociales para: "${busqueda}"`)
+      return JSON.stringify({
+        exito: false,
+        mensaje: resultado.error?.mensaje || `No se encontraron obras sociales que coincidan con "${busqueda}"`,
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error validando obra social:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error al validar la obra social",
     })
   }
 }

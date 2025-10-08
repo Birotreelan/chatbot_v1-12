@@ -2,7 +2,15 @@ import OpenAI from "openai"
 import { getWhatsAppConfigByClienteId } from "./db"
 import { obtenerDatosSede, formatearDatosSede, obtenerSubespecialidades } from "./api-tools/api-functions"
 import { getArgentinaDateTime } from "./utils/date-utils"
-import { obtenerObrasSociales, obtenerTurnosDisponibles, reservarTurno } from "./openai-tools"
+import {
+  obtenerObrasSociales,
+  obtenerTurnosDisponibles,
+  reservarTurno,
+  buscarTurnosDisponiblesHerramienta,
+  validarObraSocialHerramienta,
+  buscarProfesionalesHerramienta,
+  validarDni,
+} from "./openai-tools"
 import { safelyAddMessageToThread } from "./thread-manager"
 
 const openai = new OpenAI({
@@ -145,6 +153,39 @@ export async function processWebChatMessage(
         {
           type: "function",
           function: {
+            name: "buscar_turnos_disponibles",
+            description: "Busca turnos disponibles según criterios flexibles",
+            parameters: {
+              type: "object",
+              properties: {
+                cliente_id: {
+                  type: "string",
+                  description: "ID del cliente",
+                },
+                rango_fechas: {
+                  type: "string",
+                  description: "Rango de fechas en formato 'YYYY-MM-DD a YYYY-MM-DD'",
+                },
+                profesional: {
+                  type: "string",
+                  description: "Nombre del profesional (opcional)",
+                },
+                especialidad: {
+                  type: "string",
+                  description: "Nombre de la especialidad (opcional)",
+                },
+                profesional_id: {
+                  type: "string",
+                  description: "ID del profesional (opcional)",
+                },
+              },
+              required: ["cliente_id", "rango_fechas"],
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
             name: "reservar_turno",
             description: "Reserva un turno médico",
             parameters: {
@@ -193,6 +234,69 @@ export async function processWebChatMessage(
                 },
               },
               required: ["cliente_id", "sede_id"],
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "validar_obra_social",
+            description: "Valida y busca una obra social por nombre",
+            parameters: {
+              type: "object",
+              properties: {
+                cliente_id: {
+                  type: "string",
+                  description: "ID del cliente",
+                },
+                busqueda: {
+                  type: "string",
+                  description: "Nombre de la obra social a buscar",
+                },
+              },
+              required: ["cliente_id", "busqueda"],
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "buscar_profesionales",
+            description: "Busca profesionales médicos según un criterio",
+            parameters: {
+              type: "object",
+              properties: {
+                cliente_id: {
+                  type: "string",
+                  description: "ID del cliente",
+                },
+                busqueda: {
+                  type: "string",
+                  description: "Criterio de búsqueda",
+                },
+              },
+              required: ["cliente_id", "busqueda"],
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "validar_dni",
+            description: "Valida el DNI de un paciente",
+            parameters: {
+              type: "object",
+              properties: {
+                cliente_id: {
+                  type: "string",
+                  description: "ID del cliente",
+                },
+                dni: {
+                  type: "string",
+                  description: "DNI del paciente",
+                },
+              },
+              required: ["cliente_id", "dni"],
             },
           },
         },
@@ -254,12 +358,30 @@ export async function processWebChatMessage(
             case "obtener_turnos_disponibles":
               result = await obtenerTurnosDisponibles(args.cliente_id, args.especialidad_id, args.obra_social_id)
               break
+            case "buscar_turnos_disponibles":
+              result = await buscarTurnosDisponiblesHerramienta(
+                args.cliente_id,
+                args.rango_fechas,
+                args.profesional,
+                args.especialidad,
+                args.profesional_id,
+              )
+              break
             case "reservar_turno":
               result = await reservarTurno(args.cliente_id, args.turno_id, args.paciente_datos)
               break
             case "obtener_datos_sede":
               const sedeData = await obtenerDatosSede(args.cliente_id, args.sede_id)
               result = sedeData ? formatearDatosSede(sedeData.sede) : "No se pudieron obtener los datos de la sede"
+              break
+            case "validar_obra_social":
+              result = await validarObraSocialHerramienta(args.cliente_id, args.busqueda)
+              break
+            case "buscar_profesionales":
+              result = await buscarProfesionalesHerramienta(args.cliente_id, args.busqueda)
+              break
+            case "validar_dni":
+              result = await validarDni(args.cliente_id, args.dni)
               break
             default:
               result = "Función no reconocida"
