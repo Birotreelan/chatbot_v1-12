@@ -1,6 +1,6 @@
 import OpenAI from "openai"
 import { getWhatsAppConfigByClienteId } from "./db"
-import { obtenerDatosSede, formatearDatosSede } from "./api-tools/api-functions"
+import { obtenerDatosSede, formatearDatosSede, obtenerSubespecialidades } from "./api-tools/api-functions"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import { obtenerObrasSociales, obtenerTurnosDisponibles, reservarTurno } from "./openai-tools"
 
@@ -88,6 +88,23 @@ export async function processWebChatMessage(
           function: {
             name: "obtener_obras_sociales",
             description: "Obtiene la lista de obras sociales disponibles",
+            parameters: {
+              type: "object",
+              properties: {
+                cliente_id: {
+                  type: "string",
+                  description: "ID del cliente",
+                },
+              },
+              required: ["cliente_id"],
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "obtener_subespecialidades",
+            description: "Obtiene la lista de especialidades médicas disponibles",
             parameters: {
               type: "object",
               properties: {
@@ -223,6 +240,16 @@ export async function processWebChatMessage(
           switch (toolCall.function.name) {
             case "obtener_obras_sociales":
               result = await obtenerObrasSociales(args.cliente_id)
+              break
+            case "obtener_subespecialidades":
+              const subespecialidadesResult = await obtenerSubespecialidades(args.cliente_id)
+              result = subespecialidadesResult.exito
+                ? JSON.stringify({
+                    exito: true,
+                    especialidades: subespecialidadesResult.datos,
+                    total: subespecialidadesResult.datos?.length || 0,
+                  })
+                : JSON.stringify({ exito: false, mensaje: "No se encontraron especialidades" })
               break
             case "obtener_turnos_disponibles":
               result = await obtenerTurnosDisponibles(args.cliente_id, args.especialidad_id, args.obra_social_id)

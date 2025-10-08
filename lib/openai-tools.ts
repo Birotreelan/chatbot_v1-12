@@ -9,6 +9,7 @@ import {
   formatearDatosSede,
   buscarPaciente,
   buscarProfesionales,
+  obtenerSubespecialidades,
 } from "./api-tools/api-functions"
 import { AbortSignal } from "abort-controller"
 
@@ -77,6 +78,19 @@ export const openaiTools = {
   },
   obtener_obras_sociales: {
     description: "Obtiene las obras sociales disponibles para un cliente",
+    parameters: {
+      type: "object",
+      properties: {
+        cliente_id: {
+          type: "string",
+          description: "ID del cliente",
+        },
+      },
+      required: ["cliente_id"],
+    },
+  },
+  obtener_subespecialidades: {
+    description: "Obtiene la lista de especialidades médicas disponibles",
     parameters: {
       type: "object",
       properties: {
@@ -242,6 +256,9 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
 
       case "buscar_profesionales":
         return await buscarProfesionalesHerramienta(clienteId, args.busqueda)
+
+      case "obtener_subespecialidades":
+        return await obtenerSubespecialidadesHerramienta(clienteId)
 
       case "obtener_turnos_disponibles":
         return await obtenerTurnosDisponibles(clienteId, args.especialidad_id, args.obra_social_id)
@@ -515,6 +532,37 @@ export async function buscarProfesionalesHerramienta(clienteId: string, busqueda
     return JSON.stringify({
       exito: false,
       mensaje: "Error al buscar profesionales",
+    })
+  }
+}
+
+// Función para obtener subespecialidades
+export async function obtenerSubespecialidadesHerramienta(clienteId: string): Promise<string> {
+  try {
+    console.log(`[TOOLS] 🏥 Obteniendo subespecialidades para cliente: ${clienteId}`)
+
+    const resultado = await obtenerSubespecialidades(clienteId)
+
+    if (resultado.exito && resultado.datos) {
+      console.log(`[TOOLS] ✅ Subespecialidades obtenidas: ${resultado.datos.length}`)
+      return JSON.stringify({
+        exito: true,
+        especialidades: resultado.datos,
+        total: resultado.datos.length,
+        mensaje: `Se encontraron ${resultado.datos.length} especialidades`,
+      })
+    } else {
+      console.log(`[TOOLS] ⚠️ No se encontraron subespecialidades`)
+      return JSON.stringify({
+        exito: false,
+        mensaje: "No se encontraron especialidades disponibles",
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error obteniendo subespecialidades:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error al obtener las especialidades",
     })
   }
 }
