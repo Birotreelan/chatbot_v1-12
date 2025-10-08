@@ -200,12 +200,21 @@ export async function buscarPaciente(
     }
   }
 
-  // Convertir los parámetros al formato esperado por el API
   const apiParams: Record<string, any> = {}
   if (params.dni) apiParams.dni = params.dni
   if (params.telefono) apiParams.telefono = params.telefono
 
-  return fetchProxyApi<Paciente | null>(clienteId, "get_paciente", apiParams, useCache)
+  const resultado = await fetchProxyApi<any>(clienteId, "get_paciente", apiParams, useCache)
+
+  if (resultado.exito && resultado.datos) {
+    const pacienteData = resultado.datos.paciente || resultado.datos
+    return {
+      exito: true,
+      datos: pacienteData,
+    }
+  }
+
+  return resultado
 }
 
 // Función para obtener subespecialidades
@@ -222,12 +231,17 @@ export async function buscarProfesionales(
   busqueda: string,
   useCache = true,
 ): Promise<ApiResponse<{ id: string; nombre: string; especialidad?: string }[]>> {
-  return fetchProxyApi<{ id: string; nombre: string; especialidad?: string }[]>(
-    clienteId,
-    "get_profesionales",
-    { busqueda },
-    useCache,
-  )
+  const resultado = await fetchProxyApi<any>(clienteId, "get_profesionales", { busqueda }, useCache)
+
+  if (resultado.exito && resultado.datos) {
+    const profesionales = resultado.datos.profesionales || resultado.datos
+    return {
+      exito: true,
+      datos: Array.isArray(profesionales) ? profesionales : [],
+    }
+  }
+
+  return resultado
 }
 
 // Función para obtener turnos disponibles o agendados
@@ -252,7 +266,17 @@ export async function obtenerTurnos(
     params.Paciente_DNI = pacienteDNI
   }
 
-  return fetchProxyApi<any>(clienteId, "get_turnos", params, useCache)
+  const resultado = await fetchProxyApi<any>(clienteId, "get_turnos", params, useCache)
+
+  if (resultado.exito && resultado.datos) {
+    const turnos = resultado.datos.turnos_disponibles || resultado.datos
+    return {
+      exito: true,
+      datos: turnos,
+    }
+  }
+
+  return resultado
 }
 
 // Función para reservar un turno
@@ -322,17 +346,16 @@ export async function validarObraSocial(
     busqueda_realizada: string
   }>
 > {
-  return fetchProxyApi<{
-    obras_sociales: Array<{
-      id: string
-      nombre: string
-      razon_social: string
-      permite_turnos_online: boolean
-      permite_turnos_online_texto: string
-    }>
-    total_encontradas: number
-    busqueda_realizada: string
-  }>(clienteId, "get_obras_sociales", { busqueda }, useCache)
+  const resultado = await fetchProxyApi<any>(clienteId, "get_obras_sociales", { busqueda }, useCache)
+
+  if (resultado.exito && resultado.datos) {
+    return {
+      exito: true,
+      datos: resultado.datos,
+    }
+  }
+
+  return resultado
 }
 
 // Función para obtener datos de una sede específica

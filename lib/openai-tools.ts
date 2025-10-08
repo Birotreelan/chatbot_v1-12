@@ -171,42 +171,6 @@ const FUNCTION_MESSAGES = {
   default: "Estoy procesando tu solicitud, dame un momento por favor.",
 }
 
-// Función para procesar mensajes individuales (para compatibilidad)
-export async function processIndividualMessage(
-  message: string,
-  phoneNumberId: string,
-  userPhoneNumber: string,
-  assistantId?: string,
-) {
-  console.log(`[OPENAI] 📱 Procesando mensaje para ${userPhoneNumber}`)
-
-  try {
-    // Obtener la configuración
-    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
-    if (!config) {
-      throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
-    }
-
-    // Crear o obtener thread
-    const { getThread } = await import("@/lib/thread-manager")
-    const thread = await getThread(userPhoneNumber, config.id)
-
-    // Procesar con el asistente
-    const result = await getAssistantResponse(
-      thread.id,
-      message,
-      phoneNumberId,
-      assistantId || config.assistantId || process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
-    )
-
-    return result
-  } catch (error) {
-    console.error("[OPENAI] ❌ Error en processIndividualMessage:", error)
-    await logError("process_individual_message", error instanceof Error ? error : new Error(String(error)))
-    throw error
-  }
-}
-
 // Función para truncar respuestas largas de herramientas
 function truncateToolResponse(response: any, maxLength = 1000): any {
   const responseStr = JSON.stringify(response)
@@ -493,7 +457,7 @@ export async function validarDni(clienteId: string, dni: string): Promise<string
       console.log(`[TOOLS] ⚠️ DNI no encontrado: ${dni}`)
       return JSON.stringify({
         exito: false,
-        mensaje: "No se encontró un paciente con ese DNI",
+        mensaje: resultado.error?.mensaje || "No se encontró un paciente con ese DNI",
       })
     }
   } catch (error) {
@@ -512,7 +476,7 @@ export async function buscarProfesionalesHerramienta(clienteId: string, busqueda
 
     const resultado = await buscarProfesionales(clienteId, busqueda)
 
-    if (resultado.exito && resultado.datos) {
+    if (resultado.exito && resultado.datos && Array.isArray(resultado.datos)) {
       console.log(`[TOOLS] ✅ Profesionales encontrados: ${resultado.datos.length}`)
       return JSON.stringify({
         exito: true,
@@ -524,7 +488,7 @@ export async function buscarProfesionalesHerramienta(clienteId: string, busqueda
       console.log(`[TOOLS] ⚠️ No se encontraron profesionales para: "${busqueda}"`)
       return JSON.stringify({
         exito: false,
-        mensaje: "No se encontraron profesionales con ese criterio de búsqueda",
+        mensaje: resultado.error?.mensaje || "No se encontraron profesionales con ese criterio de búsqueda",
       })
     }
   } catch (error) {
@@ -544,10 +508,9 @@ export async function obtenerSubespecialidadesHerramienta(clienteId: string): Pr
     const resultado = await obtenerSubespecialidades(clienteId)
 
     if (resultado.exito && resultado.datos) {
-      // The API returns { subespecialidades: [...] }, so we need to extract the array
+      // The API returns { subespecialidades: [...] }, extract the array
       const especialidades = resultado.datos.subespecialidades || resultado.datos
 
-      // Check if especialidades is an array
       if (Array.isArray(especialidades)) {
         console.log(`[TOOLS] ✅ Subespecialidades obtenidas: ${especialidades.length}`)
         return JSON.stringify({
@@ -567,7 +530,7 @@ export async function obtenerSubespecialidadesHerramienta(clienteId: string): Pr
       console.log(`[TOOLS] ⚠️ No se encontraron subespecialidades`)
       return JSON.stringify({
         exito: false,
-        mensaje: "No se encontraron especialidades disponibles",
+        mensaje: resultado.error?.mensaje || "No se encontraron especialidades disponibles",
       })
     }
   } catch (error) {
@@ -580,7 +543,7 @@ export async function obtenerSubespecialidadesHerramienta(clienteId: string): Pr
 }
 
 // Tiempo máximo de espera para la respuesta de OpenAI (en milisegundos)
-const OPENAI_TIMEOUT = Number.parseInt(process.env.OPENAI_TIMEOUT || "60000", 10)
+const OPENAI_TIMEOUT = Number.parseInt(process.env.OPENAI_TIMEOUT || "50000", 10)
 
 // Número máximo de reintentos
 const MAX_RETRIES = Number.parseInt(process.env.MAX_RETRIES || "3", 10)
@@ -784,6 +747,25 @@ async function processRunWithCorrectFlow(
   } catch (error) {
     console.error(`[OPENAI] ❌ Error en processRunWithCorrectFlow:`, error)
 
+    if (error.message && error.message.includes("Timeout esperando run")) {
+      console.log(`[OPENAI] ⏰ Timeout detectado, enviando mensaje de error al usuario`)
+
+      try {
+        await sendWhatsAppMessage(
+          phoneNumberId,
+          accessToken,
+          userPhoneNumber,
+          "Lo siento, tu consulta está tomando más tiempo del esperado. Por favor, intenta nuevamente en unos momentos.",
+        )
+        console.log(`[OPENAI] 📱 Mensaje de timeout enviado`)
+      } catch (sendError) {
+        console.error(`[OPENAI] ❌ Error enviando mensaje de timeout:`, sendError)
+      }
+
+      await logError("openai_timeout", error instanceof Error ? error : new Error(String(error)))
+      return { success: false, error: "timeout" }
+    }
+
     // Reintentar si no hemos alcanzado el número máximo
     if (retryCount < MAX_RETRIES) {
       let waitTime = RETRY_DELAY
@@ -845,6 +827,23 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
     // Verificar timeout
     const elapsed = Date.now() - startTime
     if (elapsed > OPENAI_TIMEOUT) {
+      console.error(`[OPENAI] ⏰ Timeout alcanzado: ${OPENAI_TIMEOUT}ms`)
+
+      try {
+        console.log(`[OPENAI] 🛑 Intentando cancelar run ${runId}`)
+        await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}/cancel`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "assistants=v2",
+          },
+        })
+        console.log(`[OPENAI] ✅ Run cancelado`)
+      } catch (cancelError) {
+        console.error(`[OPENAI] ❌ Error cancelando run:`, cancelError)
+      }
+
       throw new Error(`Timeout esperando run: ${OPENAI_TIMEOUT}ms`)
     }
 

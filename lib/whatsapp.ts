@@ -31,6 +31,42 @@ function extractMessageContent(message: any): string {
   }
 }
 
+// Función para verificar si un mensaje ya ha sido procesado
+async function isMessageProcessed(messageId: string): Promise<boolean> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) {
+      console.warn("[WHATSAPP] Redis no disponible, no se puede verificar duplicados")
+      return false
+    }
+
+    const key = `processed_message:${messageId}`
+    const exists = await redisClient.get(key)
+    return exists !== null
+  } catch (error) {
+    console.error("[WHATSAPP] Error verificando mensaje procesado:", error)
+    return false
+  }
+}
+
+// Función para marcar un mensaje como procesado
+async function markMessageAsProcessed(messageId: string): Promise<void> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) {
+      console.warn("[WHATSAPP] Redis no disponible, no se puede marcar mensaje como procesado")
+      return
+    }
+
+    const key = `processed_message:${messageId}`
+    // Guardar por 24 horas (86400 segundos)
+    await redisClient.set(key, "1", { ex: 86400 })
+    console.log(`[WHATSAPP] Mensaje ${messageId} marcado como procesado`)
+  } catch (error) {
+    console.error("[WHATSAPP] Error marcando mensaje como procesado:", error)
+  }
+}
+
 // Modificar la función handleMessage para usar la cola por usuario
 export async function handleMessage(value: WhatsAppValue) {
   console.log("[WHATSAPP] Iniciando handleMessage con datos:", JSON.stringify(value, null, 2))
@@ -44,6 +80,17 @@ export async function handleMessage(value: WhatsAppValue) {
 
     // Extraer información del mensaje
     const message = value.messages[0]
+
+    // Verificar si el mensaje ya ha sido procesado
+    const messageId = message.id
+    if (await isMessageProcessed(messageId)) {
+      console.log(`[WHATSAPP] ⚠️ Mensaje duplicado detectado: ${messageId}, ignorando`)
+      return
+    }
+
+    // Marcar el mensaje como procesado inmediatamente para evitar condiciones de carrera
+    await markMessageAsProcessed(messageId)
+
     const userPhoneNumber = message.from
     let userMessage = extractMessageContent(message)
     const originalMessage = userMessage
@@ -218,6 +265,29 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
           const errorType = proxyResponse.error
           const userAction = proxyResponse.user_action || originalMessage
 
+          if (errorType === "NOT_FOUND") {
+            console.log(`[WHATSAPP] Error NOT_FOUND detectado, enviando mensaje directo sin OpenAI`)
+
+            // Send direct message to user
+            try {
+              await sendWhatsAppMessage(
+                value.metadata.phone_number_id,
+                config.accessToken,
+                userPhoneNumber,
+                "Lo siento, esta acción ya no está disponible. Es posible que el turno ya haya sido procesado o que la solicitud haya expirado. Si necesitas ayuda, por favor escribe tu consulta.",
+              )
+
+              // Update stats - message processed
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+
+              console.log(`[WHATSAPP] Mensaje directo enviado exitosamente para error NOT_FOUND`)
+              return // Exit early, don't queue for OpenAI
+            } catch (sendError) {
+              console.error(`[WHATSAPP] Error al enviar mensaje directo para NOT_FOUND:`, sendError)
+              // If sending fails, fall through to normal error handling
+            }
+          }
+
           switch (errorType) {
             case "CANNOT_CANCEL":
               userMessage = `El paciente intentó cancelar su turno presionando "${userAction}" pero no es posible.
@@ -282,31 +352,37 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       try {
         console.log(`[WHATSAPP] Procesando comando de reset para el usuario ${userPhoneNumber}`)
 
-        // Usar la función resetThreadForUser para reiniciar la conversación
         const resetResult = await resetThreadForUser(userPhoneNumber, config.id)
-        console.log(`[WHATSAPP] Thread reseteado: ${resetResult.threadId}, isNewThread: ${resetResult.isNewThread}`)
+        console.log(`[WHATSAPP] ✅ Thread reseteado exitosamente`)
+        console.log(`[WHATSAPP] - Nuevo thread ID: ${resetResult.threadId}`)
+        console.log(`[WHATSAPP] - isNewThread: ${resetResult.isNewThread}`)
 
         // Enviar mensaje de confirmación
         await sendWhatsAppMessage(
           value.metadata.phone_number_id,
           config.accessToken,
           userPhoneNumber,
-          "Conversación reiniciada. ¿En qué puedo ayudarte?",
+          "✅ Conversación reiniciada exitosamente. ¿En qué puedo ayudarte?",
         )
 
         // Actualizar estadísticas - mensaje procesado
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
 
+        console.log(`[WHATSAPP] ✅ Reset completado y confirmación enviada`)
         return // Importante: salir de la función después de procesar el reset
       } catch (error) {
-        console.error("[WHATSAPP] Error al resetear conversación:", error)
+        console.error("[WHATSAPP] ❌ Error al resetear conversación:", error)
+        console.error("[WHATSAPP] Error details:", {
+          message: error.message,
+          stack: error.stack,
+        })
 
         // Enviar mensaje de error
         await sendWhatsAppMessage(
           value.metadata.phone_number_id,
           config.accessToken,
           userPhoneNumber,
-          "No se pudo reiniciar la conversación. Por favor, intenta de nuevo.",
+          "❌ No se pudo reiniciar la conversación. Por favor, intenta de nuevo.",
         )
 
         // Actualizar estadísticas - error

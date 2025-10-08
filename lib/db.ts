@@ -517,24 +517,58 @@ export async function resetThreadForUser(
   console.log(`[DB] 🔄 RESETEANDO thread para ${phoneNumber} con config ${whatsappConfigId}`)
 
   try {
-    // 1. CREAR UN THREAD COMPLETAMENTE NUEVO EN OPENAI
     const openai = new (await import("openai")).default({
       apiKey: process.env.OPENAI_API_KEY,
     })
 
-    const newThread = await openai.beta.threads.create()
-    console.log(`[DB] ✅ NUEVO thread creado en OpenAI: ${newThread.id}`)
-
-    // 2. ELIMINAR COMPLETAMENTE EL THREAD ANTERIOR
+    // 1. OBTENER EL THREAD ANTERIOR (si existe)
+    let oldThreadId: string | null = null
     if (redisClient) {
-      await redisClient.del(key)
-      console.log(`[DB] ✅ Thread anterior eliminado de Redis`)
+      const oldThreadData = await redisClient.get(key)
+      const oldThreadInfo = safeJsonParse(oldThreadData)
+      if (oldThreadInfo) {
+        oldThreadId = oldThreadInfo.threadId
+        console.log(`[DB] 📋 Thread anterior encontrado: ${oldThreadId}`)
+      }
     } else {
-      memoryStorage.threads.delete(key)
-      console.log(`[DB] ✅ Thread anterior eliminado de memoria`)
+      const oldThreadInfo = memoryStorage.threads.get(key)
+      if (oldThreadInfo) {
+        oldThreadId = oldThreadInfo.threadId
+        console.log(`[DB] 📋 Thread anterior encontrado en memoria: ${oldThreadId}`)
+      }
     }
 
-    // 3. GUARDAR EL NUEVO THREAD CON FLAG DE RESET
+    if (oldThreadId) {
+      try {
+        await openai.beta.threads.del(oldThreadId)
+        console.log(`[DB] 🗑️ Thread anterior ELIMINADO de OpenAI: ${oldThreadId}`)
+      } catch (deleteError) {
+        console.warn(`[DB] ⚠️ No se pudo eliminar el thread anterior de OpenAI: ${deleteError.message}`)
+        // Continuar aunque falle la eliminación
+      }
+    }
+
+    // 2. CREAR UN THREAD COMPLETAMENTE NUEVO EN OPENAI
+    const newThread = await openai.beta.threads.create({
+      metadata: {
+        phoneNumber,
+        whatsappConfigId,
+        createdAt: new Date().toISOString(),
+        isReset: "true",
+      },
+    })
+    console.log(`[DB] ✅ NUEVO thread creado en OpenAI: ${newThread.id}`)
+
+    // 3. ELIMINAR COMPLETAMENTE EL THREAD ANTERIOR DE REDIS/MEMORIA
+    if (redisClient) {
+      await redisClient.del(key)
+      console.log(`[DB] 🗑️ Thread anterior eliminado de Redis`)
+    } else {
+      memoryStorage.threads.delete(key)
+      console.log(`[DB] 🗑️ Thread anterior eliminado de memoria`)
+    }
+
+    // 4. GUARDAR EL NUEVO THREAD CON FLAG DE RESET
     const newThreadInfo: ThreadInfo = {
       threadId: newThread.id,
       phoneNumber,
@@ -547,19 +581,28 @@ export async function resetThreadForUser(
 
     if (redisClient) {
       await redisClient.set(key, JSON.stringify(newThreadInfo))
-      console.log(`[DB] ✅ Nuevo thread guardado en Redis: ${newThread.id}`)
+      console.log(`[DB] 💾 Nuevo thread guardado en Redis: ${newThread.id}`)
     } else {
       memoryStorage.threads.set(key, newThreadInfo)
-      console.log(`[DB] ✅ Nuevo thread guardado en memoria: ${newThread.id}`)
+      console.log(`[DB] 💾 Nuevo thread guardado en memoria: ${newThread.id}`)
     }
 
-    // 4. ACTUALIZAR ESTADÍSTICAS
+    // 5. ACTUALIZAR ESTADÍSTICAS
     await updateSystemStats()
 
-    console.log(`[DB] ✅ RESET COMPLETADO: ${newThread.id}`)
+    console.log(`[DB] ✅ RESET COMPLETADO EXITOSAMENTE`)
+    console.log(`[DB] - Thread anterior: ${oldThreadId || "ninguno"} (ELIMINADO de OpenAI)`)
+    console.log(`[DB] - Thread nuevo: ${newThread.id} (CREADO en OpenAI)`)
+
     return { threadId: newThread.id, isNewThread: true }
   } catch (error) {
     console.error(`[DB] ❌ Error al resetear thread:`, error)
+    console.error(`[DB] Error details:`, {
+      message: error.message,
+      stack: error.stack,
+      phoneNumber,
+      whatsappConfigId,
+    })
     throw error
   }
 }
