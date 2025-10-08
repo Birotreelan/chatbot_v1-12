@@ -1,6 +1,7 @@
 import OpenAI from "openai"
+import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
-import { logError } from "@/lib/monitoring"
+import { incrementMetric, logError } from "@/lib/monitoring"
 import {
   obtenerTurnosDisponibles,
   confirmarTurno,
@@ -8,9 +9,6 @@ import {
   formatearDatosSede,
   buscarPaciente,
   buscarProfesionales,
-  obtenerSubespecialidades,
-  validarObraSocial,
-  obtenerTurnos,
 } from "./api-tools/api-functions"
 import { AbortSignal } from "abort-controller"
 
@@ -144,52 +142,6 @@ export const openaiTools = {
       required: ["busqueda"],
     },
   },
-  buscar_turnos_disponibles: {
-    description: "Busca turnos disponibles según criterios de búsqueda",
-    parameters: {
-      type: "object",
-      properties: {
-        profesional_id: {
-          type: "string",
-          description: "ID del profesional (opcional)",
-        },
-        subespecialidad_id: {
-          type: "string",
-          description: "ID de la subespecialidad (opcional)",
-        },
-        rango_fechas: {
-          type: "string",
-          description: "Rango de fechas para buscar turnos (opcional)",
-        },
-      },
-    },
-  },
-  obtener_subespecialidades: {
-    description: "Obtiene las subespecialidades disponibles para un cliente",
-    parameters: {
-      type: "object",
-      properties: {
-        cliente_id: {
-          type: "string",
-          description: "ID del cliente",
-        },
-      },
-      required: ["cliente_id"],
-    },
-  },
-  validar_obra_social: {
-    description: "Valida la obra social de un cliente",
-    parameters: {
-      type: "object",
-      properties: {
-        busqueda: {
-          type: "string",
-          description: "Criterio de búsqueda para la obra social",
-        },
-      },
-      required: ["busqueda"],
-    },
-  },
 }
 
 // Mensajes predefinidos para cada función
@@ -290,20 +242,6 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
 
       case "buscar_profesionales":
         return await buscarProfesionalesHerramienta(clienteId, args.busqueda)
-
-      case "buscar_turnos_disponibles":
-        return await buscarTurnosDisponiblesHerramienta(
-          clienteId,
-          args.profesional_id,
-          args.subespecialidad_id,
-          args.rango_fechas,
-        )
-
-      case "obtener_subespecialidades":
-        return await obtenerSubespecialidadesHerramienta(clienteId)
-
-      case "validar_obra_social":
-        return await validarObraSocialHerramienta(clienteId, args.busqueda)
 
       case "obtener_turnos_disponibles":
         return await obtenerTurnosDisponibles(clienteId, args.especialidad_id, args.obra_social_id)
@@ -558,30 +496,18 @@ export async function buscarProfesionalesHerramienta(clienteId: string, busqueda
     const resultado = await buscarProfesionales(clienteId, busqueda)
 
     if (resultado.exito && resultado.datos) {
-      // Check if datos has a profesionales property (API response structure)
-      const profesionales = resultado.datos.profesionales || resultado.datos
-
-      // Ensure profesionales is an array
-      if (Array.isArray(profesionales)) {
-        console.log(`[TOOLS] ✅ Profesionales encontrados: ${profesionales.length}`)
-        return JSON.stringify({
-          exito: true,
-          profesionales: profesionales,
-          total: profesionales.length,
-          mensaje: `Se encontraron ${profesionales.length} profesionales`,
-        })
-      } else {
-        console.log(`[TOOLS] ⚠️ Datos no es un array:`, resultado.datos)
-        return JSON.stringify({
-          exito: false,
-          mensaje: "Formato de respuesta inesperado",
-        })
-      }
+      console.log(`[TOOLS] ✅ Profesionales encontrados: ${resultado.datos.length}`)
+      return JSON.stringify({
+        exito: true,
+        profesionales: resultado.datos,
+        total: resultado.datos.length,
+        mensaje: `Se encontraron ${resultado.datos.length} profesionales`,
+      })
     } else {
       console.log(`[TOOLS] ⚠️ No se encontraron profesionales para: "${busqueda}"`)
       return JSON.stringify({
         exito: false,
-        mensaje: resultado.error?.mensaje || "No se encontraron profesionales con ese criterio de búsqueda",
+        mensaje: "No se encontraron profesionales con ese criterio de búsqueda",
       })
     }
   } catch (error) {
@@ -589,146 +515,6 @@ export async function buscarProfesionalesHerramienta(clienteId: string, busqueda
     return JSON.stringify({
       exito: false,
       mensaje: "Error al buscar profesionales",
-    })
-  }
-}
-
-// Función para buscar turnos disponibles
-export async function buscarTurnosDisponiblesHerramienta(
-  clienteId: string,
-  profesionalId?: string,
-  subespecialidadId?: string,
-  rangoFechas?: string,
-): Promise<string> {
-  try {
-    console.log(`[TOOLS] 📅 Buscando turnos disponibles para cliente: ${clienteId}`)
-    console.log(
-      `[TOOLS] 📋 Parámetros: profesionalId=${profesionalId}, subespecialidadId=${subespecialidadId}, rangoFechas=${rangoFechas}`,
-    )
-
-    // Determinar el rango de fechas
-    let fechaDesde: string
-    let fechaHasta: string
-
-    if (rangoFechas) {
-      // Si se proporciona un rango, parsearlo
-      const fechas = rangoFechas.split(" a ")
-      fechaDesde = fechas[0].trim()
-      fechaHasta = fechas.length > 1 ? fechas[1].trim() : fechaDesde
-    } else {
-      // Si no se proporciona, buscar los próximos 5 días
-      const hoy = new Date()
-      fechaDesde = hoy.toISOString().split("T")[0]
-
-      const futuro = new Date()
-      futuro.setDate(futuro.getDate() + 5)
-      fechaHasta = futuro.toISOString().split("T")[0]
-    }
-
-    console.log(`[TOOLS] 📆 Buscando turnos desde ${fechaDesde} hasta ${fechaHasta}`)
-
-    // Llamar a la función obtenerTurnos con los parámetros apropiados
-    const resultado = await obtenerTurnos(
-      clienteId,
-      fechaDesde,
-      fechaHasta,
-      profesionalId,
-      undefined, // pacienteDNI
-      true, // useCache
-    )
-
-    if (resultado.exito && resultado.datos) {
-      const turnosArray = Array.isArray(resultado.datos) ? resultado.datos : []
-      console.log(`[TOOLS] ✅ Turnos encontrados: ${turnosArray.length}`)
-
-      // Truncar para OpenAI (solo primeros 20 turnos)
-      const turnosTruncados = turnosArray.slice(0, 20)
-
-      return JSON.stringify({
-        exito: true,
-        turnos: turnosTruncados,
-        total_encontrados: turnosArray.length,
-        mensaje: `Se encontraron ${turnosArray.length} turnos disponibles`,
-        fecha_desde: fechaDesde,
-        fecha_hasta: fechaHasta,
-        _truncated: turnosArray.length > 20,
-        _send_to_user: true, // Flag para indicar que debe enviarse al usuario
-      })
-    } else {
-      console.log(`[TOOLS] ⚠️ No se encontraron turnos disponibles`)
-      return JSON.stringify({
-        exito: false,
-        mensaje: resultado.error?.mensaje || "No se encontraron turnos disponibles para los criterios especificados",
-      })
-    }
-  } catch (error) {
-    console.error("[TOOLS] ❌ Error buscando turnos disponibles:", error)
-    return JSON.stringify({
-      exito: false,
-      mensaje: "Error al buscar turnos disponibles",
-    })
-  }
-}
-
-// Función para obtener subespecialidades
-export async function obtenerSubespecialidadesHerramienta(clienteId: string): Promise<string> {
-  try {
-    console.log(`[TOOLS] 🏥 Obteniendo subespecialidades para cliente: ${clienteId}`)
-
-    const resultado = await obtenerSubespecialidades(clienteId)
-
-    if (resultado.exito && resultado.datos) {
-      console.log(`[TOOLS] ✅ Subespecialidades encontradas: ${resultado.datos.length}`)
-      return JSON.stringify({
-        exito: true,
-        subespecialidades: resultado.datos,
-        total: resultado.datos.length,
-        mensaje: `Se encontraron ${resultado.datos.length} especialidades`,
-      })
-    } else {
-      console.log(`[TOOLS] ⚠️ No se encontraron subespecialidades`)
-      return JSON.stringify({
-        exito: false,
-        mensaje: "No se encontraron especialidades disponibles",
-      })
-    }
-  } catch (error) {
-    console.error("[TOOLS] ❌ Error obteniendo subespecialidades:", error)
-    return JSON.stringify({
-      exito: false,
-      mensaje: "Error al obtener las especialidades",
-    })
-  }
-}
-
-// Función para validar obra social
-export async function validarObraSocialHerramienta(clienteId: string, busqueda: string): Promise<string> {
-  try {
-    console.log(`[TOOLS] 🏥 Validando obra social: "${busqueda}" para cliente: ${clienteId}`)
-
-    const resultado = await validarObraSocial(clienteId, busqueda)
-
-    if (resultado.exito && resultado.datos) {
-      console.log(`[TOOLS] ✅ Obras sociales encontradas: ${resultado.datos.total_encontradas}`)
-      return JSON.stringify({
-        exito: true,
-        obras_sociales: resultado.datos.obras_sociales,
-        total_encontradas: resultado.datos.total_encontradas,
-        busqueda_realizada: resultado.datos.busqueda_realizada,
-        mensaje: `Se encontraron ${resultado.datos.total_encontradas} obras sociales`,
-      })
-    } else {
-      console.log(`[TOOLS] ⚠️ No se encontraron obras sociales para: "${busqueda}"`)
-      return JSON.stringify({
-        exito: false,
-        mensaje: "No se encontraron obras sociales con ese criterio de búsqueda",
-      })
-    }
-  } catch (error) {
-    console.error("[TOOLS] ❌ Error validando obra social:", error)
-    return JSON.stringify({
-      exito: false,
-      mensaje: "Error al validar la obra social",
     })
   }
 }
@@ -752,35 +538,6 @@ function getOpenAIClient() {
 // Función para esperar un tiempo determinado
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-// Función para sincronizar herramientas con el asistente
-export async function syncAssistantTools(assistantId: string): Promise<void> {
-  console.log(`[OPENAI] 🔧 Sincronizando herramientas con asistente ${assistantId}`)
-
-  const openai = getOpenAIClient()
-
-  try {
-    // Convert our tool definitions to OpenAI format
-    const tools = Object.entries(openaiTools).map(([name, tool]) => ({
-      type: "function" as const,
-      function: {
-        name,
-        description: tool.description,
-        parameters: tool.parameters,
-      },
-    }))
-
-    // Update the assistant with the tools
-    await openai.beta.assistants.update(assistantId, {
-      tools,
-    })
-
-    console.log(`[OPENAI] ✅ ${tools.length} herramientas sincronizadas exitosamente`)
-  } catch (error) {
-    console.error("[OPENAI] ❌ Error sincronizando herramientas:", error)
-    throw error
-  }
-}
-
 // Función principal para obtener respuesta del asistente
 export async function getAssistantResponse(
   threadId: string,
@@ -801,53 +558,6 @@ export async function getAssistantResponse(
     }
 
     console.log(`[OPENAI] ⚙️ Config: ${config.displayName} | Cliente: ${config.cliente_id}`)
-
-    try {
-      const assistant = await openai.beta.assistants.retrieve(assistantId)
-      console.log(`[OPENAI] 🔍 Asistente tiene ${assistant.tools?.length || 0} herramientas configuradas`)
-
-      // Log the tool names
-      if (assistant.tools && assistant.tools.length > 0) {
-        const toolNames = assistant.tools
-          .filter((t: any) => t.type === "function")
-          .map((t: any) => t.function?.name)
-          .filter(Boolean)
-        console.log(`[OPENAI] 🔧 Herramientas actuales: ${toolNames.join(", ")}`)
-      }
-
-      // Get expected tool names
-      const expectedToolNames = Object.keys(openaiTools)
-      console.log(`[OPENAI] 🔧 Herramientas esperadas: ${expectedToolNames.join(", ")}`)
-
-      // Check if we need to sync
-      const currentToolNames =
-        assistant.tools
-          ?.filter((t: any) => t.type === "function")
-          .map((t: any) => t.function?.name)
-          .filter(Boolean) || []
-
-      const needsSync =
-        expectedToolNames.some((name) => !currentToolNames.includes(name)) ||
-        currentToolNames.some((name) => !expectedToolNames.includes(name))
-
-      if (!assistant.tools || assistant.tools.length === 0 || needsSync) {
-        console.log(`[OPENAI] ⚠️ Sincronizando herramientas...`)
-        await syncAssistantTools(assistantId)
-        console.log(`[OPENAI] ✅ Herramientas sincronizadas`)
-      } else {
-        console.log(`[OPENAI] ✅ Herramientas ya están sincronizadas`)
-      }
-    } catch (error) {
-      console.error("[OPENAI] ⚠️ Error verificando herramientas del asistente:", error)
-      // Try to sync anyway
-      try {
-        console.log(`[OPENAI] 🔄 Intentando sincronizar herramientas de todas formas...`)
-        await syncAssistantTools(assistantId)
-        console.log(`[OPENAI] ✅ Herramientas sincronizadas exitosamente`)
-      } catch (syncError) {
-        console.error("[OPENAI] ❌ Error sincronizando herramientas:", syncError)
-      }
-    }
 
     // Añadir el mensaje al thread
     const messageResponse = await openai.beta.threads.messages.create(threadId, {
@@ -1090,23 +800,4 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
   const totalTime = Date.now() - startTime
   console.log(`[OPENAI] ⏱️ Run completado en ${totalTime}ms (${pollCount} polls)`)
   return run
-}
-
-// Función para enviar mensaje a WhatsApp
-async function sendWhatsAppMessage(
-  phoneNumberId: string,
-  accessToken: string,
-  userPhoneNumber: string,
-  message: string,
-) {
-  // Implementación de envío de mensaje a WhatsApp
-  // Este código depende de la implementación específica de WhatsApp Business API
-  // Aquí se asume que existe una función sendWhatsAppMessage que maneja esto
-}
-
-// Función para incrementar métrica
-async function incrementMetric(metricName: string) {
-  // Implementación de incremento de métrica
-  // Este código depende de la implementación específica del sistema de métricas
-  // Aquí se asume que existe una función incrementMetric que maneja esto
 }
