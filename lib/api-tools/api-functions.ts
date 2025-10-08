@@ -596,6 +596,16 @@ export async function buscarTurnosDisponibles(
     }
   }
 
+  if (!rangoFechas || typeof rangoFechas !== "string") {
+    return {
+      exito: false,
+      error: {
+        codigo: "RANGO_FECHAS_INVALIDO",
+        mensaje: "Se requiere un rango de fechas válido",
+      },
+    }
+  }
+
   // Extraer fechas desde y hasta del rango
   const [fechaDesde, fechaHasta] = rangoFechas.split(" a ")
 

@@ -21,50 +21,31 @@ export { obtenerTurnosDisponibles } from "./api-tools/api-functions"
 // Definición de las herramientas
 export const openaiTools = {
   obtener_turnos_disponibles: {
-    description: "Obtiene los turnos disponibles para una especialidad específica",
+    description: "Obtiene turnos disponibles por especialidad",
     parameters: {
       type: "object",
       properties: {
-        especialidad_id: {
-          type: "string",
-          description: "ID de la especialidad médica",
-        },
-        profesional_id: {
-          type: "string",
-          description: "ID del profesional (opcional)",
-        },
-        obra_social_id: {
-          type: "string",
-          description: "ID de la obra social (opcional)",
-        },
+        especialidad_id: { type: "string", description: "ID especialidad" },
+        profesional_id: { type: "string", description: "ID profesional (opcional)" },
+        obra_social_id: { type: "string", description: "ID obra social (opcional)" },
       },
       required: ["especialidad_id"],
     },
   },
   buscar_turnos_disponibles: {
-    description:
-      "Busca turnos disponibles según criterios de búsqueda flexibles (rango de fechas, profesional, especialidad)",
+    description: "Busca turnos por fecha, profesional o especialidad",
     parameters: {
       type: "object",
       properties: {
         rango_fechas: {
           type: "string",
-          description: "Rango de fechas en formato 'YYYY-MM-DD a YYYY-MM-DD' o una sola fecha 'YYYY-MM-DD'",
+          description: "Fecha o rango 'YYYY-MM-DD' o 'YYYY-MM-DD a YYYY-MM-DD' (opcional, por defecto próximos 7 días)",
         },
-        profesional: {
-          type: "string",
-          description: "Nombre del profesional (opcional)",
-        },
-        especialidad: {
-          type: "string",
-          description: "Nombre de la especialidad (opcional)",
-        },
-        profesional_id: {
-          type: "string",
-          description: "ID del profesional (opcional)",
-        },
+        profesional: { type: "string", description: "Nombre profesional (opcional)" },
+        especialidad: { type: "string", description: "Nombre especialidad (opcional)" },
+        profesional_id: { type: "string", description: "ID profesional (opcional)" },
       },
-      required: ["rango_fechas"],
+      required: [], // Made all parameters optional since OpenAI might not pass rango_fechas
     },
   },
   confirmar_turno: {
@@ -72,10 +53,7 @@ export const openaiTools = {
     parameters: {
       type: "object",
       properties: {
-        turno_id: {
-          type: "string",
-          description: "ID del turno a confirmar",
-        },
+        turno_id: { type: "string", description: "ID del turno" },
         paciente_datos: {
           type: "object",
           description: "Datos del paciente",
@@ -92,40 +70,31 @@ export const openaiTools = {
     },
   },
   obtener_datos_sede: {
-    description: "Obtiene información detallada de una sede específica",
+    description: "Obtiene info de una sede",
     parameters: {
       type: "object",
       properties: {
-        sede_id: {
-          type: "string",
-          description: "ID de la sede",
-        },
+        sede_id: { type: "string", description: "ID de la sede" },
       },
       required: ["sede_id"],
     },
   },
   obtener_obras_sociales: {
-    description: "Obtiene las obras sociales disponibles para un cliente",
+    description: "Lista obras sociales disponibles",
     parameters: {
       type: "object",
       properties: {
-        cliente_id: {
-          type: "string",
-          description: "ID del cliente",
-        },
+        cliente_id: { type: "string", description: "ID del cliente" },
       },
       required: ["cliente_id"],
     },
   },
   obtener_subespecialidades: {
-    description: "Obtiene la lista de especialidades médicas disponibles",
+    description: "Lista especialidades médicas",
     parameters: {
       type: "object",
       properties: {
-        cliente_id: {
-          type: "string",
-          description: "ID del cliente",
-        },
+        cliente_id: { type: "string", description: "ID del cliente" },
       },
       required: ["cliente_id"],
     },
@@ -135,10 +104,7 @@ export const openaiTools = {
     parameters: {
       type: "object",
       properties: {
-        turno_id: {
-          type: "string",
-          description: "ID del turno a reservar",
-        },
+        turno_id: { type: "string", description: "ID del turno" },
         paciente_datos: {
           type: "object",
           description: "Datos del paciente",
@@ -150,49 +116,37 @@ export const openaiTools = {
             email: { type: "string" },
           },
         },
-        cliente_id: {
-          type: "string",
-          description: "ID del cliente",
-        },
+        cliente_id: { type: "string", description: "ID del cliente" },
       },
       required: ["turno_id", "paciente_datos", "cliente_id"],
     },
   },
   validar_dni: {
-    description: "Valida el DNI de un paciente",
+    description: "Valida DNI de paciente",
     parameters: {
       type: "object",
       properties: {
-        dni: {
-          type: "string",
-          description: "DNI del paciente",
-        },
+        dni: { type: "string", description: "DNI del paciente" },
       },
       required: ["dni"],
     },
   },
   buscar_profesionales: {
-    description: "Busca profesionales médicos según un criterio de búsqueda",
+    description: "Busca profesionales médicos",
     parameters: {
       type: "object",
       properties: {
-        busqueda: {
-          type: "string",
-          description: "Criterio de búsqueda para profesionales",
-        },
+        busqueda: { type: "string", description: "Criterio de búsqueda" },
       },
       required: ["busqueda"],
     },
   },
   validar_obra_social: {
-    description: "Valida y busca una obra social por nombre",
+    description: "Busca y valida obra social",
     parameters: {
       type: "object",
       properties: {
-        busqueda: {
-          type: "string",
-          description: "Nombre o parte del nombre de la obra social a buscar",
-        },
+        busqueda: { type: "string", description: "Nombre de la obra social" },
       },
       required: ["busqueda"],
     },
@@ -598,14 +552,25 @@ export async function obtenerSubespecialidadesHerramienta(clienteId: string): Pr
 // Función para buscar turnos disponibles
 export async function buscarTurnosDisponiblesHerramienta(
   clienteId: string,
-  rangoFechas: string,
+  rangoFechas?: string,
   profesional?: string,
   especialidad?: string,
   profesionalId?: string,
 ): Promise<string> {
   try {
+    if (!rangoFechas) {
+      const today = new Date()
+      const nextWeek = new Date(today)
+      nextWeek.setDate(today.getDate() + 7)
+
+      const formatDate = (date: Date) => date.toISOString().split("T")[0]
+      rangoFechas = `${formatDate(today)} a ${formatDate(nextWeek)}`
+
+      console.log(`[TOOLS] 📅 No se proporcionó rango de fechas, usando por defecto: ${rangoFechas}`)
+    }
+
     console.log(
-      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}`,
+      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}, profesional_id=${profesionalId}`,
     )
 
     const resultado = await buscarTurnosDisponibles(rangoFechas, profesional, especialidad, profesionalId, clienteId)
@@ -690,7 +655,8 @@ export async function validarObraSocialHerramienta(clienteId: string, busqueda: 
 }
 
 // Tiempo máximo de espera para la respuesta de OpenAI (en milisegundos)
-const OPENAI_TIMEOUT = Number.parseInt(process.env.OPENAI_TIMEOUT || "50000", 10)
+const OPENAI_TIMEOUT = Number.parseInt(process.env.OPENAI_TIMEOUT || "45000", 10)
+const EARLY_WARNING_TIME = 30000 // 30 seconds
 
 // Número máximo de reintentos
 const MAX_RETRIES = Number.parseInt(process.env.MAX_RETRIES || "3", 10)
@@ -944,8 +910,10 @@ async function processRunWithCorrectFlow(
 // Función para esperar completación del run
 async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, runId: string) {
   const startTime = Date.now()
+  let pollInterval = 800 // Start with 800ms for faster initial response
+  const maxPollInterval = 2500 // Max 2.5 seconds between polls
+  let earlyWarningSent = false
 
-  // Usar fetch directamente
   const makeDirectAPICall = async (tId: string, rId: string) => {
     const url = `https://api.openai.com/v1/threads/${tId}/runs/${rId}`
     const response = await fetch(url, {
@@ -967,17 +935,23 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
 
   let run = await makeDirectAPICall(threadId, runId)
   let pollCount = 0
+  let lastStatus = run.status
 
   while (run.status === "queued" || run.status === "in_progress") {
     pollCount++
+    const elapsed = Date.now() - startTime
+
+    if (!earlyWarningSent && elapsed > EARLY_WARNING_TIME) {
+      earlyWarningSent = true
+      console.log(`[OPENAI] ⚠️ Procesamiento lento detectado (${elapsed}ms)`)
+    }
 
     // Verificar timeout
-    const elapsed = Date.now() - startTime
     if (elapsed > OPENAI_TIMEOUT) {
-      console.error(`[OPENAI] ⏰ Timeout alcanzado: ${OPENAI_TIMEOUT}ms`)
+      console.error(`[OPENAI] ⏰ Timeout: ${OPENAI_TIMEOUT}ms (estado: ${run.status}, polls: ${pollCount})`)
 
       try {
-        console.log(`[OPENAI] 🛑 Intentando cancelar run ${runId}`)
+        console.log(`[OPENAI] 🛑 Cancelando run ${runId}`)
         await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}/cancel`, {
           method: "POST",
           headers: {
@@ -991,19 +965,34 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
         console.error(`[OPENAI] ❌ Error cancelando run:`, cancelError)
       }
 
-      throw new Error(`Timeout esperando run: ${OPENAI_TIMEOUT}ms`)
+      throw new Error(`Timeout esperando run: ${OPENAI_TIMEOUT}ms (estado: ${run.status})`)
     }
 
-    // Log cada 5 polls
-    if (pollCount % 5 === 0) {
-      console.log(`[OPENAI] ⏳ Esperando... (${run.status}, ${elapsed}ms)`)
+    // Log status changes
+    if (run.status !== lastStatus) {
+      console.log(`[OPENAI] 🔄 ${lastStatus} → ${run.status} (${elapsed}ms)`)
+      lastStatus = run.status
     }
 
-    await wait(1000)
+    if (elapsed > 10000 && pollCount % 3 === 0) {
+      console.log(`[OPENAI] ⏳ ${run.status} (${elapsed}ms, poll #${pollCount})`)
+    }
+
+    await wait(pollInterval)
+
+    if (pollInterval < maxPollInterval) {
+      pollInterval = Math.min(pollInterval + 400, maxPollInterval)
+    }
+
     run = await makeDirectAPICall(threadId, runId)
   }
 
   const totalTime = Date.now() - startTime
-  console.log(`[OPENAI] ⏱️ Run completado en ${totalTime}ms (${pollCount} polls)`)
+  console.log(`[OPENAI] ⏱️ Completado en ${totalTime}ms (${pollCount} polls, ${run.status})`)
+
+  if (totalTime > 20000) {
+    console.warn(`[OPENAI] 🐌 Respuesta lenta: ${totalTime}ms`)
+  }
+
   return run
 }
