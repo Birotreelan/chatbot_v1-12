@@ -7,8 +7,19 @@ export async function POST(request: Request) {
   try {
     console.log("[PROXYLISTENER] ===== INICIO DE SOLICITUD =====")
 
+    console.log("[v0] 📥 REQUEST DETAILS:")
+    console.log("[v0] Method:", request.method)
+    console.log("[v0] URL:", request.url)
+    console.log("[v0] Headers:", JSON.stringify(Object.fromEntries(request.headers.entries()), null, 2))
+
     // Obtener los parámetros de la solicitud
     const data = await request.json()
+
+    console.log("[v0] Body (parsed JSON):", JSON.stringify(data, null, 2))
+    console.log("[v0] Body keys:", Object.keys(data))
+    console.log("[v0] Body type:", typeof data)
+    console.log("[PROXYLISTENER] ===== FIN DE DETALLES DE REQUEST =====")
+
     console.log("[PROXYLISTENER] Datos recibidos:", JSON.stringify(data, null, 2))
 
     // Detectar si es envío de template o respuesta de botón
