@@ -250,7 +250,7 @@ function extractAppointmentInfo(templateBody: any): any {
 // Función para manejar envío de templates
 async function handleTemplateSend(data: any) {
   try {
-    const { Cliente_Id, Phone_Number_Id, Phone, Type, Body } = data
+    const { Cliente_Id, Phone_Number_Id, Phone, Type, Body, Chatbot_Data } = data
 
     console.log("[PROXYLISTENER] Parámetros extraídos:")
     console.log("[PROXYLISTENER] - Cliente_Id:", Cliente_Id)
@@ -258,6 +258,7 @@ async function handleTemplateSend(data: any) {
     console.log("[PROXYLISTENER] - Phone:", Phone)
     console.log("[PROXYLISTENER] - Type:", Type)
     console.log("[PROXYLISTENER] - Body:", typeof Body === "object" ? JSON.stringify(Body, null, 2) : Body)
+    console.log("[PROXYLISTENER] - Chatbot_Data:", Chatbot_Data)
 
     // Validaciones
     if (!Cliente_Id) {
@@ -417,7 +418,16 @@ async function handleTemplateSend(data: any) {
             console.log("[PROXYLISTENER] Error al parsear template data:", e)
           }
 
-          // Crear notificación para OpenAI con información del turno
+          let chatbotDataParsed = null
+          if (Chatbot_Data) {
+            try {
+              chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
+              console.log("[PROXYLISTENER] Chatbot_Data parseado:", JSON.stringify(chatbotDataParsed, null, 2))
+            } catch (e) {
+              console.error("[PROXYLISTENER] Error al parsear Chatbot_Data:", e)
+            }
+          }
+
           let notificationMessage = `[SISTEMA_PLANTILLA]
 Plantilla_Nombre: ${templateAnalysis.name}
 Plantilla_Contenido: ${templateAnalysis.content}`
@@ -429,6 +439,56 @@ Turno_Fecha: ${appointmentInfo.fecha || "No especificada"}
 Turno_Hora: ${appointmentInfo.hora || "No especificada"}
 Turno_Profesional: ${appointmentInfo.profesional || "No especificado"}
 Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
+          }
+
+          if (chatbotDataParsed) {
+            notificationMessage += `
+
+[CONTEXTO_COMPLETO_TURNO]`
+
+            // Información del paciente
+            if (chatbotDataParsed.paciente) {
+              notificationMessage += `
+Paciente_Nombres: ${chatbotDataParsed.paciente.nombres || ""}
+Paciente_Apellido: ${chatbotDataParsed.paciente.apellido || ""}
+Paciente_DNI: ${chatbotDataParsed.paciente.dni || ""}
+Paciente_Telefono: ${chatbotDataParsed.paciente.telefono || ""}`
+            }
+
+            // Información de los turnos
+            if (chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
+              notificationMessage += `
+Cantidad_Turnos: ${chatbotDataParsed.cantidad_turnos || chatbotDataParsed.turnos.length}`
+
+              chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
+                notificationMessage += `
+
+Turno_${index + 1}:
+  - Fecha: ${turno.fecha || ""}
+  - Fecha_Formateada: ${turno.fecha_formateada || ""}
+  - Hora: ${turno.hora || ""}
+  - Hora_Formateada: ${turno.hora_formateada || ""}
+  - Profesional: ${turno.profesional || ""}
+  - Profesional_ID: ${turno.profesional_id || ""}
+  - Sede: ${turno.sede || ""}
+  - Direccion: ${turno.direccion || ""}
+  - Agenda_ID: ${turno.agenda_id || ""}`
+              })
+            }
+
+            // Información de la clínica y tipo de mensaje
+            if (chatbotDataParsed.clinica) {
+              notificationMessage += `
+Clinica: ${chatbotDataParsed.clinica}`
+            }
+
+            if (chatbotDataParsed.tipo_mensaje) {
+              notificationMessage += `
+Tipo_Mensaje: ${chatbotDataParsed.tipo_mensaje}`
+            }
+
+            notificationMessage += `
+[/CONTEXTO_COMPLETO_TURNO]`
           }
 
           notificationMessage += `
@@ -446,6 +506,8 @@ Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
           })
 
           console.log("[PROXYLISTENER] Notificación enviada a OpenAI exitosamente")
+          console.log("[PROXYLISTENER] 📤 Mensaje enviado a OpenAI:")
+          console.log(notificationMessage)
         } catch (error: any) {
           console.error("[PROXYLISTENER] Error al notificar a OpenAI:", error)
           console.error("[PROXYLISTENER] Stack trace:", error.stack)
