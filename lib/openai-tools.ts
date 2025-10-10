@@ -104,21 +104,14 @@ export const openaiTools = {
     parameters: {
       type: "object",
       properties: {
-        turno_id: { type: "string", description: "ID del turno" },
-        paciente_datos: {
-          type: "object",
-          description: "Datos del paciente",
-          properties: {
-            nombre: { type: "string" },
-            apellido: { type: "string" },
-            dni: { type: "string" },
-            telefono: { type: "string" },
-            email: { type: "string" },
-          },
-        },
-        cliente_id: { type: "string", description: "ID del cliente" },
+        agendaId: { type: "string", description: "ID del turno/agenda a reservar" },
+        dni: { type: "string", description: "DNI del paciente" },
+        nombre: { type: "string", description: "Nombre del paciente" },
+        apellido: { type: "string", description: "Apellido del paciente" },
+        telefono: { type: "string", description: "Teléfono del paciente" },
+        email: { type: "string", description: "Email del paciente" },
       },
-      required: ["turno_id", "paciente_datos", "cliente_id"],
+      required: ["agendaId", "dni", "nombre", "apellido", "telefono", "email"],
     },
   },
   validar_dni: {
@@ -244,7 +237,18 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
         return await obtenerObrasSociales(clienteId)
 
       case "reservar_turno":
-        return await reservarTurno(clienteId, args.turno_id, args.paciente_datos)
+        if (args.agendaId) {
+          const pacienteDatos = {
+            dni: args.dni,
+            nombre: args.nombre,
+            apellido: args.apellido,
+            telefono: args.telefono,
+            email: args.email,
+          }
+          return await reservarTurno(clienteId, args.agendaId, pacienteDatos)
+        } else {
+          return await reservarTurno(clienteId, args.turno_id, args.paciente_datos)
+        }
 
       case "validar_obra_social":
         return await validarObraSocialHerramienta(clienteId, args.busqueda)
@@ -523,7 +527,6 @@ export async function obtenerSubespecialidadesHerramienta(clienteId: string): Pr
     const resultado = await obtenerSubespecialidades(clienteId)
 
     if (resultado.exito && resultado.datos) {
-      // The API returns { subespecialidades: [...] }, extract the array
       const especialidades = resultado.datos.subespecialidades || resultado.datos
 
       if (Array.isArray(especialidades)) {
@@ -584,7 +587,6 @@ export async function buscarTurnosDisponiblesHerramienta(
     const resultado = await buscarTurnosDisponibles(rangoFechas, profesional, especialidad, profesionalId, clienteId)
 
     if (resultado.exito && resultado.datos) {
-      // Check if we got multiple professionals to choose from
       if (resultado.datos.multiple) {
         console.log(`[TOOLS] ⚠️ Múltiples profesionales encontrados: ${resultado.datos.profesionales.length}`)
         return JSON.stringify({
@@ -595,7 +597,6 @@ export async function buscarTurnosDisponiblesHerramienta(
         })
       }
 
-      // Check if we got appointments
       if (Array.isArray(resultado.datos)) {
         console.log(`[TOOLS] ✅ Turnos encontrados: ${resultado.datos.length}`)
         return JSON.stringify({
@@ -606,7 +607,6 @@ export async function buscarTurnosDisponiblesHerramienta(
         })
       }
 
-      // Return the data as-is if it's in a different format
       return JSON.stringify({
         exito: true,
         datos: resultado.datos,
@@ -701,7 +701,6 @@ export async function getAssistantResponse(
   const openai = getOpenAIClient()
 
   try {
-    // Obtener la configuración
     const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
     if (!config) {
       throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
@@ -709,7 +708,6 @@ export async function getAssistantResponse(
 
     console.log(`[OPENAI] ⚙️ Config: ${config.displayName} | Cliente: ${config.cliente_id}`)
 
-    // Añadir el mensaje al thread
     const messageResponse = await openai.beta.threads.messages.create(threadId, {
       role: "user",
       content: message,
@@ -717,14 +715,12 @@ export async function getAssistantResponse(
 
     console.log(`[OPENAI] 📤 Mensaje enviado a thread ${threadId}`)
 
-    // Crear un run con el asistente
     const run = await openai.beta.threads.runs.create(threadId, {
       assistant_id: assistantId,
     })
 
     console.log(`[OPENAI] 🏃 Run creado: ${run.id}`)
 
-    // Procesar el run
     await processRunWithCorrectFlow(
       openai,
       threadId,
@@ -756,7 +752,6 @@ async function processRunWithCorrectFlow(
   retryCount = 0,
 ) {
   try {
-    // Esperar a que el run se complete o requiera acción
     const completedRun = await waitForRunCompletionOrAction(openai, threadId, runId)
     console.log(`[OPENAI] 🏁 Run completado: ${completedRun.status}`)
 
@@ -767,7 +762,6 @@ async function processRunWithCorrectFlow(
     }
 
     if (completedRun.status === "completed") {
-      // Obtener los mensajes del asistente
       const messages = await openai.beta.threads.messages.list(threadId, {
         order: "desc",
         limit: 1,
@@ -777,7 +771,6 @@ async function processRunWithCorrectFlow(
         throw new Error("No se encontraron mensajes del asistente")
       }
 
-      // Extraer el contenido del mensaje
       let messageContent = ""
       for (const content of messages.data[0].content) {
         if (content.type === "text") {
@@ -789,11 +782,9 @@ async function processRunWithCorrectFlow(
         `[OPENAI] 💬 Respuesta: "${messageContent.substring(0, 100)}${messageContent.length > 100 ? "..." : ""}"`,
       )
 
-      // Enviar el mensaje a WhatsApp
       await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, messageContent)
       console.log(`[OPENAI] 📱 Enviado a WhatsApp`)
 
-      // Incrementar métrica
       await incrementMetric("messages_sent")
 
       return { success: true }
@@ -806,14 +797,12 @@ async function processRunWithCorrectFlow(
 
         console.log(`[OPENAI] 🔧 ${toolCalls.length} herramientas a ejecutar`)
 
-        // Procesar cada llamada a herramienta
         for (const toolCall of toolCalls) {
           const functionName = toolCall.function.name
           const functionArgs = JSON.parse(toolCall.function.arguments)
 
           console.log(`[OPENAI] 🔧 Ejecutando: ${functionName}`)
 
-          // Enviar mensaje de espera al usuario
           const waitingMessage = FUNCTION_MESSAGES[functionName] || FUNCTION_MESSAGES.default
           try {
             await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
@@ -822,7 +811,6 @@ async function processRunWithCorrectFlow(
             console.error(`[OPENAI] ❌ Error enviando mensaje de espera:`, error)
           }
 
-          // Ejecutar la función
           const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
 
           toolOutputs.push({
@@ -833,7 +821,6 @@ async function processRunWithCorrectFlow(
           console.log(`[OPENAI] ✅ ${functionName} completado`)
         }
 
-        // Enviar los resultados usando API directa
         const submitUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`
         const submitResponse = await fetch(submitUrl, {
           method: "POST",
@@ -852,7 +839,6 @@ async function processRunWithCorrectFlow(
 
         console.log(`[OPENAI] 📤 Resultados enviados a OpenAI`)
 
-        // Continuar procesando el run
         return await processRunWithCorrectFlow(
           openai,
           threadId,
@@ -893,7 +879,6 @@ async function processRunWithCorrectFlow(
       return { success: false, error: "timeout" }
     }
 
-    // Reintentar si no hemos alcanzado el número máximo
     if (retryCount < MAX_RETRIES) {
       let waitTime = RETRY_DELAY
       if (error.message && error.message.includes("Please try again in")) {
@@ -960,7 +945,6 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
       console.log(`[OPENAI] ⚠️ Procesamiento lento detectado (${elapsed}ms)`)
     }
 
-    // Verificar timeout
     if (elapsed > OPENAI_TIMEOUT) {
       console.error(`[OPENAI] ⏰ Timeout: ${OPENAI_TIMEOUT}ms (estado: ${run.status}, polls: ${pollCount})`)
 
@@ -982,7 +966,6 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
       throw new Error(`Timeout esperando run: ${OPENAI_TIMEOUT}ms (estado: ${run.status})`)
     }
 
-    // Log status changes
     if (run.status !== lastStatus) {
       console.log(`[OPENAI] 🔄 ${lastStatus} → ${run.status} (${elapsed}ms)`)
       lastStatus = run.status
