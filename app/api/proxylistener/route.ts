@@ -453,9 +453,9 @@ Paciente_Nombres: ${chatbotDataParsed.paciente.nombres || ""}
 Paciente_Apellido: ${chatbotDataParsed.paciente.apellido || ""}
 Paciente_DNI: ${chatbotDataParsed.paciente.dni || ""}
 Paciente_Telefono: ${chatbotDataParsed.paciente.telefono || ""}
-Paciente_Mail: ${data.Paciente_Mail || ""}
-Paciente_Obra_Social_ID: ${data.Deudor_Id || ""}
-Paciente_Obra_Social_Nombre: ${data.Deudor_Nombre || ""}`
+Paciente_Mail: ${chatbotDataParsed.paciente.mail || ""}
+Paciente_Obra_Social_ID: ${chatbotDataParsed.paciente.obra_social_id || ""}
+Paciente_Obra_Social_Nombre: ${chatbotDataParsed.paciente.obra_social_nombre || ""}`
             }
 
             // Información de los turnos
