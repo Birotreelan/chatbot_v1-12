@@ -452,7 +452,10 @@ Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
 Paciente_Nombres: ${chatbotDataParsed.paciente.nombres || ""}
 Paciente_Apellido: ${chatbotDataParsed.paciente.apellido || ""}
 Paciente_DNI: ${chatbotDataParsed.paciente.dni || ""}
-Paciente_Telefono: ${chatbotDataParsed.paciente.telefono || ""}`
+Paciente_Telefono: ${chatbotDataParsed.paciente.telefono || ""}
+Paciente_Mail: ${data.Paciente_Mail || ""}
+Paciente_Obra_Social_ID: ${data.Deudor_Id || ""}
+Paciente_Obra_Social_Nombre: ${data.Deudor_Nombre || ""}`
             }
 
             // Información de los turnos
