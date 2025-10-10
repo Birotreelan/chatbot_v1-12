@@ -13,7 +13,7 @@ import {
   buscarTurnosDisponibles,
   validarObraSocial,
 } from "./api-tools/api-functions"
-import { AbortSignal } from "abort-controller"
+import type { AbortSignal } from "abort-controller"
 
 // Re-export functions for compatibility
 export { obtenerTurnosDisponibles } from "./api-tools/api-functions"
@@ -370,7 +370,7 @@ export async function obtenerObrasSociales(clienteId: string): Promise<string> {
         Cliente_Id: clienteId,
         Action: "get_obras_sociales",
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: createTimeoutSignal(30000),
     })
 
     if (!response.ok) {
@@ -408,7 +408,7 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
         turno_id: turnoId,
         paciente_datos: pacienteDatos,
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: createTimeoutSignal(30000),
     })
 
     if (!response.ok) {
@@ -673,6 +673,12 @@ function getOpenAIClient() {
 
 // Función para esperar un tiempo determinado
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function createTimeoutSignal(timeoutMs: number): AbortSignal {
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), timeoutMs)
+  return controller.signal
+}
 
 // Función principal para obtener respuesta del asistente
 export async function getAssistantResponse(
