@@ -237,6 +237,13 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
         return await obtenerObrasSociales(clienteId)
 
       case "reservar_turno":
+        console.log(`[OPENAI-TOOLS] 🔍 DEBUG reservar_turno:`)
+        console.log(`[OPENAI-TOOLS] 🔍 args completo:`, JSON.stringify(args, null, 2))
+        console.log(`[OPENAI-TOOLS] 🔍 args.agendaId:`, args.agendaId)
+        console.log(`[OPENAI-TOOLS] 🔍 args.dni:`, args.dni)
+        console.log(`[OPENAI-TOOLS] 🔍 args.nombre:`, args.nombre)
+        console.log(`[OPENAI-TOOLS] 🔍 clienteId:`, clienteId)
+
         if (args.agendaId) {
           const pacienteDatos = {
             dni: args.dni,
@@ -245,8 +252,15 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
             telefono: args.telefono,
             email: args.email,
           }
+          console.log(`[OPENAI-TOOLS] 🔍 pacienteDatos construido:`, JSON.stringify(pacienteDatos, null, 2))
+          console.log(`[OPENAI-TOOLS] 🔍 Llamando reservarTurno con:`)
+          console.log(`[OPENAI-TOOLS] 🔍   - clienteId: ${clienteId}`)
+          console.log(`[OPENAI-TOOLS] 🔍   - agendaId: ${args.agendaId}`)
+          console.log(`[OPENAI-TOOLS] 🔍   - pacienteDatos:`, pacienteDatos)
+
           return await reservarTurno(clienteId, args.agendaId, pacienteDatos)
         } else {
+          console.log(`[OPENAI-TOOLS] 🔍 Usando formato antiguo (turno_id)`)
           return await reservarTurno(clienteId, args.turno_id, args.paciente_datos)
         }
 
@@ -405,10 +419,27 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
 
     const requestBody = {
       Cliente_Id: clienteId,
-      Action: "reservar_turno",
-      turno_id: turnoId,
-      paciente_datos: pacienteDatos,
+      Action: "set_turno",
+      Agenda_Id: turnoId,
+      Paciente_Nombre: pacienteDatos.nombre || "",
+      Paciente_Apellido: pacienteDatos.apellido || "",
+      Paciente_DNI: pacienteDatos.dni || "",
+      Paciente_Telefono: pacienteDatos.telefono || "",
+      Paciente_Email: pacienteDatos.email || "",
+      // Campos opcionales que pueden venir en pacienteDatos
+      ...(pacienteDatos.fecha_nac && { Paciente_Fecha_Nac: pacienteDatos.fecha_nac }),
+      ...(pacienteDatos.direccion && { Paciente_Direccion: pacienteDatos.direccion }),
+      ...(pacienteDatos.localidad && { Paciente_Localidad: pacienteDatos.localidad }),
+      ...(pacienteDatos.provincia && { Paciente_Provincia: pacienteDatos.provincia }),
+      ...(pacienteDatos.sexo && { Paciente_Sexo: pacienteDatos.sexo }),
+      ...(pacienteDatos.tipo_doc && { Paciente_Tipo_Doc: pacienteDatos.tipo_doc }),
+      ...(pacienteDatos.obra_social_id && { Deudor_Id: pacienteDatos.obra_social_id }),
+      ...(pacienteDatos.plan_id && { Plan_Id: pacienteDatos.plan_id }),
+      ...(pacienteDatos.nro_afiliado && { Nro_Afiliado: pacienteDatos.nro_afiliado }),
+      ...(pacienteDatos.motivo && { Turno_Motivo: pacienteDatos.motivo }),
+      ...(pacienteDatos.comentarios && { Comentarios: pacienteDatos.comentarios }),
     }
+
     console.log(`[TOOLS] 📤 Request body completo:`, JSON.stringify(requestBody, null, 2))
 
     const response = await fetch(baseUrl, {
