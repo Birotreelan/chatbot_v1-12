@@ -500,11 +500,18 @@ Tipo_Mensaje: ${chatbotDataParsed.tipo_mensaje}`
             throw new Error(`ThreadId inválido: ${threadResult.threadId} (tipo: ${typeof threadResult.threadId})`)
           }
 
+          console.log("[v0] 🚀 ===== ENVIANDO MENSAJE A OPENAI =====")
+          console.log("[v0] ThreadID:", threadResult.threadId)
+          console.log("[v0] Mensaje completo que se enviará:")
+          console.log(notificationMessage)
+          console.log("[v0] ==========================================")
+
           await safelyAddMessageToThread(threadResult.threadId, {
             role: "user",
             content: notificationMessage,
           })
 
+          console.log("[v0] ✅ MENSAJE ENVIADO A OPENAI EXITOSAMENTE")
           console.log("[PROXYLISTENER] Notificación enviada a OpenAI exitosamente")
           console.log("[PROXYLISTENER] 📤 Mensaje enviado a OpenAI:")
           console.log(notificationMessage)
