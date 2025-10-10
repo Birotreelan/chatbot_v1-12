@@ -391,31 +391,39 @@ export async function obtenerObrasSociales(clienteId: string): Promise<string> {
 export async function reservarTurno(clienteId: string, turnoId: string, pacienteDatos: any): Promise<string> {
   try {
     console.log(`[TOOLS] 📝 Reservando turno ${turnoId} para cliente: ${clienteId}`)
+    console.log(`[TOOLS] 📋 Datos del paciente:`, JSON.stringify(pacienteDatos, null, 2))
+    console.log(`[TOOLS] 🔑 turnoId recibido:`, turnoId)
 
     const baseUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
     if (!baseUrl) {
       return "Error: URL de API no configurada"
     }
 
+    const requestBody = {
+      Cliente_Id: clienteId,
+      Action: "reservar_turno",
+      turno_id: turnoId,
+      paciente_datos: pacienteDatos,
+    }
+    console.log(`[TOOLS] 📤 Request body completo:`, JSON.stringify(requestBody, null, 2))
+
     const response = await fetch(baseUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        Cliente_Id: clienteId,
-        Action: "reservar_turno",
-        turno_id: turnoId,
-        paciente_datos: pacienteDatos,
-      }),
+      body: JSON.stringify(requestBody),
       signal: createTimeoutSignal(30000),
     })
 
     if (!response.ok) {
-      return `Error HTTP: ${response.status}`
+      const errorText = await response.text()
+      console.error(`[TOOLS] ❌ Error HTTP ${response.status}:`, errorText)
+      return `Error HTTP: ${response.status} - ${errorText}`
     }
 
     const data = await response.json()
+    console.log(`[TOOLS] 📥 Respuesta completa del proxy:`, JSON.stringify(data, null, 2))
     console.log(`[TOOLS] ✅ Turno reservado exitosamente`)
 
     return JSON.stringify(data)
