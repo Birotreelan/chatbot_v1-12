@@ -70,12 +70,12 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
         >
           <Avatar className="h-12 w-12 flex-shrink-0">
             <AvatarFallback className="bg-primary text-primary-foreground">
-              {contact.phoneNumber.slice(-2)}
+              {contact.phoneNumber ? contact.phoneNumber.slice(-2) : "??"}
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-1">
-              <p className="font-semibold text-sm truncate">{contact.phoneNumber}</p>
+              <p className="font-semibold text-sm truncate">{contact.phoneNumber || "Desconocido"}</p>
               <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
                 {formatDistanceToNow(new Date(contact.lastMessageAt), {
                   addSuffix: true,

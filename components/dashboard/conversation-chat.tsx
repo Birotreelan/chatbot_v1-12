@@ -63,10 +63,12 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
       {/* Header */}
       <div className="border-b bg-background p-4 flex items-center gap-3">
         <Avatar className="h-10 w-10">
-          <AvatarFallback className="bg-primary text-primary-foreground">{phoneNumber.slice(-2)}</AvatarFallback>
+          <AvatarFallback className="bg-primary text-primary-foreground">
+            {phoneNumber ? phoneNumber.slice(-2) : "??"}
+          </AvatarFallback>
         </Avatar>
         <div>
-          <p className="font-semibold">{phoneNumber}</p>
+          <p className="font-semibold">{phoneNumber || "Desconocido"}</p>
           <p className="text-xs text-muted-foreground">{messages.length} mensajes</p>
         </div>
       </div>
