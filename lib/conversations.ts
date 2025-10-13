@@ -2,7 +2,8 @@ import { getRedisClient } from "./redis"
 
 // Prefijos para las claves en Redis
 const CONVERSATION_PREFIX = "conversation:"
-const CONVERSATION_LIST_PREFIX = "conversation_list:"
+const CONVERSATION_CONTACT_PREFIX = "conversation_contact:"
+const CONVERSATION_CONTACTS_SET_PREFIX = "conversation_contacts:"
 
 // Duración de almacenamiento: 7 días en segundos
 const CONVERSATION_TTL = 7 * 24 * 60 * 60 // 7 días
@@ -60,14 +61,17 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
 
     console.log(`[CONVERSATIONS] ✅ Mensaje validado:`, JSON.stringify(validatedMessage, null, 2))
 
+    // Claves para almacenamiento
     const conversationKey = `${CONVERSATION_PREFIX}${message.configId}:${message.phoneNumber}`
-    const listKey = `${CONVERSATION_LIST_PREFIX}${message.configId}`
+    const contactKey = `${CONVERSATION_CONTACT_PREFIX}${message.configId}:${message.phoneNumber}`
+    const contactsSetKey = `${CONVERSATION_CONTACTS_SET_PREFIX}${message.configId}`
 
     console.log(`[CONVERSATIONS] 🔑 Claves generadas:`)
     console.log(`[CONVERSATIONS]   - conversationKey: ${conversationKey}`)
-    console.log(`[CONVERSATIONS]   - listKey: ${listKey}`)
+    console.log(`[CONVERSATIONS]   - contactKey: ${contactKey}`)
+    console.log(`[CONVERSATIONS]   - contactsSetKey: ${contactsSetKey}`)
 
-    // Guardar el mensaje en la lista de conversación
+    // 1. Guardar el mensaje en la lista de conversación
     console.log(`[CONVERSATIONS] 📝 Guardando mensaje en lista...`)
     const messageString = JSON.stringify(validatedMessage)
     console.log(
@@ -76,13 +80,10 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     )
 
     await redisClient.rpush(conversationKey, messageString)
-    console.log(`[CONVERSATIONS] ✅ Mensaje agregado a lista en Redis`)
-
-    // Establecer TTL de 7 días
     await redisClient.expire(conversationKey, CONVERSATION_TTL)
-    console.log(`[CONVERSATIONS] ⏰ TTL establecido: ${CONVERSATION_TTL}s (7 días)`)
+    console.log(`[CONVERSATIONS] ✅ Mensaje guardado con TTL de 7 días`)
 
-    // Actualizar la lista de contactos
+    // 2. Actualizar información del contacto
     const contactInfo: ConversationContact = {
       phoneNumber: message.phoneNumber,
       lastMessage: message.content.substring(0, 100),
@@ -96,20 +97,21 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     const contactString = JSON.stringify(contactInfo)
     console.log(`[CONVERSATIONS] 📇 contactInfo serializado (${contactString.length} chars):`, contactString)
 
-    console.log(`[CONVERSATIONS] 💾 Llamando a hset con:`)
-    console.log(`[CONVERSATIONS]   - key: ${listKey}`)
-    console.log(`[CONVERSATIONS]   - field: ${message.phoneNumber}`)
-    console.log(`[CONVERSATIONS]   - value: ${contactString}`)
+    // Usar SET en lugar de HSET para evitar problemas de parsing
+    console.log(`[CONVERSATIONS] 💾 Guardando contacto con SET en clave: ${contactKey}`)
+    await redisClient.set(contactKey, contactString)
+    await redisClient.expire(contactKey, CONVERSATION_TTL)
+    console.log(`[CONVERSATIONS] ✅ Contacto guardado con SET`)
 
-    const hsetResult = await redisClient.hset(listKey, message.phoneNumber, contactString)
-    console.log(`[CONVERSATIONS] 💾 hset resultado:`, hsetResult)
-
-    const verifyValue = await redisClient.hget(listKey, message.phoneNumber)
+    // Verificar que se guardó correctamente
+    const verifyValue = await redisClient.get(contactKey)
     console.log(`[CONVERSATIONS] 🔍 Verificando valor guardado:`, verifyValue)
     console.log(`[CONVERSATIONS] 🔍 Tipo de valor guardado:`, typeof verifyValue)
 
-    await redisClient.expire(listKey, CONVERSATION_TTL)
-    console.log(`[CONVERSATIONS] ⏰ TTL establecido para lista de contactos`)
+    // 3. Agregar el número de teléfono al set de contactos
+    await redisClient.sadd(contactsSetKey, message.phoneNumber)
+    await redisClient.expire(contactsSetKey, CONVERSATION_TTL)
+    console.log(`[CONVERSATIONS] ✅ Número agregado al set de contactos`)
 
     console.log(`[CONVERSATIONS] 🟢 ===== FIN saveConversationMessage (EXITOSO) =====`)
   } catch (error) {
@@ -184,30 +186,40 @@ export async function getConversationContacts(configId: string): Promise<Convers
       return []
     }
 
-    const listKey = `${CONVERSATION_LIST_PREFIX}${configId}`
+    const contactsSetKey = `${CONVERSATION_CONTACTS_SET_PREFIX}${configId}`
 
     console.log(`[CONVERSATIONS] 📇 Obteniendo contactos:`)
     console.log(`[CONVERSATIONS]   - configId: ${configId}`)
-    console.log(`[CONVERSATIONS]   - listKey: ${listKey}`)
+    console.log(`[CONVERSATIONS]   - contactsSetKey: ${contactsSetKey}`)
 
-    const contactsData = await redisClient.hgetall(listKey)
+    // Obtener todos los números de teléfono del set
+    const phoneNumbers = await redisClient.smembers(contactsSetKey)
 
-    console.log(`[CONVERSATIONS] 📊 Datos raw de Redis:`, contactsData)
+    console.log(`[CONVERSATIONS] 📊 Números de teléfono en set:`, phoneNumbers)
 
-    if (!contactsData || Object.keys(contactsData).length === 0) {
+    if (!phoneNumbers || phoneNumbers.length === 0) {
       console.log(`[CONVERSATIONS] ⚠️ No hay contactos para configId: ${configId}`)
       return []
     }
 
-    console.log(`[CONVERSATIONS] 📊 Número de contactos en hash: ${Object.keys(contactsData).length}`)
+    console.log(`[CONVERSATIONS] 📊 Total de números: ${phoneNumbers.length}`)
 
+    // Obtener la información de cada contacto
     const contacts: ConversationContact[] = []
-    for (const [phoneNumber, data] of Object.entries(contactsData)) {
+    for (const phoneNumber of phoneNumbers) {
       try {
-        console.log(`[CONVERSATIONS] 📱 Procesando contacto ${phoneNumber}:`)
-        console.log(`[CONVERSATIONS]   - Data raw:`, data)
+        const contactKey = `${CONVERSATION_CONTACT_PREFIX}${configId}:${phoneNumber}`
+        console.log(`[CONVERSATIONS] 📱 Obteniendo contacto: ${contactKey}`)
 
-        const contact = JSON.parse(data as string)
+        const contactData = await redisClient.get(contactKey)
+        console.log(`[CONVERSATIONS]   - Data raw:`, contactData)
+
+        if (!contactData) {
+          console.log(`[CONVERSATIONS]   - ⚠️ No hay datos para ${phoneNumber}`)
+          continue
+        }
+
+        const contact = JSON.parse(contactData as string)
         console.log(`[CONVERSATIONS]   - Data parseada:`, contact)
 
         const processedContact = {
@@ -221,18 +233,18 @@ export async function getConversationContacts(configId: string): Promise<Convers
         console.log(`[CONVERSATIONS]   - Contacto procesado:`, processedContact)
         contacts.push(processedContact)
       } catch (error) {
-        console.error(`[CONVERSATIONS] ❌ Error parseando contacto ${phoneNumber}:`, error)
+        console.error(`[CONVERSATIONS] ❌ Error procesando contacto ${phoneNumber}:`, error)
       }
     }
 
     console.log(`[CONVERSATIONS] ✅ Total contactos procesados: ${contacts.length}`)
 
+    // Ordenar por fecha del último mensaje
     contacts.sort((a, b) => {
       try {
         const dateA = new Date(a.lastMessageAt).getTime()
         const dateB = new Date(b.lastMessageAt).getTime()
 
-        // If either date is invalid, put it at the end
         if (isNaN(dateA)) return 1
         if (isNaN(dateB)) return -1
 
@@ -256,14 +268,15 @@ export async function updateContactMessageCount(configId: string, phoneNumber: s
     const redisClient = getRedisClient()
     if (!redisClient) return
 
-    const listKey = `${CONVERSATION_LIST_PREFIX}${configId}`
-    const contactData = await redisClient.hget(listKey, phoneNumber)
+    const contactKey = `${CONVERSATION_CONTACT_PREFIX}${configId}:${phoneNumber}`
+    const contactData = await redisClient.get(contactKey)
 
     if (contactData) {
       const contact = JSON.parse(contactData as string)
       contact.messageCount = (contact.messageCount || 0) + 1
       contact.lastMessageAt = ensureValidTimestamp(contact.lastMessageAt)
-      await redisClient.hset(listKey, phoneNumber, JSON.stringify(contact))
+      await redisClient.set(contactKey, JSON.stringify(contact))
+      await redisClient.expire(contactKey, CONVERSATION_TTL)
     }
   } catch (error) {
     console.error("[CONVERSATIONS] ❌ Error actualizando contador:", error)
