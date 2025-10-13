@@ -540,7 +540,7 @@ export async function resetThreadForUser(
 
     if (oldThreadId) {
       try {
-        await openai.beta.threads.del(oldThreadId)
+        await openai.beta.threads.delete(oldThreadId)
         console.log(`[DB] 🗑️ Thread anterior ELIMINADO de OpenAI: ${oldThreadId}`)
       } catch (deleteError) {
         console.warn(`[DB] ⚠️ No se pudo eliminar el thread anterior de OpenAI: ${deleteError.message}`)
