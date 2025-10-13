@@ -144,19 +144,34 @@ export async function getConversationMessages(configId: string, phoneNumber: str
 
     if (messages.length > 0) {
       console.log(`[CONVERSATIONS] 📝 Primer mensaje raw:`, messages[0])
+      console.log(`[CONVERSATIONS] 📝 Tipo del primer mensaje:`, typeof messages[0])
       console.log(`[CONVERSATIONS] 📝 Último mensaje raw:`, messages[messages.length - 1])
     }
 
     const parsedMessages = messages
       .map((msg, index) => {
         try {
-          const parsed = JSON.parse(msg as string)
+          let parsed: any
+
+          // Verificar si ya es un objeto o si es un string que necesita parsing
+          if (typeof msg === "string") {
+            console.log(`[CONVERSATIONS] 📄 Mensaje ${index + 1}: parseando string JSON`)
+            parsed = JSON.parse(msg)
+          } else if (typeof msg === "object" && msg !== null) {
+            console.log(`[CONVERSATIONS] 📄 Mensaje ${index + 1}: ya es un objeto, usando directamente`)
+            parsed = msg
+          } else {
+            console.log(`[CONVERSATIONS] ⚠️ Mensaje ${index + 1}: tipo inesperado ${typeof msg}`)
+            return null
+          }
+
           console.log(`[CONVERSATIONS] 📄 Mensaje ${index + 1}/${messages.length}:`, {
             role: parsed.role,
             phoneNumber: parsed.phoneNumber,
             timestamp: parsed.timestamp,
             contentLength: parsed.content?.length || 0,
           })
+
           return {
             ...parsed,
             timestamp: ensureValidTimestamp(parsed.timestamp),
