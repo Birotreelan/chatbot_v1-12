@@ -68,7 +68,7 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
 
     // Actualizar la lista de contactos
     const contactInfo: ConversationContact = {
-      phoneNumber: message.phoneNumber,
+      phoneNumber: message.phoneNumber, // Asegurar que phoneNumber esté en el objeto
       lastMessage: message.content.substring(0, 100),
       lastMessageAt: validatedMessage.timestamp,
       messageCount: 1,
@@ -134,8 +134,11 @@ export async function getConversationContacts(configId: string): Promise<Convers
       try {
         const contact = JSON.parse(data as string)
         contacts.push({
-          ...contact,
+          phoneNumber: contact.phoneNumber || phoneNumber, // Usar la clave del hash si no está en el objeto
+          lastMessage: contact.lastMessage || "",
           lastMessageAt: ensureValidTimestamp(contact.lastMessageAt),
+          messageCount: contact.messageCount || 0,
+          configId: contact.configId || configId,
         })
       } catch (error) {
         console.error(`[CONVERSATIONS] ❌ Error parseando contacto ${phoneNumber}:`, error)
