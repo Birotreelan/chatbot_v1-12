@@ -213,13 +213,25 @@ export async function getConversationContacts(configId: string): Promise<Convers
 
         const contactData = await redisClient.get(contactKey)
         console.log(`[CONVERSATIONS]   - Data raw:`, contactData)
+        console.log(`[CONVERSATIONS]   - Data type:`, typeof contactData)
 
         if (!contactData) {
           console.log(`[CONVERSATIONS]   - ⚠️ No hay datos para ${phoneNumber}`)
           continue
         }
 
-        const contact = JSON.parse(contactData as string)
+        let contact: any
+        if (typeof contactData === "string") {
+          console.log(`[CONVERSATIONS]   - Parseando string JSON`)
+          contact = JSON.parse(contactData)
+        } else if (typeof contactData === "object") {
+          console.log(`[CONVERSATIONS]   - Ya es un objeto, usando directamente`)
+          contact = contactData
+        } else {
+          console.log(`[CONVERSATIONS]   - ⚠️ Tipo de dato inesperado: ${typeof contactData}`)
+          continue
+        }
+
         console.log(`[CONVERSATIONS]   - Data parseada:`, contact)
 
         const processedContact = {
