@@ -2,15 +2,16 @@ import type React from "react"
 import WidgetChat from "@/components/widget-chat"
 
 interface WidgetPageProps {
-  searchParams: {
+  searchParams: Promise<{
     clienteId: string
     config: string
     embedded?: string
-  }
+  }>
 }
 
-const WidgetPage: React.FC<WidgetPageProps> = ({ searchParams }) => {
-  const { clienteId, config, embedded } = searchParams
+const WidgetPage: React.FC<WidgetPageProps> = async ({ searchParams }) => {
+  const params = await searchParams
+  const { clienteId, config, embedded } = params
 
   // Parse config string to JSON object
   let parsedConfig = {}

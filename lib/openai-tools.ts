@@ -126,6 +126,16 @@ export const openaiTools = {
       required: ["dni"],
     },
   },
+  validar_telefono: {
+    description: "Busca y valida paciente por número de teléfono",
+    parameters: {
+      type: "object",
+      properties: {
+        telefono: { type: "string", description: "Número de teléfono del paciente" },
+      },
+      required: ["telefono"],
+    },
+  },
   buscar_profesionales: {
     description: "Busca profesionales médicos",
     parameters: {
@@ -151,6 +161,7 @@ export const openaiTools = {
 // Mensajes predefinidos para cada función
 const FUNCTION_MESSAGES = {
   validar_dni: "Aguardá unos instantes mientras validamos tu DNI.",
+  validar_telefono: "Aguardá unos instantes mientras buscamos tu información por teléfono.",
   buscar_turnos_disponibles: "Voy a buscar turnos disponibles, aguardá unos instantes.",
   reservar_turno: "Realizando reserva de turno. aguardá unos instantes.",
   obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
@@ -207,6 +218,9 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
     switch (toolName) {
       case "validar_dni":
         return await validarDni(clienteId, args.dni)
+
+      case "validar_telefono":
+        return await validarTelefono(clienteId, args.telefono)
 
       case "buscar_profesionales":
         return await buscarProfesionalesHerramienta(clienteId, args.busqueda)
@@ -517,6 +531,36 @@ export async function validarDni(clienteId: string, dni: string): Promise<string
     return JSON.stringify({
       exito: false,
       mensaje: "Error al validar el DNI",
+    })
+  }
+}
+
+// Función para validar teléfono
+export async function validarTelefono(clienteId: string, telefono: string): Promise<string> {
+  try {
+    console.log(`[TOOLS] 📱 Validando teléfono: ${telefono} para cliente: ${clienteId}`)
+
+    const resultado = await buscarPaciente(clienteId, { telefono })
+
+    if (resultado.exito && resultado.datos) {
+      console.log(`[TOOLS] ✅ Teléfono validado exitosamente: ${telefono}`)
+      return JSON.stringify({
+        exito: true,
+        paciente: resultado.datos,
+        mensaje: "Paciente encontrado por número de teléfono",
+      })
+    } else {
+      console.log(`[TOOLS] ⚠️ Teléfono no encontrado: ${telefono}`)
+      return JSON.stringify({
+        exito: false,
+        mensaje: resultado.error?.mensaje || "No se encontró un paciente con ese número de teléfono",
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error validando teléfono:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error al validar el número de teléfono",
     })
   }
 }
