@@ -5,8 +5,10 @@ import { redirect } from "next/navigation"
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: { error?: string }
+  searchParams: Promise<{ error?: string }>
 }) {
+  const params = await searchParams
+
   // Si ya hay una sesión activa, redirigir al dashboard
   const session = await getSession()
   if (session) {
@@ -20,7 +22,7 @@ export default async function LoginPage({
         <p className="text-gray-600">Panel de administración para gestionar tus asistentes de WhatsApp</p>
       </div>
 
-      <LoginForm error={searchParams.error} />
+      <LoginForm error={params.error} />
     </main>
   )
 }

@@ -159,7 +159,7 @@ export const openaiTools = {
 }
 
 // Mensajes predefinidos para cada función
-const FUNCTION_MESSAGES = {
+const FUNCTION_MESSAGES: Record<string, string> = {
   validar_dni: "Aguardá unos instantes mientras validamos tu DNI.",
   buscar_turnos_disponibles: "Voy a buscar turnos disponibles, aguardá unos instantes.",
   reservar_turno: "Realizando reserva de turno. aguardá unos instantes.",
@@ -168,7 +168,6 @@ const FUNCTION_MESSAGES = {
   validar_obra_social: "Verificando la obra social, aguardá unos instantes.",
   obtener_datos_sede: "Consultando información de la sede, aguardá unos instantes.",
   obtener_obras_sociales: "Consultando obras sociales disponibles, aguardá unos instantes.",
-  default: "Estoy procesando tu solicitud, dame un momento por favor.",
 }
 
 // Función para truncar respuestas largas de herramientas
@@ -891,12 +890,16 @@ async function processRunWithCorrectFlow(
 
           console.log(`[OPENAI] 🔧 Ejecutando: ${functionName}`)
 
-          const waitingMessage = FUNCTION_MESSAGES[functionName] || FUNCTION_MESSAGES.default
-          try {
-            await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
-            console.log(`[OPENAI] ⏳ Mensaje de espera enviado`)
-          } catch (error) {
-            console.error(`[OPENAI] ❌ Error enviando mensaje de espera:`, error)
+          const waitingMessage = FUNCTION_MESSAGES[functionName]
+          if (waitingMessage) {
+            try {
+              await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
+              console.log(`[OPENAI] ⏳ Mensaje de espera enviado: ${functionName}`)
+            } catch (error) {
+              console.error(`[OPENAI] ❌ Error enviando mensaje de espera:`, error)
+            }
+          } else {
+            console.log(`[OPENAI] 🔕 Sin mensaje de espera para: ${functionName}`)
           }
 
           const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)

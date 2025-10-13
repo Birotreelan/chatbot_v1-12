@@ -3,10 +3,12 @@ import { getConfigByClienteId } from "@/lib/db"
 export default async function DemoPage({
   searchParams,
 }: {
-  searchParams: { cliente_id?: string }
+  searchParams: Promise<{ cliente_id?: string }>
 }) {
+  const params = await searchParams
+
   // Usar un cliente_id por defecto para la demo o el proporcionado
-  const clienteId = searchParams.cliente_id || "demo-client"
+  const clienteId = params.cliente_id || "demo-client"
 
   // Verificar si existe la configuración (opcional para demo)
   let config = null
