@@ -161,7 +161,6 @@ export const openaiTools = {
 // Mensajes predefinidos para cada función
 const FUNCTION_MESSAGES = {
   validar_dni: "Aguardá unos instantes mientras validamos tu DNI.",
-  validar_telefono: "Aguardá unos instantes mientras buscamos tu información por teléfono.",
   buscar_turnos_disponibles: "Voy a buscar turnos disponibles, aguardá unos instantes.",
   reservar_turno: "Realizando reserva de turno. aguardá unos instantes.",
   obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
