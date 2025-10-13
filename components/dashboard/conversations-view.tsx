@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { getAllWhatsAppConfigs } from "@/lib/db"
 import type { WhatsAppConfig } from "@/lib/types"
 import { ConversationsList } from "./conversations-list"
 import { ConversationChat } from "./conversation-chat"
@@ -20,10 +19,15 @@ export function ConversationsView() {
 
   async function loadConfigs() {
     try {
-      const allConfigs = await getAllWhatsAppConfigs()
-      setConfigs(allConfigs)
-      if (allConfigs.length > 0) {
-        setSelectedConfig(allConfigs[0])
+      const response = await fetch("/api/dashboard/configs")
+      if (response.ok) {
+        const allConfigs = await response.json()
+        setConfigs(allConfigs)
+        if (allConfigs.length > 0) {
+          setSelectedConfig(allConfigs[0])
+        }
+      } else {
+        console.error("Error al cargar configuraciones:", response.statusText)
       }
     } catch (error) {
       console.error("Error cargando configuraciones:", error)
@@ -46,7 +50,7 @@ export function ConversationsView() {
         <Card className="p-8 text-center">
           <h2 className="text-2xl font-bold mb-2">No hay clientes configurados</h2>
           <p className="text-muted-foreground">
-            Agrega un número de WhatsApp para comenzar a monitorear conversaciones
+            Agrega un número de WhatsApp en el Dashboard para comenzar a monitorear conversaciones
           </p>
         </Card>
       </div>
