@@ -42,31 +42,40 @@ function ensureValidTimestamp(timestamp: any): string {
 // Guardar un mensaje en la conversación
 export async function saveConversationMessage(message: ConversationMessage): Promise<void> {
   try {
+    console.log(`[CONVERSATIONS] 🔵 ===== INICIO saveConversationMessage =====`)
+    console.log(`[CONVERSATIONS] 🔵 Mensaje recibido:`, JSON.stringify(message, null, 2))
+
     const redisClient = getRedisClient()
     if (!redisClient) {
       console.warn("[CONVERSATIONS] Redis no disponible, no se puede guardar mensaje")
       return
     }
 
+    console.log(`[CONVERSATIONS] ✅ Cliente Redis obtenido`)
+
     const validatedMessage = {
       ...message,
       timestamp: ensureValidTimestamp(message.timestamp),
     }
 
+    console.log(`[CONVERSATIONS] ✅ Mensaje validado:`, JSON.stringify(validatedMessage, null, 2))
+
     const conversationKey = `${CONVERSATION_PREFIX}${message.configId}:${message.phoneNumber}`
     const listKey = `${CONVERSATION_LIST_PREFIX}${message.configId}`
 
-    console.log(`[CONVERSATIONS] 💾 Guardando mensaje:`)
-    console.log(`[CONVERSATIONS]   - phoneNumber: ${message.phoneNumber}`)
-    console.log(`[CONVERSATIONS]   - role: ${message.role}`)
-    console.log(`[CONVERSATIONS]   - content: ${message.content.substring(0, 50)}...`)
-    console.log(`[CONVERSATIONS]   - timestamp: ${validatedMessage.timestamp}`)
-    console.log(`[CONVERSATIONS]   - configId: ${message.configId}`)
+    console.log(`[CONVERSATIONS] 🔑 Claves generadas:`)
     console.log(`[CONVERSATIONS]   - conversationKey: ${conversationKey}`)
     console.log(`[CONVERSATIONS]   - listKey: ${listKey}`)
 
     // Guardar el mensaje en la lista de conversación
-    await redisClient.rpush(conversationKey, JSON.stringify(validatedMessage))
+    console.log(`[CONVERSATIONS] 📝 Guardando mensaje en lista...`)
+    const messageString = JSON.stringify(validatedMessage)
+    console.log(
+      `[CONVERSATIONS] 📝 Mensaje serializado (${messageString.length} chars):`,
+      messageString.substring(0, 200),
+    )
+
+    await redisClient.rpush(conversationKey, messageString)
     console.log(`[CONVERSATIONS] ✅ Mensaje agregado a lista en Redis`)
 
     // Establecer TTL de 7 días
@@ -82,16 +91,32 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
       configId: message.configId,
     }
 
-    console.log(`[CONVERSATIONS] 📇 Actualizando contacto:`, JSON.stringify(contactInfo, null, 2))
+    console.log(`[CONVERSATIONS] 📇 Objeto contactInfo creado:`, JSON.stringify(contactInfo, null, 2))
 
-    // Guardar en un hash para acceso rápido
-    await redisClient.hset(listKey, message.phoneNumber, JSON.stringify(contactInfo))
+    const contactString = JSON.stringify(contactInfo)
+    console.log(`[CONVERSATIONS] 📇 contactInfo serializado (${contactString.length} chars):`, contactString)
+
+    console.log(`[CONVERSATIONS] 💾 Llamando a hset con:`)
+    console.log(`[CONVERSATIONS]   - key: ${listKey}`)
+    console.log(`[CONVERSATIONS]   - field: ${message.phoneNumber}`)
+    console.log(`[CONVERSATIONS]   - value: ${contactString}`)
+
+    const hsetResult = await redisClient.hset(listKey, message.phoneNumber, contactString)
+    console.log(`[CONVERSATIONS] 💾 hset resultado:`, hsetResult)
+
+    const verifyValue = await redisClient.hget(listKey, message.phoneNumber)
+    console.log(`[CONVERSATIONS] 🔍 Verificando valor guardado:`, verifyValue)
+    console.log(`[CONVERSATIONS] 🔍 Tipo de valor guardado:`, typeof verifyValue)
+
     await redisClient.expire(listKey, CONVERSATION_TTL)
+    console.log(`[CONVERSATIONS] ⏰ TTL establecido para lista de contactos`)
 
-    console.log(`[CONVERSATIONS] ✅ Contacto actualizado en hash`)
-    console.log(`[CONVERSATIONS] ✅ Mensaje guardado completamente`)
+    console.log(`[CONVERSATIONS] 🟢 ===== FIN saveConversationMessage (EXITOSO) =====`)
   } catch (error) {
+    console.error("[CONVERSATIONS] 🔴 ===== ERROR en saveConversationMessage =====")
     console.error("[CONVERSATIONS] ❌ Error guardando mensaje:", error)
+    console.error("[CONVERSATIONS] ❌ Stack:", error.stack)
+    console.error("[CONVERSATIONS] 🔴 ===== FIN ERROR =====")
   }
 }
 
