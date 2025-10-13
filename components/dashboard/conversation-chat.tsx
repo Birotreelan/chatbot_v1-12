@@ -105,7 +105,9 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
                     message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground",
                   )}
                 >
-                  {format(new Date(message.timestamp), "HH:mm", { locale: es })}
+                  {message.timestamp && !isNaN(new Date(message.timestamp).getTime())
+                    ? format(new Date(message.timestamp), "HH:mm", { locale: es })
+                    : "--:--"}
                 </p>
               </div>
               {message.role === "user" && (

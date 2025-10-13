@@ -25,6 +25,20 @@ export interface ConversationContact {
   configId: string
 }
 
+function ensureValidTimestamp(timestamp: any): string {
+  if (!timestamp) {
+    return new Date().toISOString()
+  }
+
+  const date = new Date(timestamp)
+  if (isNaN(date.getTime())) {
+    console.warn(`[CONVERSATIONS] Invalid timestamp: ${timestamp}, using current time`)
+    return new Date().toISOString()
+  }
+
+  return date.toISOString()
+}
+
 // Guardar un mensaje en la conversación
 export async function saveConversationMessage(message: ConversationMessage): Promise<void> {
   try {
@@ -34,11 +48,20 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
       return
     }
 
+    const validatedMessage = {
+      ...message,
+      timestamp: ensureValidTimestamp(message.timestamp),
+    }
+
     const conversationKey = `${CONVERSATION_PREFIX}${message.configId}:${message.phoneNumber}`
     const listKey = `${CONVERSATION_LIST_PREFIX}${message.configId}`
 
+    console.log(
+      `[CONVERSATIONS] Guardando mensaje: ${message.phoneNumber} (${message.role}) - timestamp: ${validatedMessage.timestamp}`,
+    )
+
     // Guardar el mensaje en la lista de conversación
-    await redisClient.rpush(conversationKey, JSON.stringify(message))
+    await redisClient.rpush(conversationKey, JSON.stringify(validatedMessage))
 
     // Establecer TTL de 7 días
     await redisClient.expire(conversationKey, CONVERSATION_TTL)
@@ -47,7 +70,7 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     const contactInfo: ConversationContact = {
       phoneNumber: message.phoneNumber,
       lastMessage: message.content.substring(0, 100),
-      lastMessageAt: message.timestamp,
+      lastMessageAt: validatedMessage.timestamp,
       messageCount: 1,
       configId: message.configId,
     }
@@ -56,9 +79,9 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     await redisClient.hset(listKey, message.phoneNumber, JSON.stringify(contactInfo))
     await redisClient.expire(listKey, CONVERSATION_TTL)
 
-    console.log(`[CONVERSATIONS] Mensaje guardado: ${message.phoneNumber} (${message.role})`)
+    console.log(`[CONVERSATIONS] ✅ Mensaje guardado: ${message.phoneNumber} (${message.role})`)
   } catch (error) {
-    console.error("[CONVERSATIONS] Error guardando mensaje:", error)
+    console.error("[CONVERSATIONS] ❌ Error guardando mensaje:", error)
   }
 }
 
@@ -74,9 +97,17 @@ export async function getConversationMessages(configId: string, phoneNumber: str
     const conversationKey = `${CONVERSATION_PREFIX}${configId}:${phoneNumber}`
     const messages = await redisClient.lrange(conversationKey, 0, -1)
 
-    return messages.map((msg) => JSON.parse(msg as string))
+    console.log(`[CONVERSATIONS] Obteniendo mensajes: ${phoneNumber} - ${messages.length} mensajes`)
+
+    return messages.map((msg) => {
+      const parsed = JSON.parse(msg as string)
+      return {
+        ...parsed,
+        timestamp: ensureValidTimestamp(parsed.timestamp),
+      }
+    })
   } catch (error) {
-    console.error("[CONVERSATIONS] Error obteniendo mensajes:", error)
+    console.error("[CONVERSATIONS] ❌ Error obteniendo mensajes:", error)
     return []
   }
 }
@@ -94,6 +125,7 @@ export async function getConversationContacts(configId: string): Promise<Convers
     const contactsData = await redisClient.hgetall(listKey)
 
     if (!contactsData) {
+      console.log(`[CONVERSATIONS] No hay contactos para configId: ${configId}`)
       return []
     }
 
@@ -101,18 +133,36 @@ export async function getConversationContacts(configId: string): Promise<Convers
     for (const [phoneNumber, data] of Object.entries(contactsData)) {
       try {
         const contact = JSON.parse(data as string)
-        contacts.push(contact)
+        contacts.push({
+          ...contact,
+          lastMessageAt: ensureValidTimestamp(contact.lastMessageAt),
+        })
       } catch (error) {
-        console.error(`[CONVERSATIONS] Error parseando contacto ${phoneNumber}:`, error)
+        console.error(`[CONVERSATIONS] ❌ Error parseando contacto ${phoneNumber}:`, error)
       }
     }
 
-    // Ordenar por última actividad
-    contacts.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+    console.log(`[CONVERSATIONS] Contactos obtenidos: ${contacts.length} para configId: ${configId}`)
+
+    contacts.sort((a, b) => {
+      try {
+        const dateA = new Date(a.lastMessageAt).getTime()
+        const dateB = new Date(b.lastMessageAt).getTime()
+
+        // If either date is invalid, put it at the end
+        if (isNaN(dateA)) return 1
+        if (isNaN(dateB)) return -1
+
+        return dateB - dateA
+      } catch (error) {
+        console.error(`[CONVERSATIONS] ❌ Error ordenando contactos:`, error)
+        return 0
+      }
+    })
 
     return contacts
   } catch (error) {
-    console.error("[CONVERSATIONS] Error obteniendo contactos:", error)
+    console.error("[CONVERSATIONS] ❌ Error obteniendo contactos:", error)
     return []
   }
 }
@@ -129,9 +179,10 @@ export async function updateContactMessageCount(configId: string, phoneNumber: s
     if (contactData) {
       const contact = JSON.parse(contactData as string)
       contact.messageCount = (contact.messageCount || 0) + 1
+      contact.lastMessageAt = ensureValidTimestamp(contact.lastMessageAt)
       await redisClient.hset(listKey, phoneNumber, JSON.stringify(contact))
     }
   } catch (error) {
-    console.error("[CONVERSATIONS] Error actualizando contador:", error)
+    console.error("[CONVERSATIONS] ❌ Error actualizando contador:", error)
   }
 }

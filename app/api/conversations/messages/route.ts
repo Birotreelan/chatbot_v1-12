@@ -7,11 +7,15 @@ export async function GET(request: Request) {
     const configId = searchParams.get("configId")
     const phoneNumber = searchParams.get("phoneNumber")
 
+    console.log("[API] GET /api/conversations/messages - configId:", configId, "phoneNumber:", phoneNumber)
+
     if (!configId || !phoneNumber) {
       return NextResponse.json({ error: "configId y phoneNumber son requeridos" }, { status: 400 })
     }
 
     const messages = await getConversationMessages(configId, phoneNumber)
+
+    console.log("[API] Messages fetched:", messages.length)
 
     return NextResponse.json({ messages })
   } catch (error) {

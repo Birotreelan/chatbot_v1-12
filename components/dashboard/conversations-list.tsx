@@ -77,10 +77,12 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
             <div className="flex items-center justify-between mb-1">
               <p className="font-semibold text-sm truncate">{contact.phoneNumber || "Desconocido"}</p>
               <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
-                {formatDistanceToNow(new Date(contact.lastMessageAt), {
-                  addSuffix: true,
-                  locale: es,
-                })}
+                {contact.lastMessageAt && !isNaN(new Date(contact.lastMessageAt).getTime())
+                  ? formatDistanceToNow(new Date(contact.lastMessageAt), {
+                      addSuffix: true,
+                      locale: es,
+                    })
+                  : "Ahora"}
               </span>
             </div>
             <p className="text-sm text-muted-foreground truncate">{contact.lastMessage}</p>
