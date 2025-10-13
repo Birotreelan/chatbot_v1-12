@@ -36,11 +36,19 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
 
   async function loadMessages() {
     try {
+      console.log("[v0] Loading messages for configId:", configId, "phoneNumber:", phoneNumber)
       const response = await fetch(`/api/conversations/messages?configId=${configId}&phoneNumber=${phoneNumber}`)
       const data = await response.json()
+      console.log("[v0] Messages response:", data)
+      console.log("[v0] Number of messages:", data.messages?.length || 0)
+
+      if (data.messages && data.messages.length > 0) {
+        console.log("[v0] First message sample:", data.messages[0])
+      }
+
       setMessages(data.messages || [])
     } catch (error) {
-      console.error("Error cargando mensajes:", error)
+      console.error("[v0] Error cargando mensajes:", error)
     } finally {
       setLoading(false)
     }
@@ -80,45 +88,65 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
             <p className="text-muted-foreground">No hay mensajes en esta conversación</p>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}
-            >
-              {message.role === "assistant" && (
-                <Avatar className="h-8 w-8 flex-shrink-0">
-                  <AvatarFallback className="bg-primary text-primary-foreground">
-                    <Bot className="h-4 w-4" />
-                  </AvatarFallback>
-                </Avatar>
-              )}
+          messages.map((message) => {
+            console.log("[v0] Rendering message:", message.id, "timestamp:", message.timestamp)
+
+            return (
               <div
-                className={cn(
-                  "max-w-[70%] rounded-lg p-3",
-                  message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
-                )}
+                key={message.id}
+                className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}
               >
-                <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-                <p
+                {message.role === "assistant" && (
+                  <Avatar className="h-8 w-8 flex-shrink-0">
+                    <AvatarFallback className="bg-primary text-primary-foreground">
+                      <Bot className="h-4 w-4" />
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+                <div
                   className={cn(
-                    "text-xs mt-1",
-                    message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground",
+                    "max-w-[70%] rounded-lg p-3",
+                    message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
                   )}
                 >
-                  {message.timestamp && !isNaN(new Date(message.timestamp).getTime())
-                    ? format(new Date(message.timestamp), "HH:mm", { locale: es })
-                    : "--:--"}
-                </p>
+                  <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                  <p
+                    className={cn(
+                      "text-xs mt-1",
+                      message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground",
+                    )}
+                  >
+                    {(() => {
+                      try {
+                        if (!message.timestamp) {
+                          console.log("[v0] No timestamp for message:", message.id)
+                          return "--:--"
+                        }
+
+                        const date = new Date(message.timestamp)
+                        if (isNaN(date.getTime())) {
+                          console.log("[v0] Invalid timestamp for message:", message.id, "value:", message.timestamp)
+                          return "--:--"
+                        }
+
+                        return format(date, "HH:mm", { locale: es })
+                      } catch (error) {
+                        console.error("[v0] Error formatting timestamp:", error)
+                        return "--:--"
+                      }
+                    })()}
+                  </p>
+                </div>
+                {message.role === "user" && (
+                  <Avatar className="h-8 w-8 flex-shrink-0">
+                    <AvatarFallback className="bg-muted">
+                      <User className="h-4 w-4" />
+                    </AvatarFallback>
+                  </Avatar>
+                )}
               </div>
-              {message.role === "user" && (
-                <Avatar className="h-8 w-8 flex-shrink-0">
-                  <AvatarFallback className="bg-muted">
-                    <User className="h-4 w-4" />
-                  </AvatarFallback>
-                </Avatar>
-              )}
-            </div>
-          ))
+            )
+          })
         )}
         <div ref={messagesEndRef} />
       </div>

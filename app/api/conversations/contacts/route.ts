@@ -15,6 +15,13 @@ export async function GET(request: Request) {
     const contacts = await getConversationContacts(configId)
 
     console.log("[API] Contacts fetched:", contacts.length)
+    if (contacts.length > 0) {
+      console.log("[API] First contact full data:", JSON.stringify(contacts[0], null, 2))
+      console.log(
+        "[API] All contact phone numbers:",
+        contacts.map((c) => c.phoneNumber),
+      )
+    }
 
     return NextResponse.json({ contacts })
   } catch (error) {
