@@ -56,30 +56,40 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     const conversationKey = `${CONVERSATION_PREFIX}${message.configId}:${message.phoneNumber}`
     const listKey = `${CONVERSATION_LIST_PREFIX}${message.configId}`
 
-    console.log(
-      `[CONVERSATIONS] Guardando mensaje: ${message.phoneNumber} (${message.role}) - timestamp: ${validatedMessage.timestamp}`,
-    )
+    console.log(`[CONVERSATIONS] 💾 Guardando mensaje:`)
+    console.log(`[CONVERSATIONS]   - phoneNumber: ${message.phoneNumber}`)
+    console.log(`[CONVERSATIONS]   - role: ${message.role}`)
+    console.log(`[CONVERSATIONS]   - content: ${message.content.substring(0, 50)}...`)
+    console.log(`[CONVERSATIONS]   - timestamp: ${validatedMessage.timestamp}`)
+    console.log(`[CONVERSATIONS]   - configId: ${message.configId}`)
+    console.log(`[CONVERSATIONS]   - conversationKey: ${conversationKey}`)
+    console.log(`[CONVERSATIONS]   - listKey: ${listKey}`)
 
     // Guardar el mensaje en la lista de conversación
     await redisClient.rpush(conversationKey, JSON.stringify(validatedMessage))
+    console.log(`[CONVERSATIONS] ✅ Mensaje agregado a lista en Redis`)
 
     // Establecer TTL de 7 días
     await redisClient.expire(conversationKey, CONVERSATION_TTL)
+    console.log(`[CONVERSATIONS] ⏰ TTL establecido: ${CONVERSATION_TTL}s (7 días)`)
 
     // Actualizar la lista de contactos
     const contactInfo: ConversationContact = {
-      phoneNumber: message.phoneNumber, // Asegurar que phoneNumber esté en el objeto
+      phoneNumber: message.phoneNumber,
       lastMessage: message.content.substring(0, 100),
       lastMessageAt: validatedMessage.timestamp,
       messageCount: 1,
       configId: message.configId,
     }
 
+    console.log(`[CONVERSATIONS] 📇 Actualizando contacto:`, JSON.stringify(contactInfo, null, 2))
+
     // Guardar en un hash para acceso rápido
     await redisClient.hset(listKey, message.phoneNumber, JSON.stringify(contactInfo))
     await redisClient.expire(listKey, CONVERSATION_TTL)
 
-    console.log(`[CONVERSATIONS] ✅ Mensaje guardado: ${message.phoneNumber} (${message.role})`)
+    console.log(`[CONVERSATIONS] ✅ Contacto actualizado en hash`)
+    console.log(`[CONVERSATIONS] ✅ Mensaje guardado completamente`)
   } catch (error) {
     console.error("[CONVERSATIONS] ❌ Error guardando mensaje:", error)
   }
@@ -95,17 +105,45 @@ export async function getConversationMessages(configId: string, phoneNumber: str
     }
 
     const conversationKey = `${CONVERSATION_PREFIX}${configId}:${phoneNumber}`
+
+    console.log(`[CONVERSATIONS] 📖 Obteniendo mensajes:`)
+    console.log(`[CONVERSATIONS]   - configId: ${configId}`)
+    console.log(`[CONVERSATIONS]   - phoneNumber: ${phoneNumber}`)
+    console.log(`[CONVERSATIONS]   - conversationKey: ${conversationKey}`)
+
     const messages = await redisClient.lrange(conversationKey, 0, -1)
 
-    console.log(`[CONVERSATIONS] Obteniendo mensajes: ${phoneNumber} - ${messages.length} mensajes`)
+    console.log(`[CONVERSATIONS] 📊 Mensajes en Redis: ${messages.length}`)
 
-    return messages.map((msg) => {
-      const parsed = JSON.parse(msg as string)
-      return {
-        ...parsed,
-        timestamp: ensureValidTimestamp(parsed.timestamp),
-      }
-    })
+    if (messages.length > 0) {
+      console.log(`[CONVERSATIONS] 📝 Primer mensaje raw:`, messages[0])
+      console.log(`[CONVERSATIONS] 📝 Último mensaje raw:`, messages[messages.length - 1])
+    }
+
+    const parsedMessages = messages
+      .map((msg, index) => {
+        try {
+          const parsed = JSON.parse(msg as string)
+          console.log(`[CONVERSATIONS] 📄 Mensaje ${index + 1}/${messages.length}:`, {
+            role: parsed.role,
+            phoneNumber: parsed.phoneNumber,
+            timestamp: parsed.timestamp,
+            contentLength: parsed.content?.length || 0,
+          })
+          return {
+            ...parsed,
+            timestamp: ensureValidTimestamp(parsed.timestamp),
+          }
+        } catch (parseError) {
+          console.error(`[CONVERSATIONS] ❌ Error parseando mensaje ${index}:`, parseError)
+          return null
+        }
+      })
+      .filter(Boolean)
+
+    console.log(`[CONVERSATIONS] ✅ Mensajes parseados: ${parsedMessages.length}`)
+
+    return parsedMessages
   } catch (error) {
     console.error("[CONVERSATIONS] ❌ Error obteniendo mensajes:", error)
     return []
@@ -122,30 +160,47 @@ export async function getConversationContacts(configId: string): Promise<Convers
     }
 
     const listKey = `${CONVERSATION_LIST_PREFIX}${configId}`
+
+    console.log(`[CONVERSATIONS] 📇 Obteniendo contactos:`)
+    console.log(`[CONVERSATIONS]   - configId: ${configId}`)
+    console.log(`[CONVERSATIONS]   - listKey: ${listKey}`)
+
     const contactsData = await redisClient.hgetall(listKey)
 
-    if (!contactsData) {
-      console.log(`[CONVERSATIONS] No hay contactos para configId: ${configId}`)
+    console.log(`[CONVERSATIONS] 📊 Datos raw de Redis:`, contactsData)
+
+    if (!contactsData || Object.keys(contactsData).length === 0) {
+      console.log(`[CONVERSATIONS] ⚠️ No hay contactos para configId: ${configId}`)
       return []
     }
+
+    console.log(`[CONVERSATIONS] 📊 Número de contactos en hash: ${Object.keys(contactsData).length}`)
 
     const contacts: ConversationContact[] = []
     for (const [phoneNumber, data] of Object.entries(contactsData)) {
       try {
+        console.log(`[CONVERSATIONS] 📱 Procesando contacto ${phoneNumber}:`)
+        console.log(`[CONVERSATIONS]   - Data raw:`, data)
+
         const contact = JSON.parse(data as string)
-        contacts.push({
-          phoneNumber: contact.phoneNumber || phoneNumber, // Usar la clave del hash si no está en el objeto
+        console.log(`[CONVERSATIONS]   - Data parseada:`, contact)
+
+        const processedContact = {
+          phoneNumber: contact.phoneNumber || phoneNumber,
           lastMessage: contact.lastMessage || "",
           lastMessageAt: ensureValidTimestamp(contact.lastMessageAt),
           messageCount: contact.messageCount || 0,
           configId: contact.configId || configId,
-        })
+        }
+
+        console.log(`[CONVERSATIONS]   - Contacto procesado:`, processedContact)
+        contacts.push(processedContact)
       } catch (error) {
         console.error(`[CONVERSATIONS] ❌ Error parseando contacto ${phoneNumber}:`, error)
       }
     }
 
-    console.log(`[CONVERSATIONS] Contactos obtenidos: ${contacts.length} para configId: ${configId}`)
+    console.log(`[CONVERSATIONS] ✅ Total contactos procesados: ${contacts.length}`)
 
     contacts.sort((a, b) => {
       try {
