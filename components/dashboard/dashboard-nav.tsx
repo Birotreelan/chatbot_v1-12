@@ -25,6 +25,9 @@ export function DashboardNav() {
             <Link href="/dashboard" className="text-foreground/60 hover:text-foreground">
               Dashboard
             </Link>
+            <Link href="/dashboard/conversations" className="text-foreground/60 hover:text-foreground">
+              Conversaciones
+            </Link>
             <Link href="/dashboard/config/new" className="text-foreground/60 hover:text-foreground">
               Nuevo Número
             </Link>

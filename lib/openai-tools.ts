@@ -14,6 +14,8 @@ import {
   validarObraSocial,
 } from "./api-tools/api-functions"
 import type { AbortSignal } from "abort-controller"
+import { saveConversationMessage } from "./conversations"
+import { nanoid } from "nanoid"
 
 // Re-export functions for compatibility
 export { obtenerTurnosDisponibles } from "./api-tools/api-functions"
@@ -812,6 +814,18 @@ async function processRunWithCorrectFlow(
       console.log(
         `[OPENAI] 💬 Respuesta: "${messageContent.substring(0, 100)}${messageContent.length > 100 ? "..." : ""}"`,
       )
+
+      const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+      if (config) {
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: messageContent,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
+      }
 
       await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, messageContent)
       console.log(`[OPENAI] 📱 Enviado a WhatsApp`)

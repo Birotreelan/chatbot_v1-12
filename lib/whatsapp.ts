@@ -11,6 +11,8 @@ import { getAssistantResponse } from "@/lib/openai-tools"
 import { getArgentinaDateTime } from "@/lib/utils/date-utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
+import { saveConversationMessage } from "./conversations"
+import { nanoid } from "nanoid"
 
 // Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): string {
@@ -109,6 +111,16 @@ export async function handleMessage(value: WhatsAppValue) {
     }
 
     console.log(`[WHATSAPP] Configuración encontrada: ${config.displayName} (ID: ${config.id})`)
+
+    await saveConversationMessage({
+      id: nanoid(),
+      role: "user",
+      content: userMessage,
+      timestamp: new Date().toISOString(),
+      phoneNumber: userPhoneNumber,
+      configId: config.id,
+      messageType: message.type,
+    })
 
     // Actualizar estadísticas - mensaje recibido
     await updateWhatsAppStats(config.id, { messagesReceived: 1 })

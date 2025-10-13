@@ -1,0 +1,102 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { getAllWhatsAppConfigs } from "@/lib/db"
+import type { WhatsAppConfig } from "@/lib/types"
+import { ConversationsList } from "./conversations-list"
+import { ConversationChat } from "./conversation-chat"
+import { Card } from "@/components/ui/card"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
+export function ConversationsView() {
+  const [configs, setConfigs] = useState<WhatsAppConfig[]>([])
+  const [selectedConfig, setSelectedConfig] = useState<WhatsAppConfig | null>(null)
+  const [selectedContact, setSelectedContact] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    loadConfigs()
+  }, [])
+
+  async function loadConfigs() {
+    try {
+      const allConfigs = await getAllWhatsAppConfigs()
+      setConfigs(allConfigs)
+      if (allConfigs.length > 0) {
+        setSelectedConfig(allConfigs[0])
+      }
+    } catch (error) {
+      console.error("Error cargando configuraciones:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p className="text-muted-foreground">Cargando clientes...</p>
+      </div>
+    )
+  }
+
+  if (configs.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Card className="p-8 text-center">
+          <h2 className="text-2xl font-bold mb-2">No hay clientes configurados</h2>
+          <p className="text-muted-foreground">
+            Agrega un número de WhatsApp para comenzar a monitorear conversaciones
+          </p>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="border-b bg-background p-4">
+        <h1 className="text-2xl font-bold mb-4">Monitor de Conversaciones</h1>
+        <Tabs
+          value={selectedConfig?.id}
+          onValueChange={(value) => {
+            const config = configs.find((c) => c.id === value)
+            setSelectedConfig(config || null)
+            setSelectedContact(null)
+          }}
+        >
+          <TabsList className="w-full justify-start overflow-x-auto">
+            {configs.map((config) => (
+              <TabsTrigger key={config.id} value={config.id} className="flex-shrink-0">
+                {config.displayName}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
+
+      <div className="flex-1 flex overflow-hidden">
+        {selectedConfig && (
+          <>
+            <div className="w-80 border-r bg-background overflow-y-auto">
+              <ConversationsList
+                configId={selectedConfig.id}
+                selectedContact={selectedContact}
+                onSelectContact={setSelectedContact}
+              />
+            </div>
+            <div className="flex-1 bg-muted/20">
+              {selectedContact ? (
+                <ConversationChat configId={selectedConfig.id} phoneNumber={selectedContact} />
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-muted-foreground">Selecciona un contacto para ver la conversación</p>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
