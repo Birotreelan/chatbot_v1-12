@@ -374,7 +374,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           value.metadata.phone_number_id,
           config.accessToken,
           userPhoneNumber,
-          "✅ Conversación reiniciada exitosamente. ¿En qué puedo ayudarte?",
+          "✅ Conversación reiniciada exitosamente.",
         )
 
         // Actualizar estadísticas - mensaje procesado
