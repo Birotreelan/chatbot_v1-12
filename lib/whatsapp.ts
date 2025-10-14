@@ -360,7 +360,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     }
 
     // Comandos especiales
-    if (userMessage.toLowerCase() === "reset" || userMessage.toLowerCase() === "tree reset") {
+    if (userMessage.toLowerCase() === "tree reset") {
       try {
         console.log(`[WHATSAPP] Procesando comando de reset para el usuario ${userPhoneNumber}`)
 
