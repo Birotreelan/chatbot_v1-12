@@ -2,7 +2,7 @@
 
 import { Suspense } from "react"
 import { Settings } from "lucide-react"
-import { toast } from "sonner"
+import { useToast } from "@/hooks/use-toast"
 import dynamic from "next/dynamic"
 
 import { Button } from "@/components/ui/button"
@@ -25,6 +25,8 @@ const WhatsAppConfigsWrapper = dynamic(
 )
 
 export function DashboardClient() {
+  const { toast } = useToast()
+
   const handleMigration = async () => {
     try {
       const response = await fetch("/api/migrate-widget", {

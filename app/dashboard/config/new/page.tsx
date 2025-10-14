@@ -1,10 +1,10 @@
-import { WhatsAppConfigForm } from "@/components/dashboard/whatsapp-config-form"
+import { WhatsAppConfigFormWrapper } from "@/components/dashboard/whatsapp-config-form-wrapper"
 
 export default function NewWhatsAppConfigPage() {
   return (
     <div className="container mx-auto py-8">
       <h1 className="text-3xl font-bold mb-8">Nueva Configuración de WhatsApp</h1>
-      <WhatsAppConfigForm />
+      <WhatsAppConfigFormWrapper isNew={true} />
     </div>
   )
 }
