@@ -9,6 +9,7 @@ import {
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getAssistantResponse } from "@/lib/openai-tools"
 import { getArgentinaDateTime } from "@/lib/utils/date-utils"
+import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage } from "./conversations"
@@ -93,7 +94,7 @@ export async function handleMessage(value: WhatsAppValue) {
     // Marcar el mensaje como procesado inmediatamente para evitar condiciones de carrera
     await markMessageAsProcessed(messageId)
 
-    const userPhoneNumber = message.from
+    const userPhoneNumber = normalizePhoneNumber(message.from)
     let userMessage = extractMessageContent(message)
     const originalMessage = userMessage
 

@@ -1,6 +1,7 @@
 import { Redis } from "@upstash/redis"
 import type { WhatsAppConfig, ThreadInfo, SystemStats } from "./types"
 import { nanoid } from "nanoid"
+import { normalizePhoneNumber } from "./utils"
 
 // Inicializar el cliente de Redis
 let redis: Redis | null = null
@@ -414,10 +415,11 @@ export async function getThreadForUser(
   phoneNumber: string,
   whatsappConfigId: string,
 ): Promise<{ threadId: string; isNewThread: boolean; isResetThread?: boolean }> {
-  const key = `${THREAD_PREFIX}${phoneNumber}:${whatsappConfigId}`
+  const normalizedPhone = normalizePhoneNumber(phoneNumber)
+  const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
   const redisClient = getRedisClient()
 
-  console.log(`[DB] 🔍 Obteniendo thread para ${phoneNumber} con config ${whatsappConfigId}`)
+  console.log(`[DB] 🔍 Obteniendo thread para ${normalizedPhone} con config ${whatsappConfigId}`)
 
   if (redisClient) {
     // Intentar obtener el thread existente
@@ -486,7 +488,7 @@ export async function getThreadForUser(
   // Guardar la información del thread
   const newThreadInfo: ThreadInfo = {
     threadId: thread.id,
-    phoneNumber,
+    phoneNumber: normalizedPhone,
     whatsappConfigId,
     lastMessageAt: new Date().toISOString(),
     messageCount: 1,
@@ -511,10 +513,11 @@ export async function resetThreadForUser(
   phoneNumber: string,
   whatsappConfigId: string,
 ): Promise<{ threadId: string; isNewThread: boolean }> {
-  const key = `${THREAD_PREFIX}${phoneNumber}:${whatsappConfigId}`
+  const normalizedPhone = normalizePhoneNumber(phoneNumber)
+  const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
   const redisClient = getRedisClient()
 
-  console.log(`[DB] 🔄 RESETEANDO thread para ${phoneNumber} con config ${whatsappConfigId}`)
+  console.log(`[DB] 🔄 RESETEANDO thread para ${normalizedPhone} con config ${whatsappConfigId}`)
 
   try {
     const openai = new (await import("openai")).default({
@@ -551,7 +554,7 @@ export async function resetThreadForUser(
     // 2. CREAR UN THREAD COMPLETAMENTE NUEVO EN OPENAI
     const newThread = await openai.beta.threads.create({
       metadata: {
-        phoneNumber,
+        phoneNumber: normalizedPhone,
         whatsappConfigId,
         createdAt: new Date().toISOString(),
         isReset: "true",
@@ -571,7 +574,7 @@ export async function resetThreadForUser(
     // 4. GUARDAR EL NUEVO THREAD CON FLAG DE RESET
     const newThreadInfo: ThreadInfo = {
       threadId: newThread.id,
-      phoneNumber,
+      phoneNumber: normalizedPhone,
       whatsappConfigId,
       lastMessageAt: new Date().toISOString(),
       messageCount: 0, // Empezar en 0 para que se considere nuevo
@@ -600,7 +603,7 @@ export async function resetThreadForUser(
     console.error(`[DB] Error details:`, {
       message: error.message,
       stack: error.stack,
-      phoneNumber,
+      phoneNumber: normalizedPhone,
       whatsappConfigId,
     })
     throw error

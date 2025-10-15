@@ -4,6 +4,7 @@ import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp-api"
 import { safelyAddMessageToThread } from "@/lib/thread-manager"
 import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
+import { normalizePhoneNumber } from "@/lib/utils"
 
 export async function POST(request: Request) {
   try {
@@ -391,7 +392,7 @@ async function handleTemplateSend(data: any) {
       destinationPhone = `+${destinationPhone}`
     }
 
-    const cleanPhoneNumber = destinationPhone.replace("+", "")
+    const cleanPhoneNumber = normalizePhoneNumber(destinationPhone)
 
     console.log("[PROXYLISTENER] Número de teléfono formateado:", destinationPhone)
     console.log("[PROXYLISTENER] Enviando mensaje tipo:", messageType)
