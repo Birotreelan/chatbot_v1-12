@@ -192,27 +192,32 @@ function extractAppointmentInfo(templateBody: any): any {
     if (templateData.template && templateData.template.components) {
       for (const component of templateData.template.components) {
         if (component.type === "body" && component.parameters) {
-          // Los parámetros suelen estar en orden: fecha, hora, profesional, lugar
+          // Los parámetros vienen en este orden:
+          // [0] = Nombre de la clínica
+          // [1] = Fecha
+          // [2] = Hora
+          // [3] = Profesional
+          // [4] = Lugar/Dirección
           const params = component.parameters
 
-          if (params.length >= 1 && params[0].text) {
-            // Primer parámetro suele ser la fecha
-            appointmentInfo.fecha = params[0].text
-          }
-
           if (params.length >= 2 && params[1].text) {
-            // Segundo parámetro suele ser la hora
-            appointmentInfo.hora = params[1].text
+            // Segundo parámetro es la fecha
+            appointmentInfo.fecha = params[1].text
           }
 
           if (params.length >= 3 && params[2].text) {
-            // Tercer parámetro suele ser el profesional
-            appointmentInfo.profesional = params[2].text
+            // Tercer parámetro es la hora
+            appointmentInfo.hora = params[2].text
           }
 
           if (params.length >= 4 && params[3].text) {
-            // Cuarto parámetro suele ser el lugar
-            appointmentInfo.lugar = params[3].text
+            // Cuarto parámetro es el profesional
+            appointmentInfo.profesional = params[3].text
+          }
+
+          if (params.length >= 5 && params[4].text) {
+            // Quinto parámetro es el lugar
+            appointmentInfo.lugar = params[4].text
           }
         }
       }
