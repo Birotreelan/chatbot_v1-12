@@ -48,6 +48,23 @@ function safeJsonParse(data: any): any {
   return data // Si ya es un objeto, devolverlo tal cual
 }
 
+// Función adicional para escanear claves de Redis de manera segura
+async function scanRedisKeys(redisClient: Redis, pattern: string): Promise<string[]> {
+  const allKeys: string[] = []
+  let cursor = 0
+
+  do {
+    const result = await redisClient.scan(cursor, {
+      match: pattern,
+      count: 100,
+    })
+    cursor = result[0]
+    allKeys.push(...result[1])
+  } while (cursor !== 0)
+
+  return allKeys
+}
+
 // Funciones para la gestión de configuraciones de WhatsApp
 
 // Crear una nueva configuración
@@ -242,7 +259,7 @@ export async function getAllWhatsAppConfigs(): Promise<WhatsAppConfig[]> {
 
     if (redisClient) {
       console.log(`[DB] 🔍 Buscando en Redis`)
-      const keys = await redisClient.keys(`${CONFIG_PREFIX}*`)
+      const keys = await scanRedisKeys(redisClient, `${CONFIG_PREFIX}*`)
       console.log(`[DB] 📊 Encontradas ${keys.length} claves en Redis`)
 
       if (keys.length === 0) {
@@ -615,7 +632,7 @@ export async function getAllThreads(): Promise<ThreadInfo[]> {
   const redisClient = getRedisClient()
 
   if (redisClient) {
-    const keys = await redisClient.keys(`${THREAD_PREFIX}*`)
+    const keys = await scanRedisKeys(redisClient, `${THREAD_PREFIX}*`)
 
     if (keys.length === 0) return []
 
