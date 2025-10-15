@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import { getWhatsAppConfigByPhoneId, getAllWhatsAppConfigs, getThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp-api"
 import { safelyAddMessageToThread } from "@/lib/thread-manager"
+import { saveConversationMessage } from "@/lib/conversations"
+import { nanoid } from "nanoid"
 
 export async function POST(request: Request) {
   try {
@@ -247,6 +249,47 @@ function extractAppointmentInfo(templateBody: any): any {
   }
 }
 
+// Función para extraer contenido legible de la plantilla
+function extractTemplateContent(templateBody: any): string {
+  try {
+    const templateData = typeof templateBody === "string" ? JSON.parse(templateBody) : templateBody
+
+    if (!templateData.template) {
+      return "Plantilla enviada"
+    }
+
+    const templateName = templateData.template.name || "plantilla_desconocida"
+    let content = `Plantilla: ${templateName}\n\n`
+
+    // Extract parameters from body component
+    if (templateData.template.components) {
+      for (const component of templateData.template.components) {
+        if (component.type === "body" && component.parameters) {
+          const params = component.parameters.filter((p: any) => p.type === "text" && p.text).map((p: any) => p.text)
+
+          if (params.length > 0) {
+            // Build a readable message based on common template patterns
+            if (templateName.includes("confirmacion") || templateName.includes("recordatorio")) {
+              // Appointment reminder format
+              const [clinica, fecha, hora, profesional, lugar] = params
+              content += `Hola! Nos comunicamos desde ${clinica || "la clínica"} para recordarle que tiene un turno el día ${fecha || "próximamente"}, a las ${hora || "a confirmar"} horas con ${profesional || "el profesional"} en ${lugar || "nuestra sede"}.\n\n`
+              content += `Por favor, confirme o cancele su asistencia.`
+            } else {
+              // Generic template
+              content += params.join(" | ")
+            }
+          }
+        }
+      }
+    }
+
+    return content
+  } catch (error) {
+    console.error("[PROXYLISTENER] Error extracting template content:", error)
+    return "Plantilla enviada (contenido no disponible)"
+  }
+}
+
 // Función para manejar envío de templates
 async function handleTemplateSend(data: any) {
   try {
@@ -353,6 +396,17 @@ async function handleTemplateSend(data: any) {
 
     if (messageType === "text") {
       whatsappResponse = await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, destinationPhone, Body)
+
+      await saveConversationMessage({
+        id: nanoid(),
+        role: "assistant",
+        content: Body,
+        timestamp: new Date().toISOString(),
+        phoneNumber: cleanPhoneNumber,
+        configId: config.id,
+        messageType: "text",
+      })
+      console.log("[PROXYLISTENER] ✅ Mensaje de texto guardado en Redis")
     } else {
       whatsappResponse = await sendWhatsAppTemplate(
         config.phoneNumberId,
@@ -361,6 +415,18 @@ async function handleTemplateSend(data: any) {
         Body,
         config.wabaId,
       )
+
+      const templateContent = extractTemplateContent(Body)
+      await saveConversationMessage({
+        id: nanoid(),
+        role: "assistant",
+        content: templateContent,
+        timestamp: new Date().toISOString(),
+        phoneNumber: cleanPhoneNumber,
+        configId: config.id,
+        messageType: "template",
+      })
+      console.log("[PROXYLISTENER] ✅ Mensaje de plantilla guardado en Redis")
 
       // Notificar a OpenAI sobre la plantilla enviada
       if (messageType === "template") {

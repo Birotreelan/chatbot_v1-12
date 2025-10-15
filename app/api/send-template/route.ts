@@ -3,6 +3,8 @@ import { getWhatsAppConfigByPhoneId, getAllWhatsAppConfigs } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getRedisClient } from "@/lib/redis"
 import OpenAI from "openai"
+import { saveConversationMessage } from "@/lib/conversations"
+import { nanoid } from "nanoid"
 
 export async function POST(request: Request) {
   try {
@@ -86,6 +88,19 @@ export async function POST(request: Request) {
     // Enviar el mensaje a través de la API de WhatsApp
     await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, destinationPhone, Body)
 
+    // Guardar el mensaje en Redis para monitoreo de conversaciones
+    const cleanPhoneNumber = destinationPhone.replace("+", "")
+    await saveConversationMessage({
+      id: nanoid(),
+      role: "assistant",
+      content: Body,
+      timestamp: new Date().toISOString(),
+      phoneNumber: cleanPhoneNumber,
+      configId: config.id,
+      messageType: Template_Name ? "template" : "text",
+    })
+    console.log("[SEND-TEMPLATE] ✅ Mensaje guardado en Redis para monitoreo")
+
     // Notificar al thread de OpenAI sobre la plantilla enviada
     await notifyOpenAIAboutTemplate({
       userPhoneNumber: destinationPhone,
@@ -105,6 +120,7 @@ export async function POST(request: Request) {
         destinationPhone,
         messageLength: Body.length,
         templateNotified: true,
+        savedToRedis: true,
       },
     })
   } catch (error) {
