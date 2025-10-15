@@ -21,11 +21,18 @@ Se ha refactorizado el sistema para que el `Sede_Id` se tome desde cada request 
 - ✅ Usa `sedeId` del parámetro si está disponible, sino usa el del config (fallback)
 - ✅ Pasa el `sede_id` efectivo a `createSystemBlock`
 
+### 4. **components/dashboard/whatsapp-config-form.tsx**
+- ✅ Eliminado el campo `sede_id` del formulario del panel de control
+- ✅ Ya no se solicita ni se guarda `sede_id` en la configuración
+
+### 5. **lib/types.ts**
+- ✅ Removido el campo `sede_id` del tipo `WhatsAppConfig`
+
 ## Comportamiento
 
 ### Prioridad de Sede_Id
-1. **Primera prioridad**: `Sede_Id` del request entrante
-2. **Fallback**: `sede_id` de la configuración almacenada
+1. **Única fuente**: `Sede_Id` del request entrante
+2. ~~**Fallback**: `sede_id` de la configuración almacenada~~ (ELIMINADO)
 
 ### Flujo de Datos
 
@@ -41,9 +48,9 @@ Request → sede_id extraído → processWebChatMessage → createSystemBlock �
 
 ## Compatibilidad
 
-- ✅ **Retrocompatible**: Si no se envía `Sede_Id` en el request, se usa el del config
+- ✅ **Simplificado**: El `Sede_Id` DEBE venir en cada request
 - ✅ **Flexible**: Permite diferentes sedes para el mismo cliente según el origen del request
-- ✅ **Sin cambios en DB**: El campo `sede_id` permanece en la configuración como fallback
+- ✅ **Sin campo en config**: El campo `sede_id` ya no existe en la configuración del panel
 
 ## Ejemplo de Request
 
@@ -64,11 +71,11 @@ Request → sede_id extraído → processWebChatMessage → createSystemBlock �
 Para probar la funcionalidad:
 
 1. **Con Sede_Id en request**: Enviar request con `Sede_Id` y verificar que se use ese valor
-2. **Sin Sede_Id en request**: Enviar request sin `Sede_Id` y verificar que se use el del config
-3. **Logs**: Revisar logs para confirmar qué `Sede_Id` se está usando en cada caso
+2. **Logs**: Revisar logs para confirmar que el `Sede_Id` del request se está usando correctamente
 
 ## Notas Importantes
 
-- El campo `sede_id` en la configuración del panel de control sigue siendo útil como valor por defecto
-- Los logs indican claramente si el `Sede_Id` viene del request o del config
-- No se requieren cambios en la base de datos ni en el schema
+- El campo `sede_id` ha sido completamente eliminado de la configuración del panel de control
+- El `Sede_Id` ahora DEBE venir en cada request desde el proxy
+- Los logs indican claramente el `Sede_Id` recibido en cada request
+- No se requieren cambios en la base de datos (el campo simplemente no se usa más)

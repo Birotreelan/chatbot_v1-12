@@ -37,7 +37,6 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     accessToken: "",
     webhookUrl: "",
     cliente_id: "",
-    sede_id: "", // Nuevo campo
     proxy: "",
     // Widget settings
     widgetEnabled: true,
@@ -189,19 +188,6 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                     ID único del cliente para identificar la configuración
                   </p>
                 </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="sede_id">Sede ID</Label>
-                <Input
-                  id="sede_id"
-                  value={formData.sede_id || ""}
-                  onChange={(e) => updateFormData("sede_id", e.target.value)}
-                  placeholder="cfe6a025-1b9d-102d-b564-6096d05021b3"
-                />
-                <p className="text-sm text-muted-foreground">
-                  ID de la sede para obtener información específica (domicilio, teléfono, horarios, etc.)
-                </p>
               </div>
 
               <div className="flex items-center space-x-2">
