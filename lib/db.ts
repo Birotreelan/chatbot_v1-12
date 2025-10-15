@@ -51,16 +51,16 @@ function safeJsonParse(data: any): any {
 // Función adicional para escanear claves de Redis de manera segura
 async function scanRedisKeys(redisClient: Redis, pattern: string): Promise<string[]> {
   const allKeys: string[] = []
-  let cursor = 0
+  let cursor = "0" // Usar string en lugar de number para el cursor
 
   do {
     const result = await redisClient.scan(cursor, {
       match: pattern,
       count: 100,
     })
-    cursor = result[0]
+    cursor = typeof result[0] === "number" ? result[0].toString() : result[0]
     allKeys.push(...result[1])
-  } while (cursor !== 0)
+  } while (cursor !== "0") // Comparar con string "0"
 
   return allKeys
 }
@@ -607,8 +607,8 @@ export async function resetThreadForUser(
       console.log(`[DB] 💾 Nuevo thread guardado en memoria: ${newThread.id}`)
     }
 
-    // 5. ACTUALIZAR ESTADÍSTICAS
-    await updateSystemStats()
+    // Las estadísticas se actualizarán en el próximo mensaje
+    // await updateSystemStats()
 
     console.log(`[DB] ✅ RESET COMPLETADO EXITOSAMENTE`)
     console.log(`[DB] - Thread anterior: ${oldThreadId || "ninguno"} (ELIMINADO de OpenAI)`)
