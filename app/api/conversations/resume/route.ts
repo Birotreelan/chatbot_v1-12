@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   try {
     const { configId, phoneNumber } = await request.json()
 
-    console.log("[API] POST /api/conversations/resume")
+    console.log("[API] 🔵 POST /api/conversations/resume")
     console.log("[API]   - configId:", configId)
     console.log("[API]   - phoneNumber:", phoneNumber)
 
@@ -15,11 +15,11 @@ export async function POST(request: Request) {
 
     await resumeConversation(configId, phoneNumber)
 
-    console.log("[API] ✅ Conversación reanudada exitosamente")
+    console.log("[API] 🟢 Conversación reanudada exitosamente")
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("[API] ❌ Error reanudando conversación:", error)
+    console.error("[API] 🔴 Error reanudando conversación:", error)
     return NextResponse.json({ error: "Error reanudando conversación" }, { status: 500 })
   }
 }
