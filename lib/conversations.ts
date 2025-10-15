@@ -4,6 +4,7 @@ import { getRedisClient } from "./redis"
 const CONVERSATION_PREFIX = "conversation:"
 const CONVERSATION_CONTACT_PREFIX = "conversation_contact:"
 const CONVERSATION_CONTACTS_SET_PREFIX = "conversation_contacts:"
+const CONVERSATION_PAUSED_PREFIX = "conversation_paused:"
 
 // Duración de almacenamiento: 7 días en segundos
 const CONVERSATION_TTL = 7 * 24 * 60 * 60 // 7 días
@@ -307,5 +308,56 @@ export async function updateContactMessageCount(configId: string, phoneNumber: s
     }
   } catch (error) {
     console.error("[CONVERSATIONS] ❌ Error actualizando contador:", error)
+  }
+}
+
+// Nueva función para pausar una conversación
+export async function pauseConversation(configId: string, phoneNumber: string): Promise<void> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) {
+      console.warn("[CONVERSATIONS] Redis no disponible, no se puede pausar conversación")
+      return
+    }
+
+    const pauseKey = `${CONVERSATION_PAUSED_PREFIX}${configId}:${phoneNumber}`
+    await redisClient.set(pauseKey, "true", { ex: CONVERSATION_TTL })
+    console.log(`[CONVERSATIONS] ✅ Conversación pausada: ${configId}:${phoneNumber}`)
+  } catch (error) {
+    console.error("[CONVERSATIONS] ❌ Error pausando conversación:", error)
+  }
+}
+
+// Nueva función para reanudar una conversación
+export async function resumeConversation(configId: string, phoneNumber: string): Promise<void> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) {
+      console.warn("[CONVERSATIONS] Redis no disponible, no se puede reanudar conversación")
+      return
+    }
+
+    const pauseKey = `${CONVERSATION_PAUSED_PREFIX}${configId}:${phoneNumber}`
+    await redisClient.del(pauseKey)
+    console.log(`[CONVERSATIONS] ✅ Conversación reanudada: ${configId}:${phoneNumber}`)
+  } catch (error) {
+    console.error("[CONVERSATIONS] ❌ Error reanudando conversación:", error)
+  }
+}
+
+// Nueva función para verificar si una conversación está pausada
+export async function isConversationPaused(configId: string, phoneNumber: string): Promise<boolean> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) {
+      return false
+    }
+
+    const pauseKey = `${CONVERSATION_PAUSED_PREFIX}${configId}:${phoneNumber}`
+    const isPaused = await redisClient.get(pauseKey)
+    return isPaused === "true"
+  } catch (error) {
+    console.error("[CONVERSATIONS] ❌ Error verificando estado de pausa:", error)
+    return false
   }
 }
