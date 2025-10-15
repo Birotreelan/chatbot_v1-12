@@ -6,12 +6,15 @@ import { ConversationsList } from "./conversations-list"
 import { ConversationChat } from "./conversation-chat"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import { Download } from "lucide-react"
 
 export function ConversationsView() {
   const [configs, setConfigs] = useState<WhatsAppConfig[]>([])
   const [selectedConfig, setSelectedConfig] = useState<WhatsAppConfig | null>(null)
   const [selectedContact, setSelectedContact] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     loadConfigs()
@@ -33,6 +36,35 @@ export function ConversationsView() {
       console.error("Error cargando configuraciones:", error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleExport() {
+    if (!selectedConfig) return
+
+    try {
+      setExporting(true)
+      const response = await fetch(`/api/conversations/export?configId=${selectedConfig.id}`)
+
+      if (!response.ok) {
+        throw new Error("Error al exportar conversaciones")
+      }
+
+      // Descargar el archivo
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `conversaciones_${selectedConfig.displayName}_${new Date().toISOString().split("T")[0]}.csv`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (error) {
+      console.error("Error exportando conversaciones:", error)
+      alert("Error al exportar conversaciones. Por favor intenta de nuevo.")
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -60,7 +92,15 @@ export function ConversationsView() {
   return (
     <div className="h-full flex flex-col">
       <div className="border-b bg-background p-4">
-        <h1 className="text-2xl font-bold mb-4">Monitor de Conversaciones</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">Monitor de Conversaciones</h1>
+          {selectedConfig && (
+            <Button onClick={handleExport} disabled={exporting} variant="outline" size="sm">
+              <Download className="h-4 w-4 mr-2" />
+              {exporting ? "Exportando..." : "Exportar CSV"}
+            </Button>
+          )}
+        </div>
         <Tabs
           value={selectedConfig?.id}
           onValueChange={(value) => {
