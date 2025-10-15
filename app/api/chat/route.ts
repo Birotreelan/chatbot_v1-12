@@ -18,13 +18,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log("[API-CHAT] 📦 Body recibido:", JSON.stringify(body, null, 2))
 
-    const { message, cliente_id, session_id, source } = body
+    const { message, cliente_id, session_id, source, sede_id } = body
 
     console.log("[API-CHAT] 🔍 Parámetros validados:")
     console.log("[API-CHAT] - message:", message)
     console.log("[API-CHAT] - cliente_id:", cliente_id)
     console.log("[API-CHAT] - session_id:", session_id)
     console.log("[API-CHAT] - source:", source)
+    console.log("[API-CHAT] - sede_id:", sede_id)
 
     // Validar parámetros requeridos
     if (!message || !cliente_id || !session_id) {
@@ -64,6 +65,9 @@ export async function POST(request: NextRequest) {
     console.log("[API-CHAT] - Display Name:", config.displayName)
     console.log("[API-CHAT] - Assistant ID:", config.assistantId)
 
+    const effectiveSedeId = sede_id || config.sede_id
+    console.log("[API-CHAT] - Sede ID efectivo:", effectiveSedeId, sede_id ? "(del request)" : "(del config)")
+
     // Procesar mensaje con web chat
     console.log("[API-CHAT] 🤖 Procesando mensaje con web chat...")
     const response = await processWebChatMessage({
@@ -71,6 +75,7 @@ export async function POST(request: NextRequest) {
       sessionId: session_id,
       config,
       ip: request.ip || "unknown",
+      sedeId: effectiveSedeId,
     })
 
     console.log("[API-CHAT] ✅ Respuesta generada:")

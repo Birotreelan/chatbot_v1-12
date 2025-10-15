@@ -1,5 +1,4 @@
 import OpenAI from "openai"
-import { getWhatsAppConfigByClienteId } from "./db"
 import { obtenerDatosSede, formatearDatosSede, obtenerSubespecialidades } from "./api-tools/api-functions"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import {
@@ -49,18 +48,27 @@ CelularPaciente: No disponible (consulta web)`
   return systemBlock
 }
 
-export async function processWebChatMessage(
-  message: string,
-  threadId: string,
-  clienteId: string,
-): Promise<{ response: string; error?: string }> {
+export async function processWebChatMessage({
+  message,
+  sessionId,
+  config,
+  ip,
+  sedeId,
+}: {
+  message: string
+  sessionId: string
+  config: any
+  ip: string
+  sedeId?: string
+}): Promise<{ response: string; error?: string }> {
   try {
-    console.log(`[WEB-CHAT] 💬 Procesando mensaje para cliente: ${clienteId}`)
-    console.log(`[WEB-CHAT] Thread ID: ${threadId}`)
-    console.log(`[WEB-CHAT] Mensaje: ${message}`)
+    const clienteId = config.cliente_id
 
-    // Obtener configuración del cliente
-    const config = await getWhatsAppConfigByClienteId(clienteId)
+    console.log(`[WEB-CHAT] 💬 Procesando mensaje para cliente: ${clienteId}`)
+    console.log(`[WEB-CHAT] Session ID: ${sessionId}`)
+    console.log(`[WEB-CHAT] Mensaje: ${message}`)
+    console.log(`[WEB-CHAT] Sede ID recibido:`, sedeId)
+
     if (!config) {
       console.error(`[WEB-CHAT] ❌ No se encontró configuración para cliente: ${clienteId}`)
       return {
@@ -71,13 +79,15 @@ export async function processWebChatMessage(
 
     console.log(`[WEB-CHAT] ✅ Configuración encontrada: ${config.displayName}`)
 
-    // Crear bloque SISTEMA con datos de sede si están disponibles
-    const systemBlock = await createSystemBlock(config.displayName, config.cliente_id, config.sede_id)
+    const effectiveSedeId = sedeId || config.sede_id
+    console.log(`[WEB-CHAT] Sede ID efectivo:`, effectiveSedeId, sedeId ? "(del request)" : "(del config)")
+
+    const systemBlock = await createSystemBlock(config.displayName, config.cliente_id, effectiveSedeId)
 
     console.log(`[WEB-CHAT] 📋 Bloque SISTEMA creado:`)
     console.log(systemBlock)
 
-    await safelyAddMessageToThread(threadId, {
+    await safelyAddMessageToThread(sessionId, {
       role: "user",
       content: `${systemBlock}\n\n${message}`,
     })
@@ -88,7 +98,7 @@ export async function processWebChatMessage(
     const assistantId = config.widgetAssistantId || config.whatsappAssistantId
     console.log(`[WEB-CHAT] 🤖 Ejecutando asistente: ${assistantId}`)
 
-    const run = await openai.beta.threads.runs.create(threadId, {
+    const run = await openai.beta.threads.runs.create(sessionId, {
       assistant_id: assistantId,
       tools: [
         {
@@ -306,7 +316,7 @@ export async function processWebChatMessage(
     console.log(`[WEB-CHAT] 🔄 Run creado: ${run.id}`)
 
     // Esperar a que el run se complete
-    let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+    let runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
     console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
@@ -323,7 +333,7 @@ export async function processWebChatMessage(
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
       console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
@@ -403,12 +413,12 @@ export async function processWebChatMessage(
       }
 
       // Enviar los resultados de las tools
-      await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
+      await openai.beta.threads.runs.submitToolOutputs(sessionId, run.id, {
         tool_outputs: toolOutputs,
       })
 
       // Esperar a que el run se complete después de las tool calls
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -422,7 +432,7 @@ export async function processWebChatMessage(
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
-        runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+        runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
         console.log(`[WEB-CHAT] 📊 Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
@@ -431,7 +441,7 @@ export async function processWebChatMessage(
       console.log(`[WEB-CHAT] ✅ Run completado exitosamente`)
 
       // Obtener los mensajes del thread
-      const messages = await openai.beta.threads.messages.list(threadId, {
+      const messages = await openai.beta.threads.messages.list(sessionId, {
         order: "desc",
         limit: 1,
       })

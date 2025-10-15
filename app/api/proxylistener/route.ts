@@ -250,7 +250,7 @@ function extractAppointmentInfo(templateBody: any): any {
 // Función para manejar envío de templates
 async function handleTemplateSend(data: any) {
   try {
-    const { Cliente_Id, Phone_Number_Id, Phone, Type, Body, Chatbot_Data } = data
+    const { Cliente_Id, Phone_Number_Id, Phone, Type, Body, Chatbot_Data, Sede_Id } = data
 
     console.log("[PROXYLISTENER] Parámetros extraídos:")
     console.log("[PROXYLISTENER] - Cliente_Id:", Cliente_Id)
@@ -259,6 +259,7 @@ async function handleTemplateSend(data: any) {
     console.log("[PROXYLISTENER] - Type:", Type)
     console.log("[PROXYLISTENER] - Body:", typeof Body === "object" ? JSON.stringify(Body, null, 2) : Body)
     console.log("[PROXYLISTENER] - Chatbot_Data:", Chatbot_Data)
+    console.log("[PROXYLISTENER] - Sede_Id:", Sede_Id)
 
     // Validaciones
     if (!Cliente_Id) {
@@ -492,6 +493,11 @@ Tipo_Mensaje: ${chatbotDataParsed.tipo_mensaje}`
 
             notificationMessage += `
 [/CONTEXTO_COMPLETO_TURNO]`
+          }
+
+          if (Sede_Id) {
+            notificationMessage += `
+Sede_ID: ${Sede_Id}`
           }
 
           notificationMessage += `
