@@ -1,4 +1,5 @@
-// Función para enviar mensajes de texto a través de la API de WhatsApp
+import { logger } from "./logger"
+
 export async function sendWhatsAppMessage(
   phoneNumberId: string,
   accessToken: string,
@@ -7,11 +8,8 @@ export async function sendWhatsAppMessage(
 ): Promise<any> {
   const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`
 
-  console.log(`[WHATSAPP-API] Enviando mensaje a ${to}:`, text)
-  console.log(`[WHATSAPP-API] URL:`, url)
-  console.log(`[WHATSAPP-API] Phone Number ID:`, phoneNumberId)
+  logger.info("WHATSAPP-API", `Enviando mensaje a ${to} (${text.length} chars)`)
 
-  // Enviar mensaje a WhatsApp
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -33,20 +31,19 @@ export async function sendWhatsAppMessage(
 
     if (!response.ok) {
       const errorData = await response.json()
-      console.error(`[WHATSAPP-API] Error al enviar mensaje de WhatsApp: ${JSON.stringify(errorData)}`)
+      logger.error("WHATSAPP-API", "Error enviando mensaje", errorData)
       throw new Error(`Error al enviar mensaje de WhatsApp: ${JSON.stringify(errorData)}`)
     }
 
     const responseData = await response.json()
-    console.log(`[WHATSAPP-API] Mensaje enviado exitosamente:`, responseData)
+    logger.info("WHATSAPP-API", `Mensaje enviado ✓: ${responseData.messages?.[0]?.id}`)
     return responseData
   } catch (error) {
-    console.error(`[WHATSAPP-API] Error al enviar mensaje de WhatsApp:`, error)
+    logger.error("WHATSAPP-API", "Error en sendWhatsAppMessage", error)
     throw error
   }
 }
 
-// Nueva función para enviar plantillas a través de la API de WhatsApp
 export async function sendWhatsAppTemplate(
   phoneNumberId: string,
   accessToken: string,
@@ -54,36 +51,27 @@ export async function sendWhatsAppTemplate(
   templateData: any,
   wabaId?: string,
 ): Promise<any> {
-  // Para plantillas, usar WABA ID si está disponible, sino usar phoneNumberId
-  const endpointId = phoneNumberId // Usar siempre Phone Number ID por defecto
+  const endpointId = phoneNumberId
 
-  if (wabaId && wabaId !== phoneNumberId) {
-    console.warn(`[WHATSAPP-API] WABA ID configurado (${wabaId}) pero usando Phone Number ID por compatibilidad`)
-  }
+  logger.info("WHATSAPP-API", `Enviando plantilla a ${to}`)
 
   const url = `https://graph.facebook.com/v18.0/${endpointId}/messages`
 
-  console.log(`[WHATSAPP-API] Enviando plantilla a ${to}:`, templateData)
-  console.log(`[WHATSAPP-API] Usando endpoint ID: ${endpointId} (${wabaId ? "WABA ID" : "Phone Number ID"})`)
-
   try {
-    // Si templateData es una cadena, intentamos analizarla como JSON
     let templateBody = templateData
     if (typeof templateData === "string") {
       try {
         templateBody = JSON.parse(templateData)
       } catch (e) {
-        console.error("[WHATSAPP-API] Error al analizar la plantilla como JSON:", e)
+        logger.error("WHATSAPP-API", "Error parseando plantilla")
         throw new Error("El cuerpo de la plantilla debe ser un objeto JSON válido o una cadena JSON válida")
       }
     }
 
-    // Verificar que el cuerpo de la solicitud tenga la estructura correcta
     if (!templateBody.template || !templateBody.template.name) {
       throw new Error("La plantilla debe incluir al menos un nombre en template.name")
     }
 
-    // Asegurarse de que el cuerpo incluya los campos obligatorios
     const requestBody = {
       messaging_product: "whatsapp",
       recipient_type: "individual",
@@ -91,8 +79,6 @@ export async function sendWhatsAppTemplate(
       type: "template",
       ...templateBody,
     }
-
-    console.log(`[WHATSAPP-API] Enviando plantilla a WhatsApp: ${JSON.stringify(requestBody)}`)
 
     const response = await fetch(url, {
       method: "POST",
@@ -105,14 +91,12 @@ export async function sendWhatsAppTemplate(
 
     if (!response.ok) {
       const errorData = await response.json()
-      console.error(`[WHATSAPP-API] Error al enviar plantilla de WhatsApp: ${JSON.stringify(errorData)}`)
+      logger.error("WHATSAPP-API", "Error enviando plantilla", errorData)
 
-      // Si el error es por el endpoint, intentar con el otro ID
       if (errorData.error?.code === 100 && wabaId && wabaId !== phoneNumberId) {
-        console.log(`[WHATSAPP-API] Reintentando con Phone Number ID: ${phoneNumberId}`)
+        logger.info("WHATSAPP-API", "Reintentando con Phone Number ID")
         return sendWhatsAppTemplate(phoneNumberId, accessToken, to, templateData)
       } else if (errorData.error?.code === 100 && !wabaId) {
-        console.log(`[WHATSAPP-API] Error con Phone Number ID, se necesita WABA ID para enviar plantillas`)
         throw new Error(`Error: Para enviar plantillas se requiere configurar el WABA ID. ${errorData.error?.message}`)
       }
 
@@ -120,10 +104,10 @@ export async function sendWhatsAppTemplate(
     }
 
     const responseData = await response.json()
-    console.log(`[WHATSAPP-API] Plantilla enviada exitosamente:`, responseData)
+    logger.info("WHATSAPP-API", `Plantilla enviada ✓: ${responseData.messages?.[0]?.id}`)
     return responseData
   } catch (error) {
-    console.error(`[WHATSAPP-API] Error al enviar plantilla de WhatsApp:`, error)
+    logger.error("WHATSAPP-API", "Error en sendWhatsAppTemplate", error)
     throw error
   }
 }
