@@ -31,15 +31,25 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
   const [sending, setSending] = useState(false)
   const [pauseLoading, setPauseLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const isMountedRef = useRef(true)
+  const isTogglingRef = useRef(false)
 
   useEffect(() => {
+    isMountedRef.current = true
     loadMessages()
     loadPauseStatus()
+
     const interval = setInterval(() => {
-      loadMessages()
-      loadPauseStatus()
-    }, 5000) // Actualizar cada 5 segundos
-    return () => clearInterval(interval)
+      if (!isTogglingRef.current) {
+        loadMessages()
+        loadPauseStatus()
+      }
+    }, 5000)
+
+    return () => {
+      isMountedRef.current = false
+      clearInterval(interval)
+    }
   }, [configId, phoneNumber])
 
   useEffect(() => {
@@ -49,44 +59,85 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
   async function loadMessages() {
     try {
       const response = await fetch(`/api/conversations/messages?configId=${configId}&phoneNumber=${phoneNumber}`)
+      if (!response.ok) {
+        console.error("[v0] Error loading messages:", response.status)
+        return
+      }
       const data = await response.json()
-      setMessages(data.messages || [])
+      if (isMountedRef.current) {
+        setMessages(data.messages || [])
+      }
     } catch (error) {
-      console.error("Error cargando mensajes:", error)
+      console.error("[v0] Error cargando mensajes:", error)
     } finally {
-      setLoading(false)
+      if (isMountedRef.current) {
+        setLoading(false)
+      }
     }
   }
 
   async function loadPauseStatus() {
     try {
       const response = await fetch(`/api/conversations/status?configId=${configId}&phoneNumber=${phoneNumber}`)
+      if (!response.ok) {
+        console.error("[v0] Error loading pause status:", response.status)
+        return
+      }
       const data = await response.json()
-      setIsPaused(data.isPaused || false)
+      console.log("[v0] Pause status loaded:", data.isPaused)
+      if (isMountedRef.current) {
+        setIsPaused(data.isPaused || false)
+      }
     } catch (error) {
-      console.error("Error cargando estado de pausa:", error)
+      console.error("[v0] Error cargando estado de pausa:", error)
     }
   }
 
   async function togglePause() {
+    if (isTogglingRef.current) {
+      console.log("[v0] Toggle already in progress, skipping")
+      return
+    }
+
+    isTogglingRef.current = true
     setPauseLoading(true)
+
     try {
       const endpoint = isPaused ? "/api/conversations/resume" : "/api/conversations/pause"
+      console.log("[v0] Toggling pause state:", { endpoint, currentState: isPaused })
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ configId, phoneNumber }),
       })
 
-      if (response.ok) {
-        setIsPaused(!isPaused)
-      } else {
-        console.error("Error al cambiar estado de pausa")
+      if (!response.ok) {
+        console.error("[v0] Error al cambiar estado de pausa:", response.status)
+        return
       }
+
+      const newPausedState = !isPaused
+      console.log("[v0] Pause state changed successfully to:", newPausedState)
+
+      if (isMountedRef.current) {
+        setIsPaused(newPausedState)
+      }
+
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          loadPauseStatus()
+        }
+      }, 500)
     } catch (error) {
-      console.error("Error al cambiar estado de pausa:", error)
+      console.error("[v0] Error al cambiar estado de pausa:", error)
     } finally {
-      setPauseLoading(false)
+      if (isMountedRef.current) {
+        setPauseLoading(false)
+      }
+      setTimeout(() => {
+        isTogglingRef.current = false
+      }, 1000)
     }
   }
 
@@ -95,6 +146,8 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
 
     setSending(true)
     try {
+      console.log("[v0] Sending manual message:", manualMessage.substring(0, 50))
+
       const response = await fetch("/api/conversations/send-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -106,15 +159,18 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
       })
 
       if (response.ok) {
+        console.log("[v0] Manual message sent successfully")
         setManualMessage("")
         await loadMessages()
       } else {
-        console.error("Error al enviar mensaje")
+        console.error("[v0] Error al enviar mensaje:", response.status)
       }
     } catch (error) {
-      console.error("Error al enviar mensaje:", error)
+      console.error("[v0] Error al enviar mensaje:", error)
     } finally {
-      setSending(false)
+      if (isMountedRef.current) {
+        setSending(false)
+      }
     }
   }
 
@@ -151,7 +207,7 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
             <p className="font-semibold">{phoneNumber || "Desconocido"}</p>
             <p className="text-xs text-muted-foreground">
               {messages.length} mensajes
-              {isPaused && <span className="ml-2 text-orange-500">• Pausado</span>}
+              {isPaused && <span className="ml-2 text-orange-500 font-semibold">• Pausado</span>}
             </p>
           </div>
         </div>
@@ -238,7 +294,7 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
       </div>
 
       {isPaused && (
-        <div className="border-t bg-background p-4">
+        <div className="border-t bg-muted/30 p-4">
           <div className="flex gap-2">
             <Input
               placeholder="Escribe un mensaje manual..."
