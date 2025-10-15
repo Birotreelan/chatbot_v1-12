@@ -428,7 +428,10 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
 
     const baseUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
     if (!baseUrl) {
-      return "Error: URL de API no configurada"
+      return JSON.stringify({
+        exito: false,
+        error: "URL de API no configurada",
+      })
     }
 
     const requestBody = {
@@ -468,17 +471,46 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
     if (!response.ok) {
       const errorText = await response.text()
       console.error(`[TOOLS] ❌ Error HTTP ${response.status}:`, errorText)
-      return `Error HTTP: ${response.status} - ${errorText}`
+      return JSON.stringify({
+        exito: false,
+        error: `Error HTTP: ${response.status} - ${errorText}`,
+      })
     }
 
     const data = await response.json()
     console.log(`[TOOLS] 📥 Respuesta completa del proxy:`, JSON.stringify(data, null, 2))
-    console.log(`[TOOLS] ✅ Turno reservado exitosamente`)
 
-    return JSON.stringify(data)
+    if (data.error) {
+      console.error(`[TOOLS] ❌ Error del proxy:`, data.error)
+      return JSON.stringify({
+        exito: false,
+        error: data.error,
+        mensaje: "Error al reservar el turno. Por favor, intenta nuevamente o contacta a la clínica.",
+      })
+    }
+
+    if (data.success === false) {
+      console.error(`[TOOLS] ❌ Reserva fallida:`, data)
+      return JSON.stringify({
+        exito: false,
+        error: data.message || data.error || "Error desconocido",
+        mensaje: "No se pudo completar la reserva del turno.",
+      })
+    }
+
+    console.log(`[TOOLS] ✅ Turno reservado exitosamente`)
+    return JSON.stringify({
+      exito: true,
+      datos: data,
+      mensaje: "Turno reservado correctamente",
+    })
   } catch (error) {
     console.error("[TOOLS] ❌ Error reservando turno:", error)
-    return "Error al reservar el turno"
+    return JSON.stringify({
+      exito: false,
+      error: error instanceof Error ? error.message : "Error desconocido",
+      mensaje: "Error al reservar el turno",
+    })
   }
 }
 
