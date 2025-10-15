@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getConversationContacts } from "@/lib/conversations"
+import { getConversationContacts, getConversationMessages } from "@/lib/conversations"
 
 export async function GET(request: Request) {
   try {
@@ -9,9 +9,10 @@ export async function GET(request: Request) {
     const startDate = searchParams.get("startDate")
     const endDate = searchParams.get("endDate")
     const searchPhone = searchParams.get("searchPhone")
+    const searchText = searchParams.get("searchText")
 
     console.log("[API] GET /api/conversations/contacts - configId:", configId)
-    console.log("[API] Filters:", { timeFilter, startDate, endDate, searchPhone })
+    console.log("[API] Filters:", { timeFilter, startDate, endDate, searchPhone, searchText })
 
     if (!configId) {
       return NextResponse.json({ error: "configId es requerido" }, { status: 400 })
@@ -50,6 +51,25 @@ export async function GET(request: Request) {
     if (searchPhone && searchPhone.trim()) {
       const searchTerm = searchPhone.trim().toLowerCase()
       contacts = contacts.filter((contact) => contact.phoneNumber.toLowerCase().includes(searchTerm))
+    }
+
+    if (searchText && searchText.trim()) {
+      const searchTerm = searchText.trim().toLowerCase()
+      console.log("[API] Applying global text search:", searchTerm)
+
+      // Filter contacts that have at least one message matching the search text
+      const filteredContacts = []
+      for (const contact of contacts) {
+        const messages = await getConversationMessages(configId, contact.phoneNumber)
+        const hasMatch = messages.some((msg) => msg.content.toLowerCase().includes(searchTerm))
+
+        if (hasMatch) {
+          filteredContacts.push(contact)
+        }
+      }
+
+      contacts = filteredContacts
+      console.log("[API] Contacts after text search:", contacts.length)
     }
 
     console.log("[API] Contacts fetched:", contacts.length, "after filters")

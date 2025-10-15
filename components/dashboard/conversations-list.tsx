@@ -10,7 +10,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
 import { formatDistanceToNow, format } from "date-fns"
 import { es } from "date-fns/locale"
-import { Search, Download, CalendarIcon, Loader2 } from "lucide-react"
+import { Search, Download, CalendarIcon, Loader2, MessageSquareText } from "lucide-react"
 
 interface Contact {
   phoneNumber: string
@@ -31,6 +31,7 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
   const [exporting, setExporting] = useState(false)
 
   const [searchPhone, setSearchPhone] = useState("")
+  const [searchText, setSearchText] = useState("")
   const [timeFilter, setTimeFilter] = useState<"all" | "lastHour" | "lastDay" | "custom">("all")
   const [startDate, setStartDate] = useState<Date | undefined>(undefined)
   const [endDate, setEndDate] = useState<Date | undefined>(undefined)
@@ -40,7 +41,7 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
     loadContacts()
     const interval = setInterval(loadContacts, 10000)
     return () => clearInterval(interval)
-  }, [configId, searchPhone, timeFilter, startDate, endDate])
+  }, [configId, searchPhone, searchText, timeFilter, startDate, endDate])
 
   async function loadContacts() {
     try {
@@ -59,6 +60,10 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
 
       if (searchPhone.trim()) {
         params.append("searchPhone", searchPhone.trim())
+      }
+
+      if (searchText.trim()) {
+        params.append("searchText", searchText.trim())
       }
 
       const response = await fetch(`/api/conversations/contacts?${params.toString()}`)
@@ -92,6 +97,10 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
         params.append("searchPhone", searchPhone.trim())
       }
 
+      if (searchText.trim()) {
+        params.append("searchText", searchText.trim())
+      }
+
       const response = await fetch(`/api/conversations/export?${params.toString()}`)
 
       if (!response.ok) {
@@ -117,6 +126,7 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
 
   function resetFilters() {
     setSearchPhone("")
+    setSearchText("")
     setTimeFilter("all")
     setStartDate(undefined)
     setEndDate(undefined)
@@ -133,7 +143,16 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b space-y-3">
-        {/* Phone search */}
+        <div className="relative">
+          <MessageSquareText className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar en mensajes..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -144,7 +163,6 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
           />
         </div>
 
-        {/* Time filters */}
         <div className="flex gap-2 flex-wrap">
           <Button
             variant={timeFilter === "all" ? "default" : "outline"}
@@ -180,7 +198,6 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
             Último día
           </Button>
 
-          {/* Date range picker */}
           <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
             <PopoverTrigger asChild>
               <Button
@@ -252,7 +269,6 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
           </Popover>
         </div>
 
-        {/* Export and reset buttons */}
         <div className="flex gap-2">
           <Button onClick={handleExport} disabled={exporting || contacts.length === 0} size="sm" className="flex-1">
             {exporting ? (
@@ -267,7 +283,7 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
               </>
             )}
           </Button>
-          {(searchPhone || timeFilter !== "all") && (
+          {(searchPhone || searchText || timeFilter !== "all") && (
             <Button onClick={resetFilters} variant="outline" size="sm">
               Limpiar
             </Button>
@@ -275,12 +291,13 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
         </div>
       </div>
 
-      {/* Contacts list */}
       <div className="flex-1 overflow-y-auto divide-y">
         {contacts.length === 0 ? (
           <div className="p-4">
             <p className="text-sm text-muted-foreground">
-              {searchPhone || timeFilter !== "all" ? "No se encontraron conversaciones" : "No hay conversaciones aún"}
+              {searchPhone || searchText || timeFilter !== "all"
+                ? "No se encontraron conversaciones"
+                : "No hay conversaciones aún"}
             </p>
           </div>
         ) : (

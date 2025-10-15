@@ -9,6 +9,7 @@ export async function GET(request: Request) {
     const startDate = searchParams.get("startDate")
     const endDate = searchParams.get("endDate")
     const searchPhone = searchParams.get("searchPhone")
+    const searchText = searchParams.get("searchText") // Added searchText parameter for global text search
 
     console.log("[API] GET /api/conversations/export - configId:", configId)
 
@@ -16,7 +17,6 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "configId es requerido" }, { status: 400 })
     }
 
-    // Get all contacts first
     let contacts = await getConversationContacts(configId)
 
     // Apply time-based filters (same logic as contacts route)
@@ -52,6 +52,24 @@ export async function GET(request: Request) {
     if (searchPhone && searchPhone.trim()) {
       const searchTerm = searchPhone.trim().toLowerCase()
       contacts = contacts.filter((contact) => contact.phoneNumber.toLowerCase().includes(searchTerm))
+    }
+
+    if (searchText && searchText.trim()) {
+      const searchTerm = searchText.trim().toLowerCase()
+      console.log("[API] Applying global text search for export:", searchTerm)
+
+      const filteredContacts = []
+      for (const contact of contacts) {
+        const messages = await getConversationMessages(configId, contact.phoneNumber)
+        const hasMatch = messages.some((msg) => msg.content.toLowerCase().includes(searchTerm))
+
+        if (hasMatch) {
+          filteredContacts.push(contact)
+        }
+      }
+
+      contacts = filteredContacts
+      console.log("[API] Contacts after text search for export:", contacts.length)
     }
 
     // Fetch all messages for each contact
