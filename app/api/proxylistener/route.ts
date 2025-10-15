@@ -495,9 +495,37 @@ async function handleTemplateSend(data: any) {
           if (Chatbot_Data) {
             try {
               chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
-              console.log("[PROXYLISTENER] Chatbot_Data parseado:", JSON.stringify(chatbotDataParsed, null, 2))
+              console.log("[PROXYLISTENER] 📋 ===== CHATBOT_DATA PARSEADO =====")
+              console.log("[PROXYLISTENER] Chatbot_Data completo:", JSON.stringify(chatbotDataParsed, null, 2))
+
+              if (chatbotDataParsed.paciente) {
+                console.log("[PROXYLISTENER] 👤 Datos del paciente:")
+                console.log("[PROXYLISTENER]   - Nombres:", chatbotDataParsed.paciente.nombres)
+                console.log("[PROXYLISTENER]   - Apellido:", chatbotDataParsed.paciente.apellido)
+                console.log("[PROXYLISTENER]   - DNI:", chatbotDataParsed.paciente.dni)
+                console.log("[PROXYLISTENER]   - Teléfono:", chatbotDataParsed.paciente.telefono)
+                console.log("[PROXYLISTENER]   - Mail:", chatbotDataParsed.paciente.mail || "(VACÍO)")
+                console.log("[PROXYLISTENER]   - Obra Social ID:", chatbotDataParsed.paciente.obra_social_id)
+                console.log("[PROXYLISTENER]   - Obra Social Nombre:", chatbotDataParsed.paciente.obra_social_nombre)
+              }
+
+              if (chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
+                console.log("[PROXYLISTENER] 📅 Turnos encontrados:", chatbotDataParsed.turnos.length)
+                chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
+                  console.log(`[PROXYLISTENER] Turno ${index + 1}:`)
+                  console.log(`[PROXYLISTENER]   - Fecha: ${turno.fecha}`)
+                  console.log(`[PROXYLISTENER]   - Hora: ${turno.hora}`)
+                  console.log(`[PROXYLISTENER]   - Profesional: ${turno.profesional}`)
+                  console.log(`[PROXYLISTENER]   - Profesional ID: ${turno.profesional_id}`)
+                  console.log(`[PROXYLISTENER]   - Sede: ${turno.sede}`)
+                  console.log(`[PROXYLISTENER]   - Dirección: ${turno.direccion}`)
+                  console.log(`[PROXYLISTENER]   - Agenda ID: ${turno.agenda_id}`)
+                })
+              }
+
+              console.log("[PROXYLISTENER] =====================================")
             } catch (e) {
-              console.error("[PROXYLISTENER] Error al parsear Chatbot_Data:", e)
+              console.error("[PROXYLISTENER] ❌ Error al parsear Chatbot_Data:", e)
             }
           }
 
@@ -521,19 +549,33 @@ Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
 
             // Información del paciente
             if (chatbotDataParsed.paciente) {
+              const paciente = chatbotDataParsed.paciente
+
+              if (!paciente.mail || paciente.mail.trim() === "") {
+                console.warn("[PROXYLISTENER] ⚠️ ADVERTENCIA: El campo 'mail' está vacío en Chatbot_Data")
+              }
+
               notificationMessage += `
-Paciente_Nombres: ${chatbotDataParsed.paciente.nombres || ""}
-Paciente_Apellido: ${chatbotDataParsed.paciente.apellido || ""}
-Paciente_DNI: ${chatbotDataParsed.paciente.dni || ""}
-Paciente_Telefono: ${chatbotDataParsed.paciente.telefono || ""}
-Paciente_Mail: ${chatbotDataParsed.paciente.mail || ""}
-Paciente_Obra_Social_ID: ${chatbotDataParsed.paciente.obra_social_id || ""}
-Paciente_Obra_Social_Nombre: ${chatbotDataParsed.paciente.obra_social_nombre || ""}`
+Paciente_Nombres: ${paciente.nombres || ""}
+Paciente_Apellido: ${paciente.apellido || ""}
+Paciente_DNI: ${paciente.dni || ""}
+Paciente_Telefono: ${paciente.telefono || ""}
+Paciente_Mail: ${paciente.mail || ""}
+Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`
+
+              console.log("[PROXYLISTENER] 📝 Bloque CONTEXTO_COMPLETO_TURNO generado:")
+              console.log(`[PROXYLISTENER]   Paciente_Nombres: ${paciente.nombres || ""}`)
+              console.log(`[PROXYLISTENER]   Paciente_Apellido: ${paciente.apellido || ""}`)
+              console.log(`[PROXYLISTENER]   Paciente_DNI: ${paciente.dni || ""}`)
+              console.log(`[PROXYLISTENER]   Paciente_Telefono: ${paciente.telefono || ""}`)
+              console.log(`[PROXYLISTENER]   Paciente_Mail: ${paciente.mail || "(VACÍO)"}`)
+              console.log(`[PROXYLISTENER]   Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`)
             }
 
             // Información de los turnos
             if (chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
               notificationMessage += `
+
 Cantidad_Turnos: ${chatbotDataParsed.cantidad_turnos || chatbotDataParsed.turnos.length}`
 
               chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
@@ -541,13 +583,11 @@ Cantidad_Turnos: ${chatbotDataParsed.cantidad_turnos || chatbotDataParsed.turnos
 
 Turno_${index + 1}:
   - Fecha: ${turno.fecha || ""}
-  - Fecha_Formateada: ${turno.fecha_formateada || ""}
   - Hora: ${turno.hora || ""}
-  - Hora_Formateada: ${turno.hora_formateada || ""}
   - Profesional: ${turno.profesional || ""}
   - Profesional_ID: ${turno.profesional_id || ""}
   - Sede: ${turno.sede || ""}
-  - Direccion: ${turno.direccion || ""}
+  - Dirección: ${turno.direccion || ""}
   - Agenda_ID: ${turno.agenda_id || ""}`
               })
             }
@@ -555,6 +595,7 @@ Turno_${index + 1}:
             // Información de la clínica y tipo de mensaje
             if (chatbotDataParsed.clinica) {
               notificationMessage += `
+
 Clinica: ${chatbotDataParsed.clinica}`
             }
 
@@ -565,6 +606,8 @@ Tipo_Mensaje: ${chatbotDataParsed.tipo_mensaje}`
 
             notificationMessage += `
 [/CONTEXTO_COMPLETO_TURNO]`
+          } else {
+            console.warn("[PROXYLISTENER] ⚠️ ADVERTENCIA: No se recibió Chatbot_Data en la solicitud")
           }
 
           if (Sede_Id) {
