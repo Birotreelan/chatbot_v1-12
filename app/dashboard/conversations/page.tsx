@@ -1,5 +1,3 @@
-"use client"
-
 import { ConversationsView } from "@/components/dashboard/conversations-view"
 
 export default function ConversationsPage() {
@@ -9,3 +7,5 @@ export default function ConversationsPage() {
     </div>
   )
 }
+
+export const dynamic = "force-dynamic"

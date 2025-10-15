@@ -12,7 +12,7 @@ import { getArgentinaDateTime } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
-import { saveConversationMessage, isConversationPaused } from "./conversations"
+import { saveConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 
 // Función para extraer el contenido del mensaje según su tipo
@@ -112,26 +112,6 @@ export async function handleMessage(value: WhatsAppValue) {
     }
 
     console.log(`[WHATSAPP] Configuración encontrada: ${config.displayName} (ID: ${config.id})`)
-
-    const isPaused = await isConversationPaused(config.id, userPhoneNumber)
-    if (isPaused) {
-      console.log(`[WHATSAPP] ⏸️ Conversación pausada, guardando mensaje sin procesar con OpenAI`)
-
-      await saveConversationMessage({
-        id: nanoid(),
-        role: "user",
-        content: userMessage,
-        timestamp: new Date().toISOString(),
-        phoneNumber: userPhoneNumber,
-        configId: config.id,
-        messageType: message.type,
-      })
-
-      await updateWhatsAppStats(config.id, { messagesReceived: 1 })
-
-      console.log(`[WHATSAPP] ✅ Mensaje guardado, esperando atención manual`)
-      return // Exit early, don't process with OpenAI
-    }
 
     await saveConversationMessage({
       id: nanoid(),
