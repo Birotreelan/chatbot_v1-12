@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
-import { User, Bot, Pause, Play, Send, Loader2 } from "lucide-react"
+import { User, Bot, Pause, Play, Send, Loader2, Search, X } from "lucide-react"
 
 interface Message {
   id: string
@@ -30,6 +30,7 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
   const [manualMessage, setManualMessage] = useState("")
   const [sending, setSending] = useState(false)
   const [pauseLoading, setPauseLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const isMountedRef = useRef(true)
   const isTogglingRef = useRef(false)
@@ -185,6 +186,25 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
 
+  const filteredMessages = messages.filter((message) =>
+    message.content.toLowerCase().includes(searchQuery.toLowerCase()),
+  )
+
+  function highlightText(text: string, query: string) {
+    if (!query.trim()) return text
+
+    const parts = text.split(new RegExp(`(${query})`, "gi"))
+    return parts.map((part, index) =>
+      part.toLowerCase() === query.toLowerCase() ? (
+        <mark key={index} className="bg-yellow-300 dark:bg-yellow-600 text-foreground">
+          {part}
+        </mark>
+      ) : (
+        part
+      ),
+    )
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -196,52 +216,78 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b bg-background p-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Avatar className="h-10 w-10">
-            <AvatarFallback className="bg-primary text-primary-foreground">
-              {phoneNumber ? phoneNumber.slice(-2) : "??"}
-            </AvatarFallback>
-          </Avatar>
-          <div>
-            <p className="font-semibold">{phoneNumber || "Desconocido"}</p>
-            <p className="text-xs text-muted-foreground">
-              {messages.length} mensajes
-              {isPaused && <span className="ml-2 text-orange-500 font-semibold">• Pausado</span>}
-            </p>
+      <div className="border-b bg-background p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Avatar className="h-10 w-10">
+              <AvatarFallback className="bg-primary text-primary-foreground">
+                {phoneNumber ? phoneNumber.slice(-2) : "??"}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <p className="font-semibold">{phoneNumber || "Desconocido"}</p>
+              <p className="text-xs text-muted-foreground">
+                {searchQuery
+                  ? `${filteredMessages.length} de ${messages.length} mensajes`
+                  : `${messages.length} mensajes`}
+                {isPaused && <span className="ml-2 text-orange-500 font-semibold">• Pausado</span>}
+              </p>
+            </div>
           </div>
+          <Button
+            variant={isPaused ? "default" : "outline"}
+            size="sm"
+            onClick={togglePause}
+            disabled={pauseLoading}
+            className="flex items-center gap-2"
+          >
+            {pauseLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : isPaused ? (
+              <>
+                <Play className="h-4 w-4" />
+                Reanudar
+              </>
+            ) : (
+              <>
+                <Pause className="h-4 w-4" />
+                Pausar
+              </>
+            )}
+          </Button>
         </div>
-        <Button
-          variant={isPaused ? "default" : "outline"}
-          size="sm"
-          onClick={togglePause}
-          disabled={pauseLoading}
-          className="flex items-center gap-2"
-        >
-          {pauseLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : isPaused ? (
-            <>
-              <Play className="h-4 w-4" />
-              Reanudar
-            </>
-          ) : (
-            <>
-              <Pause className="h-4 w-4" />
-              Pausar
-            </>
+
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar en los mensajes..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9 pr-9"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
           )}
-        </Button>
+        </div>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 ? (
+        {filteredMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-muted-foreground">No hay mensajes en esta conversación</p>
+            <p className="text-muted-foreground">
+              {searchQuery
+                ? "No se encontraron mensajes que coincidan con la búsqueda"
+                : "No hay mensajes en esta conversación"}
+            </p>
           </div>
         ) : (
-          messages.map((message) => (
+          filteredMessages.map((message) => (
             <div
               key={message.id}
               className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}
@@ -259,7 +305,9 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
                   message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
                 )}
               >
-                <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                <p className="text-sm whitespace-pre-wrap break-words">
+                  {searchQuery ? highlightText(message.content, searchQuery) : message.content}
+                </p>
                 <p
                   className={cn(
                     "text-xs mt-1",
