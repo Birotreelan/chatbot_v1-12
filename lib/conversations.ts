@@ -8,6 +8,9 @@ const CONVERSATION_CONTACTS_SET_PREFIX = "conversation_contacts:"
 // Duración de almacenamiento: 7 días en segundos
 const CONVERSATION_TTL = 7 * 24 * 60 * 60 // 7 días
 
+const contactsCache = new Map<string, { contacts: ConversationContact[]; timestamp: number }>()
+const CACHE_TTL = 30000 // 30 segundos de caché
+
 export interface ConversationMessage {
   id: string
   role: "user" | "assistant" | "system"
@@ -113,6 +116,8 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     await redisClient.expire(contactsSetKey, CONVERSATION_TTL)
     console.log(`[CONVERSATIONS] ✅ Número agregado al set de contactos`)
 
+    contactsCache.delete(message.configId)
+
     console.log(`[CONVERSATIONS] 🟢 ===== FIN saveConversationMessage (EXITOSO) =====`)
   } catch (error) {
     console.error("[CONVERSATIONS] 🔴 ===== ERROR en saveConversationMessage =====")
@@ -195,6 +200,11 @@ export async function getConversationMessages(configId: string, phoneNumber: str
 // Obtener todos los contactos de un cliente
 export async function getConversationContacts(configId: string): Promise<ConversationContact[]> {
   try {
+    const cached = contactsCache.get(configId)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.contacts
+    }
+
     const redisClient = getRedisClient()
     if (!redisClient) {
       console.warn("[CONVERSATIONS] Redis no disponible")
@@ -203,68 +213,44 @@ export async function getConversationContacts(configId: string): Promise<Convers
 
     const contactsSetKey = `${CONVERSATION_CONTACTS_SET_PREFIX}${configId}`
 
-    console.log(`[CONVERSATIONS] 📇 Obteniendo contactos:`)
-    console.log(`[CONVERSATIONS]   - configId: ${configId}`)
-    console.log(`[CONVERSATIONS]   - contactsSetKey: ${contactsSetKey}`)
-
     // Obtener todos los números de teléfono del set
     const phoneNumbers = await redisClient.smembers(contactsSetKey)
 
-    console.log(`[CONVERSATIONS] 📊 Números de teléfono en set:`, phoneNumbers)
-
     if (!phoneNumbers || phoneNumbers.length === 0) {
-      console.log(`[CONVERSATIONS] ⚠️ No hay contactos para configId: ${configId}`)
       return []
     }
 
-    console.log(`[CONVERSATIONS] 📊 Total de números: ${phoneNumbers.length}`)
+    const contactKeys = phoneNumbers.map((phone) => `${CONVERSATION_CONTACT_PREFIX}${configId}:${phone}`)
 
-    // Obtener la información de cada contacto
-    const contacts: ConversationContact[] = []
-    for (const phoneNumber of phoneNumbers) {
-      try {
-        const contactKey = `${CONVERSATION_CONTACT_PREFIX}${configId}:${phoneNumber}`
-        console.log(`[CONVERSATIONS] 📱 Obteniendo contacto: ${contactKey}`)
+    const contactsData = await redisClient.mget(...contactKeys)
 
-        const contactData = await redisClient.get(contactKey)
-        console.log(`[CONVERSATIONS]   - Data raw:`, contactData)
-        console.log(`[CONVERSATIONS]   - Data type:`, typeof contactData)
+    const contacts: ConversationContact[] = contactsData
+      .map((contactData, index) => {
+        if (!contactData) return null
 
-        if (!contactData) {
-          console.log(`[CONVERSATIONS]   - ⚠️ No hay datos para ${phoneNumber}`)
-          continue
+        try {
+          let contact: any
+          if (typeof contactData === "string") {
+            contact = JSON.parse(contactData)
+          } else if (typeof contactData === "object") {
+            contact = contactData
+          } else {
+            return null
+          }
+
+          return {
+            phoneNumber: contact.phoneNumber || phoneNumbers[index],
+            lastMessage: contact.lastMessage || "",
+            lastMessageAt: ensureValidTimestamp(contact.lastMessageAt),
+            messageCount: contact.messageCount || 0,
+            configId: contact.configId || configId,
+          }
+        } catch (error) {
+          console.error(`[CONVERSATIONS] Error procesando contacto:`, error)
+          return null
         }
-
-        let contact: any
-        if (typeof contactData === "string") {
-          console.log(`[CONVERSATIONS]   - Parseando string JSON`)
-          contact = JSON.parse(contactData)
-        } else if (typeof contactData === "object") {
-          console.log(`[CONVERSATIONS]   - Ya es un objeto, usando directamente`)
-          contact = contactData
-        } else {
-          console.log(`[CONVERSATIONS]   - ⚠️ Tipo de dato inesperado: ${typeof contactData}`)
-          continue
-        }
-
-        console.log(`[CONVERSATIONS]   - Data parseada:`, contact)
-
-        const processedContact = {
-          phoneNumber: contact.phoneNumber || phoneNumber,
-          lastMessage: contact.lastMessage || "",
-          lastMessageAt: ensureValidTimestamp(contact.lastMessageAt),
-          messageCount: contact.messageCount || 0,
-          configId: contact.configId || configId,
-        }
-
-        console.log(`[CONVERSATIONS]   - Contacto procesado:`, processedContact)
-        contacts.push(processedContact)
-      } catch (error) {
-        console.error(`[CONVERSATIONS] ❌ Error procesando contacto ${phoneNumber}:`, error)
-      }
-    }
-
-    console.log(`[CONVERSATIONS] ✅ Total contactos procesados: ${contacts.length}`)
+      })
+      .filter((contact): contact is ConversationContact => contact !== null)
 
     // Ordenar por fecha del último mensaje
     contacts.sort((a, b) => {
@@ -277,14 +263,15 @@ export async function getConversationContacts(configId: string): Promise<Convers
 
         return dateB - dateA
       } catch (error) {
-        console.error(`[CONVERSATIONS] ❌ Error ordenando contactos:`, error)
         return 0
       }
     })
 
+    contactsCache.set(configId, { contacts, timestamp: Date.now() })
+
     return contacts
   } catch (error) {
-    console.error("[CONVERSATIONS] ❌ Error obteniendo contactos:", error)
+    console.error("[CONVERSATIONS] Error obteniendo contactos:", error)
     return []
   }
 }
@@ -306,6 +293,6 @@ export async function updateContactMessageCount(configId: string, phoneNumber: s
       await redisClient.expire(contactKey, CONVERSATION_TTL)
     }
   } catch (error) {
-    console.error("[CONVERSATIONS] ❌ Error actualizando contador:", error)
+    console.error("[CONVERSATIONS] Error actualizando contador:", error)
   }
 }
