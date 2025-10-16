@@ -23,6 +23,8 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
 
   useEffect(() => {
     loadMessages()
@@ -31,8 +33,25 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
   }, [configId, phoneNumber])
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+    if (shouldAutoScroll) {
+      scrollToBottom()
+    }
+  }, [messages, shouldAutoScroll])
+
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current
+    if (!scrollContainer) return
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainer
+      // Consider "at bottom" if within 100px of the bottom
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100
+      setShouldAutoScroll(isNearBottom)
+    }
+
+    scrollContainer.addEventListener("scroll", handleScroll)
+    return () => scrollContainer.removeEventListener("scroll", handleScroll)
+  }, [])
 
   async function loadMessages() {
     try {
@@ -74,7 +93,7 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-muted-foreground">No hay mensajes en esta conversación</p>
