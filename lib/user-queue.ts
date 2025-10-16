@@ -136,8 +136,17 @@ async function processUserQueue(userPhoneNumber: string) {
           continue
         }
 
-        if (!queuedMessage.userMessage || !queuedMessage.phoneNumberId || !queuedMessage.config) {
-          logger.warn("USER-QUEUE", "Estructura inválida")
+        const unsupportedTypes = ["reaction", "sticker", "audio"]
+        const isUnsupportedType = unsupportedTypes.includes(queuedMessage.messageType || "")
+
+        if (!queuedMessage.phoneNumberId || !queuedMessage.config) {
+          logger.warn("USER-QUEUE", "Estructura inválida: falta phoneNumberId o config")
+          continue
+        }
+
+        // Allow empty userMessage only for unsupported types
+        if (!queuedMessage.userMessage && !isUnsupportedType) {
+          logger.warn("USER-QUEUE", "Estructura inválida: mensaje vacío y tipo no soportado")
           continue
         }
 

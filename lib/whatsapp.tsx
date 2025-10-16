@@ -433,7 +433,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         }
         // </CHANGE>
 
-        // Enviar mensaje de error
         await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, errorMessage)
 
         // Actualizar estadísticas - error
@@ -471,6 +470,55 @@ export async function processIndividualMessage(
   )
 
   try {
+    const unsupportedMessageTypes: Record<string, string> = {
+      sticker:
+        "Lo siento, soy un asistente virtual y no tengo la capacidad de entender stickers o imagenes. Responda escribiendo texto, por favor.",
+      reaction:
+        "Lo siento, soy un asistente virtual y no tengo la capacidad de procesar reacciones o iconos en mensajes. Responda escribiendo texto, por favor.",
+      audio:
+        "Lo siento, soy un asistente virtual y no tengo la capacidad de entender mensajes de audio. Responda escribiendo texto, por favor.",
+    }
+
+    if (messageType && unsupportedMessageTypes[messageType]) {
+      const errorMessage = unsupportedMessageTypes[messageType]
+
+      console.log(`[WHATSAPP] Tipo de mensaje no soportado detectado: ${messageType}`)
+      console.log(`[WHATSAPP] Enviando respuesta automática sin OpenAI`)
+
+      // Save the automatic response to conversation
+      try {
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: errorMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: "error",
+        })
+        console.log(`[WHATSAPP] 💾 Respuesta automática guardada en conversación`)
+      } catch (saveError) {
+        console.error(`[WHATSAPP] ❌ Error guardando respuesta automática:`, saveError)
+      }
+
+      // Send direct message to user
+      try {
+        await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
+
+        // Update stats - message processed
+        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+
+        console.log(`[WHATSAPP] ✅ Respuesta automática enviada para tipo: ${messageType}`)
+        return // Exit early, don't process with OpenAI
+      } catch (sendError) {
+        console.error(`[WHATSAPP] ❌ Error al enviar respuesta automática:`, sendError)
+        // Update stats - error
+        await updateWhatsAppStats(config.id, { errors: 1 })
+        return
+      }
+    }
+    // </CHANGE>
+
     // Obtener o crear un thread para este usuario
     let threadResult
     try {
@@ -497,7 +545,6 @@ export async function processIndividualMessage(
       } catch (saveError) {
         console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
       }
-      // </CHANGE>
 
       await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
       // Actualizar estadísticas - error
@@ -616,7 +663,6 @@ ${userMessage}`
           } catch (saveError) {
             console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
           }
-          // </CHANGE>
 
           // Enviar mensaje de error al usuario
           await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
@@ -642,7 +688,6 @@ ${userMessage}`
         } catch (saveError) {
           console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
         }
-        // </CHANGE>
 
         // Enviar mensaje de error al usuario
         await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
@@ -670,7 +715,6 @@ ${userMessage}`
     } catch (saveError) {
       console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
     }
-    // </CHANGE>
 
     // Enviar mensaje de error al usuario
     try {
