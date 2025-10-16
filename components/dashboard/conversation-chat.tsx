@@ -24,19 +24,25 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
   const [loading, setLoading] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
+  const isUserScrollingRef = useRef(false)
+  const previousMessageCountRef = useRef(0)
+  const scrollTimeoutRef = useRef<NodeJS.Timeout>()
 
   useEffect(() => {
     loadMessages()
-    const interval = setInterval(loadMessages, 5000) // Actualizar cada 5 segundos
+    const interval = setInterval(loadMessages, 5000)
     return () => clearInterval(interval)
   }, [configId, phoneNumber])
 
   useEffect(() => {
-    if (shouldAutoScroll) {
+    const hasNewMessages = messages.length > previousMessageCountRef.current
+
+    if (hasNewMessages && !isUserScrollingRef.current) {
       scrollToBottom()
     }
-  }, [messages, shouldAutoScroll])
+
+    previousMessageCountRef.current = messages.length
+  }, [messages])
 
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current
@@ -44,13 +50,38 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = scrollContainer
-      // Consider "at bottom" if within 100px of the bottom
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100
-      setShouldAutoScroll(isNearBottom)
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
+
+      // Clear existing timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+
+      // If user is at bottom, allow auto-scroll
+      if (isAtBottom) {
+        isUserScrollingRef.current = false
+      } else {
+        // User has scrolled up
+        isUserScrollingRef.current = true
+
+        // After 3 seconds of no scrolling, if they're at bottom, re-enable auto-scroll
+        scrollTimeoutRef.current = setTimeout(() => {
+          const { scrollTop, scrollHeight, clientHeight } = scrollContainer
+          const isStillAtBottom = scrollHeight - scrollTop - clientHeight < 50
+          if (isStillAtBottom) {
+            isUserScrollingRef.current = false
+          }
+        }, 3000)
+      }
     }
 
     scrollContainer.addEventListener("scroll", handleScroll)
-    return () => scrollContainer.removeEventListener("scroll", handleScroll)
+    return () => {
+      scrollContainer.removeEventListener("scroll", handleScroll)
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+    }
   }, [])
 
   async function loadMessages() {
