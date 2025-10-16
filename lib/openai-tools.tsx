@@ -779,6 +779,14 @@ const MAX_RETRIES = Number.parseInt(process.env.MAX_RETRIES || "3", 10)
 // Tiempo de espera entre reintentos (en milisegundos)
 const RETRY_DELAY = Number.parseInt(process.env.RETRY_DELAY || "2000", 10)
 
+function calculateBackoffDelay(retryCount: number, baseDelay: number = RETRY_DELAY): number {
+  // Exponential backoff: 2s, 4s, 8s, 16s...
+  const exponentialDelay = baseDelay * Math.pow(2, retryCount)
+  // Add jitter (±20%) to prevent thundering herd
+  const jitter = exponentialDelay * 0.2 * (Math.random() - 0.5)
+  return Math.floor(exponentialDelay + jitter)
+}
+
 // Función para obtener una instancia de OpenAI
 function getOpenAIClient() {
   return new OpenAI({
@@ -983,49 +991,105 @@ async function processRunWithCorrectFlow(
   } catch (error) {
     console.error(`[OPENAI] ❌ Error en processRunWithCorrectFlow:`, error)
 
-    if (error.message && error.message.includes("Timeout esperando run")) {
-      console.log(`[OPENAI] ⏰ Timeout detectado, enviando mensaje de error al usuario`)
+    const isTimeout = error.message && error.message.includes("Timeout esperando run")
+    const isRateLimitError = error.message && error.message.includes("Please try again in")
 
-      try {
-        await sendWhatsAppMessage(
-          phoneNumberId,
-          accessToken,
-          userPhoneNumber,
-          "Lo siento, tu consulta está tomando más tiempo del esperado. Por favor, intenta nuevamente en unos momentos.",
-        )
-        console.log(`[OPENAI] 📱 Mensaje de timeout enviado`)
-      } catch (sendError) {
-        console.error(`[OPENAI] ❌ Error enviando mensaje de timeout:`, sendError)
-      }
-
-      await logError("openai_timeout", error instanceof Error ? error : new Error(String(error)))
-      return { success: false, error: "timeout" }
+    // Log error type for debugging
+    if (isTimeout) {
+      console.log(`[OPENAI] ⏰ Timeout detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
+    } else if (isRateLimitError) {
+      console.log(`[OPENAI] 🚦 Rate limit detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
     }
 
+    // Check if we should retry
     if (retryCount < MAX_RETRIES) {
       let waitTime = RETRY_DELAY
-      if (error.message && error.message.includes("Please try again in")) {
+
+      // Calculate wait time based on error type
+      if (isRateLimitError) {
+        // Extract suggested delay from OpenAI's error message
         const match = error.message.match(/Please try again in (\d+\.?\d*)s/)
         if (match) {
           waitTime = Math.ceil(Number.parseFloat(match[1]) * 1000) + 1000
+          console.log(`[OPENAI] 🚦 Usando delay sugerido por OpenAI: ${waitTime}ms`)
         }
+      } else if (isTimeout) {
+        // Use exponential backoff for timeouts
+        waitTime = calculateBackoffDelay(retryCount)
+        console.log(`[OPENAI] ⏰ Usando backoff exponencial: ${waitTime}ms`)
+      } else {
+        // Use exponential backoff for other errors too
+        waitTime = calculateBackoffDelay(retryCount)
+        console.log(`[OPENAI] 🔄 Usando backoff exponencial: ${waitTime}ms`)
       }
-      console.log(`[OPENAI] 🔄 Reintentando en ${waitTime}ms...`)
+
+      console.log(`[OPENAI] 🔄 Reintentando en ${waitTime}ms (intento ${retryCount + 1}/${MAX_RETRIES})...`)
       await wait(waitTime)
-      return processRunWithCorrectFlow(
-        openai,
-        threadId,
-        runId,
-        accessToken,
-        phoneNumberId,
-        userPhoneNumber,
-        clienteId,
-        retryCount + 1,
-      )
+
+      try {
+        console.log(`[OPENAI] 🔄 Creando nuevo run para reintento...`)
+        const newRun = await openai.beta.threads.runs.create(threadId, {
+          assistant_id: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
+        })
+        console.log(`[OPENAI] 🔄 Nuevo run creado: ${newRun.id}`)
+
+        return processRunWithCorrectFlow(
+          openai,
+          threadId,
+          newRun.id, // Use new run ID
+          accessToken,
+          phoneNumberId,
+          userPhoneNumber,
+          clienteId,
+          retryCount + 1,
+        )
+      } catch (retryError) {
+        console.error(`[OPENAI] ❌ Error creando nuevo run para reintento:`, retryError)
+        // Fall through to final error handling
+      }
     }
 
-    await logError("openai_run", error instanceof Error ? error : new Error(String(error)))
-    throw error
+    console.log(`[OPENAI] ❌ Todos los reintentos agotados (${retryCount + 1}/${MAX_RETRIES + 1})`)
+
+    try {
+      let errorMessage =
+        "Lo siento, no pude procesar tu consulta en este momento. Por favor, intenta nuevamente en unos momentos."
+
+      if (isTimeout) {
+        errorMessage =
+          "Lo siento, tu consulta está tomando más tiempo del esperado. Por favor, intenta nuevamente en unos momentos."
+      }
+
+      // Save error message to conversation database
+      const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+      if (config) {
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: errorMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: "error",
+        })
+        console.log(`[OPENAI] 💾 Mensaje de error guardado en conversación`)
+      }
+
+      await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, errorMessage)
+      console.log(`[OPENAI] 📱 Mensaje de error enviado al usuario`)
+    } catch (sendError) {
+      console.error(`[OPENAI] ❌ Error enviando mensaje de error:`, sendError)
+    }
+    // </CHANGE>
+
+    // Log error for monitoring
+    if (isTimeout) {
+      await logError("openai_timeout", error instanceof Error ? error : new Error(String(error)))
+    } else {
+      await logError("openai_run", error instanceof Error ? error : new Error(String(error)))
+    }
+
+    return { success: false, error: isTimeout ? "timeout" : "error" }
   }
 }
 
