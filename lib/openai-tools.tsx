@@ -879,19 +879,35 @@ async function processRunWithCorrectFlow(
     if (completedRun.status === "completed") {
       const messages = await openai.beta.threads.messages.list(threadId, {
         order: "desc",
-        limit: 1,
+        limit: 10, // Aumentar límite para capturar múltiples mensajes
+        run_id: runId, // ⚠️ CRÍTICO: Filtrar solo mensajes de ESTE run específico
       })
 
-      if (messages.data.length === 0 || messages.data[0].role !== "assistant") {
+      console.log(`[OPENAI] 📨 Total de mensajes encontrados para run ${runId}: ${messages.data.length}`)
+
+      // Filtrar solo mensajes del asistente de este run
+      const assistantMessages = messages.data.filter((msg) => msg.role === "assistant" && msg.run_id === runId)
+
+      console.log(`[OPENAI] 🤖 Mensajes del asistente en este run: ${assistantMessages.length}`)
+
+      if (assistantMessages.length === 0) {
+        console.error(`[OPENAI] ❌ No se encontraron mensajes del asistente para run ${runId}`)
         throw new Error("No se encontraron mensajes del asistente")
       }
 
+      // Concatenar TODOS los mensajes del asistente de este run (en orden correcto)
       let messageContent = ""
-      for (const content of messages.data[0].content) {
-        if (content.type === "text") {
-          messageContent += content.text.value
+      for (const message of assistantMessages.reverse()) {
+        // Reverse para orden cronológico
+        for (const content of message.content) {
+          if (content.type === "text") {
+            messageContent += content.text.value + "\n"
+          }
         }
       }
+
+      // Limpiar espacios en blanco extra
+      messageContent = messageContent.trim()
 
       console.log(
         `[OPENAI] 💬 Respuesta: "${messageContent.substring(0, 100)}${messageContent.length > 100 ? "..." : ""}"`,
