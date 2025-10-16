@@ -6,7 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DeleteWhatsAppConfig } from "@/components/dashboard/delete-whatsapp-config"
-import { Pause, Play } from "lucide-react"
+import { Pause, Play, Activity, AlertTriangle, XCircle } from "lucide-react"
+// </CHANGE>
 import { useState } from "react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -17,6 +18,8 @@ interface WhatsAppConfigListProps {
 export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigListProps) {
   const [configs, setConfigs] = useState(initialConfigs)
   const [loadingPause, setLoadingPause] = useState<string | null>(null)
+  const [loadingHealth, setLoadingHealth] = useState<string | null>(null)
+  // </CHANGE>
   const { toast } = useToast()
 
   const handleTogglePause = async (configId: string) => {
@@ -50,6 +53,92 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
     }
   }
 
+  const handleCheckHealth = async (configId: string) => {
+    setLoadingHealth(configId)
+    try {
+      const response = await fetch("/api/dashboard/configs/check-health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ configId }),
+      })
+
+      if (!response.ok) throw new Error("Error al verificar health status")
+
+      const data = await response.json()
+
+      // Update local state
+      setConfigs((prev) =>
+        prev.map((c) =>
+          c.id === configId
+            ? {
+                ...c,
+                healthStatus: data.healthStatus,
+                lastHealthCheck: new Date().toISOString(),
+                healthCheckError: data.errors && data.errors.length > 0 ? JSON.stringify(data.errors) : undefined,
+              }
+            : c,
+        ),
+      )
+
+      toast({
+        title: "Health Status Actualizado",
+        description: `Estado: ${data.healthStatus}`,
+        variant: data.healthStatus === "BLOCKED" ? "destructive" : "default",
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudo verificar el health status",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingHealth(null)
+    }
+  }
+
+  const getHealthStatusBadge = (config: WhatsAppConfig) => {
+    if (!config.healthStatus) {
+      return (
+        <Badge variant="outline" className="gap-1">
+          <Activity className="h-3 w-3" />
+          No verificado
+        </Badge>
+      )
+    }
+
+    switch (config.healthStatus) {
+      case "AVAILABLE":
+        return (
+          <Badge variant="success" className="gap-1">
+            <Activity className="h-3 w-3" />
+            Disponible
+          </Badge>
+        )
+      case "LIMITED":
+        return (
+          <Badge variant="secondary" className="gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            Limitado
+          </Badge>
+        )
+      case "BLOCKED":
+        return (
+          <Badge variant="destructive" className="gap-1">
+            <XCircle className="h-3 w-3" />
+            Bloqueado
+          </Badge>
+        )
+      default:
+        return (
+          <Badge variant="outline" className="gap-1">
+            <Activity className="h-3 w-3" />
+            Desconocido
+          </Badge>
+        )
+    }
+  }
+  // </CHANGE>
+
   return (
     <div className="rounded-md border">
       <Table>
@@ -59,6 +148,8 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
             <TableHead>ID de Número</TableHead>
             <TableHead>ID de Asistente</TableHead>
             <TableHead>Estado</TableHead>
+            <TableHead>Health Status</TableHead>
+            {/* </CHANGE> */}
             <TableHead>Mensajes</TableHead>
             <TableHead>Acciones</TableHead>
           </TableRow>
@@ -82,12 +173,38 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
                 </div>
               </TableCell>
               <TableCell>
+                <div className="flex flex-col gap-2">
+                  {getHealthStatusBadge(config)}
+                  {config.lastHealthCheck && (
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(config.lastHealthCheck).toLocaleString()}
+                    </span>
+                  )}
+                  {config.healthCheckError && (
+                    <span className="text-xs text-red-600" title={config.healthCheckError}>
+                      Ver error
+                    </span>
+                  )}
+                </div>
+              </TableCell>
+              {/* </CHANGE> */}
+              <TableCell>
                 {config.stats?.messagesReceived || 0} recibidos
                 <br />
                 {config.stats?.messagesProcessed || 0} procesados
               </TableCell>
               <TableCell>
                 <div className="flex space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleCheckHealth(config.id)}
+                    disabled={loadingHealth === config.id}
+                    title="Verificar Health Status"
+                  >
+                    <Activity className="h-4 w-4" />
+                  </Button>
+                  {/* </CHANGE> */}
                   <Button
                     variant={config.paused ? "default" : "outline"}
                     size="sm"

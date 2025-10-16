@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppConfigByPhoneId, getAllWhatsAppConfigs, getThreadForUser } from "@/lib/db"
-import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp-api"
+import { sendWhatsAppMessage, sendWhatsAppTemplate, checkWhatsAppHealth } from "@/lib/whatsapp-api"
 import { safelyAddMessageToThread } from "@/lib/thread-manager"
 import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
@@ -302,7 +302,7 @@ function extractTemplateContent(templateBody: any, chatbotData?: any): string {
               } else {
                 // Single appointment format
                 const turno = turnos[0]
-                content += `Hola! Nos comunicamos desde ${clinica} para recordarle que tiene un turno el día ${turno.fecha || fecha}, a las ${turno.hora || "hora a confirmar"} horas con ${turno.profesional || "el profesional"} en ${turno.direccion || turno.sede || "nuestra sede"}.\n\n`
+                content += `Hola! Nos comunicamos desde ${clinica} para recordarle que tiene un turno el día ${turno.fecha || fecha}, a las ${turno.hora || "a confirmar"} horas con ${turno.profesional || "el profesional"} en ${turno.direccion || turno.sede || "nuestra sede"}.\n\n`
                 content += `Por favor, confirme o cancele su asistencia.`
               }
             } else if (templateName.includes("confirmacion") || templateName.includes("recordatorio")) {
@@ -399,6 +399,44 @@ async function handleTemplateSend(data: any) {
         { success: false, error: "La configuración de WhatsApp no está activa" },
         { status: 400 },
       )
+    }
+
+    try {
+      console.log("[PROXYLISTENER] Verificando health status antes de enviar mensaje...")
+      const healthData = await checkWhatsAppHealth(config.phoneNumberId, config.accessToken)
+
+      console.log("[PROXYLISTENER] Health status:", healthData.status)
+
+      if (healthData.status === "BLOCKED") {
+        const errorMessage =
+          healthData.errors && healthData.errors.length > 0
+            ? healthData.errors[0].errorDescription
+            : "La cuenta de WhatsApp está bloqueada"
+
+        console.error("[PROXYLISTENER] ❌ Cuenta bloqueada. No se puede enviar mensaje.")
+        console.error("[PROXYLISTENER] Errores:", JSON.stringify(healthData.errors, null, 2))
+
+        return NextResponse.json(
+          {
+            success: false,
+            error: "ACCOUNT_BLOCKED",
+            message: errorMessage,
+            healthStatus: healthData.status,
+            errors: healthData.errors,
+            possibleSolution:
+              healthData.errors && healthData.errors.length > 0 ? healthData.errors[0].possibleSolution : undefined,
+          },
+          { status: 403 },
+        )
+      }
+
+      if (healthData.status === "LIMITED") {
+        console.warn("[PROXYLISTENER] ⚠️ Cuenta con capacidad limitada")
+      }
+    } catch (healthError) {
+      console.error("[PROXYLISTENER] Error al verificar health status:", healthError)
+      // Continue with message sending even if health check fails
+      // This prevents blocking legitimate messages due to API issues
     }
 
     // Determinar número de teléfono destinatario

@@ -16,6 +16,10 @@ export interface WhatsAppConfig {
   proxy?: string
   escalationPhoneNumber?: string
 
+  healthStatus?: "AVAILABLE" | "LIMITED" | "BLOCKED"
+  lastHealthCheck?: string
+  healthCheckError?: string
+
   // Widget configuration
   widgetEnabled?: boolean
   widgetTitle?: string

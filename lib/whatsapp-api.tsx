@@ -1,5 +1,52 @@
 import { logger } from "./logger"
 
+export async function checkWhatsAppHealth(
+  phoneNumberId: string,
+  accessToken: string,
+): Promise<{
+  status: "AVAILABLE" | "LIMITED" | "BLOCKED"
+  canSendMessage: "AVAILABLE" | "RATE_LIMITED" | "FLAGGED" | "RESTRICTED" | "UNAVAILABLE"
+  errors?: Array<{ errorCode: number; errorDescription: string; possibleSolution: string }>
+}> {
+  const url = `https://graph.facebook.com/v18.0/${phoneNumberId}?fields=health_status`
+
+  logger.info("WHATSAPP-API", `Verificando health status para ${phoneNumberId}`)
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      logger.error("WHATSAPP-API", "Error verificando health status", errorData)
+      throw new Error(`Error al verificar health status: ${JSON.stringify(errorData)}`)
+    }
+
+    const data = await response.json()
+    logger.info("WHATSAPP-API", `Health status obtenido: ${JSON.stringify(data)}`)
+
+    // Extract health status from response
+    const healthStatus = data.health_status || {}
+    const status = healthStatus.status || "AVAILABLE"
+    const canSendMessage = healthStatus.can_send_message || "AVAILABLE"
+    const errors = healthStatus.errors || []
+
+    return {
+      status,
+      canSendMessage,
+      errors,
+    }
+  } catch (error) {
+    logger.error("WHATSAPP-API", "Error en checkWhatsAppHealth", error)
+    throw error
+  }
+}
+// </CHANGE>
+
 export async function sendWhatsAppMessage(
   phoneNumberId: string,
   accessToken: string,
