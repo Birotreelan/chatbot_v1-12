@@ -73,7 +73,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
         ...config,
       }))
     }
-  }, [config])
+  }, [config]) // Updated to use the entire config object as dependency
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {}
@@ -96,10 +96,6 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
 
     if (!formData.cliente_id?.trim()) {
       newErrors.cliente_id = "El Cliente ID es requerido"
-    }
-
-    if (!formData.escalationPhoneNumber?.trim()) {
-      newErrors.escalationPhoneNumber = "El Número de Derivación es requerido"
     }
 
     // Validar colores hex

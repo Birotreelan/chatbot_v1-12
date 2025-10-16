@@ -465,7 +465,7 @@ Nombre: ${config.displayName}
 FechaHora: ${fechaHora}
 PrimerMensaje: ${threadResult.isNewThread}
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
 [/SISTEMA]
 
 ${userMessage}`
@@ -478,7 +478,7 @@ FechaHora: ${fechaHora}
 PrimerMensaje: true
 ThreadReseteado: true
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
 [/SISTEMA]
 
 ${userMessage}`
@@ -539,7 +539,7 @@ Nombre: ${config.displayName}
 FechaHora: ${fechaHora}
 PrimerMensaje: true
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
 [/SISTEMA]
 
 ${userMessage}`
