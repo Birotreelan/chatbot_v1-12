@@ -2,10 +2,13 @@
 
 import { useState, useEffect, useRef } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
-import { User, Bot } from "lucide-react"
+import { User, Bot, Pause, Play, Send, Loader2 } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface Message {
   id: string
@@ -22,6 +25,10 @@ interface ConversationChatProps {
 export function ConversationChat({ configId, phoneNumber }: ConversationChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
+  const [isPaused, setIsPaused] = useState(false)
+  const [manualMessage, setManualMessage] = useState("")
+  const [sending, setSending] = useState(false)
+  const [toggling, setToggling] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isUserScrollingRef = useRef(false)
@@ -30,6 +37,7 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
 
   useEffect(() => {
     loadMessages()
+    loadPauseState()
     const interval = setInterval(loadMessages, 5000)
     return () => clearInterval(interval)
   }, [configId, phoneNumber])
@@ -52,19 +60,15 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
       const { scrollTop, scrollHeight, clientHeight } = scrollContainer
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
 
-      // Clear existing timeout
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current)
       }
 
-      // If user is at bottom, allow auto-scroll
       if (isAtBottom) {
         isUserScrollingRef.current = false
       } else {
-        // User has scrolled up
         isUserScrollingRef.current = true
 
-        // After 3 seconds of no scrolling, if they're at bottom, re-enable auto-scroll
         scrollTimeoutRef.current = setTimeout(() => {
           const { scrollTop, scrollHeight, clientHeight } = scrollContainer
           const isStillAtBottom = scrollHeight - scrollTop - clientHeight < 50
@@ -96,6 +100,67 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
     }
   }
 
+  async function loadPauseState() {
+    try {
+      const response = await fetch(`/api/dashboard/configs/${configId}`)
+      if (response.ok) {
+        const config = await response.json()
+        setIsPaused(config.paused || false)
+      }
+    } catch (error) {
+      console.error("Error cargando estado de pausa:", error)
+    }
+  }
+
+  async function togglePause() {
+    try {
+      setToggling(true)
+      const response = await fetch("/api/dashboard/configs/toggle-pause", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ configId }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setIsPaused(data.paused)
+      }
+    } catch (error) {
+      console.error("Error cambiando estado de pausa:", error)
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  async function sendManualMessage() {
+    if (!manualMessage.trim() || sending) return
+
+    try {
+      setSending(true)
+      const response = await fetch("/api/dashboard/send-manual-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          configId,
+          phoneNumber,
+          message: manualMessage.trim(),
+        }),
+      })
+
+      if (response.ok) {
+        setManualMessage("")
+        await loadMessages()
+      } else {
+        alert("Error al enviar mensaje")
+      }
+    } catch (error) {
+      console.error("Error enviando mensaje manual:", error)
+      alert("Error al enviar mensaje")
+    } finally {
+      setSending(false)
+    }
+  }
+
   function scrollToBottom() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
@@ -111,17 +176,38 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b bg-background p-4 flex items-center gap-3">
-        <Avatar className="h-10 w-10">
-          <AvatarFallback className="bg-primary text-primary-foreground">
-            {phoneNumber ? phoneNumber.slice(-2) : "??"}
-          </AvatarFallback>
-        </Avatar>
-        <div>
-          <p className="font-semibold">{phoneNumber || "Desconocido"}</p>
-          <p className="text-xs text-muted-foreground">{messages.length} mensajes</p>
+      <div className="border-b bg-background p-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Avatar className="h-10 w-10">
+            <AvatarFallback className="bg-primary text-primary-foreground">
+              {phoneNumber ? phoneNumber.slice(-2) : "??"}
+            </AvatarFallback>
+          </Avatar>
+          <div>
+            <p className="font-semibold">{phoneNumber || "Desconocido"}</p>
+            <p className="text-xs text-muted-foreground">{messages.length} mensajes</p>
+          </div>
         </div>
+        <Button onClick={togglePause} disabled={toggling} variant={isPaused ? "default" : "outline"} size="sm">
+          {toggling ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : isPaused ? (
+            <Play className="h-4 w-4 mr-2" />
+          ) : (
+            <Pause className="h-4 w-4 mr-2" />
+          )}
+          {isPaused ? "Reanudar IA" : "Pausar IA"}
+        </Button>
       </div>
+
+      {isPaused && (
+        <Alert className="m-4 mb-0 border-orange-500 bg-orange-50 dark:bg-orange-950">
+          <AlertDescription className="text-sm">
+            <strong>IA Pausada:</strong> Los mensajes del usuario no serán procesados automáticamente. Puedes enviar
+            respuestas manuales.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Messages */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -181,6 +267,35 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {isPaused && (
+        <div className="border-t bg-background p-4">
+          <div className="flex gap-2">
+            <Textarea
+              value={manualMessage}
+              onChange={(e) => setManualMessage(e.target.value)}
+              placeholder="Escribe un mensaje manual..."
+              className="resize-none"
+              rows={2}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  sendManualMessage()
+                }
+              }}
+            />
+            <Button
+              onClick={sendManualMessage}
+              disabled={!manualMessage.trim() || sending}
+              size="icon"
+              className="h-auto"
+            >
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">Presiona Enter para enviar, Shift+Enter para nueva línea</p>
+        </div>
+      )}
     </div>
   )
 }
