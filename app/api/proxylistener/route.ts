@@ -256,7 +256,7 @@ function extractAppointmentInfo(templateBody: any): any {
 }
 
 // Función para extraer contenido legible de la plantilla
-function extractTemplateContent(templateBody: any): string {
+function extractTemplateContent(templateBody: any, chatbotData?: any): string {
   try {
     const templateData = typeof templateBody === "string" ? JSON.parse(templateBody) : templateBody
 
@@ -267,6 +267,16 @@ function extractTemplateContent(templateBody: any): string {
     const templateName = templateData.template.name || "plantilla_desconocida"
     let content = `Plantilla: ${templateName}\n\n`
 
+    // Parse chatbot data if available
+    let chatbotDataParsed = null
+    if (chatbotData) {
+      try {
+        chatbotDataParsed = typeof chatbotData === "string" ? JSON.parse(chatbotData) : chatbotData
+      } catch (e) {
+        console.error("[PROXYLISTENER] Error parsing chatbot data:", e)
+      }
+    }
+
     // Extract parameters from body component
     if (templateData.template.components) {
       for (const component of templateData.template.components) {
@@ -274,9 +284,29 @@ function extractTemplateContent(templateBody: any): string {
           const params = component.parameters.filter((p: any) => p.type === "text" && p.text).map((p: any) => p.text)
 
           if (params.length > 0) {
-            // Build a readable message based on common template patterns
-            if (templateName.includes("confirmacion") || templateName.includes("recordatorio")) {
-              // Appointment reminder format
+            // Check if we have chatbot data with multiple appointments
+            if (chatbotDataParsed && chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
+              const turnos = chatbotDataParsed.turnos
+              const clinica = params[0] || chatbotDataParsed.clinica || "la clínica"
+              const fecha = turnos[0]?.fecha || params[1] || "próximamente"
+
+              if (turnos.length > 1) {
+                // Multiple appointments format
+                content += `Hola! Nos comunicamos desde ${clinica} para recordarle que tiene los siguientes turnos el día ${fecha}:\n\n`
+
+                turnos.forEach((turno: any) => {
+                  content += `  ●   ${turno.hora || "hora a confirmar"} horas con ${turno.profesional || "el profesional"}  en ${turno.direccion || turno.sede || "nuestra sede"}.\n`
+                })
+
+                content += `\nPor favor, confirme o cancele su asistencia.\nMuchas gracias.`
+              } else {
+                // Single appointment format
+                const turno = turnos[0]
+                content += `Hola! Nos comunicamos desde ${clinica} para recordarle que tiene un turno el día ${turno.fecha || fecha}, a las ${turno.hora || "hora a confirmar"} horas con ${turno.profesional || "el profesional"} en ${turno.direccion || turno.sede || "nuestra sede"}.\n\n`
+                content += `Por favor, confirme o cancele su asistencia.`
+              }
+            } else if (templateName.includes("confirmacion") || templateName.includes("recordatorio")) {
+              // Fallback to parameter-based extraction for single appointment
               const [clinica, fecha, hora, profesional, lugar] = params
               content += `Hola! Nos comunicamos desde ${clinica || "la clínica"} para recordarle que tiene un turno el día ${fecha || "próximamente"}, a las ${hora || "a confirmar"} horas con ${profesional || "el profesional"} en ${lugar || "nuestra sede"}.\n\n`
               content += `Por favor, confirme o cancele su asistencia.`
@@ -422,7 +452,7 @@ async function handleTemplateSend(data: any) {
         config.wabaId,
       )
 
-      const templateContent = extractTemplateContent(Body)
+      const templateContent = extractTemplateContent(Body, Chatbot_Data)
       await saveConversationMessage({
         id: nanoid(),
         role: "assistant",
