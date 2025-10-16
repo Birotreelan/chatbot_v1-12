@@ -17,13 +17,22 @@ const openai = new OpenAI({
 })
 
 // Función para crear el bloque SISTEMA con datos de sede
-async function createSystemBlock(clinicName: string, clienteId?: string, sedeId?: string): Promise<string> {
+async function createSystemBlock(
+  clinicName: string,
+  clienteId?: string,
+  sedeId?: string,
+  escalationPhone?: string,
+): Promise<string> {
   const fechaHora = getArgentinaDateTime()
 
   let systemBlock = `[SISTEMA]
 Nombre: ${clinicName}
 FechaHora: ${fechaHora}
 CelularPaciente: No disponible (consulta web)`
+
+  if (escalationPhone) {
+    systemBlock += `\nNumeroDerivacion: ${escalationPhone}`
+  }
 
   // Si tenemos clienteId y sedeId, obtener datos de sede
   if (clienteId && sedeId) {
@@ -82,7 +91,12 @@ export async function processWebChatMessage({
     const effectiveSedeId = sedeId || config.sede_id
     console.log(`[WEB-CHAT] Sede ID efectivo:`, effectiveSedeId, sedeId ? "(del request)" : "(del config)")
 
-    const systemBlock = await createSystemBlock(config.displayName, config.cliente_id, effectiveSedeId)
+    const systemBlock = await createSystemBlock(
+      config.displayName,
+      config.cliente_id,
+      effectiveSedeId,
+      config.escalationPhoneNumber,
+    )
 
     console.log(`[WEB-CHAT] 📋 Bloque SISTEMA creado:`)
     console.log(systemBlock)

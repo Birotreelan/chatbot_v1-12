@@ -14,6 +14,7 @@ export interface WhatsAppConfig {
   webhookUrl?: string
   cliente_id?: string
   proxy?: string
+  escalationPhoneNumber?: string
 
   // Widget configuration
   widgetEnabled?: boolean

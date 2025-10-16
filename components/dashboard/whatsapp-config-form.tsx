@@ -38,6 +38,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     webhookUrl: "",
     cliente_id: "",
     proxy: "",
+    escalationPhoneNumber: "",
     // Widget settings
     widgetEnabled: true,
     widgetTitle: "Asistente Virtual",
@@ -67,7 +68,10 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
 
   useEffect(() => {
     if (config) {
-      setFormData({ ...formData, ...config })
+      setFormData((prev) => ({
+        ...prev,
+        ...config,
+      }))
     }
   }, [config])
 
@@ -92,6 +96,10 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
 
     if (!formData.cliente_id?.trim()) {
       newErrors.cliente_id = "El Cliente ID es requerido"
+    }
+
+    if (!formData.escalationPhoneNumber?.trim()) {
+      newErrors.escalationPhoneNumber = "El Número de Derivación es requerido"
     }
 
     // Validar colores hex
@@ -188,6 +196,19 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                     ID único del cliente para identificar la configuración
                   </p>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="escalationPhoneNumber">Número de Derivación</Label>
+                <Input
+                  id="escalationPhoneNumber"
+                  value={formData.escalationPhoneNumber || ""}
+                  onChange={(e) => updateFormData("escalationPhoneNumber", e.target.value)}
+                  placeholder="+54 9 11 1234-5678"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Número de teléfono para derivar cuando el chatbot no pueda responder
+                </p>
               </div>
 
               <div className="flex items-center space-x-2">
