@@ -6,6 +6,7 @@ export interface WhatsAppConfig {
   whatsappAssistantId: string
   widgetAssistantId: string
   active: boolean
+  paused?: boolean
   createdAt: string
   updatedAt: string
   verifyToken: string

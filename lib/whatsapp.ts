@@ -113,6 +113,12 @@ export async function handleMessage(value: WhatsAppValue) {
 
     console.log(`[WHATSAPP] Configuración encontrada: ${config.displayName} (ID: ${config.id})`)
 
+    if (config.paused) {
+      console.log(`[WHATSAPP] ⏸️ IA pausada para config ${config.id}, mensaje ignorado`)
+      await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+      return
+    }
+
     await saveConversationMessage({
       id: nanoid(),
       role: "user",
