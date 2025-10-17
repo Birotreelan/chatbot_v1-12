@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation"
 import { getConfigByClienteId } from "@/lib/db"
+import { getAppointmentStatsByClienteId } from "@/lib/appointment-stats"
 import { AppointmentStatsView } from "@/components/stats/appointment-stats-view"
 
 export default async function ClientStatsPage({
@@ -21,9 +22,11 @@ export default async function ClientStatsPage({
 
   console.log(`[STATS_PAGE] Cliente encontrado: ${config.displayName}`)
 
+  const initialStats = await getAppointmentStatsByClienteId(cliente_id)
+
   return (
     <div className="min-h-screen bg-background">
-      <AppointmentStatsView clienteId={cliente_id} clientName={config.displayName} />
+      <AppointmentStatsView clienteId={cliente_id} clientName={config.displayName} initialStats={initialStats} />
     </div>
   )
 }

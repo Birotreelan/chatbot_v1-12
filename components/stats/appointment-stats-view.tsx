@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CheckCircle2, XCircle, Calendar, Clock, TrendingUp, TrendingDown, Send } from "lucide-react"
 import type { ClientAppointmentStats } from "@/lib/types"
@@ -12,66 +11,57 @@ import { ResponseTimeChart } from "./response-time-chart"
 interface AppointmentStatsViewProps {
   clienteId: string
   clientName: string
+  initialStats: ClientAppointmentStats | null
 }
 
-export function AppointmentStatsView({ clienteId, clientName }: AppointmentStatsViewProps) {
-  const [stats, setStats] = useState<ClientAppointmentStats | null>(null)
-  const [loading, setLoading] = useState(true)
+export function AppointmentStatsView({ clienteId, clientName, initialStats }: AppointmentStatsViewProps) {
+  const [stats, setStats] = useState<ClientAppointmentStats | null>(initialStats)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetchStats() {
       try {
-        setLoading(true)
+        console.log("[v0] Actualizando estadísticas...")
         setError(null)
 
         const response = await fetch(`/api/stats/${clienteId}`)
-        const data = await response.json()
 
         if (!response.ok) {
-          throw new Error(data.error || "Error al cargar estadísticas")
+          throw new Error(`Error ${response.status}: ${response.statusText}`)
         }
 
-        if (data.success) {
+        const data = await response.json()
+
+        if (data.success && data.data) {
           setStats(data.data)
+          console.log("[v0] Estadísticas actualizadas exitosamente")
         } else {
           throw new Error(data.error || "Error desconocido")
         }
       } catch (err) {
-        console.error("Error fetching stats:", err)
+        console.error("[v0] Error fetching stats:", err)
         setError(err instanceof Error ? err.message : "Error al cargar estadísticas")
-      } finally {
-        setLoading(false)
       }
     }
-
-    fetchStats()
 
     // Actualizar cada 30 segundos
     const interval = setInterval(fetchStats, 30000)
     return () => clearInterval(interval)
   }, [clienteId])
 
-  if (loading) {
+  if (!stats) {
     return (
-      <div className="container mx-auto p-6 space-y-6">
-        <div className="space-y-2">
-          <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-4 w-96" />
+      <div className="container mx-auto p-6">
+        <div className="space-y-2 mb-6">
+          <h1 className="text-3xl font-bold tracking-tight">{clientName}</h1>
+          <p className="text-muted-foreground">Estadísticas de gestión de turnos</p>
         </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Card key={i}>
-              <CardHeader className="pb-2">
-                <Skeleton className="h-4 w-32" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-8 w-16 mb-2" />
-                <Skeleton className="h-3 w-24" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <Alert>
+          <AlertDescription>
+            No hay estadísticas disponibles aún. Las estadísticas comenzarán a aparecer cuando se envíen plantillas y
+            los usuarios respondan.
+          </AlertDescription>
+        </Alert>
       </div>
     )
   }
@@ -79,18 +69,12 @@ export function AppointmentStatsView({ clienteId, clientName }: AppointmentStats
   if (error) {
     return (
       <div className="container mx-auto p-6">
+        <div className="space-y-2 mb-6">
+          <h1 className="text-3xl font-bold tracking-tight">{clientName}</h1>
+          <p className="text-muted-foreground">Estadísticas de gestión de turnos</p>
+        </div>
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      </div>
-    )
-  }
-
-  if (!stats) {
-    return (
-      <div className="container mx-auto p-6">
-        <Alert>
-          <AlertDescription>No hay estadísticas disponibles para este cliente.</AlertDescription>
         </Alert>
       </div>
     )
