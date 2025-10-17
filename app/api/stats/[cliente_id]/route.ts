@@ -2,9 +2,9 @@ import { NextResponse } from "next/server"
 import { getAppointmentStatsByClienteId } from "@/lib/appointment-stats"
 import { getConfigByClienteId } from "@/lib/db"
 
-export async function GET(request: Request, { params }: { params: { cliente_id: string } }) {
+export async function GET(request: Request, { params }: { params: Promise<{ cliente_id: string }> }) {
   try {
-    const { cliente_id } = params
+    const { cliente_id } = await params
 
     console.log(`[STATS_API] Solicitando estadísticas para cliente_id: ${cliente_id}`)
 
