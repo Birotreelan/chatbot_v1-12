@@ -5,6 +5,7 @@ import { safelyAddMessageToThread } from "@/lib/thread-manager"
 import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "@/lib/utils"
+import { trackAppointmentEvent, trackTemplateSent, getTemplateSentTime } from "@/lib/appointment-stats"
 
 export async function POST(request: Request) {
   try {
@@ -73,6 +74,8 @@ async function handleButtonResponse(data: any) {
       )
     }
 
+    const templateSentAt = await getTemplateSentTime(config.id, userPhoneNumber)
+
     // Simular validación del estado del turno
     // En un sistema real, aquí consultarías la base de datos para verificar el estado actual del turno
     const buttonLower = buttonResponse.toLowerCase()
@@ -126,6 +129,14 @@ async function handleButtonResponse(data: any) {
       }
 
       console.log("[PROXYLISTENER] ✅ Turno confirmado por usuario:", userPhoneNumber)
+
+      await trackAppointmentEvent({
+        clienteId: config.id,
+        phoneNumber: userPhoneNumber,
+        eventType: "confirmed",
+        timestamp: new Date().toISOString(),
+        templateSentAt: templateSentAt || undefined,
+      })
     } else if (buttonLower.includes("cancelar") || buttonLower === "no") {
       responseData = {
         ...responseData,
@@ -136,6 +147,14 @@ async function handleButtonResponse(data: any) {
       }
 
       console.log("[PROXYLISTENER] ❌ Turno cancelado por usuario:", userPhoneNumber)
+
+      await trackAppointmentEvent({
+        clienteId: config.id,
+        phoneNumber: userPhoneNumber,
+        eventType: "cancelled",
+        timestamp: new Date().toISOString(),
+        templateSentAt: templateSentAt || undefined,
+      })
     } else if (buttonLower.includes("reprogramar") || buttonLower.includes("reagendar")) {
       responseData = {
         ...responseData,
@@ -147,6 +166,14 @@ async function handleButtonResponse(data: any) {
       }
 
       console.log("[PROXYLISTENER] 🔄 Reprogramación solicitada por usuario:", userPhoneNumber)
+
+      await trackAppointmentEvent({
+        clienteId: config.id,
+        phoneNumber: userPhoneNumber,
+        eventType: "rescheduled",
+        timestamp: new Date().toISOString(),
+        templateSentAt: templateSentAt || undefined,
+      })
     } else {
       // Respuesta genérica para otros botones
       responseData = {
@@ -193,7 +220,7 @@ function extractAppointmentInfo(templateBody: any): any {
     if (templateData.template && templateData.template.components) {
       for (const component of templateData.template.components) {
         if (component.type === "body" && component.parameters) {
-          // Los parámetros vienen en este orden:
+          // Los parámetros vengono en este orden:
           // [0] = Nombre de la clínica
           // [1] = Fecha
           // [2] = Hora
@@ -502,6 +529,17 @@ async function handleTemplateSend(data: any) {
       })
       console.log("[PROXYLISTENER] ✅ Mensaje de plantilla guardado en Redis")
 
+      const appointmentInfo = extractAppointmentInfo(Body)
+      await trackTemplateSent(config.id, cleanPhoneNumber, appointmentInfo)
+
+      await trackAppointmentEvent({
+        clienteId: config.id,
+        phoneNumber: cleanPhoneNumber,
+        eventType: "template_sent",
+        timestamp: new Date().toISOString(),
+        appointmentInfo,
+      })
+
       // Notificar a OpenAI sobre la plantilla enviada
       if (messageType === "template") {
         try {
@@ -519,7 +557,7 @@ async function handleTemplateSend(data: any) {
           console.log("[PROXYLISTENER] Tipo de threadId:", typeof threadResult.threadId)
 
           // Extraer información del turno desde el template
-          const appointmentInfo = extractAppointmentInfo(Body)
+          // (appointmentInfo ya fue extraído arriba)
 
           // Analizar plantilla
           const templateAnalysis = {

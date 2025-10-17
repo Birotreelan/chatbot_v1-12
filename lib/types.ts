@@ -70,3 +70,61 @@ export interface SystemStats {
   totalThreads: number
   lastUpdated: string
 }
+
+export interface AppointmentStats {
+  // Totales
+  totalConfirmed: number
+  totalCancelled: number
+  totalRescheduled: number
+  totalTemplatesSent: number
+
+  // Por día (últimos 30 días)
+  confirmedByDay: Record<string, number>
+  cancelledByDay: Record<string, number>
+  rescheduledByDay: Record<string, number>
+  templatesSentByDay: Record<string, number>
+
+  // Tasas de conversión
+  confirmationRate: number // (confirmados / plantillas enviadas) * 100
+  cancellationRate: number // (cancelados / plantillas enviadas) * 100
+  responseRate: number // ((confirmados + cancelados) / plantillas enviadas) * 100
+
+  // Tiempos promedio (en minutos)
+  avgResponseTime: number // Tiempo promedio de respuesta
+  avgConfirmationTime: number // Tiempo promedio hasta confirmación
+  avgCancellationTime: number // Tiempo promedio hasta cancelación
+
+  // Última actualización
+  lastUpdated: string
+}
+
+export interface AppointmentEvent {
+  id: string
+  clienteId: string
+  phoneNumber: string
+  eventType: "template_sent" | "confirmed" | "cancelled" | "rescheduled"
+  timestamp: string
+  templateSentAt?: string // Para calcular tiempo de respuesta
+  appointmentInfo?: {
+    fecha?: string
+    hora?: string
+    profesional?: string
+    especialidad?: string
+    lugar?: string
+  }
+  metadata?: Record<string, any>
+}
+
+export interface ClientAppointmentStats extends AppointmentStats {
+  clienteId: string
+  clientName: string
+  // Desglose adicional por especialidad, profesional, etc.
+  bySpecialty?: Record<string, number>
+  byProfessional?: Record<string, number>
+  byTimeOfDay?: {
+    morning: number // 6am - 12pm
+    afternoon: number // 12pm - 6pm
+    evening: number // 6pm - 10pm
+  }
+  byDayOfWeek?: Record<string, number>
+}
