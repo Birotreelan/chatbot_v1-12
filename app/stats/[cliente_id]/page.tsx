@@ -2,8 +2,12 @@ import { notFound } from "next/navigation"
 import { getConfigByClienteId } from "@/lib/db"
 import { AppointmentStatsView } from "@/components/stats/appointment-stats-view"
 
-export default async function ClientStatsPage({ params }: { params: { cliente_id: string } }) {
-  const { cliente_id } = params
+export default async function ClientStatsPage({
+  params,
+}: {
+  params: Promise<{ cliente_id: string }>
+}) {
+  const { cliente_id } = await params
 
   console.log(`[STATS_PAGE] Accediendo a estadísticas para cliente_id: ${cliente_id}`)
 
