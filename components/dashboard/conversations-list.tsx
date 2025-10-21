@@ -3,10 +3,13 @@
 import { useState, useEffect } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
-import { formatDistanceToNow } from "date-fns"
+import { formatDistanceToNow, format } from "date-fns"
 import { es } from "date-fns/locale"
-import { Search } from "lucide-react"
+import { Search, CalendarIcon } from "lucide-react"
 
 interface Contact {
   phoneNumber: string
@@ -19,22 +22,34 @@ interface ConversationsListProps {
   configId: string
   selectedContact: string | null
   onSelectContact: (phoneNumber: string) => void
+  onFilteredContactsChange?: (contacts: Contact[]) => void
 }
 
-export function ConversationsList({ configId, selectedContact, onSelectContact }: ConversationsListProps) {
+export function ConversationsList({
+  configId,
+  selectedContact,
+  onSelectContact,
+  onFilteredContactsChange,
+}: ConversationsListProps) {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [loading, setLoading] = useState(true)
   const [phoneFilter, setPhoneFilter] = useState("")
+  const [dateFrom, setDateFrom] = useState<Date>(new Date())
+  const [dateTo, setDateTo] = useState<Date>(new Date())
 
   useEffect(() => {
     loadContacts()
-    const interval = setInterval(loadContacts, 10000) // Actualizar cada 10 segundos
+    const interval = setInterval(loadContacts, 10000)
     return () => clearInterval(interval)
-  }, [configId])
+  }, [configId, dateFrom, dateTo])
 
   async function loadContacts() {
     try {
-      const response = await fetch(`/api/conversations/contacts?configId=${configId}`)
+      const fromStr = format(dateFrom, "yyyy-MM-dd")
+      const toStr = format(dateTo, "yyyy-MM-dd")
+      const response = await fetch(
+        `/api/conversations/contacts?configId=${configId}&dateFrom=${fromStr}&dateTo=${toStr}`,
+      )
       const data = await response.json()
       setContacts(data.contacts || [])
     } catch (error) {
@@ -48,6 +63,12 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
     contact.phoneNumber.toLowerCase().includes(phoneFilter.toLowerCase()),
   )
 
+  useEffect(() => {
+    if (onFilteredContactsChange) {
+      onFilteredContactsChange(filteredContacts)
+    }
+  }, [filteredContacts, onFilteredContactsChange])
+
   if (loading) {
     return (
       <div className="p-4">
@@ -58,7 +79,7 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 border-b bg-background sticky top-0 z-10">
+      <div className="p-4 border-b bg-background sticky top-0 z-10 space-y-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -69,17 +90,45 @@ export function ConversationsList({ configId, selectedContact, onSelectContact }
             className="pl-9"
           />
         </div>
-        {phoneFilter && (
-          <p className="text-xs text-muted-foreground mt-2">
-            {filteredContacts.length} de {contacts.length} contactos
-          </p>
-        )}
+
+        <div className="flex gap-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="flex-1 justify-start text-left font-normal bg-transparent">
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {format(dateFrom, "dd/MM/yyyy", { locale: es })}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar mode="single" selected={dateFrom} onSelect={(date) => date && setDateFrom(date)} />
+            </PopoverContent>
+          </Popover>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="flex-1 justify-start text-left font-normal bg-transparent">
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {format(dateTo, "dd/MM/yyyy", { locale: es })}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar mode="single" selected={dateTo} onSelect={(date) => date && setDateTo(date)} />
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          {filteredContacts.length} de {contacts.length} contactos
+          {phoneFilter && " (filtrado por número)"}
+        </p>
       </div>
 
       {filteredContacts.length === 0 ? (
         <div className="p-4">
           <p className="text-sm text-muted-foreground">
-            {phoneFilter ? "No se encontraron contactos con ese número" : "No hay conversaciones aún"}
+            {phoneFilter
+              ? "No se encontraron contactos con ese número"
+              : "No hay conversaciones en el rango de fechas seleccionado"}
           </p>
         </div>
       ) : (

@@ -8,6 +8,14 @@ import { Card } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Download } from "lucide-react"
+import { format } from "date-fns"
+
+interface Contact {
+  phoneNumber: string
+  lastMessage: string
+  lastMessageAt: string
+  messageCount: number
+}
 
 export function ConversationsView() {
   const [configs, setConfigs] = useState<WhatsAppConfig[]>([])
@@ -15,6 +23,7 @@ export function ConversationsView() {
   const [selectedContact, setSelectedContact] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
+  const [filteredContacts, setFilteredContacts] = useState<Contact[]>([])
 
   useEffect(() => {
     loadConfigs()
@@ -40,22 +49,29 @@ export function ConversationsView() {
   }
 
   async function handleExport() {
-    if (!selectedConfig) return
+    if (!selectedConfig || filteredContacts.length === 0) {
+      alert("No hay conversaciones filtradas para exportar")
+      return
+    }
 
     try {
       setExporting(true)
-      const response = await fetch(`/api/conversations/export?configId=${selectedConfig.id}`)
+
+      const phoneNumbers = filteredContacts.map((c) => c.phoneNumber).join(",")
+
+      const response = await fetch(
+        `/api/conversations/export?configId=${selectedConfig.id}&phoneNumbers=${encodeURIComponent(phoneNumbers)}`,
+      )
 
       if (!response.ok) {
         throw new Error("Error al exportar conversaciones")
       }
 
-      // Descargar el archivo
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = `conversaciones_${selectedConfig.displayName}_${new Date().toISOString().split("T")[0]}.csv`
+      a.download = `conversaciones_${selectedConfig.displayName}_${format(new Date(), "yyyy-MM-dd")}.csv`
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
@@ -95,9 +111,14 @@ export function ConversationsView() {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">Monitor de Conversaciones</h1>
           {selectedConfig && (
-            <Button onClick={handleExport} disabled={exporting} variant="outline" size="sm">
+            <Button
+              onClick={handleExport}
+              disabled={exporting || filteredContacts.length === 0}
+              variant="outline"
+              size="sm"
+            >
               <Download className="h-4 w-4 mr-2" />
-              {exporting ? "Exportando..." : "Exportar CSV"}
+              {exporting ? "Exportando..." : `Exportar CSV (${filteredContacts.length})`}
             </Button>
           )}
         </div>
@@ -127,6 +148,7 @@ export function ConversationsView() {
                 configId={selectedConfig.id}
                 selectedContact={selectedContact}
                 onSelectContact={setSelectedContact}
+                onFilteredContactsChange={setFilteredContacts}
               />
             </div>
             <div className="flex-1 bg-muted/20">

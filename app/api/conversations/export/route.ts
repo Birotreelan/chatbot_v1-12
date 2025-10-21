@@ -1,28 +1,31 @@
 import { NextResponse } from "next/server"
-import { getConversationContacts, getConversationMessages } from "@/lib/conversations"
+import { getConversationMessages } from "@/lib/conversations"
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const configId = searchParams.get("configId")
+    const phoneNumbersParam = searchParams.get("phoneNumbers")
 
     if (!configId) {
       return NextResponse.json({ error: "configId es requerido" }, { status: 400 })
     }
 
+    if (!phoneNumbersParam) {
+      return NextResponse.json({ error: "No hay contactos para exportar" }, { status: 400 })
+    }
+
     console.log(`[API] Exportando conversaciones para configId: ${configId}`)
 
-    // Obtener todos los contactos
-    const contacts = await getConversationContacts(configId)
+    const phoneNumbers = phoneNumbersParam.split(",").filter(Boolean)
 
-    if (contacts.length === 0) {
+    if (phoneNumbers.length === 0) {
       return NextResponse.json({ error: "No hay conversaciones para exportar" }, { status: 404 })
     }
 
-    // Obtener mensajes de cada contacto
     const allMessages = []
-    for (const contact of contacts) {
-      const messages = await getConversationMessages(configId, contact.phoneNumber)
+    for (const phoneNumber of phoneNumbers) {
+      const messages = await getConversationMessages(configId, phoneNumber)
       allMessages.push(...messages)
     }
 

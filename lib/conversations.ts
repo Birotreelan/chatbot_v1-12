@@ -198,10 +198,14 @@ export async function getConversationMessages(configId: string, phoneNumber: str
 }
 
 // Obtener todos los contactos de un cliente
-export async function getConversationContacts(configId: string): Promise<ConversationContact[]> {
+export async function getConversationContacts(
+  configId: string,
+  dateFrom?: string,
+  dateTo?: string,
+): Promise<ConversationContact[]> {
   try {
     const cached = contactsCache.get(configId)
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL && !dateFrom && !dateTo) {
       return cached.contacts
     }
 
@@ -252,8 +256,36 @@ export async function getConversationContacts(configId: string): Promise<Convers
       })
       .filter((contact): contact is ConversationContact => contact !== null)
 
+    // Filtrar por rango de fechas si se proporcionan
+    let filteredContacts = contacts
+    if (dateFrom || dateTo) {
+      filteredContacts = contacts.filter((contact) => {
+        try {
+          const contactDate = new Date(contact.lastMessageAt)
+          if (isNaN(contactDate.getTime())) return false
+
+          // Establecer la hora al inicio o al final del día para una comparación adecuada
+          if (dateFrom) {
+            const fromDate = new Date(dateFrom)
+            fromDate.setHours(0, 0, 0, 0)
+            if (contactDate < fromDate) return false
+          }
+
+          if (dateTo) {
+            const toDate = new Date(dateTo)
+            toDate.setHours(23, 59, 59, 999)
+            if (contactDate > toDate) return false
+          }
+
+          return true
+        } catch (error) {
+          return false
+        }
+      })
+    }
+
     // Ordenar por fecha del último mensaje
-    contacts.sort((a, b) => {
+    filteredContacts.sort((a, b) => {
       try {
         const dateA = new Date(a.lastMessageAt).getTime()
         const dateB = new Date(b.lastMessageAt).getTime()
@@ -267,9 +299,12 @@ export async function getConversationContacts(configId: string): Promise<Convers
       }
     })
 
-    contactsCache.set(configId, { contacts, timestamp: Date.now() })
+    // Solo almacenar en caché si no se aplican filtros de fecha
+    if (!dateFrom && !dateTo) {
+      contactsCache.set(configId, { contacts: filteredContacts, timestamp: Date.now() })
+    }
 
-    return contacts
+    return filteredContacts
   } catch (error) {
     console.error("[CONVERSATIONS] Error obteniendo contactos:", error)
     return []
