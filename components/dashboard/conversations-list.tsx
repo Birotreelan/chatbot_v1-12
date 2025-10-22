@@ -3,9 +3,7 @@
 import { useState, useEffect } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
+import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import { formatDistanceToNow, format } from "date-fns"
 import { es } from "date-fns/locale"
@@ -34,8 +32,8 @@ export function ConversationsList({
   const [contacts, setContacts] = useState<Contact[]>([])
   const [loading, setLoading] = useState(true)
   const [phoneFilter, setPhoneFilter] = useState("")
-  const [dateFrom, setDateFrom] = useState<Date>(new Date())
-  const [dateTo, setDateTo] = useState<Date>(new Date())
+  const [dateFrom, setDateFrom] = useState<string>(format(new Date(), "yyyy-MM-dd"))
+  const [dateTo, setDateTo] = useState<string>(format(new Date(), "yyyy-MM-dd"))
 
   useEffect(() => {
     loadContacts()
@@ -45,10 +43,8 @@ export function ConversationsList({
 
   async function loadContacts() {
     try {
-      const fromStr = format(dateFrom, "yyyy-MM-dd")
-      const toStr = format(dateTo, "yyyy-MM-dd")
       const response = await fetch(
-        `/api/conversations/contacts?configId=${configId}&dateFrom=${fromStr}&dateTo=${toStr}`,
+        `/api/conversations/contacts?configId=${configId}&dateFrom=${dateFrom}&dateTo=${dateTo}`,
       )
       const data = await response.json()
       setContacts(data.contacts || [])
@@ -91,30 +87,40 @@ export function ConversationsList({
           />
         </div>
 
-        <div className="flex gap-2">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="flex-1 justify-start text-left font-normal bg-transparent">
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {format(dateFrom, "dd/MM/yyyy", { locale: es })}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar mode="single" selected={dateFrom} onSelect={(date) => date && setDateFrom(date)} />
-            </PopoverContent>
-          </Popover>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="date-from" className="text-xs text-muted-foreground">
+              Desde
+            </Label>
+            <div className="relative">
+              <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                id="date-from"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                max={dateTo}
+                className="pl-9"
+              />
+            </div>
+          </div>
 
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="flex-1 justify-start text-left font-normal bg-transparent">
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {format(dateTo, "dd/MM/yyyy", { locale: es })}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar mode="single" selected={dateTo} onSelect={(date) => date && setDateTo(date)} />
-            </PopoverContent>
-          </Popover>
+          <div className="space-y-1.5">
+            <Label htmlFor="date-to" className="text-xs text-muted-foreground">
+              Hasta
+            </Label>
+            <div className="relative">
+              <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                id="date-to"
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                min={dateFrom}
+                className="pl-9"
+              />
+            </div>
+          </div>
         </div>
 
         <p className="text-xs text-muted-foreground">
