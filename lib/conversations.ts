@@ -5,8 +5,8 @@ const CONVERSATION_PREFIX = "conversation:"
 const CONVERSATION_CONTACT_PREFIX = "conversation_contact:"
 const CONVERSATION_CONTACTS_SET_PREFIX = "conversation_contacts:"
 
-// Duración de almacenamiento: 7 días en segundos
-const CONVERSATION_TTL = 7 * 24 * 60 * 60 // 7 días
+// Duración de almacenamiento: 15 días en segundos
+const CONVERSATION_TTL = 15 * 24 * 60 * 60 // 15 días
 
 const contactsCache = new Map<string, { contacts: ConversationContact[]; timestamp: number }>()
 const CACHE_TTL = 30000 // 30 segundos de caché
@@ -84,7 +84,7 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
 
     await redisClient.rpush(conversationKey, messageString)
     await redisClient.expire(conversationKey, CONVERSATION_TTL)
-    console.log(`[CONVERSATIONS] ✅ Mensaje guardado con TTL de 7 días`)
+    console.log(`[CONVERSATIONS] ✅ Mensaje guardado con TTL de 15 días`)
 
     // 2. Actualizar información del contacto
     const contactInfo: ConversationContact = {
