@@ -4,10 +4,11 @@ import { useState, useEffect } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { formatDistanceToNow, format } from "date-fns"
 import { es } from "date-fns/locale"
-import { Search, CalendarIcon } from "lucide-react"
+import { Search, CalendarIcon, Filter } from "lucide-react"
 
 interface Contact {
   phoneNumber: string
@@ -34,17 +35,19 @@ export function ConversationsList({
   const [phoneFilter, setPhoneFilter] = useState("")
   const [dateFrom, setDateFrom] = useState<string>(format(new Date(), "yyyy-MM-dd"))
   const [dateTo, setDateTo] = useState<string>(format(new Date(), "yyyy-MM-dd"))
+  const [appliedDateFrom, setAppliedDateFrom] = useState<string>(format(new Date(), "yyyy-MM-dd"))
+  const [appliedDateTo, setAppliedDateTo] = useState<string>(format(new Date(), "yyyy-MM-dd"))
 
   useEffect(() => {
     loadContacts()
     const interval = setInterval(loadContacts, 10000)
     return () => clearInterval(interval)
-  }, [configId, dateFrom, dateTo])
+  }, [configId, appliedDateFrom, appliedDateTo])
 
   async function loadContacts() {
     try {
       const response = await fetch(
-        `/api/conversations/contacts?configId=${configId}&dateFrom=${dateFrom}&dateTo=${dateTo}`,
+        `/api/conversations/contacts?configId=${configId}&dateFrom=${appliedDateFrom}&dateTo=${appliedDateTo}`,
       )
       const data = await response.json()
       setContacts(data.contacts || [])
@@ -53,6 +56,12 @@ export function ConversationsList({
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleApplyFilter = () => {
+    setAppliedDateFrom(dateFrom)
+    setAppliedDateTo(dateTo)
+    setLoading(true)
   }
 
   const filteredContacts = contacts.filter((contact) =>
@@ -87,39 +96,48 @@ export function ConversationsList({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="date-from" className="text-xs text-muted-foreground">
-              Desde
-            </Label>
-            <div className="relative">
-              <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-              <Input
-                id="date-from"
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                max={dateTo}
-                className="pl-9"
-              />
+        <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-2 flex-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="date-from" className="text-xs text-muted-foreground">
+                Desde
+              </Label>
+              <div className="relative">
+                <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  id="date-from"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  max={dateTo}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="date-to" className="text-xs text-muted-foreground">
+                Hasta
+              </Label>
+              <div className="relative">
+                <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  id="date-to"
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  min={dateFrom}
+                  className="pl-9"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="date-to" className="text-xs text-muted-foreground">
-              Hasta
-            </Label>
-            <div className="relative">
-              <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-              <Input
-                id="date-to"
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                min={dateFrom}
-                className="pl-9"
-              />
-            </div>
+          <div className="flex items-end">
+            <Button onClick={handleApplyFilter} size="default" className="h-10">
+              <Filter className="h-4 w-4 mr-2" />
+              Filtrar
+            </Button>
           </div>
         </div>
 

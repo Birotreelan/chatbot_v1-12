@@ -3,6 +3,44 @@ import type { WhatsAppConfig, ThreadInfo, SystemStats } from "./types"
 import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "./utils"
 
+// In-memory caches for configs and threads with TTL
+// Config cache: 5 minutes TTL
+const configCache = new Map<string, { config: WhatsAppConfig; timestamp: number }>()
+const CONFIG_CACHE_TTL = 5 * 60 * 1000 // 5 minutos
+
+// Phone to config ID cache: 5 minutes TTL
+const phoneToConfigCache = new Map<string, { configId: string; timestamp: number }>()
+
+// Thread cache: 3 minutes TTL
+const threadCache = new Map<string, { thread: ThreadInfo; timestamp: number }>()
+const THREAD_CACHE_TTL = 3 * 60 * 1000 // 3 minutos
+
+export function clearAllCaches(): void {
+  console.log("[DB] 🧹 Limpiando todos los cachés en memoria")
+  configCache.clear()
+  phoneToConfigCache.clear()
+  threadCache.clear()
+  console.log("[DB] ✅ Cachés limpiados exitosamente")
+}
+
+export function clearConfigCache(configId?: string): void {
+  if (configId) {
+    console.log(`[DB] 🧹 Limpiando caché para config: ${configId}`)
+    configCache.delete(configId)
+    // Also clear phone to config cache entries that point to this config
+    for (const [phone, data] of phoneToConfigCache.entries()) {
+      if (data.configId === configId) {
+        phoneToConfigCache.delete(phone)
+      }
+    }
+  } else {
+    console.log("[DB] 🧹 Limpiando todos los cachés de configuración")
+    configCache.clear()
+    phoneToConfigCache.clear()
+  }
+  console.log("[DB] ✅ Caché de configuración limpiado")
+}
+
 // Inicializar el cliente de Redis
 let redis: Redis | null = null
 
@@ -149,6 +187,12 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
 // Obtener una configuración por ID
 export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | null> {
   try {
+    const cached = configCache.get(id)
+    if (cached && Date.now() - cached.timestamp < CONFIG_CACHE_TTL) {
+      console.log(`[DB] ⚡ Config ${id} obtenida del caché en memoria`)
+      return cached.config
+    }
+
     console.log(`[DB] 🔍 Obteniendo configuración ${id}`)
 
     const redisClient = getRedisClient()
@@ -172,7 +216,6 @@ export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | nu
       }
 
       console.log(`[DB] 📄 Datos encontrados en Redis, deserializando...`)
-      // Usar la función auxiliar para manejar la deserialización
       const config = safeJsonParse(configData)
 
       if (!config) {
@@ -180,18 +223,23 @@ export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | nu
         return null
       }
 
-      console.log(`[DB] ✅ Configuración ${id} obtenida exitosamente`)
+      configCache.set(id, { config, timestamp: Date.now() })
+
+      console.log(`[DB] ✅ Configuración ${id} obtenida exitosamente y guardada en caché`)
       console.log(`[DB] - displayName: ${config.displayName}`)
       console.log(`[DB] - cliente_id: ${config.cliente_id}`)
       return config
     } else {
       console.log(`[DB] 🔍 Buscando en memoria`)
-      // Fallback a memoria
       const config = memoryStorage.configs.get(id) || null
       console.log(`[DB] Configuración ${id} obtenida de memoria:`, config ? "encontrada" : "no encontrada")
 
       if (!config) {
         console.log(`[DB] 🔍 Configuraciones disponibles en memoria:`, Array.from(memoryStorage.configs.keys()))
+      }
+
+      if (config) {
+        configCache.set(id, { config, timestamp: Date.now() })
       }
 
       return config
@@ -205,46 +253,52 @@ export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | nu
 
 // Obtener una configuración por ID de número de teléfono
 export async function getWhatsAppConfigByPhoneId(phoneNumberId: string): Promise<WhatsAppConfig | null> {
+  const cachedMapping = phoneToConfigCache.get(phoneNumberId)
+  if (cachedMapping && Date.now() - cachedMapping.timestamp < CONFIG_CACHE_TTL) {
+    console.log(`[DB] ⚡ Mapeo de phone ${phoneNumberId} obtenido del caché`)
+    return getWhatsAppConfig(cachedMapping.configId)
+  }
+
   const redisClient = getRedisClient()
 
   if (redisClient) {
-    // Intentar obtener el ID de configuración directamente
     const key = `${PHONE_TO_CONFIG_PREFIX}${phoneNumberId}`
     const configId = await redisClient.get(key)
 
     if (!configId) {
-      // Si no encontramos el ID, intentamos buscar manualmente
       const allConfigs = await getAllWhatsAppConfigs()
       const manualMatch = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
 
       if (manualMatch) {
-        // Corregir el mapeo en Redis
         await redisClient.set(key, manualMatch.id)
+        phoneToConfigCache.set(phoneNumberId, { configId: manualMatch.id, timestamp: Date.now() })
         return manualMatch
       }
 
       return null
     }
+
+    phoneToConfigCache.set(phoneNumberId, { configId: configId as string, timestamp: Date.now() })
 
     const config = await getWhatsAppConfig(configId as string)
     return config
   } else {
-    // Fallback a memoria
     const configId = memoryStorage.phoneToConfig.get(phoneNumberId)
 
     if (!configId) {
-      // Si no encontramos el ID, intentamos buscar manualmente
       const allConfigs = Array.from(memoryStorage.configs.values())
       const manualMatch = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
 
       if (manualMatch) {
-        // Corregir el mapeo en memoria
         memoryStorage.phoneToConfig.set(phoneNumberId, manualMatch.id)
+        phoneToConfigCache.set(phoneNumberId, { configId: manualMatch.id, timestamp: Date.now() })
         return manualMatch
       }
 
       return null
     }
+
+    phoneToConfigCache.set(phoneNumberId, { configId, timestamp: Date.now() })
 
     return memoryStorage.configs.get(configId) || null
   }
@@ -316,7 +370,6 @@ export async function updateWhatsAppConfig(
     const redisClient = getRedisClient()
 
     if (redisClient) {
-      // Si el phoneNumberId cambió, actualizar el mapeo
       if (updates.phoneNumberId && updates.phoneNumberId !== config.phoneNumberId) {
         if (config.phoneNumberId) {
           await redisClient.del(`${PHONE_TO_CONFIG_PREFIX}${config.phoneNumberId}`)
@@ -330,14 +383,14 @@ export async function updateWhatsAppConfig(
         updatedAt: new Date().toISOString(),
       }
 
-      // Guardar en Redis - siempre como cadena JSON
       const serializedConfig = JSON.stringify(updatedConfig)
       await redisClient.set(`${CONFIG_PREFIX}${id}`, serializedConfig)
 
-      console.log(`[DB] ✅ Configuración ${id} actualizada exitosamente`)
+      clearConfigCache(id)
+
+      console.log(`[DB] ✅ Configuración ${id} actualizada exitosamente y caché limpiado`)
       return updatedConfig
     } else {
-      // Fallback a memoria
       if (updates.phoneNumberId && updates.phoneNumberId !== config.phoneNumberId) {
         if (config.phoneNumberId) {
           memoryStorage.phoneToConfig.delete(config.phoneNumberId)
@@ -352,7 +405,10 @@ export async function updateWhatsAppConfig(
       }
 
       memoryStorage.configs.set(id, updatedConfig)
-      console.log(`[DB] ✅ Configuración ${id} actualizada en memoria`)
+
+      clearConfigCache(id)
+
+      console.log(`[DB] ✅ Configuración ${id} actualizada en memoria y caché limpiado`)
       return updatedConfig
     }
   } catch (error) {
@@ -434,32 +490,62 @@ export async function getThreadForUser(
 ): Promise<{ threadId: string; isNewThread: boolean; isResetThread?: boolean }> {
   const normalizedPhone = normalizePhoneNumber(phoneNumber)
   const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
+
+  const cachedThread = threadCache.get(key)
+  if (cachedThread && Date.now() - cachedThread.timestamp < THREAD_CACHE_TTL) {
+    console.log(`[DB] ⚡ Thread para ${normalizedPhone} obtenido del caché en memoria`)
+
+    // Update message count in cache
+    const updatedThreadInfo = {
+      ...cachedThread.thread,
+      lastMessageAt: new Date().toISOString(),
+      messageCount: (cachedThread.thread.messageCount || 0) + 1,
+      isResetThread: false,
+    }
+
+    // Update cache
+    threadCache.set(key, { thread: updatedThreadInfo, timestamp: Date.now() })
+
+    // Update in Redis/memory in background (don't await)
+    const redisClient = getRedisClient()
+    if (redisClient) {
+      redisClient
+        .set(key, JSON.stringify(updatedThreadInfo))
+        .catch((err) => console.error("[DB] Error updating thread in Redis:", err))
+    } else {
+      memoryStorage.threads.set(key, updatedThreadInfo)
+    }
+
+    return {
+      threadId: cachedThread.thread.threadId,
+      isNewThread: false,
+      isResetThread: cachedThread.thread.isResetThread === true,
+    }
+  }
+
   const redisClient = getRedisClient()
 
   console.log(`[DB] 🔍 Obteniendo thread para ${normalizedPhone} con config ${whatsappConfigId}`)
 
   if (redisClient) {
-    // Intentar obtener el thread existente
     const threadData = await redisClient.get(key)
     const threadInfo = safeJsonParse(threadData)
 
     if (threadInfo) {
       console.log(`[DB] ✅ Thread encontrado: ${threadInfo.threadId}`)
 
-      // Verificar si es un thread reseteado
       const isResetThread = threadInfo.isResetThread === true
 
-      // Actualizar la información del thread
       const updatedThreadInfo = {
         ...threadInfo,
         lastMessageAt: new Date().toISOString(),
         messageCount: (threadInfo.messageCount || 0) + 1,
-        // Limpiar el flag de reset después del primer uso
         isResetThread: false,
       }
 
-      // Guardar en Redis - siempre como cadena JSON
       await redisClient.set(key, JSON.stringify(updatedThreadInfo))
+
+      threadCache.set(key, { thread: updatedThreadInfo, timestamp: Date.now() })
 
       return {
         threadId: threadInfo.threadId,
@@ -468,7 +554,6 @@ export async function getThreadForUser(
       }
     }
   } else {
-    // Fallback a memoria con la misma lógica
     const threadInfo = memoryStorage.threads.get(key)
 
     if (threadInfo) {
@@ -484,6 +569,8 @@ export async function getThreadForUser(
       }
 
       memoryStorage.threads.set(key, updatedThreadInfo)
+
+      threadCache.set(key, { thread: updatedThreadInfo, timestamp: Date.now() })
 
       return {
         threadId: threadInfo.threadId,
@@ -502,7 +589,6 @@ export async function getThreadForUser(
   const thread = await openai.beta.threads.create()
   console.log(`[DB] ✅ Nuevo thread creado: ${thread.id}`)
 
-  // Guardar la información del thread
   const newThreadInfo: ThreadInfo = {
     threadId: thread.id,
     phoneNumber: normalizedPhone,
@@ -512,14 +598,13 @@ export async function getThreadForUser(
   }
 
   if (redisClient) {
-    // Guardar en Redis - siempre como cadena JSON
     await redisClient.set(key, JSON.stringify(newThreadInfo))
   } else {
-    // Fallback a memoria
     memoryStorage.threads.set(key, newThreadInfo)
   }
 
-  // Actualizar estadísticas
+  threadCache.set(key, { thread: newThreadInfo, timestamp: Date.now() })
+
   await updateSystemStats()
 
   return { threadId: thread.id, isNewThread: true }
@@ -532,6 +617,9 @@ export async function resetThreadForUser(
 ): Promise<{ threadId: string; isNewThread: boolean }> {
   const normalizedPhone = normalizePhoneNumber(phoneNumber)
   const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
+
+  threadCache.delete(key)
+
   const redisClient = getRedisClient()
 
   console.log(`[DB] 🔄 RESETEANDO thread para ${normalizedPhone} con config ${whatsappConfigId}`)
@@ -541,7 +629,6 @@ export async function resetThreadForUser(
       apiKey: process.env.OPENAI_API_KEY,
     })
 
-    // 1. OBTENER EL THREAD ANTERIOR (si existe)
     let oldThreadId: string | null = null
     if (redisClient) {
       const oldThreadData = await redisClient.get(key)
@@ -564,11 +651,9 @@ export async function resetThreadForUser(
         console.log(`[DB] 🗑️ Thread anterior ELIMINADO de OpenAI: ${oldThreadId}`)
       } catch (deleteError) {
         console.warn(`[DB] ⚠️ No se pudo eliminar el thread anterior de OpenAI: ${deleteError.message}`)
-        // Continuar aunque falle la eliminación
       }
     }
 
-    // 2. CREAR UN THREAD COMPLETAMENTE NUEVO EN OPENAI
     const newThread = await openai.beta.threads.create({
       metadata: {
         phoneNumber: normalizedPhone,
@@ -579,7 +664,6 @@ export async function resetThreadForUser(
     })
     console.log(`[DB] ✅ NUEVO thread creado en OpenAI: ${newThread.id}`)
 
-    // 3. ELIMINAR COMPLETAMENTE EL THREAD ANTERIOR DE REDIS/MEMORIA
     if (redisClient) {
       await redisClient.del(key)
       console.log(`[DB] 🗑️ Thread anterior eliminado de Redis`)
@@ -588,14 +672,13 @@ export async function resetThreadForUser(
       console.log(`[DB] 🗑️ Thread anterior eliminado de memoria`)
     }
 
-    // 4. GUARDAR EL NUEVO THREAD CON FLAG DE RESET
     const newThreadInfo: ThreadInfo = {
       threadId: newThread.id,
       phoneNumber: normalizedPhone,
       whatsappConfigId,
       lastMessageAt: new Date().toISOString(),
-      messageCount: 0, // Empezar en 0 para que se considere nuevo
-      isResetThread: true, // Flag para indicar que es un thread reseteado
+      messageCount: 0,
+      isResetThread: true,
       createdAt: new Date().toISOString(),
     }
 
@@ -607,8 +690,7 @@ export async function resetThreadForUser(
       console.log(`[DB] 💾 Nuevo thread guardado en memoria: ${newThread.id}`)
     }
 
-    // Las estadísticas se actualizarán en el próximo mensaje
-    // await updateSystemStats()
+    threadCache.set(key, { thread: newThreadInfo, timestamp: Date.now() })
 
     console.log(`[DB] ✅ RESET COMPLETADO EXITOSAMENTE`)
     console.log(`[DB] - Thread anterior: ${oldThreadId || "ninguno"} (ELIMINADO de OpenAI)`)

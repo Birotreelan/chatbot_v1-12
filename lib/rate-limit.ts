@@ -54,7 +54,7 @@ function isMetaWhatsAppIP(ip: string): boolean {
 export async function rateLimit(
   key: string,
   maxRequests: number = Number(process.env.RATE_LIMIT_MAX_REQUESTS || 20),
-  window: number = Number(process.env.RATE_LIMIT_WINDOW || 60000),
+  window: number = Number(process.env.RATE_LIMIT_WINDOW || 300000), // 5 minutos (antes 60000)
   globalMax: number = Number(process.env.RATE_LIMIT_GLOBAL_MAX || 1000),
 ): Promise<{ success: boolean; current: number; limit: number; reset: number }> {
   try {
