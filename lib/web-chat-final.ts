@@ -354,7 +354,7 @@ export async function processWebChatMessage({
       throw new Error(`Invalid parameters for retrieve: threadId=${threadId}, runId=${run.id}`)
     }
 
-    let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+    let runStatus = await openai.beta.threads.runs.retrieve(run.id, threadId)
     console.log(`[WEB-CHAT] Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
@@ -376,7 +376,7 @@ export async function processWebChatMessage({
         throw new Error("threadId became undefined during polling")
       }
 
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(run.id, threadId)
       console.log(`[WEB-CHAT] Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
@@ -462,7 +462,7 @@ export async function processWebChatMessage({
         tool_outputs: toolOutputs,
       })
 
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(run.id, threadId)
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -481,7 +481,7 @@ export async function processWebChatMessage({
           throw new Error("threadId became undefined during polling after tool calls")
         }
 
-        runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+        runStatus = await openai.beta.threads.runs.retrieve(run.id, threadId)
         console.log(`[WEB-CHAT] Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
