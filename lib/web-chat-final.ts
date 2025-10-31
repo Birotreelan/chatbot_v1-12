@@ -25,7 +25,8 @@ async function retrieveRunStatus(threadId: string, runId: string) {
   }
 
   console.log(`[WEB-CHAT] Retrieving run - Thread: ${threadId}, Run: ${runId}`)
-  return await openai.beta.threads.runs.retrieve(threadId, runId)
+  // OpenAI SDK expects: retrieve(runId, threadId) - NOT (threadId, runId)
+  return await openai.beta.threads.runs.retrieve(runId, threadId)
 }
 
 // Función para crear el bloque SISTEMA con datos de sede
