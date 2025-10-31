@@ -102,6 +102,8 @@ export async function processWebChatMessage({
 
     const threadId = thread.id
     console.log(`[WEB-CHAT] Thread obtenido: ${threadId}`)
+    console.log(`[WEB-CHAT] Thread ID type: ${typeof threadId}`)
+    console.log(`[WEB-CHAT] Thread ID length: ${threadId?.length}`)
 
     const systemBlock = await createSystemBlock(
       config.displayName,
@@ -346,6 +348,11 @@ export async function processWebChatMessage({
     })
 
     console.log(`[WEB-CHAT] Run creado: ${run.id}`)
+    console.log(`[WEB-CHAT] Verificando estado - ThreadID: ${threadId}, RunID: ${run.id}`)
+
+    if (!threadId || !run.id) {
+      throw new Error(`Invalid parameters for retrieve: threadId=${threadId}, runId=${run.id}`)
+    }
 
     let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
     console.log(`[WEB-CHAT] Estado inicial del run: ${runStatus.status}`)
@@ -447,6 +454,10 @@ export async function processWebChatMessage({
         }
       }
 
+      if (!threadId) {
+        throw new Error("threadId became undefined before submitting tool outputs")
+      }
+
       await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
         tool_outputs: toolOutputs,
       })
@@ -477,6 +488,10 @@ export async function processWebChatMessage({
 
     if (runStatus.status === "completed") {
       console.log(`[WEB-CHAT] Run completado exitosamente`)
+
+      if (!threadId) {
+        throw new Error("threadId became undefined before listing messages")
+      }
 
       const messages = await openai.beta.threads.messages.list(threadId, {
         order: "desc",
