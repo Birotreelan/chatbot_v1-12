@@ -1,4 +1,5 @@
 import { OpenAI } from "openai"
+import { getRedisClient } from "./redis"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -10,9 +11,9 @@ interface Message {
 }
 
 export async function getThread(userIdentifier: string, configId: string) {
-  // Determinar si es WhatsApp o Web basado en el prefijo
   const isWebThread = userIdentifier.startsWith("web_")
   const threadName = isWebThread ? `web-${userIdentifier}-${configId}` : `whatsapp-${userIdentifier}-${configId}`
+  const cacheKey = `thread:${threadName}`
 
   console.log(`[THREAD-MANAGER] Buscando thread: ${threadName} (${isWebThread ? "web" : "whatsapp"})`)
   console.log(`[THREAD-MANAGER] UserIdentifier: ${userIdentifier}`)
@@ -24,37 +25,32 @@ export async function getThread(userIdentifier: string, configId: string) {
       throw new Error("OpenAI client not properly initialized")
     }
 
-    // Para threads web, intentar buscar por metadata primero
-    if (isWebThread) {
-      const threads = await openai.beta.threads.list({
-        limit: 20,
-        order: "desc",
-      })
+    // Intentar obtener el thread ID desde Redis
+    const redis = getRedisClient()
+    const cachedThreadId = await redis.get(cacheKey)
 
-      for (const thread of threads.data) {
-        if (thread.metadata?.name === threadName || thread.metadata?.sessionId === userIdentifier) {
-          console.log(`[THREAD-MANAGER] Thread web encontrado: ${thread.id}`)
-          return thread
-        }
-      }
-    } else {
-      // Lógica original para WhatsApp
-      const threads = await openai.beta.threads.list({
-        limit: 10,
-        order: "desc",
-      })
-
-      for (const thread of threads.data) {
-        if (thread.metadata?.name === threadName) {
-          console.log(`[THREAD-MANAGER] Thread WhatsApp encontrado: ${thread.id}`)
-          return thread
-        }
+    if (cachedThreadId) {
+      console.log(`[THREAD-MANAGER] Thread encontrado en caché: ${cachedThreadId}`)
+      try {
+        // Verificar que el thread aún existe en OpenAI
+        const thread = await openai.beta.threads.retrieve(cachedThreadId)
+        console.log(`[THREAD-MANAGER] Thread verificado en OpenAI: ${thread.id}`)
+        return thread
+      } catch (error) {
+        console.log(`[THREAD-MANAGER] Thread en caché no existe en OpenAI, creando nuevo`)
+        // Si el thread no existe, eliminar de caché y crear uno nuevo
+        await redis.del(cacheKey)
       }
     }
 
-    // Si no se encuentra, crear uno nuevo
+    // Si no se encuentra en caché, crear uno nuevo
     console.log(`[THREAD-MANAGER] Thread no encontrado, creando nuevo: ${threadName}`)
-    return await createNewThread(userIdentifier, configId)
+    const newThread = await createNewThread(userIdentifier, configId)
+
+    // Guardar en caché (expira en 30 días)
+    await redis.set(cacheKey, newThread.id, { ex: 30 * 24 * 60 * 60 })
+
+    return newThread
   } catch (error: any) {
     console.error("[THREAD-MANAGER] Error getting thread:", error)
     console.error("[THREAD-MANAGER] OpenAI instance:", !!openai)
@@ -67,6 +63,7 @@ export async function getThread(userIdentifier: string, configId: string) {
 // Función para crear threads web
 export async function createThread(sessionId: string, configId: string) {
   const threadName = `web-${sessionId}-${configId}`
+  const cacheKey = `thread:${threadName}`
 
   try {
     console.log(`[THREAD-MANAGER] Creando thread web: ${threadName}`)
@@ -81,6 +78,11 @@ export async function createThread(sessionId: string, configId: string) {
     })
 
     console.log(`[THREAD-MANAGER] Thread web creado: ${thread.id}`)
+
+    // Guardar en caché
+    const redis = getRedisClient()
+    await redis.set(cacheKey, thread.id, { ex: 30 * 24 * 60 * 60 })
+
     return thread
   } catch (error: any) {
     console.error("[THREAD-MANAGER] Error creating web thread:", error)
