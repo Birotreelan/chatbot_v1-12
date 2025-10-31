@@ -353,7 +353,7 @@ export async function processWebChatMessage({
     console.log(`[WEB-CHAT] Run creado: ${RUN_ID}`)
     console.log(`[WEB-CHAT] Verificando estado - ThreadID: ${THREAD_ID}, RunID: ${RUN_ID}`)
 
-    let runStatus = await retrieveRunStatus(THREAD_ID, RUN_ID)
+    let runStatus = await openai.beta.threads.runs.retrieve(THREAD_ID, RUN_ID)
     console.log(`[WEB-CHAT] Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
@@ -371,7 +371,7 @@ export async function processWebChatMessage({
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
-      runStatus = await retrieveRunStatus(THREAD_ID, RUN_ID)
+      runStatus = await openai.beta.threads.runs.retrieve(THREAD_ID, RUN_ID)
       console.log(`[WEB-CHAT] Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
@@ -453,7 +453,7 @@ export async function processWebChatMessage({
         tool_outputs: toolOutputs,
       })
 
-      runStatus = await retrieveRunStatus(THREAD_ID, RUN_ID)
+      runStatus = await openai.beta.threads.runs.retrieve(THREAD_ID, RUN_ID)
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -468,7 +468,7 @@ export async function processWebChatMessage({
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
 
-        runStatus = await retrieveRunStatus(THREAD_ID, RUN_ID)
+        runStatus = await openai.beta.threads.runs.retrieve(THREAD_ID, RUN_ID)
         console.log(`[WEB-CHAT] Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
