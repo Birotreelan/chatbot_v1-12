@@ -16,6 +16,18 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
+async function retrieveRunStatus(threadId: string, runId: string) {
+  if (!threadId || typeof threadId !== "string") {
+    throw new Error(`Invalid threadId: ${threadId}`)
+  }
+  if (!runId || typeof runId !== "string") {
+    throw new Error(`Invalid runId: ${runId}`)
+  }
+
+  console.log(`[WEB-CHAT] Retrieving run - Thread: ${threadId}, Run: ${runId}`)
+  return await openai.beta.threads.runs.retrieve(threadId, runId)
+}
+
 // Función para crear el bloque SISTEMA con datos de sede
 async function createSystemBlock(
   clinicName: string,
@@ -100,10 +112,8 @@ export async function processWebChatMessage({
       throw new Error("Failed to get valid thread from OpenAI")
     }
 
-    const threadId = thread.id
-    console.log(`[WEB-CHAT] Thread obtenido: ${threadId}`)
-    console.log(`[WEB-CHAT] Thread ID type: ${typeof threadId}`)
-    console.log(`[WEB-CHAT] Thread ID length: ${threadId?.length}`)
+    const THREAD_ID = thread.id
+    console.log(`[WEB-CHAT] Thread obtenido: ${THREAD_ID}`)
 
     const systemBlock = await createSystemBlock(
       config.displayName,
@@ -114,11 +124,7 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] Bloque SISTEMA creado`)
 
-    if (!threadId) {
-      throw new Error("threadId is undefined before adding message")
-    }
-
-    await safelyAddMessageToThread(threadId, {
+    await safelyAddMessageToThread(THREAD_ID, {
       role: "user",
       content: `${systemBlock}\n\n${message}`,
     })
@@ -128,11 +134,7 @@ export async function processWebChatMessage({
     const assistantId = config.widgetAssistantId || config.whatsappAssistantId
     console.log(`[WEB-CHAT] Ejecutando asistente: ${assistantId}`)
 
-    if (!threadId) {
-      throw new Error("threadId is undefined before creating run")
-    }
-
-    const run = await openai.beta.threads.runs.create(threadId, {
+    const run = await openai.beta.threads.runs.create(THREAD_ID, {
       assistant_id: assistantId,
       tools: [
         {
@@ -347,14 +349,11 @@ export async function processWebChatMessage({
       ],
     })
 
-    console.log(`[WEB-CHAT] Run creado: ${run.id}`)
-    console.log(`[WEB-CHAT] Verificando estado - ThreadID: ${threadId}, RunID: ${run.id}`)
+    const RUN_ID = run.id
+    console.log(`[WEB-CHAT] Run creado: ${RUN_ID}`)
+    console.log(`[WEB-CHAT] Verificando estado - ThreadID: ${THREAD_ID}, RunID: ${RUN_ID}`)
 
-    if (!threadId || !run.id) {
-      throw new Error(`Invalid parameters for retrieve: threadId=${threadId}, runId=${run.id}`)
-    }
-
-    let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+    let runStatus = await retrieveRunStatus(THREAD_ID, RUN_ID)
     console.log(`[WEB-CHAT] Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
@@ -372,11 +371,7 @@ export async function processWebChatMessage({
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
-      if (!threadId) {
-        throw new Error("threadId became undefined during polling")
-      }
-
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+      runStatus = await retrieveRunStatus(THREAD_ID, RUN_ID)
       console.log(`[WEB-CHAT] Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
@@ -454,15 +449,11 @@ export async function processWebChatMessage({
         }
       }
 
-      if (!threadId) {
-        throw new Error("threadId became undefined before submitting tool outputs")
-      }
-
-      await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
+      await openai.beta.threads.runs.submitToolOutputs(THREAD_ID, RUN_ID, {
         tool_outputs: toolOutputs,
       })
 
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+      runStatus = await retrieveRunStatus(THREAD_ID, RUN_ID)
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -477,11 +468,7 @@ export async function processWebChatMessage({
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
 
-        if (!threadId) {
-          throw new Error("threadId became undefined during polling after tool calls")
-        }
-
-        runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+        runStatus = await retrieveRunStatus(THREAD_ID, RUN_ID)
         console.log(`[WEB-CHAT] Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
@@ -489,11 +476,7 @@ export async function processWebChatMessage({
     if (runStatus.status === "completed") {
       console.log(`[WEB-CHAT] Run completado exitosamente`)
 
-      if (!threadId) {
-        throw new Error("threadId became undefined before listing messages")
-      }
-
-      const messages = await openai.beta.threads.messages.list(threadId, {
+      const messages = await openai.beta.threads.messages.list(THREAD_ID, {
         order: "desc",
         limit: 1,
       })
