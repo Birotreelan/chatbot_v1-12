@@ -89,8 +89,38 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] ✅ Configuración encontrada: ${config.displayName}`)
 
+    console.log(`[WEB-CHAT] 🔍 Obteniendo thread para sessionId: ${sessionId}, configId: ${config.id}`)
     const threadResult = await getThreadForUser(sessionId, config.id)
+
+    console.log(`[WEB-CHAT] 📋 Thread result completo:`, JSON.stringify(threadResult, null, 2))
+
+    if (!threadResult) {
+      console.error(`[WEB-CHAT] ❌ getThreadForUser devolvió null/undefined`)
+      return {
+        response: "Lo siento, ocurrió un error al iniciar la conversación.",
+        error: "ThreadResult es null",
+      }
+    }
+
+    if (!threadResult.threadId) {
+      console.error(`[WEB-CHAT] ❌ threadResult.threadId es undefined`)
+      console.error(`[WEB-CHAT] threadResult keys:`, Object.keys(threadResult))
+      console.error(`[WEB-CHAT] threadResult values:`, Object.values(threadResult))
+      return {
+        response: "Lo siento, ocurrió un error al iniciar la conversación.",
+        error: "ThreadId no disponible en threadResult",
+      }
+    }
+
     const threadId = threadResult.threadId
+
+    if (typeof threadId !== "string" || !threadId.startsWith("thread_")) {
+      console.error(`[WEB-CHAT] ❌ ThreadId tiene formato inválido: ${threadId} (tipo: ${typeof threadId})`)
+      return {
+        response: "Lo siento, ocurrió un error al iniciar la conversación.",
+        error: `ThreadId inválido: ${threadId}`,
+      }
+    }
 
     console.log(`[WEB-CHAT] 🧵 Thread obtenido: ${threadId}`)
     console.log(`[WEB-CHAT] - Es nuevo: ${threadResult.isNewThread}`)
@@ -116,7 +146,6 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] ✅ Mensaje agregado al thread`)
 
-    // Ejecutar el asistente
     const assistantId = config.widgetAssistantId || config.whatsappAssistantId
     console.log(`[WEB-CHAT] 🤖 Ejecutando asistente: ${assistantId}`)
 
@@ -337,7 +366,14 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] 🔄 Run creado: ${run.id}`)
 
-    // Esperar a que el run se complete
+    if (!threadId || typeof threadId !== "string") {
+      console.error(`[WEB-CHAT] ❌ ThreadId inválido antes de retrieve: ${threadId}`)
+      return {
+        response: "Lo siento, ocurrió un error en la conversación.",
+        error: "ThreadId inválido",
+      }
+    }
+
     let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
     console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
 
@@ -359,7 +395,6 @@ export async function processWebChatMessage({
       console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
-    // Manejar tool calls si es necesario
     if (runStatus.status === "requires_action") {
       console.log(`[WEB-CHAT] 🔧 Run requiere acción - procesando tool calls`)
 
@@ -434,12 +469,10 @@ export async function processWebChatMessage({
         }
       }
 
-      // Enviar los resultados de las tools
       await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
         tool_outputs: toolOutputs,
       })
 
-      // Esperar a que el run se complete después de las tool calls
       runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
       attempts = 0
 
@@ -462,7 +495,6 @@ export async function processWebChatMessage({
     if (runStatus.status === "completed") {
       console.log(`[WEB-CHAT] ✅ Run completado exitosamente`)
 
-      // Obtener los mensajes del thread
       const messages = await openai.beta.threads.messages.list(threadId, {
         order: "desc",
         limit: 1,

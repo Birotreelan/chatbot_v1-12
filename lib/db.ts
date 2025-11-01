@@ -37,12 +37,19 @@ const STATS_KEY = "system_stats"
 
 // Función auxiliar para manejar la serialización/deserialización segura
 function safeJsonParse(data: any): any {
+  if (!data) return null
+
   if (typeof data === "string") {
+    if (data.startsWith("thread_") || data.startsWith("asst_") || data.startsWith("msg_") || data.startsWith("run_")) {
+      // It's an OpenAI ID, return as-is
+      return data
+    }
+
     try {
       return JSON.parse(data)
     } catch (error) {
       console.error("[DB] Error al parsear JSON:", error)
-      return null
+      return data
     }
   }
   return data // Si ya es un objeto, devolverlo tal cual
@@ -441,30 +448,49 @@ export async function getThreadForUser(
   if (redisClient) {
     // Intentar obtener el thread existente
     const threadData = await redisClient.get(key)
-    const threadInfo = safeJsonParse(threadData)
 
-    if (threadInfo) {
-      console.log(`[DB] ✅ Thread encontrado: ${threadInfo.threadId}`)
+    if (threadData) {
+      let threadInfo = null
 
-      // Verificar si es un thread reseteado
-      const isResetThread = threadInfo.isResetThread === true
-
-      // Actualizar la información del thread
-      const updatedThreadInfo = {
-        ...threadInfo,
-        lastMessageAt: new Date().toISOString(),
-        messageCount: (threadInfo.messageCount || 0) + 1,
-        // Limpiar el flag de reset después del primer uso
-        isResetThread: false,
+      // If it's a string that looks like a thread ID, wrap it in an object
+      if (typeof threadData === "string" && threadData.startsWith("thread_")) {
+        console.log(`[DB] ⚠️ Thread guardado como string simple, migrando a formato objeto`)
+        threadInfo = {
+          threadId: threadData,
+          phoneNumber: normalizedPhone,
+          whatsappConfigId,
+          lastMessageAt: new Date().toISOString(),
+          messageCount: 1,
+        }
+        // Save in the correct format
+        await redisClient.set(key, JSON.stringify(threadInfo))
+      } else {
+        threadInfo = safeJsonParse(threadData)
       }
 
-      // Guardar en Redis - siempre como cadena JSON
-      await redisClient.set(key, JSON.stringify(updatedThreadInfo))
+      if (threadInfo && threadInfo.threadId) {
+        console.log(`[DB] ✅ Thread encontrado: ${threadInfo.threadId}`)
 
-      return {
-        threadId: threadInfo.threadId,
-        isNewThread: false,
-        isResetThread,
+        // Verificar si es un thread reseteado
+        const isResetThread = threadInfo.isResetThread === true
+
+        // Actualizar la información del thread
+        const updatedThreadInfo = {
+          ...threadInfo,
+          lastMessageAt: new Date().toISOString(),
+          messageCount: (threadInfo.messageCount || 0) + 1,
+          // Limpiar el flag de reset después del primer uso
+          isResetThread: false,
+        }
+
+        // Guardar en Redis - siempre como cadena JSON
+        await redisClient.set(key, JSON.stringify(updatedThreadInfo))
+
+        return {
+          threadId: threadInfo.threadId,
+          isNewThread: false,
+          isResetThread,
+        }
       }
     }
   } else {
