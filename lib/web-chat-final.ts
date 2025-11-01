@@ -10,7 +10,8 @@ import {
   buscarProfesionalesHerramienta,
   validarDni,
 } from "./openai-tools"
-import { getThread, createThread } from "./thread-manager"
+import { safelyAddMessageToThread } from "./thread-manager"
+import { getThreadForUser } from "./db"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -88,6 +89,13 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] ✅ Configuración encontrada: ${config.displayName}`)
 
+    const threadResult = await getThreadForUser(sessionId, config.id)
+    const threadId = threadResult.threadId
+
+    console.log(`[WEB-CHAT] 🧵 Thread obtenido: ${threadId}`)
+    console.log(`[WEB-CHAT] - Es nuevo: ${threadResult.isNewThread}`)
+    console.log(`[WEB-CHAT] - Es reseteado: ${threadResult.isResetThread || false}`)
+
     const effectiveSedeId = sedeId || config.sede_id
     console.log(`[WEB-CHAT] Sede ID efectivo:`, effectiveSedeId, sedeId ? "(del request)" : "(del config)")
 
@@ -101,28 +109,18 @@ export async function processWebChatMessage({
     console.log(`[WEB-CHAT] 📋 Bloque SISTEMA creado:`)
     console.log(systemBlock)
 
-    console.log(`[WEB-CHAT] 🔍 Obteniendo thread para session: ${sessionId}`)
-    let thread
-    try {
-      thread = await getThread(sessionId, config.id)
-      console.log(`[WEB-CHAT] ✅ Thread encontrado: ${thread.id}`)
-    } catch (error) {
-      console.log(`[WEB-CHAT] 📝 Thread no encontrado, creando nuevo...`)
-      thread = await createThread(sessionId, config.id)
-      console.log(`[WEB-CHAT] ✅ Thread creado: ${thread.id}`)
-    }
-
-    await openai.beta.threads.messages.create(thread.id, {
+    await safelyAddMessageToThread(threadId, {
       role: "user",
       content: `${systemBlock}\n\n${message}`,
     })
 
     console.log(`[WEB-CHAT] ✅ Mensaje agregado al thread`)
 
+    // Ejecutar el asistente
     const assistantId = config.widgetAssistantId || config.whatsappAssistantId
     console.log(`[WEB-CHAT] 🤖 Ejecutando asistente: ${assistantId}`)
 
-    const run = await openai.beta.threads.runs.create(thread.id, {
+    const run = await openai.beta.threads.runs.create(threadId, {
       assistant_id: assistantId,
       tools: [
         {
@@ -339,7 +337,8 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] 🔄 Run creado: ${run.id}`)
 
-    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id)
+    // Esperar a que el run se complete
+    let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
     console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
@@ -356,10 +355,11 @@ export async function processWebChatMessage({
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
-      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
       console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
+    // Manejar tool calls si es necesario
     if (runStatus.status === "requires_action") {
       console.log(`[WEB-CHAT] 🔧 Run requiere acción - procesando tool calls`)
 
@@ -434,11 +434,13 @@ export async function processWebChatMessage({
         }
       }
 
-      await openai.beta.threads.runs.submitToolOutputs(thread.id, run.id, {
+      // Enviar los resultados de las tools
+      await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
         tool_outputs: toolOutputs,
       })
 
-      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id)
+      // Esperar a que el run se complete después de las tool calls
+      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -452,7 +454,7 @@ export async function processWebChatMessage({
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
-        runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id)
+        runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
         console.log(`[WEB-CHAT] 📊 Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
@@ -460,7 +462,8 @@ export async function processWebChatMessage({
     if (runStatus.status === "completed") {
       console.log(`[WEB-CHAT] ✅ Run completado exitosamente`)
 
-      const messages = await openai.beta.threads.messages.list(thread.id, {
+      // Obtener los mensajes del thread
+      const messages = await openai.beta.threads.messages.list(threadId, {
         order: "desc",
         limit: 1,
       })

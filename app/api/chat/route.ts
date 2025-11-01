@@ -63,14 +63,14 @@ export async function POST(request: NextRequest) {
     console.log("[API-CHAT] ✅ Configuración encontrada:")
     console.log("[API-CHAT] - ID:", config.id)
     console.log("[API-CHAT] - Display Name:", config.displayName)
-    console.log("[API-CHAT] - Assistant ID:", config.assistantId)
+    console.log("[API-CHAT] - Assistant ID:", config.widgetAssistantId || config.whatsappAssistantId)
 
     const effectiveSedeId = sede_id || config.sede_id
     console.log("[API-CHAT] - Sede ID efectivo:", effectiveSedeId, sede_id ? "(del request)" : "(del config)")
 
     // Procesar mensaje con web chat
     console.log("[API-CHAT] 🤖 Procesando mensaje con web chat...")
-    const response = await processWebChatMessage({
+    const result = await processWebChatMessage({
       message,
       sessionId: session_id,
       config,
@@ -78,27 +78,18 @@ export async function POST(request: NextRequest) {
       sedeId: effectiveSedeId,
     })
 
-    console.log("[API-CHAT] ✅ Respuesta generada:")
-    if (response.response) {
-      console.log("[API-CHAT] - Longitud:", response.response.length, "caracteres")
-      console.log("[API-CHAT] - Contenido:", response.response.substring(0, 200) + "...")
-    } else {
-      console.log("[API-CHAT] - Sin respuesta (error):", response.error)
+    if (result.error) {
+      console.log("[API-CHAT] ⚠️ Error en procesamiento:", result.error)
     }
 
-    if (response.error && !response.response) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: response.error,
-        },
-        { status: 500 },
-      )
-    }
+    console.log("[API-CHAT] ✅ Respuesta generada:")
+    console.log("[API-CHAT] - Longitud:", result.response.length, "caracteres")
+    console.log("[API-CHAT] - Contenido:", result.response.substring(0, 200) + "...")
 
     const responseData = {
-      success: true,
-      response: response.response,
+      success: !result.error,
+      response: result.response,
+      error: result.error,
     }
 
     console.log("[API-CHAT] 📤 Enviando respuesta:", JSON.stringify(responseData, null, 2))

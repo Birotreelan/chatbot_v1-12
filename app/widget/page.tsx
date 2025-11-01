@@ -4,7 +4,7 @@ import WidgetChat from "@/components/widget-chat"
 interface WidgetPageProps {
   searchParams: Promise<{
     clienteId: string
-    config?: string
+    config: string
     embedded?: string
   }>
 }
@@ -15,12 +15,10 @@ const WidgetPage: React.FC<WidgetPageProps> = async ({ searchParams }) => {
 
   // Parse config string to JSON object
   let parsedConfig = {}
-  if (config && config !== "undefined") {
-    try {
-      parsedConfig = JSON.parse(config)
-    } catch (error) {
-      console.error("Error parsing config:", error)
-    }
+  try {
+    parsedConfig = JSON.parse(config)
+  } catch (error) {
+    console.error("Error parsing config:", error)
   }
 
   return (
