@@ -363,6 +363,7 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] 🔄 Run creado: ${run.id}`)
 
+    console.log(`[WEB-CHAT] 🔍 Llamando retrieve con threadId: ${validThreadId}, runId: ${run.id}`)
     let runStatus = await openai.beta.threads.runs.retrieve(validThreadId, run.id)
 
     console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
