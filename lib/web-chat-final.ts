@@ -115,6 +115,11 @@ export async function processWebChatMessage({
     const THREAD_ID = thread.id
     console.log(`[WEB-CHAT] Thread obtenido: ${THREAD_ID}`)
 
+    if (!THREAD_ID || typeof THREAD_ID !== "string" || THREAD_ID === "undefined") {
+      console.error(`[WEB-CHAT] THREAD_ID inválido: ${THREAD_ID}`)
+      throw new Error(`Invalid THREAD_ID: ${THREAD_ID}`)
+    }
+
     const systemBlock = await createSystemBlock(
       config.displayName,
       config.cliente_id,
@@ -133,6 +138,14 @@ export async function processWebChatMessage({
 
     const assistantId = config.widgetAssistantId || config.whatsappAssistantId
     console.log(`[WEB-CHAT] Ejecutando asistente: ${assistantId}`)
+
+    if (!assistantId || typeof assistantId !== "string" || assistantId === "undefined") {
+      console.error(`[WEB-CHAT] assistantId inválido: ${assistantId}`)
+      return {
+        response: "Lo siento, la configuración del asistente no es válida.",
+        error: `Invalid assistantId: ${assistantId}`,
+      }
+    }
 
     const run = await openai.beta.threads.runs.create(THREAD_ID, {
       assistant_id: assistantId,
@@ -351,7 +364,17 @@ export async function processWebChatMessage({
 
     const RUN_ID = run.id
     console.log(`[WEB-CHAT] Run creado: ${RUN_ID}`)
+
+    if (!RUN_ID || typeof RUN_ID !== "string" || RUN_ID === "undefined") {
+      console.error(`[WEB-CHAT] RUN_ID inválido: ${RUN_ID}`)
+      throw new Error(`Invalid RUN_ID: ${RUN_ID}`)
+    }
+
     console.log(`[WEB-CHAT] Verificando estado - ThreadID: ${THREAD_ID}, RunID: ${RUN_ID}`)
+
+    console.log(
+      `[WEB-CHAT] Validando parámetros antes de retrieve - THREAD_ID type: ${typeof THREAD_ID}, RUN_ID type: ${typeof RUN_ID}`,
+    )
 
     let runStatus = await openai.beta.threads.runs.retrieve(THREAD_ID, RUN_ID)
     console.log(`[WEB-CHAT] Estado inicial del run: ${runStatus.status}`)
