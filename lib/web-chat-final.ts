@@ -363,8 +363,10 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] 🔄 Run creado: ${run.id}`)
 
-    console.log(`[WEB-CHAT] 🔍 Llamando retrieve con threadId: ${validThreadId}, runId: ${run.id}`)
-    let runStatus = await openai.beta.threads.runs.retrieve(validThreadId, run.id)
+    console.log(`[WEB-CHAT] 🔍 Llamando retrieve con runId: ${run.id}, thread_id: ${validThreadId}`)
+    let runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+      thread_id: validThreadId,
+    })
 
     console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
 
@@ -382,7 +384,9 @@ export async function processWebChatMessage({
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
-      runStatus = await openai.beta.threads.runs.retrieve(validThreadId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+        thread_id: validThreadId,
+      })
       console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
@@ -460,11 +464,14 @@ export async function processWebChatMessage({
         }
       }
 
-      await openai.beta.threads.runs.submitToolOutputs(validThreadId, run.id, {
+      await openai.beta.threads.runs.submitToolOutputs(run.id, {
+        thread_id: validThreadId,
         tool_outputs: toolOutputs,
       })
 
-      runStatus = await openai.beta.threads.runs.retrieve(validThreadId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+        thread_id: validThreadId,
+      })
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -478,7 +485,9 @@ export async function processWebChatMessage({
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
-        runStatus = await openai.beta.threads.runs.retrieve(validThreadId, run.id)
+        runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+          thread_id: validThreadId,
+        })
         console.log(`[WEB-CHAT] 📊 Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
