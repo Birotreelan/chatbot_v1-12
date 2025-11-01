@@ -10,23 +10,11 @@ import {
   buscarProfesionalesHerramienta,
   validarDni,
 } from "./openai-tools"
-import { safelyAddMessageToThread, getThread } from "./thread-manager"
+import { safelyAddMessageToThread } from "./thread-manager"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
-
-async function retrieveRunStatus(threadId: string, runId: string) {
-  if (!threadId || typeof threadId !== "string") {
-    throw new Error(`Invalid threadId: ${threadId}`)
-  }
-  if (!runId || typeof runId !== "string") {
-    throw new Error(`Invalid runId: ${runId}`)
-  }
-
-  console.log(`[WEB-CHAT] Retrieving run - Thread: ${threadId}, Run: ${runId}`)
-  return await openai.beta.threads.runs.retrieve(threadId, runId)
-}
 
 // Función para crear el bloque SISTEMA con datos de sede
 async function createSystemBlock(
@@ -49,18 +37,18 @@ CelularPaciente: No disponible (consulta web)`
   // Si tenemos clienteId y sedeId, obtener datos de sede
   if (clienteId && sedeId) {
     try {
-      console.log(`[SISTEMA] Obteniendo datos de sede para cliente: ${clienteId}, sede: ${sedeId}`)
+      console.log(`[SISTEMA] 🏥 Obteniendo datos de sede para cliente: ${clienteId}, sede: ${sedeId}`)
       const sedeData = await obtenerDatosSede(clienteId, sedeId)
 
       if (sedeData && sedeData.success && sedeData.sede) {
         const datosSede = formatearDatosSede(sedeData.sede)
         systemBlock += `\n${datosSede}`
-        console.log(`[SISTEMA] Datos de sede agregados al bloque SISTEMA`)
+        console.log(`[SISTEMA] ✅ Datos de sede agregados al bloque SISTEMA`)
       } else {
-        console.log(`[SISTEMA] No se pudieron obtener datos de sede`)
+        console.log(`[SISTEMA] ⚠️ No se pudieron obtener datos de sede`)
       }
     } catch (error) {
-      console.error(`[SISTEMA] Error al obtener datos de sede:`, error)
+      console.error(`[SISTEMA] ❌ Error al obtener datos de sede:`, error)
     }
   }
 
@@ -85,40 +73,23 @@ export async function processWebChatMessage({
   try {
     const clienteId = config.cliente_id
 
-    console.log(`[WEB-CHAT] Procesando mensaje para cliente: ${clienteId}`)
+    console.log(`[WEB-CHAT] 💬 Procesando mensaje para cliente: ${clienteId}`)
     console.log(`[WEB-CHAT] Session ID: ${sessionId}`)
     console.log(`[WEB-CHAT] Mensaje: ${message}`)
     console.log(`[WEB-CHAT] Sede ID recibido:`, sedeId)
 
     if (!config) {
-      console.error(`[WEB-CHAT] No se encontró configuración para cliente: ${clienteId}`)
+      console.error(`[WEB-CHAT] ❌ No se encontró configuración para cliente: ${clienteId}`)
       return {
         response: "Lo siento, no se pudo procesar tu consulta en este momento.",
         error: "Configuración no encontrada",
       }
     }
 
-    console.log(`[WEB-CHAT] Configuración encontrada: ${config.displayName}`)
+    console.log(`[WEB-CHAT] ✅ Configuración encontrada: ${config.displayName}`)
 
     const effectiveSedeId = sedeId || config.sede_id
     console.log(`[WEB-CHAT] Sede ID efectivo:`, effectiveSedeId, sedeId ? "(del request)" : "(del config)")
-
-    console.log(`[WEB-CHAT] Obteniendo thread de OpenAI para sessionId: ${sessionId}`)
-
-    const thread = await getThread(sessionId, config.id.toString())
-
-    if (!thread || !thread.id) {
-      console.error(`[WEB-CHAT] getThread devolvió un thread inválido:`, thread)
-      throw new Error("Failed to get valid thread from OpenAI")
-    }
-
-    const THREAD_ID = thread.id
-    console.log(`[WEB-CHAT] Thread obtenido: ${THREAD_ID}`)
-
-    if (!THREAD_ID || typeof THREAD_ID !== "string" || THREAD_ID === "undefined") {
-      console.error(`[WEB-CHAT] THREAD_ID inválido: ${THREAD_ID}`)
-      throw new Error(`Invalid THREAD_ID: ${THREAD_ID}`)
-    }
 
     const systemBlock = await createSystemBlock(
       config.displayName,
@@ -127,27 +98,21 @@ export async function processWebChatMessage({
       config.escalationPhoneNumber,
     )
 
-    console.log(`[WEB-CHAT] Bloque SISTEMA creado`)
+    console.log(`[WEB-CHAT] 📋 Bloque SISTEMA creado:`)
+    console.log(systemBlock)
 
-    await safelyAddMessageToThread(THREAD_ID, {
+    await safelyAddMessageToThread(sessionId, {
       role: "user",
       content: `${systemBlock}\n\n${message}`,
     })
 
-    console.log(`[WEB-CHAT] Mensaje agregado al thread`)
+    console.log(`[WEB-CHAT] ✅ Mensaje agregado al thread`)
 
+    // Ejecutar el asistente
     const assistantId = config.widgetAssistantId || config.whatsappAssistantId
-    console.log(`[WEB-CHAT] Ejecutando asistente: ${assistantId}`)
+    console.log(`[WEB-CHAT] 🤖 Ejecutando asistente: ${assistantId}`)
 
-    if (!assistantId || typeof assistantId !== "string" || assistantId === "undefined") {
-      console.error(`[WEB-CHAT] assistantId inválido: ${assistantId}`)
-      return {
-        response: "Lo siento, la configuración del asistente no es válida.",
-        error: `Invalid assistantId: ${assistantId}`,
-      }
-    }
-
-    const run = await openai.beta.threads.runs.create(THREAD_ID, {
+    const run = await openai.beta.threads.runs.create(sessionId, {
       assistant_id: assistantId,
       tools: [
         {
@@ -362,29 +327,11 @@ export async function processWebChatMessage({
       ],
     })
 
-    const RUN_ID = run.id
-    console.log(`[WEB-CHAT] Run creado: ${RUN_ID}`)
+    console.log(`[WEB-CHAT] 🔄 Run creado: ${run.id}`)
 
-    if (!RUN_ID || typeof RUN_ID !== "string" || RUN_ID === "undefined") {
-      console.error(`[WEB-CHAT] RUN_ID inválido: ${RUN_ID}`)
-      throw new Error(`Invalid RUN_ID: ${RUN_ID}`)
-    }
-
-    console.log(`[WEB-CHAT] Verificando estado - ThreadID: ${THREAD_ID}, RunID: ${RUN_ID}`)
-
-    console.log(
-      `[WEB-CHAT] Validando parámetros antes de retrieve - THREAD_ID type: ${typeof THREAD_ID}, RUN_ID type: ${typeof RUN_ID}`,
-    )
-
-    const threadIdForRetrieve = String(THREAD_ID)
-    const runIdForRetrieve = String(RUN_ID)
-
-    console.log(
-      `[WEB-CHAT] Parámetros para retrieve - threadId: "${threadIdForRetrieve}", runId: "${runIdForRetrieve}"`,
-    )
-
-    let runStatus = await openai.beta.threads.runs.retrieve(threadIdForRetrieve, runIdForRetrieve)
-    console.log(`[WEB-CHAT] Estado inicial del run: ${runStatus.status}`)
+    // Esperar a que el run se complete
+    let runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
+    console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
     let attempts = 0
@@ -392,7 +339,7 @@ export async function processWebChatMessage({
     while (runStatus.status === "in_progress" || runStatus.status === "queued") {
       attempts++
       if (attempts > maxAttempts) {
-        console.error(`[WEB-CHAT] Timeout esperando respuesta del asistente`)
+        console.error(`[WEB-CHAT] ❌ Timeout esperando respuesta del asistente`)
         return {
           response: "Lo siento, la consulta está tomando más tiempo del esperado. Por favor, intenta nuevamente.",
           error: "Timeout",
@@ -400,19 +347,19 @@ export async function processWebChatMessage({
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      runStatus = await openai.beta.threads.runs.retrieve(threadIdForRetrieve, runIdForRetrieve)
-      console.log(`[WEB-CHAT] Estado del run (intento ${attempts}): ${runStatus.status}`)
+      runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
+      console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
+    // Manejar tool calls si es necesario
     if (runStatus.status === "requires_action") {
-      console.log(`[WEB-CHAT] Run requiere acción - procesando tool calls`)
+      console.log(`[WEB-CHAT] 🔧 Run requiere acción - procesando tool calls`)
 
       const toolCalls = runStatus.required_action?.submit_tool_outputs?.tool_calls || []
       const toolOutputs = []
 
       for (const toolCall of toolCalls) {
-        console.log(`[WEB-CHAT] Ejecutando tool: ${toolCall.function.name}`)
+        console.log(`[WEB-CHAT] 🛠️ Ejecutando tool: ${toolCall.function.name}`)
 
         try {
           const args = JSON.parse(toolCall.function.arguments)
@@ -469,9 +416,9 @@ export async function processWebChatMessage({
             output: typeof result === "string" ? result : JSON.stringify(result),
           })
 
-          console.log(`[WEB-CHAT] Tool ${toolCall.function.name} ejecutado exitosamente`)
+          console.log(`[WEB-CHAT] ✅ Tool ${toolCall.function.name} ejecutado exitosamente`)
         } catch (error) {
-          console.error(`[WEB-CHAT] Error ejecutando tool ${toolCall.function.name}:`, error)
+          console.error(`[WEB-CHAT] ❌ Error ejecutando tool ${toolCall.function.name}:`, error)
           toolOutputs.push({
             tool_call_id: toolCall.id,
             output: "Error al ejecutar la función",
@@ -479,17 +426,19 @@ export async function processWebChatMessage({
         }
       }
 
-      await openai.beta.threads.runs.submitToolOutputs(THREAD_ID, RUN_ID, {
+      // Enviar los resultados de las tools
+      await openai.beta.threads.runs.submitToolOutputs(sessionId, run.id, {
         tool_outputs: toolOutputs,
       })
 
-      runStatus = await openai.beta.threads.runs.retrieve(threadIdForRetrieve, runIdForRetrieve)
+      // Esperar a que el run se complete después de las tool calls
+      runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
         attempts++
         if (attempts > maxAttempts) {
-          console.error(`[WEB-CHAT] Timeout después de tool calls`)
+          console.error(`[WEB-CHAT] ❌ Timeout después de tool calls`)
           return {
             response: "Lo siento, la consulta está tomando más tiempo del esperado.",
             error: "Timeout after tool calls",
@@ -497,16 +446,16 @@ export async function processWebChatMessage({
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
-
-        runStatus = await openai.beta.threads.runs.retrieve(threadIdForRetrieve, runIdForRetrieve)
-        console.log(`[WEB-CHAT] Estado post-tools (intento ${attempts}): ${runStatus.status}`)
+        runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
+        console.log(`[WEB-CHAT] 📊 Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
 
     if (runStatus.status === "completed") {
-      console.log(`[WEB-CHAT] Run completado exitosamente`)
+      console.log(`[WEB-CHAT] ✅ Run completado exitosamente`)
 
-      const messages = await openai.beta.threads.messages.list(THREAD_ID, {
+      // Obtener los mensajes del thread
+      const messages = await openai.beta.threads.messages.list(sessionId, {
         order: "desc",
         limit: 1,
       })
@@ -515,25 +464,25 @@ export async function processWebChatMessage({
         const lastMessage = messages.data[0]
         if (lastMessage.role === "assistant" && lastMessage.content[0]?.type === "text") {
           const response = lastMessage.content[0].text.value
-          console.log(`[WEB-CHAT] Respuesta del asistente: ${response.substring(0, 100)}...`)
+          console.log(`[WEB-CHAT] 📤 Respuesta del asistente: ${response.substring(0, 100)}...`)
           return { response }
         }
       }
 
-      console.error(`[WEB-CHAT] No se encontró respuesta del asistente`)
+      console.error(`[WEB-CHAT] ❌ No se encontró respuesta del asistente`)
       return {
         response: "Lo siento, no pude generar una respuesta.",
         error: "No assistant response found",
       }
     } else {
-      console.error(`[WEB-CHAT] Run falló con estado: ${runStatus.status}`)
+      console.error(`[WEB-CHAT] ❌ Run falló con estado: ${runStatus.status}`)
       return {
         response: "Lo siento, ocurrió un error al procesar tu consulta.",
         error: `Run failed with status: ${runStatus.status}`,
       }
     }
   } catch (error) {
-    console.error(`[WEB-CHAT] Error crítico:`, error)
+    console.error(`[WEB-CHAT] ❌ Error crítico:`, error)
     return {
       response: "Lo siento, ocurrió un error inesperado. Por favor, intenta nuevamente.",
       error: error instanceof Error ? error.message : "Unknown error",

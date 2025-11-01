@@ -80,11 +80,7 @@ export async function POST(request: NextRequest) {
 
     console.log("[API-CHAT] ✅ Respuesta generada:")
     console.log("[API-CHAT] - Longitud:", response.length, "caracteres")
-    if (typeof response === "string") {
-      console.log("[API-CHAT] - Contenido:", response.substring(0, 200) + "...")
-    } else {
-      console.log("[API-CHAT] - Contenido:", response)
-    }
+    console.log("[API-CHAT] - Contenido:", response.substring(0, 200) + "...")
 
     const responseData = {
       success: true,

@@ -16,7 +16,6 @@ import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 import type { WhatsAppConfig } from "@/lib/types"
-import { ClearCacheButton } from "@/components/dashboard/clear-cache-button"
 
 interface WhatsAppConfigFormProps {
   config?: WhatsAppConfig
@@ -616,39 +615,23 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               </div>
 
               {config && (
-                <>
-                  <Separator />
-                  <div className="space-y-2">
-                    <Label>Gestión de Caché</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Si realizaste cambios y no se reflejan inmediatamente, limpia el caché de esta configuración.
-                    </p>
-                    <ClearCacheButton configId={config.id} variant="outline" size="default" />
-                  </div>
-                </>
-              )}
-
-              {config && (
-                <>
-                  <Separator />
-                  <Alert>
-                    <AlertDescription>
-                      <div className="space-y-2">
-                        <p>
-                          <strong>ID:</strong> <Badge variant="outline">{config.id}</Badge>
-                        </p>
-                        <p>
-                          <strong>Creado:</strong>{" "}
-                          {config.createdAt ? new Date(config.createdAt).toLocaleString() : "N/A"}
-                        </p>
-                        <p>
-                          <strong>Actualizado:</strong>{" "}
-                          {config.updatedAt ? new Date(config.updatedAt).toLocaleString() : "N/A"}
-                        </p>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                </>
+                <Alert>
+                  <AlertDescription>
+                    <div className="space-y-2">
+                      <p>
+                        <strong>ID:</strong> <Badge variant="outline">{config.id}</Badge>
+                      </p>
+                      <p>
+                        <strong>Creado:</strong>{" "}
+                        {config.createdAt ? new Date(config.createdAt).toLocaleString() : "N/A"}
+                      </p>
+                      <p>
+                        <strong>Actualizado:</strong>{" "}
+                        {config.updatedAt ? new Date(config.updatedAt).toLocaleString() : "N/A"}
+                      </p>
+                    </div>
+                  </AlertDescription>
+                </Alert>
               )}
             </CardContent>
           </Card>

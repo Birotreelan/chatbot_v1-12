@@ -1,17 +1,13 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { ClearCacheButton } from "@/components/dashboard/clear-cache-button"
 
 export function DashboardHeader() {
   return (
     <div className="flex justify-between items-center mb-8">
       <h1 className="text-3xl font-bold">Panel de Control de WhatsApp AI</h1>
-      <div className="flex gap-2">
-        <ClearCacheButton />
-        <Link href="/dashboard/config/new">
-          <Button>Nuevo Número de WhatsApp</Button>
-        </Link>
-      </div>
+      <Link href="/dashboard/config/new">
+        <Button>Nuevo Número de WhatsApp</Button>
+      </Link>
     </div>
   )
 }
