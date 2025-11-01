@@ -25,7 +25,7 @@ async function retrieveRunStatus(threadId: string, runId: string) {
   }
 
   console.log(`[WEB-CHAT] Retrieving run - Thread: ${threadId}, Run: ${runId}`)
-  return await openai.beta.threads.runs.retrieve(threadId, runId)
+  return await openai.beta.threads.runs.retrieve(runId, threadId)
 }
 
 // Función para crear el bloque SISTEMA con datos de sede
@@ -383,7 +383,7 @@ export async function processWebChatMessage({
       `[WEB-CHAT] Parámetros para retrieve - threadId: "${threadIdForRetrieve}", runId: "${runIdForRetrieve}"`,
     )
 
-    let runStatus = await openai.beta.threads.runs.retrieve(threadIdForRetrieve, runIdForRetrieve)
+    let runStatus = await openai.beta.threads.runs.retrieve(runIdForRetrieve, threadIdForRetrieve)
     console.log(`[WEB-CHAT] Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
@@ -401,7 +401,7 @@ export async function processWebChatMessage({
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
-      runStatus = await openai.beta.threads.runs.retrieve(threadIdForRetrieve, runIdForRetrieve)
+      runStatus = await openai.beta.threads.runs.retrieve(runIdForRetrieve, threadIdForRetrieve)
       console.log(`[WEB-CHAT] Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
@@ -483,7 +483,7 @@ export async function processWebChatMessage({
         tool_outputs: toolOutputs,
       })
 
-      runStatus = await openai.beta.threads.runs.retrieve(threadIdForRetrieve, runIdForRetrieve)
+      runStatus = await openai.beta.threads.runs.retrieve(runIdForRetrieve, threadIdForRetrieve)
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -498,7 +498,7 @@ export async function processWebChatMessage({
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
 
-        runStatus = await openai.beta.threads.runs.retrieve(threadIdForRetrieve, runIdForRetrieve)
+        runStatus = await openai.beta.threads.runs.retrieve(runIdForRetrieve, threadIdForRetrieve)
         console.log(`[WEB-CHAT] Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
