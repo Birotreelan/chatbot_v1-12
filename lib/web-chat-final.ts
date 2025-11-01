@@ -1,4 +1,3 @@
-import OpenAI from "openai"
 import { obtenerDatosSede, formatearDatosSede, obtenerSubespecialidades } from "./api-tools/api-functions"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import {
@@ -12,12 +11,8 @@ import {
 } from "./openai-tools"
 import { safelyAddMessageToThread } from "./thread-manager"
 import { getThreadForUser } from "./db"
+import { openai } from "./openai"
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
-
-// Función para crear el bloque SISTEMA con datos de sede
 async function createSystemBlock(
   clinicName: string,
   clienteId?: string,
@@ -35,7 +30,6 @@ CelularPaciente: No disponible (consulta web)`
     systemBlock += `\nNumeroDerivacion: ${escalationPhone}`
   }
 
-  // Si tenemos clienteId y sedeId, obtener datos de sede
   if (clienteId && sedeId) {
     try {
       console.log(`[SISTEMA] 🏥 Obteniendo datos de sede para cliente: ${clienteId}, sede: ${sedeId}`)
@@ -369,42 +363,7 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] 🔄 Run creado: ${run.id}`)
 
-    console.log(`[WEB-CHAT] 🔍 === DEBUG DETALLADO ANTES DE RETRIEVE ===`)
-    console.log(`[WEB-CHAT] 🔍 validThreadId value: "${validThreadId}"`)
-    console.log(`[WEB-CHAT] 🔍 validThreadId type: ${typeof validThreadId}`)
-    console.log(`[WEB-CHAT] 🔍 validThreadId is undefined: ${validThreadId === undefined}`)
-    console.log(`[WEB-CHAT] 🔍 validThreadId is null: ${validThreadId === null}`)
-    console.log(`[WEB-CHAT] 🔍 validThreadId length: ${validThreadId?.length}`)
-    console.log(`[WEB-CHAT] 🔍 run.id value: "${run.id}"`)
-    console.log(`[WEB-CHAT] 🔍 run.id type: ${typeof run.id}`)
-    console.log(`[WEB-CHAT] 🔍 run.id is undefined: ${run.id === undefined}`)
-    console.log(`[WEB-CHAT] 🔍 run.id is null: ${run.id === null}`)
-    console.log(`[WEB-CHAT] 🔍 run.id length: ${run.id?.length}`)
-    console.log(`[WEB-CHAT] 🔍 openai instance exists: ${!!openai}`)
-    console.log(`[WEB-CHAT] 🔍 openai.beta exists: ${!!openai?.beta}`)
-    console.log(`[WEB-CHAT] 🔍 openai.beta.threads exists: ${!!openai?.beta?.threads}`)
-    console.log(`[WEB-CHAT] 🔍 openai.beta.threads.runs exists: ${!!openai?.beta?.threads?.runs}`)
-    console.log(`[WEB-CHAT] 🔍 openai.beta.threads.runs.retrieve exists: ${!!openai?.beta?.threads?.runs?.retrieve}`)
-    console.log(
-      `[WEB-CHAT] 🔍 typeof openai.beta.threads.runs.retrieve: ${typeof openai?.beta?.threads?.runs?.retrieve}`,
-    )
-
-    // Try to log the actual function signature
-    try {
-      const retrieveFunc = openai.beta.threads.runs.retrieve
-      console.log(`[WEB-CHAT] 🔍 retrieve function: ${retrieveFunc.toString().substring(0, 200)}`)
-    } catch (e) {
-      console.log(`[WEB-CHAT] 🔍 Could not log retrieve function: ${e}`)
-    }
-
-    console.log(`[WEB-CHAT] 🔍 === FIN DEBUG DETALLADO ===`)
-
-    const threadIdParam = validThreadId
-    const runIdParam = run.id
-
-    console.log(`[WEB-CHAT] 🔍 Calling retrieve with threadIdParam: "${threadIdParam}", runIdParam: "${runIdParam}"`)
-
-    let runStatus = await openai.beta.threads.runs.retrieve(threadIdParam, runIdParam)
+    let runStatus = await openai.beta.threads.runs.retrieve(validThreadId, run.id)
 
     console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
 
