@@ -403,12 +403,14 @@ export async function processWebChatMessage({
           const args = JSON.parse(toolCall.function.arguments)
           let result = null
 
+          const effectiveClienteId = clienteId
+
           switch (toolCall.function.name) {
             case "obtener_obras_sociales":
-              result = await obtenerObrasSociales(args.cliente_id)
+              result = await obtenerObrasSociales(effectiveClienteId)
               break
             case "obtener_subespecialidades":
-              const subespecialidadesResult = await obtenerSubespecialidades(args.cliente_id)
+              const subespecialidadesResult = await obtenerSubespecialidades(effectiveClienteId)
               result = subespecialidadesResult.exito
                 ? JSON.stringify({
                     exito: true,
@@ -418,11 +420,11 @@ export async function processWebChatMessage({
                 : JSON.stringify({ exito: false, mensaje: "No se encontraron especialidades" })
               break
             case "obtener_turnos_disponibles":
-              result = await obtenerTurnosDisponibles(args.cliente_id, args.especialidad_id, args.obra_social_id)
+              result = await obtenerTurnosDisponibles(effectiveClienteId, args.especialidad_id, args.obra_social_id)
               break
             case "buscar_turnos_disponibles":
               result = await buscarTurnosDisponiblesHerramienta(
-                args.cliente_id,
+                effectiveClienteId,
                 args.rango_fechas,
                 args.profesional,
                 args.especialidad,
@@ -430,20 +432,20 @@ export async function processWebChatMessage({
               )
               break
             case "reservar_turno":
-              result = await reservarTurno(args.cliente_id, args.turno_id, args.paciente_datos)
+              result = await reservarTurno(effectiveClienteId, args.turno_id, args.paciente_datos)
               break
             case "obtener_datos_sede":
-              const sedeData = await obtenerDatosSede(args.cliente_id, args.sede_id)
+              const sedeData = await obtenerDatosSede(effectiveClienteId, args.sede_id)
               result = sedeData ? formatearDatosSede(sedeData.sede) : "No se pudieron obtener los datos de la sede"
               break
             case "validar_obra_social":
-              result = await validarObraSocialHerramienta(args.cliente_id, args.busqueda)
+              result = await validarObraSocialHerramienta(effectiveClienteId, args.busqueda)
               break
             case "buscar_profesionales":
-              result = await buscarProfesionalesHerramienta(args.cliente_id, args.busqueda)
+              result = await buscarProfesionalesHerramienta(effectiveClienteId, args.busqueda)
               break
             case "validar_dni":
-              result = await validarDni(args.cliente_id, args.dni)
+              result = await validarDni(effectiveClienteId, args.dni)
               break
             default:
               result = "Función no reconocida"
