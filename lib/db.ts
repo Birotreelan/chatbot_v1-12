@@ -446,50 +446,117 @@ export async function getThreadForUser(
   console.log(`[DB] 🔍 Obteniendo thread para ${normalizedPhone} con config ${whatsappConfigId}`)
 
   if (redisClient) {
-    // Intentar obtener el thread existente
-    const threadData = await redisClient.get(key)
+    // Use a lock to prevent concurrent access to the same thread
+    const lockKey = `${key}:lock`
+    const lockId = nanoid()
+    let lockAcquired = false
 
-    if (threadData) {
-      let threadInfo = null
+    try {
+      // Try to acquire lock with 10 second timeout
+      for (let i = 0; i < 50; i++) {
+        const acquired = await redisClient.set(lockKey, lockId, {
+          nx: true,
+          ex: 10,
+        })
 
-      // If it's a string that looks like a thread ID, wrap it in an object
-      if (typeof threadData === "string" && threadData.startsWith("thread_")) {
-        console.log(`[DB] ⚠️ Thread guardado como string simple, migrando a formato objeto`)
-        threadInfo = {
-          threadId: threadData,
-          phoneNumber: normalizedPhone,
-          whatsappConfigId,
-          lastMessageAt: new Date().toISOString(),
-          messageCount: 1,
+        if (acquired) {
+          lockAcquired = true
+          console.log(`[DB] 🔒 Lock adquirido para thread: ${normalizedPhone}`)
+          break
         }
-        // Save in the correct format
-        await redisClient.set(key, JSON.stringify(threadInfo))
-      } else {
-        threadInfo = safeJsonParse(threadData)
+
+        // Wait 100ms before retrying
+        await new Promise((resolve) => setTimeout(resolve, 100))
       }
 
-      if (threadInfo && threadInfo.threadId) {
-        console.log(`[DB] ✅ Thread encontrado: ${threadInfo.threadId}`)
+      if (!lockAcquired) {
+        console.error(`[DB] ❌ No se pudo adquirir lock para thread: ${normalizedPhone}`)
+        throw new Error(`Could not acquire lock for thread: ${normalizedPhone}`)
+      }
 
-        // Verificar si es un thread reseteado
-        const isResetThread = threadInfo.isResetThread === true
+      // Now safely get or create the thread
+      const threadData = await redisClient.get(key)
 
-        // Actualizar la información del thread
-        const updatedThreadInfo = {
-          ...threadInfo,
-          lastMessageAt: new Date().toISOString(),
-          messageCount: (threadInfo.messageCount || 0) + 1,
-          // Limpiar el flag de reset después del primer uso
-          isResetThread: false,
+      if (threadData) {
+        let threadInfo = null
+
+        // If it's a string that looks like a thread ID, wrap it in an object
+        if (typeof threadData === "string" && threadData.startsWith("thread_")) {
+          console.log(`[DB] ⚠️ Thread guardado como string simple, migrando a formato objeto`)
+          threadInfo = {
+            threadId: threadData,
+            phoneNumber: normalizedPhone,
+            whatsappConfigId,
+            lastMessageAt: new Date().toISOString(),
+            messageCount: 1,
+          }
+        } else {
+          threadInfo = safeJsonParse(threadData)
         }
 
-        // Guardar en Redis - siempre como cadena JSON
-        await redisClient.set(key, JSON.stringify(updatedThreadInfo))
+        if (threadInfo && threadInfo.threadId) {
+          console.log(`[DB] ✅ Thread encontrado: ${threadInfo.threadId}`)
 
-        return {
-          threadId: threadInfo.threadId,
-          isNewThread: false,
-          isResetThread,
+          // Verificar si es un thread reseteado
+          const isResetThread = threadInfo.isResetThread === true
+
+          // Actualizar la información del thread de forma atómica
+          const updatedThreadInfo = {
+            ...threadInfo,
+            lastMessageAt: new Date().toISOString(),
+            messageCount: (threadInfo.messageCount || 0) + 1,
+            // Limpiar el flag de reset después del primer uso
+            isResetThread: false,
+          }
+
+          // Guardar en Redis - siempre como cadena JSON
+          await redisClient.set(key, JSON.stringify(updatedThreadInfo))
+
+          return {
+            threadId: threadInfo.threadId,
+            isNewThread: false,
+            isResetThread,
+          }
+        }
+      }
+
+      // Crear un nuevo thread
+      console.log(`[DB] 📝 No se encontró thread existente, creando uno nuevo`)
+      const openai = new (await import("openai")).default({
+        apiKey: process.env.OPENAI_API_KEY,
+      })
+
+      const thread = await openai.beta.threads.create({
+        metadata: {
+          phoneNumber: normalizedPhone,
+          whatsappConfigId,
+          createdAt: new Date().toISOString(),
+        },
+      })
+      console.log(`[DB] ✅ Nuevo thread creado: ${thread.id}`)
+
+      // Guardar la información del thread
+      const newThreadInfo: ThreadInfo = {
+        threadId: thread.id,
+        phoneNumber: normalizedPhone,
+        whatsappConfigId,
+        lastMessageAt: new Date().toISOString(),
+        messageCount: 1,
+      }
+
+      await redisClient.set(key, JSON.stringify(newThreadInfo))
+
+      // Actualizar estadísticas
+      await updateSystemStats()
+
+      return { threadId: thread.id, isNewThread: true }
+    } finally {
+      // Always release the lock
+      if (lockAcquired) {
+        const currentLock = await redisClient.get(lockKey)
+        if (currentLock === lockId) {
+          await redisClient.del(lockKey)
+          console.log(`[DB] 🔓 Lock liberado para thread: ${normalizedPhone}`)
         }
       }
     }
@@ -517,38 +584,32 @@ export async function getThreadForUser(
         isResetThread,
       }
     }
-  }
 
-  // Crear un nuevo thread
-  console.log(`[DB] 📝 No se encontró thread existente, creando uno nuevo`)
-  const openai = new (await import("openai")).default({
-    apiKey: process.env.OPENAI_API_KEY,
-  })
+    // Crear un nuevo thread
+    console.log(`[DB] 📝 No se encontró thread existente, creando uno nuevo`)
+    const openai = new (await import("openai")).default({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
 
-  const thread = await openai.beta.threads.create()
-  console.log(`[DB] ✅ Nuevo thread creado: ${thread.id}`)
+    const thread = await openai.beta.threads.create()
+    console.log(`[DB] ✅ Nuevo thread creado: ${thread.id}`)
 
-  // Guardar la información del thread
-  const newThreadInfo: ThreadInfo = {
-    threadId: thread.id,
-    phoneNumber: normalizedPhone,
-    whatsappConfigId,
-    lastMessageAt: new Date().toISOString(),
-    messageCount: 1,
-  }
+    // Guardar la información del thread
+    const newThreadInfo: ThreadInfo = {
+      threadId: thread.id,
+      phoneNumber: normalizedPhone,
+      whatsappConfigId,
+      lastMessageAt: new Date().toISOString(),
+      messageCount: 1,
+    }
 
-  if (redisClient) {
-    // Guardar en Redis - siempre como cadena JSON
-    await redisClient.set(key, JSON.stringify(newThreadInfo))
-  } else {
-    // Fallback a memoria
     memoryStorage.threads.set(key, newThreadInfo)
+
+    // Actualizar estadísticas
+    await updateSystemStats()
+
+    return { threadId: thread.id, isNewThread: true }
   }
-
-  // Actualizar estadísticas
-  await updateSystemStats()
-
-  return { threadId: thread.id, isNewThread: true }
 }
 
 // Resetear un thread para un usuario - OPTIMIZADO
@@ -751,6 +812,59 @@ export async function updateWhatsAppStats(
 // Función adicional para obtener configuración por ID (alias para compatibilidad)
 export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig | null> {
   return getWhatsAppConfig(id)
+}
+
+// Función para validar la propiedad del thread - NUEVA FUNCIÓN AGREGADA
+export async function validateThreadOwnership(
+  threadId: string,
+  phoneNumber: string,
+  whatsappConfigId: string,
+): Promise<boolean> {
+  const normalizedPhone = normalizePhoneNumber(phoneNumber)
+  const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
+  const redisClient = getRedisClient()
+
+  console.log(`[DB] 🔍 Validando ownership del thread ${threadId} para ${normalizedPhone}`)
+
+  if (redisClient) {
+    const threadData = await redisClient.get(key)
+    if (!threadData) {
+      console.warn(`[DB] ⚠️ No se encontró thread data para validación`)
+      return false
+    }
+
+    const threadInfo = safeJsonParse(threadData)
+    if (!threadInfo || !threadInfo.threadId) {
+      console.warn(`[DB] ⚠️ Thread info inválido`)
+      return false
+    }
+
+    const isValid = threadInfo.threadId === threadId
+    if (!isValid) {
+      console.error(`[DB] ❌ THREAD MISMATCH DETECTADO! Esperado: ${threadId}, Actual: ${threadInfo.threadId}`)
+      console.error(`[DB] ❌ Usuario: ${normalizedPhone}, Config: ${whatsappConfigId}`)
+    } else {
+      console.log(`[DB] ✅ Thread ownership validado correctamente`)
+    }
+
+    return isValid
+  } else {
+    // Fallback a memoria
+    const threadInfo = memoryStorage.threads.get(key)
+    if (!threadInfo) {
+      console.warn(`[DB] ⚠️ No se encontró thread en memoria para validación`)
+      return false
+    }
+
+    const isValid = threadInfo.threadId === threadId
+    if (!isValid) {
+      console.error(
+        `[DB] ❌ THREAD MISMATCH DETECTADO en memoria! Esperado: ${threadId}, Actual: ${threadInfo.threadId}`,
+      )
+    }
+
+    return isValid
+  }
 }
 
 // Export alias for compatibility
