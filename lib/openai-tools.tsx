@@ -867,21 +867,6 @@ async function processRunWithCorrectFlow(
   retryCount = 0,
 ) {
   try {
-    const { validateThreadOwnership, getWhatsAppConfigByPhoneId: getConfigByPhone } = await import("@/lib/db")
-    const config = await getConfigByPhone(phoneNumberId)
-
-    if (!config) {
-      throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
-    }
-
-    // Validar que el thread pertenece a este usuario específico
-    const isValidThread = await validateThreadOwnership(threadId, userPhoneNumber, config.id)
-    if (!isValidThread) {
-      console.error(`[OPENAI] ❌ VALIDACIÓN FALLÓ: Thread ${threadId} NO pertenece a ${userPhoneNumber}`)
-      throw new Error(`Thread ownership validation failed for ${userPhoneNumber}`)
-    }
-    console.log(`[OPENAI] ✅ Thread ${threadId} validado para usuario ${userPhoneNumber}`)
-
     const completedRun = await waitForRunCompletionOrAction(openai, threadId, runId)
     console.log(`[OPENAI] 🏁 Run completado: ${completedRun.status}`)
 
@@ -892,23 +877,15 @@ async function processRunWithCorrectFlow(
     }
 
     if (completedRun.status === "completed") {
-      console.log(`[OPENAI] 🔍 Obteniendo mensajes para thread ${threadId}, run ${runId}, usuario ${userPhoneNumber}`)
-
       const messages = await openai.beta.threads.messages.list(threadId, {
         order: "desc",
-        limit: 10,
-        run_id: runId,
+        limit: 10, // Aumentar límite para capturar múltiples mensajes
+        run_id: runId, // ⚠️ CRÍTICO: Filtrar solo mensajes de ESTE run específico
       })
 
       console.log(`[OPENAI] 📨 Total de mensajes encontrados para run ${runId}: ${messages.data.length}`)
 
-      for (const msg of messages.data) {
-        if (msg.thread_id !== threadId) {
-          console.error(`[OPENAI] ❌ MENSAJE DE THREAD INCORRECTO: esperado ${threadId}, recibido ${msg.thread_id}`)
-          throw new Error(`Message thread mismatch detected`)
-        }
-      }
-
+      // Filtrar solo mensajes del asistente de este run
       const assistantMessages = messages.data.filter((msg) => msg.role === "assistant" && msg.run_id === runId)
 
       console.log(`[OPENAI] 🤖 Mensajes del asistente en este run: ${assistantMessages.length}`)
@@ -918,8 +895,10 @@ async function processRunWithCorrectFlow(
         throw new Error("No se encontraron mensajes del asistente")
       }
 
+      // Concatenar TODOS los mensajes del asistente de este run (en orden correcto)
       let messageContent = ""
       for (const message of assistantMessages.reverse()) {
+        // Reverse para orden cronológico
         for (const content of message.content) {
           if (content.type === "text") {
             messageContent += content.text.value + "\n"
@@ -927,32 +906,25 @@ async function processRunWithCorrectFlow(
         }
       }
 
+      // Limpiar espacios en blanco extra
       messageContent = messageContent.trim()
 
       console.log(
         `[OPENAI] 💬 Respuesta: "${messageContent.substring(0, 100)}${messageContent.length > 100 ? "..." : ""}"`,
       )
 
-      const finalValidation = await validateThreadOwnership(threadId, userPhoneNumber, config.id)
-      if (!finalValidation) {
-        console.error(`[OPENAI] ❌ VALIDACIÓN FINAL FALLÓ antes de enviar mensaje`)
-        throw new Error(`Final thread validation failed`)
+      const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+      if (config) {
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: messageContent,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
       }
 
-      console.log(`[OPENAI] 🔒 Enviando mensaje a ${userPhoneNumber} (thread ${threadId} validado)`)
-
-      await saveConversationMessage({
-        id: nanoid(),
-        role: "assistant",
-        content: messageContent,
-        timestamp: new Date().toISOString(),
-        phoneNumber: userPhoneNumber,
-        configId: config.id,
-      })
-
-      console.log(
-        `[OPENAI] 📱 ENVIANDO a WhatsApp: usuario=${userPhoneNumber}, phoneNumberId=${phoneNumberId}, thread=${threadId}`,
-      )
       await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, messageContent)
       console.log(`[OPENAI] 📱 Enviado a WhatsApp`)
 
@@ -977,12 +949,6 @@ async function processRunWithCorrectFlow(
           const waitingMessage = FUNCTION_MESSAGES[functionName]
           if (waitingMessage) {
             try {
-              const validBeforeWaiting = await validateThreadOwnership(threadId, userPhoneNumber, config.id)
-              if (!validBeforeWaiting) {
-                console.error(`[OPENAI] ❌ Thread inválido antes de mensaje de espera`)
-                throw new Error(`Thread validation failed before waiting message`)
-              }
-
               await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
               console.log(`[OPENAI] ⏳ Mensaje de espera enviado: ${functionName}`)
             } catch (error) {
@@ -1044,25 +1010,31 @@ async function processRunWithCorrectFlow(
     const isTimeout = error.message && error.message.includes("Timeout esperando run")
     const isRateLimitError = error.message && error.message.includes("Please try again in")
 
+    // Log error type for debugging
     if (isTimeout) {
       console.log(`[OPENAI] ⏰ Timeout detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
     } else if (isRateLimitError) {
       console.log(`[OPENAI] 🚦 Rate limit detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
     }
 
+    // Check if we should retry
     if (retryCount < MAX_RETRIES) {
       let waitTime = RETRY_DELAY
 
+      // Calculate wait time based on error type
       if (isRateLimitError) {
+        // Extract suggested delay from OpenAI's error message
         const match = error.message.match(/Please try again in (\d+\.?\d*)s/)
         if (match) {
           waitTime = Math.ceil(Number.parseFloat(match[1]) * 1000) + 1000
           console.log(`[OPENAI] 🚦 Usando delay sugerido por OpenAI: ${waitTime}ms`)
         }
       } else if (isTimeout) {
+        // Use exponential backoff for timeouts
         waitTime = calculateBackoffDelay(retryCount)
         console.log(`[OPENAI] ⏰ Usando backoff exponencial: ${waitTime}ms`)
       } else {
+        // Use exponential backoff for other errors too
         waitTime = calculateBackoffDelay(retryCount)
         console.log(`[OPENAI] 🔄 Usando backoff exponencial: ${waitTime}ms`)
       }
@@ -1080,7 +1052,7 @@ async function processRunWithCorrectFlow(
         return processRunWithCorrectFlow(
           openai,
           threadId,
-          newRun.id,
+          newRun.id, // Use new run ID
           accessToken,
           phoneNumberId,
           userPhoneNumber,
@@ -1089,6 +1061,7 @@ async function processRunWithCorrectFlow(
         )
       } catch (retryError) {
         console.error(`[OPENAI] ❌ Error creando nuevo run para reintento:`, retryError)
+        // Fall through to final error handling
       }
     }
 
@@ -1103,6 +1076,7 @@ async function processRunWithCorrectFlow(
           "Lo siento, tu consulta está tomando más tiempo del esperado. Por favor, intenta nuevamente en unos momentos."
       }
 
+      // Save error message to conversation database
       const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
       if (config) {
         await saveConversationMessage({
@@ -1122,7 +1096,9 @@ async function processRunWithCorrectFlow(
     } catch (sendError) {
       console.error(`[OPENAI] ❌ Error enviando mensaje de error:`, sendError)
     }
+    // </CHANGE>
 
+    // Log error for monitoring
     if (isTimeout) {
       await logError("openai_timeout", error instanceof Error ? error : new Error(String(error)))
     } else {

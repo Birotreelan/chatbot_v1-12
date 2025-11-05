@@ -5,7 +5,6 @@ import {
   getThreadForUser,
   resetThreadForUser,
   updateWhatsAppConfig,
-  validateThreadOwnership,
 } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getAssistantResponse } from "@/lib/openai-tools"
@@ -466,12 +465,6 @@ export async function processIndividualMessage(
   userPhoneNumber: string,
   messageType = "text",
 ) {
-  const requestId = nanoid(8)
-  console.log(
-    `[WHATSAPP:${requestId}] 🔵 INICIO procesamiento para ${userPhoneNumber} (config: ${config.id}, phoneId: ${phoneNumberId})`,
-  )
-  // </CHANGE>
-
   console.log(
     `[WHATSAPP] Procesando mensaje individual para usuario ${userPhoneNumber}: "${userMessage}" (tipo: ${messageType})`,
   )
@@ -492,6 +485,7 @@ export async function processIndividualMessage(
       console.log(`[WHATSAPP] Tipo de mensaje no soportado detectado: ${messageType}`)
       console.log(`[WHATSAPP] Enviando respuesta automática sin OpenAI`)
 
+      // Save the automatic response to conversation
       try {
         await saveConversationMessage({
           id: nanoid(),
@@ -507,44 +501,32 @@ export async function processIndividualMessage(
         console.error(`[WHATSAPP] ❌ Error guardando respuesta automática:`, saveError)
       }
 
+      // Send direct message to user
       try {
         await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
+
+        // Update stats - message processed
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+
         console.log(`[WHATSAPP] ✅ Respuesta automática enviada para tipo: ${messageType}`)
-        return
+        return // Exit early, don't process with OpenAI
       } catch (sendError) {
         console.error(`[WHATSAPP] ❌ Error al enviar respuesta automática:`, sendError)
+        // Update stats - error
         await updateWhatsAppStats(config.id, { errors: 1 })
         return
       }
     }
+    // </CHANGE>
 
+    // Obtener o crear un thread para este usuario
     let threadResult
     try {
-      console.log(`[WHATSAPP:${requestId}] 🔍 Obteniendo thread para usuario ${userPhoneNumber} y config ${config.id}`)
-      // </CHANGE>
-
+      console.log(`[WHATSAPP] Obteniendo thread para usuario ${userPhoneNumber} y config ${config.id}`)
       threadResult = await getThreadForUser(userPhoneNumber, config.id)
-
-      console.log(`[WHATSAPP:${requestId}] 📋 Thread obtenido: ${threadResult.threadId}`)
-      console.log(`[WHATSAPP:${requestId}] 📋 isNewThread: ${threadResult.isNewThread}`)
-      console.log(`[WHATSAPP:${requestId}] 📋 Usuario: ${userPhoneNumber}`)
-      console.log(`[WHATSAPP:${requestId}] 📋 Config: ${config.id}`)
-      // </CHANGE>
-
-      console.log(`[WHATSAPP:${requestId}] 🔒 Validando ownership del thread...`)
-      const isValidThread = await validateThreadOwnership(threadResult.threadId, userPhoneNumber, config.id)
-      if (!isValidThread) {
-        console.error(`[WHATSAPP:${requestId}] ❌ VALIDACIÓN DE THREAD FALLÓ`)
-        console.error(`[WHATSAPP:${requestId}] ❌ Thread: ${threadResult.threadId}`)
-        console.error(`[WHATSAPP:${requestId}] ❌ Usuario: ${userPhoneNumber}`)
-        console.error(`[WHATSAPP:${requestId}] ❌ Config: ${config.id}`)
-        throw new Error(`Thread validation failed for user ${userPhoneNumber}`)
-      }
-      console.log(`[WHATSAPP:${requestId}] ✅ Thread validado correctamente`)
-      // </CHANGE>
+      console.log(`[WHATSAPP] Thread obtenido: ${threadResult.threadId}, isNewThread: ${threadResult.isNewThread}`)
     } catch (error) {
-      console.error(`[WHATSAPP:${requestId}] ❌ Error al obtener/validar thread ID:`, error)
+      console.error("[WHATSAPP] Error al obtener thread ID:", error)
 
       const errorMessage =
         "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
@@ -565,10 +547,12 @@ export async function processIndividualMessage(
       }
 
       await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
+      // Actualizar estadísticas - error
       await updateWhatsAppStats(config.id, { errors: 1 })
       return
     }
 
+    // Preparar mensaje con parámetros iniciales
     const fechaHora = getArgentinaDateTime()
     let messageToSend = `[SISTEMA]
 Nombre: ${config.displayName}
@@ -580,6 +564,7 @@ PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDer
 
 ${userMessage}`
 
+    // Si es un thread reseteado, indicarlo
     if (threadResult.isResetThread) {
       messageToSend = `[SISTEMA]
 Nombre: ${config.displayName}
@@ -595,51 +580,53 @@ ${userMessage}`
 
     console.log(`[WHATSAPP] Mensaje preparado para OpenAI:`, messageToSend)
 
+    // Obtener respuesta del asistente
     try {
-      console.log(`[WHATSAPP:${requestId}] 🤖 Llamando a getAssistantResponse`)
-      console.log(`[WHATSAPP:${requestId}] 🤖 Thread: ${threadResult.threadId}`)
-      console.log(`[WHATSAPP:${requestId}] 🤖 Usuario: ${userPhoneNumber}`)
-      console.log(`[WHATSAPP:${requestId}] 🤖 PhoneNumberId: ${phoneNumberId}`)
-      console.log(`[WHATSAPP:${requestId}] 🤖 AssistantId: ${config.whatsappAssistantId}`)
-      // </CHANGE>
-
+      console.log(`[WHATSAPP] Llamando a getAssistantResponse...`)
+      // Usar el ID de asistente específico para esta configuración y pasar el phoneNumberId
       await getAssistantResponse(threadResult.threadId, messageToSend, phoneNumberId, config.whatsappAssistantId)
 
-      console.log(`[WHATSAPP:${requestId}] ✅ getAssistantResponse completado exitosamente`)
-      // </CHANGE>
+      console.log(`[WHATSAPP] getAssistantResponse completado exitosamente`)
 
+      // Actualizar estadísticas - mensaje procesado
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
     } catch (error) {
-      console.error(`[WHATSAPP:${requestId}] ❌ Error al obtener respuesta del asistente:`, error)
+      console.error("[WHATSAPP] Error al obtener respuesta del asistente:", error)
 
+      // Actualizar estadísticas - error
       await updateWhatsAppStats(config.id, { errors: 1 })
 
+      // Si el error es 404 (thread no encontrado), intentar crear uno nuevo
       if (error.status === 404 && error.error?.type === "invalid_request_error") {
         try {
-          console.log(`[WHATSAPP:${requestId}] 🔄 Thread no encontrado, creando uno nuevo...`)
+          console.log("[WHATSAPP] Thread no encontrado, creando uno nuevo...")
+          // Crear un nuevo thread directamente con OpenAI
           const openai = new (await import("openai")).default({
             apiKey: process.env.OPENAI_API_KEY,
           })
 
           const newThread = await openai.beta.threads.create()
-          console.log(`[WHATSAPP:${requestId}] ✅ Nuevo thread creado: ${newThread.id}`)
+          console.log(`[WHATSAPP] Nuevo thread creado: ${newThread.id}`)
 
+          // Actualizar en la base de datos
           const key = `thread:${userPhoneNumber}:${config.id}`
           const redisClient = getRedisClient()
 
+          // Guardar el nuevo thread
           const threadInfo = {
             threadId: newThread.id,
             phoneNumber: userPhoneNumber,
             whatsappConfigId: config.id,
             lastMessageAt: new Date().toISOString(),
             messageCount: 1,
-            isResetThread: true,
+            isResetThread: true, // Añadir este flag para identificar que es un thread recién creado
           }
 
           if (redisClient) {
             await redisClient.set(key, JSON.stringify(threadInfo))
           }
 
+          // Preparar mensaje con parámetros iniciales
           const fechaHora = getArgentinaDateTime()
           messageToSend = `[SISTEMA]
 Nombre: ${config.displayName}
@@ -651,12 +638,13 @@ PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDer
 
 ${userMessage}`
 
-          console.log(`[WHATSAPP:${requestId}] 🔄 Reintentando con nuevo thread...`)
+          console.log(`[WHATSAPP] Reintentando con nuevo thread...`)
           await getAssistantResponse(newThread.id, messageToSend, phoneNumberId, config.whatsappAssistantId)
 
+          // Actualizar estadísticas - mensaje procesado
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
         } catch (retryError) {
-          console.error(`[WHATSAPP:${requestId}] ❌ Error al reintentar con nuevo thread:`, retryError)
+          console.error("[WHATSAPP] Error al reintentar con nuevo thread:", retryError)
 
           const errorMessage =
             "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
@@ -676,8 +664,10 @@ ${userMessage}`
             console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
           }
 
+          // Enviar mensaje de error al usuario
           await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
 
+          // Actualizar estadísticas - error
           await updateWhatsAppStats(config.id, { errors: 1 })
         }
       } else {
@@ -699,21 +689,14 @@ ${userMessage}`
           console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
         }
 
-        try {
-          await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
-        } catch (sendError) {
-          console.error(`[WHATSAPP:${requestId}] ❌ Error al enviar mensaje de error:`, sendError)
-        }
+        // Enviar mensaje de error al usuario
+        await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
       }
     }
 
-    console.log(`[WHATSAPP:${requestId}] 🔵 FIN procesamiento para ${userPhoneNumber}`)
-    // </CHANGE>
+    console.log(`[WHATSAPP] Procesamiento individual completado para usuario ${userPhoneNumber}`)
   } catch (error) {
-    console.error(
-      `[WHATSAPP:${requestId}] ❌ Error al procesar mensaje individual para usuario ${userPhoneNumber}:`,
-      error,
-    )
+    console.error(`[WHATSAPP] Error al procesar mensaje individual para usuario ${userPhoneNumber}:`, error)
 
     const errorMessage =
       "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
@@ -733,10 +716,11 @@ ${userMessage}`
       console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
     }
 
+    // Enviar mensaje de error al usuario
     try {
       await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
     } catch (sendError) {
-      console.error(`[WHATSAPP:${requestId}] ❌ Error al enviar mensaje de error:`, sendError)
+      console.error("[WHATSAPP] Error al enviar mensaje de error:", sendError)
     }
   }
 }

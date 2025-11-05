@@ -1,3 +1,4 @@
+import OpenAI from "openai"
 import { obtenerDatosSede, formatearDatosSede, obtenerSubespecialidades } from "./api-tools/api-functions"
 import { getArgentinaDateTime } from "./utils/date-utils"
 import {
@@ -10,9 +11,12 @@ import {
   validarDni,
 } from "./openai-tools"
 import { safelyAddMessageToThread } from "./thread-manager"
-import { getThreadForUser } from "./db"
-import { openai } from "./openai"
 
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
+
+// Función para crear el bloque SISTEMA con datos de sede
 async function createSystemBlock(
   clinicName: string,
   clienteId?: string,
@@ -30,6 +34,7 @@ CelularPaciente: No disponible (consulta web)`
     systemBlock += `\nNumeroDerivacion: ${escalationPhone}`
   }
 
+  // Si tenemos clienteId y sedeId, obtener datos de sede
   if (clienteId && sedeId) {
     try {
       console.log(`[SISTEMA] 🏥 Obteniendo datos de sede para cliente: ${clienteId}, sede: ${sedeId}`)
@@ -83,43 +88,6 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] ✅ Configuración encontrada: ${config.displayName}`)
 
-    console.log(`[WEB-CHAT] 🔍 Obteniendo thread para sessionId: ${sessionId}, configId: ${config.id}`)
-    const threadResult = await getThreadForUser(sessionId, config.id)
-
-    console.log(`[WEB-CHAT] 📋 Thread result completo:`, JSON.stringify(threadResult, null, 2))
-
-    if (!threadResult) {
-      console.error(`[WEB-CHAT] ❌ getThreadForUser devolvió null/undefined`)
-      return {
-        response: "Lo siento, ocurrió un error al iniciar la conversación.",
-        error: "ThreadResult es null",
-      }
-    }
-
-    if (!threadResult.threadId) {
-      console.error(`[WEB-CHAT] ❌ threadResult.threadId es undefined`)
-      console.error(`[WEB-CHAT] threadResult keys:`, Object.keys(threadResult))
-      console.error(`[WEB-CHAT] threadResult values:`, Object.values(threadResult))
-      return {
-        response: "Lo siento, ocurrió un error al iniciar la conversación.",
-        error: "ThreadId no disponible en threadResult",
-      }
-    }
-
-    const threadId = threadResult.threadId
-
-    if (typeof threadId !== "string" || !threadId.startsWith("thread_")) {
-      console.error(`[WEB-CHAT] ❌ ThreadId tiene formato inválido: ${threadId} (tipo: ${typeof threadId})`)
-      return {
-        response: "Lo siento, ocurrió un error al iniciar la conversación.",
-        error: `ThreadId inválido: ${threadId}`,
-      }
-    }
-
-    console.log(`[WEB-CHAT] 🧵 Thread obtenido: ${threadId}`)
-    console.log(`[WEB-CHAT] - Es nuevo: ${threadResult.isNewThread}`)
-    console.log(`[WEB-CHAT] - Es reseteado: ${threadResult.isResetThread || false}`)
-
     const effectiveSedeId = sedeId || config.sede_id
     console.log(`[WEB-CHAT] Sede ID efectivo:`, effectiveSedeId, sedeId ? "(del request)" : "(del config)")
 
@@ -133,20 +101,18 @@ export async function processWebChatMessage({
     console.log(`[WEB-CHAT] 📋 Bloque SISTEMA creado:`)
     console.log(systemBlock)
 
-    await safelyAddMessageToThread(threadId, {
+    await safelyAddMessageToThread(sessionId, {
       role: "user",
       content: `${systemBlock}\n\n${message}`,
     })
 
     console.log(`[WEB-CHAT] ✅ Mensaje agregado al thread`)
 
+    // Ejecutar el asistente
     const assistantId = config.widgetAssistantId || config.whatsappAssistantId
     console.log(`[WEB-CHAT] 🤖 Ejecutando asistente: ${assistantId}`)
 
-    const validThreadId = threadId
-    console.log(`[WEB-CHAT] 🔍 ThreadId almacenado en const: ${validThreadId}`)
-
-    const run = await openai.beta.threads.runs.create(validThreadId, {
+    const run = await openai.beta.threads.runs.create(sessionId, {
       assistant_id: assistantId,
       tools: [
         {
@@ -363,11 +329,8 @@ export async function processWebChatMessage({
 
     console.log(`[WEB-CHAT] 🔄 Run creado: ${run.id}`)
 
-    console.log(`[WEB-CHAT] 🔍 Llamando retrieve con runId: ${run.id}, thread_id: ${validThreadId}`)
-    let runStatus = await openai.beta.threads.runs.retrieve(run.id, {
-      thread_id: validThreadId,
-    })
-
+    // Esperar a que el run se complete
+    let runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
     console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
@@ -384,12 +347,11 @@ export async function processWebChatMessage({
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
-      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
-        thread_id: validThreadId,
-      })
+      runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
       console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
+    // Manejar tool calls si es necesario
     if (runStatus.status === "requires_action") {
       console.log(`[WEB-CHAT] 🔧 Run requiere acción - procesando tool calls`)
 
@@ -403,14 +365,12 @@ export async function processWebChatMessage({
           const args = JSON.parse(toolCall.function.arguments)
           let result = null
 
-          const effectiveClienteId = clienteId
-
           switch (toolCall.function.name) {
             case "obtener_obras_sociales":
-              result = await obtenerObrasSociales(effectiveClienteId)
+              result = await obtenerObrasSociales(args.cliente_id)
               break
             case "obtener_subespecialidades":
-              const subespecialidadesResult = await obtenerSubespecialidades(effectiveClienteId)
+              const subespecialidadesResult = await obtenerSubespecialidades(args.cliente_id)
               result = subespecialidadesResult.exito
                 ? JSON.stringify({
                     exito: true,
@@ -420,11 +380,11 @@ export async function processWebChatMessage({
                 : JSON.stringify({ exito: false, mensaje: "No se encontraron especialidades" })
               break
             case "obtener_turnos_disponibles":
-              result = await obtenerTurnosDisponibles(effectiveClienteId, args.especialidad_id, args.obra_social_id)
+              result = await obtenerTurnosDisponibles(args.cliente_id, args.especialidad_id, args.obra_social_id)
               break
             case "buscar_turnos_disponibles":
               result = await buscarTurnosDisponiblesHerramienta(
-                effectiveClienteId,
+                args.cliente_id,
                 args.rango_fechas,
                 args.profesional,
                 args.especialidad,
@@ -432,20 +392,20 @@ export async function processWebChatMessage({
               )
               break
             case "reservar_turno":
-              result = await reservarTurno(effectiveClienteId, args.turno_id, args.paciente_datos)
+              result = await reservarTurno(args.cliente_id, args.turno_id, args.paciente_datos)
               break
             case "obtener_datos_sede":
-              const sedeData = await obtenerDatosSede(effectiveClienteId, args.sede_id)
+              const sedeData = await obtenerDatosSede(args.cliente_id, args.sede_id)
               result = sedeData ? formatearDatosSede(sedeData.sede) : "No se pudieron obtener los datos de la sede"
               break
             case "validar_obra_social":
-              result = await validarObraSocialHerramienta(effectiveClienteId, args.busqueda)
+              result = await validarObraSocialHerramienta(args.cliente_id, args.busqueda)
               break
             case "buscar_profesionales":
-              result = await buscarProfesionalesHerramienta(effectiveClienteId, args.busqueda)
+              result = await buscarProfesionalesHerramienta(args.cliente_id, args.busqueda)
               break
             case "validar_dni":
-              result = await validarDni(effectiveClienteId, args.dni)
+              result = await validarDni(args.cliente_id, args.dni)
               break
             default:
               result = "Función no reconocida"
@@ -466,14 +426,13 @@ export async function processWebChatMessage({
         }
       }
 
-      await openai.beta.threads.runs.submitToolOutputs(run.id, {
-        thread_id: validThreadId,
+      // Enviar los resultados de las tools
+      await openai.beta.threads.runs.submitToolOutputs(sessionId, run.id, {
         tool_outputs: toolOutputs,
       })
 
-      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
-        thread_id: validThreadId,
-      })
+      // Esperar a que el run se complete después de las tool calls
+      runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -487,9 +446,7 @@ export async function processWebChatMessage({
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
-        runStatus = await openai.beta.threads.runs.retrieve(run.id, {
-          thread_id: validThreadId,
-        })
+        runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
         console.log(`[WEB-CHAT] 📊 Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
@@ -497,7 +454,8 @@ export async function processWebChatMessage({
     if (runStatus.status === "completed") {
       console.log(`[WEB-CHAT] ✅ Run completado exitosamente`)
 
-      const messages = await openai.beta.threads.messages.list(validThreadId, {
+      // Obtener los mensajes del thread
+      const messages = await openai.beta.threads.messages.list(sessionId, {
         order: "desc",
         limit: 1,
       })
