@@ -21,8 +21,9 @@ export async function GET(req: Request) {
     const MAX_ITEMS_PER_CATEGORY = 1000
 
     // 1. Limpiar threads inactivos
-    const threadKeys = await redis.keys("whatsapp_thread:*")
+    const threadKeys = await redis.keys("thread:*")
     let threadsDeleted = 0
+    let threadsConverted = 0
 
     // Limitar el número de threads a procesar
     const threadsToProcess = threadKeys.slice(0, MAX_ITEMS_PER_CATEGORY)
@@ -31,7 +32,25 @@ export async function GET(req: Request) {
       const threadData = await redis.get(key)
       if (threadData) {
         try {
-          const thread = JSON.parse(threadData as string)
+          let thread: any = null
+
+          // Try to parse as JSON first
+          if (typeof threadData === "string" && threadData.startsWith("{")) {
+            thread = JSON.parse(threadData)
+          } else if (typeof threadData === "object") {
+            thread = threadData
+          } else {
+            // Old format: just a threadId string like "thread_VAKW"
+            // Convert to new format or delete if too old
+            console.log(`[CLEANUP] Found old format thread data: ${threadData}`)
+
+            // Since we don't have timestamp info for old format, delete it
+            await redis.del(key)
+            threadsDeleted++
+            threadsConverted++
+            continue
+          }
+
           const lastMessageTime = thread.lastMessageAt ? new Date(thread.lastMessageAt).getTime() : 0
 
           if (lastMessageTime < THREAD_CUTOFF) {
@@ -40,6 +59,7 @@ export async function GET(req: Request) {
           }
         } catch (e) {
           // Si no podemos parsear el thread, lo eliminamos por seguridad
+          console.error(`[CLEANUP] Error parsing thread ${key}:`, e)
           await redis.del(key)
           threadsDeleted++
         }
@@ -112,6 +132,7 @@ export async function GET(req: Request) {
 
     // Registrar la limpieza
     await incrementMetric("cleanup_threads_deleted", threadsDeleted)
+    await incrementMetric("cleanup_threads_converted", threadsConverted)
     await incrementMetric("cleanup_metrics_deleted", metricsCleanedUp)
     await incrementMetric("cleanup_cache_deleted", cacheEntriesDeleted)
     await incrementMetric("cleanup_ratelimit_deleted", rateLimitEntriesDeleted)
@@ -125,6 +146,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       success: true,
       threadsDeleted,
+      threadsConverted,
       metricsCleanedUp,
       cacheEntriesDeleted,
       rateLimitEntriesDeleted,
