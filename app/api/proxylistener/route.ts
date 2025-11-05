@@ -6,6 +6,7 @@ import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { trackAppointmentEvent, trackTemplateSent, getTemplateSentTime } from "@/lib/appointment-stats"
+import { extractAndFormatDate } from "@/lib/utils/date-utils"
 
 export async function POST(request: Request) {
   try {
@@ -220,7 +221,7 @@ function extractAppointmentInfo(templateBody: any): any {
     if (templateData.template && templateData.template.components) {
       for (const component of templateData.template.components) {
         if (component.type === "body" && component.parameters) {
-          // Los parámetros vengono en este orden:
+          // Los parámetros venguen en este orden:
           // [0] = Nombre de la clínica
           // [1] = Fecha
           // [2] = Hora
@@ -641,8 +642,13 @@ Plantilla_Contenido: ${templateAnalysis.content}`
 
           // Agregar información del turno si está disponible
           if (appointmentInfo && (appointmentInfo.fecha || appointmentInfo.hora || appointmentInfo.profesional)) {
+            // Format the date with day of week if available
+            const fechaFormateada = appointmentInfo.fecha
+              ? extractAndFormatDate(appointmentInfo.fecha)
+              : "No especificada"
+
             notificationMessage += `
-Turno_Fecha: ${appointmentInfo.fecha || "No especificada"}
+Turno_Fecha: ${fechaFormateada}
 Turno_Hora: ${appointmentInfo.hora || "No especificada"}
 Turno_Profesional: ${appointmentInfo.profesional || "No especificado"}
 Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
@@ -685,10 +691,12 @@ Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`
 Cantidad_Turnos: ${chatbotDataParsed.cantidad_turnos || chatbotDataParsed.turnos.length}`
 
               chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
+                const fechaFormateada = turno.fecha ? extractAndFormatDate(turno.fecha) : ""
+
                 notificationMessage += `
 
 Turno_${index + 1}:
-  - Fecha: ${turno.fecha || ""}
+  - Fecha: ${fechaFormateada}
   - Hora: ${turno.hora || ""}
   - Profesional: ${turno.profesional || ""}
   - Profesional_ID: ${turno.profesional_id || ""}
