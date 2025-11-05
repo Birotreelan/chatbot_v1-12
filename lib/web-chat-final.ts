@@ -330,7 +330,9 @@ export async function processWebChatMessage({
     console.log(`[WEB-CHAT] 🔄 Run creado: ${run.id}`)
 
     // Esperar a que el run se complete
-    let runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
+    let runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+      thread_id: sessionId,
+    })
     console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
@@ -347,7 +349,9 @@ export async function processWebChatMessage({
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
-      runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+        thread_id: sessionId,
+      })
       console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
@@ -427,12 +431,15 @@ export async function processWebChatMessage({
       }
 
       // Enviar los resultados de las tools
-      await openai.beta.threads.runs.submitToolOutputs(sessionId, run.id, {
+      await openai.beta.threads.runs.submitToolOutputs(run.id, {
+        thread_id: sessionId,
         tool_outputs: toolOutputs,
       })
 
       // Esperar a que el run se complete después de las tool calls
-      runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+        thread_id: sessionId,
+      })
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -446,7 +453,9 @@ export async function processWebChatMessage({
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
-        runStatus = await openai.beta.threads.runs.retrieve(sessionId, run.id)
+        runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+          thread_id: sessionId,
+        })
         console.log(`[WEB-CHAT] 📊 Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }

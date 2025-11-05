@@ -114,7 +114,9 @@ async function waitForWebRunCompletion(openai: any, threadId: string, runId: str
     throw new Error(`Run ID inválido: ${runId}`)
   }
 
-  let run = await openai.beta.threads.runs.retrieve(threadId, runId)
+  let run = await openai.beta.threads.runs.retrieve(runId, {
+    thread_id: threadId,
+  })
   let pollCount = 0
 
   while (run.status === "queued" || run.status === "in_progress") {
@@ -125,7 +127,9 @@ async function waitForWebRunCompletion(openai: any, threadId: string, runId: str
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1000))
-    run = await openai.beta.threads.runs.retrieve(threadId, runId)
+    run = await openai.beta.threads.runs.retrieve(runId, {
+      thread_id: threadId,
+    })
   }
 
   logger.debug("WEB-ASSISTANT", `Run completado: ${run.status}`)
@@ -152,7 +156,8 @@ async function waitForWebRunCompletion(openai: any, threadId: string, runId: str
         })
       }
 
-      await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
+      await openai.beta.threads.runs.submitToolOutputs(runId, {
+        thread_id: threadId,
         tool_outputs: toolOutputs,
       })
 

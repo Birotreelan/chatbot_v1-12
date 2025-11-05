@@ -66,7 +66,9 @@ async function waitForRunCompletion(threadId: string, runId: string): Promise<Op
   const startTime = Date.now()
 
   while (Date.now() - startTime < MAX_WAIT_TIME) {
-    const runStatus = await openai.beta.threads.runs.retrieve(threadId, runId)
+    const runStatus = await openai.beta.threads.runs.retrieve(runId, {
+      thread_id: threadId,
+    })
 
     switch (runStatus.status) {
       case "completed":

@@ -347,11 +347,15 @@ export async function processWebOnlyMessage(
 
 // Función para procesar run web sin enviar a WhatsApp
 async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string, clienteId: string): Promise<void> {
-  let run = await openai.beta.threads.runs.retrieve(threadId, runId)
+  let run = await openai.beta.threads.runs.retrieve(runId, {
+    thread_id: threadId,
+  })
 
   while (run.status === "queued" || run.status === "in_progress") {
     await wait(1000)
-    run = await openai.beta.threads.runs.retrieve(threadId, runId)
+    run = await openai.beta.threads.runs.retrieve(runId, {
+      thread_id: threadId,
+    })
   }
 
   if (run.status === "requires_action") {
@@ -371,7 +375,8 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         })
       }
 
-      await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
+      await openai.beta.threads.runs.submitToolOutputs(runId, {
+        thread_id: threadId,
         tool_outputs: toolOutputs,
       })
 

@@ -172,7 +172,9 @@ export async function safelyAddMessageToThread(
             throw new Error(`[THREAD-MANAGER] Parámetros inválidos - threadId: ${threadId}, runId: ${activeRun.id}`)
           }
 
-          const updatedRun = await openai.beta.threads.runs.retrieve(threadId, activeRun.id)
+          const updatedRun = await openai.beta.threads.runs.retrieve(activeRun.id, {
+            thread_id: threadId,
+          })
           runStatus = updatedRun.status
           waitAttempts++
           console.log(
@@ -278,7 +280,9 @@ export async function runThread(threadId: string, assistantId: string, instructi
 
 export async function getRun(threadId: string, runId: string) {
   try {
-    const run = await openai.beta.threads.runs.retrieve(threadId, runId)
+    const run = await openai.beta.threads.runs.retrieve(runId, {
+      thread_id: threadId,
+    })
     return run
   } catch (error: any) {
     console.error("Error getting run:", error)
