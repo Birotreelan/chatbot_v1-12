@@ -36,12 +36,19 @@ const PHONE_TO_CONFIG_PREFIX = "phone_to_config:"
 const STATS_KEY = "system_stats"
 
 // Función auxiliar para manejar la serialización/deserialización segura
-function safeJsonParse(data: any): any {
+function safeJsonParse(data: any, key?: string): any {
   if (typeof data === "string") {
+    if (data.startsWith("thread_") && key?.includes(THREAD_PREFIX)) {
+      console.log(`[DB] 🧹 Detectado thread en formato antiguo: ${data.substring(0, 20)}... - será eliminado`)
+      return null // Retornar null para que sea filtrado y eliminado
+    }
+
     try {
       return JSON.parse(data)
     } catch (error) {
-      console.error("[DB] Error al parsear JSON:", error)
+      if (!data.startsWith("thread_")) {
+        console.error("[DB] Error al parsear JSON:", error)
+      }
       return null
     }
   }
@@ -441,7 +448,7 @@ export async function getThreadForUser(
   if (redisClient) {
     // Intentar obtener el thread existente
     const threadData = await redisClient.get(key)
-    const threadInfo = safeJsonParse(threadData)
+    const threadInfo = safeJsonParse(threadData, key)
 
     if (threadInfo) {
       console.log(`[DB] ✅ Thread encontrado: ${threadInfo.threadId}`)
@@ -545,7 +552,7 @@ export async function resetThreadForUser(
     let oldThreadId: string | null = null
     if (redisClient) {
       const oldThreadData = await redisClient.get(key)
-      const oldThreadInfo = safeJsonParse(oldThreadData)
+      const oldThreadInfo = safeJsonParse(oldThreadData, key)
       if (oldThreadInfo) {
         oldThreadId = oldThreadInfo.threadId
         console.log(`[DB] 📋 Thread anterior encontrado: ${oldThreadId}`)
@@ -636,15 +643,26 @@ export async function getAllThreads(): Promise<ThreadInfo[]> {
 
     if (keys.length === 0) return []
 
-    const threads = await Promise.all(
+    const threadsWithKeys = await Promise.all(
       keys.map(async (key) => {
         const threadData = await redisClient.get(key)
-        // Usar la función auxiliar para manejar la deserialización
-        return safeJsonParse(threadData)
+        // Pasar la clave para que safeJsonParse pueda detectar threads antiguos
+        const parsed = safeJsonParse(threadData, key)
+        return { key, data: parsed }
       }),
     )
 
-    return threads.filter(Boolean) as ThreadInfo[]
+    const keysToDelete = threadsWithKeys.filter(({ data }) => data === null).map(({ key }) => key)
+
+    if (keysToDelete.length > 0) {
+      console.log(`[DB] 🧹 Limpiando ${keysToDelete.length} threads en formato antiguo de Redis`)
+      await Promise.all(keysToDelete.map((key) => redisClient.del(key)))
+    }
+
+    // Retornar solo los threads válidos
+    const validThreads = threadsWithKeys.filter(({ data }) => data !== null).map(({ data }) => data) as ThreadInfo[]
+
+    return validThreads
   } else {
     // Fallback a memoria
     return Array.from(memoryStorage.threads.values())
