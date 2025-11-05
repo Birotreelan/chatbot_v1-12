@@ -191,9 +191,7 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
   console.log(`[WEB-ASSISTANT-SIMPLE] Thread ID válido: ${threadId}`)
   console.log(`[WEB-ASSISTANT-SIMPLE] Cliente ID: ${clienteId}`)
 
-  let run = await openai.beta.threads.runs.retrieve(runId, {
-    thread_id: threadId,
-  })
+  let run = await openai.beta.threads.runs.retrieve(threadId, runId)
   let pollCount = 0
 
   while (run.status === "queued" || run.status === "in_progress") {
@@ -207,9 +205,7 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
       throw new Error(`Thread ID se volvió inválido durante polling: ${threadId}`)
     }
 
-    run = await openai.beta.threads.runs.retrieve(runId, {
-      thread_id: threadId,
-    })
+    run = await openai.beta.threads.runs.retrieve(threadId, runId)
   }
 
   console.log(`[WEB-ASSISTANT-SIMPLE] Run completado con estado: ${run.status}`)
@@ -249,8 +245,7 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
       }
 
       // Enviar los resultados de las herramientas
-      await openai.beta.threads.runs.submitToolOutputs(runId, {
-        thread_id: threadId,
+      await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
         tool_outputs: toolOutputs,
       })
 
