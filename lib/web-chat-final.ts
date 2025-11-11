@@ -146,13 +146,8 @@ export async function processWebChatMessage({
             description: "Obtiene la lista de obras sociales disponibles",
             parameters: {
               type: "object",
-              properties: {
-                cliente_id: {
-                  type: "string",
-                  description: "ID del cliente",
-                },
-              },
-              required: ["cliente_id"],
+              properties: {},
+              required: [],
             },
           },
         },
@@ -163,13 +158,8 @@ export async function processWebChatMessage({
             description: "Obtiene la lista de especialidades médicas disponibles",
             parameters: {
               type: "object",
-              properties: {
-                cliente_id: {
-                  type: "string",
-                  description: "ID del cliente",
-                },
-              },
-              required: ["cliente_id"],
+              properties: {},
+              required: [],
             },
           },
         },
@@ -181,10 +171,6 @@ export async function processWebChatMessage({
             parameters: {
               type: "object",
               properties: {
-                cliente_id: {
-                  type: "string",
-                  description: "ID del cliente",
-                },
                 especialidad_id: {
                   type: "string",
                   description: "ID de la especialidad médica",
@@ -194,7 +180,7 @@ export async function processWebChatMessage({
                   description: "ID de la obra social",
                 },
               },
-              required: ["cliente_id", "especialidad_id", "obra_social_id"],
+              required: ["especialidad_id", "obra_social_id"],
             },
           },
         },
@@ -206,10 +192,6 @@ export async function processWebChatMessage({
             parameters: {
               type: "object",
               properties: {
-                cliente_id: {
-                  type: "string",
-                  description: "ID del cliente",
-                },
                 rango_fechas: {
                   type: "string",
                   description: "Rango de fechas en formato 'YYYY-MM-DD a YYYY-MM-DD'",
@@ -227,7 +209,7 @@ export async function processWebChatMessage({
                   description: "ID del profesional (opcional)",
                 },
               },
-              required: ["cliente_id", "rango_fechas"],
+              required: ["rango_fechas"],
             },
           },
         },
@@ -239,10 +221,6 @@ export async function processWebChatMessage({
             parameters: {
               type: "object",
               properties: {
-                cliente_id: {
-                  type: "string",
-                  description: "ID del cliente",
-                },
                 turno_id: {
                   type: "string",
                   description: "ID del turno a reservar",
@@ -260,7 +238,7 @@ export async function processWebChatMessage({
                   required: ["nombre", "apellido", "dni", "telefono"],
                 },
               },
-              required: ["cliente_id", "turno_id", "paciente_datos"],
+              required: ["turno_id", "paciente_datos"],
             },
           },
         },
@@ -272,16 +250,12 @@ export async function processWebChatMessage({
             parameters: {
               type: "object",
               properties: {
-                cliente_id: {
-                  type: "string",
-                  description: "ID del cliente",
-                },
                 sede_id: {
                   type: "string",
                   description: "ID de la sede",
                 },
               },
-              required: ["cliente_id", "sede_id"],
+              required: ["sede_id"],
             },
           },
         },
@@ -293,16 +267,12 @@ export async function processWebChatMessage({
             parameters: {
               type: "object",
               properties: {
-                cliente_id: {
-                  type: "string",
-                  description: "ID del cliente",
-                },
                 busqueda: {
                   type: "string",
                   description: "Nombre de la obra social a buscar",
                 },
               },
-              required: ["cliente_id", "busqueda"],
+              required: ["busqueda"],
             },
           },
         },
@@ -314,16 +284,12 @@ export async function processWebChatMessage({
             parameters: {
               type: "object",
               properties: {
-                cliente_id: {
-                  type: "string",
-                  description: "ID del cliente",
-                },
                 busqueda: {
                   type: "string",
                   description: "Criterio de búsqueda",
                 },
               },
-              required: ["cliente_id", "busqueda"],
+              required: ["busqueda"],
             },
           },
         },
@@ -335,16 +301,12 @@ export async function processWebChatMessage({
             parameters: {
               type: "object",
               properties: {
-                cliente_id: {
-                  type: "string",
-                  description: "ID del cliente",
-                },
                 dni: {
                   type: "string",
                   description: "DNI del paciente",
                 },
               },
-              required: ["cliente_id", "dni"],
+              required: ["dni"],
             },
           },
         },
@@ -400,10 +362,10 @@ export async function processWebChatMessage({
 
           switch (toolCall.function.name) {
             case "obtener_obras_sociales":
-              result = await obtenerObrasSociales(args.cliente_id)
+              result = await obtenerObrasSociales(clienteId)
               break
             case "obtener_subespecialidades":
-              const subespecialidadesResult = await obtenerSubespecialidades(args.cliente_id)
+              const subespecialidadesResult = await obtenerSubespecialidades(clienteId)
               result = subespecialidadesResult.exito
                 ? JSON.stringify({
                     exito: true,
@@ -413,11 +375,11 @@ export async function processWebChatMessage({
                 : JSON.stringify({ exito: false, mensaje: "No se encontraron especialidades" })
               break
             case "obtener_turnos_disponibles":
-              result = await obtenerTurnosDisponibles(args.cliente_id, args.especialidad_id, args.obra_social_id)
+              result = await obtenerTurnosDisponibles(clienteId, args.especialidad_id, args.obra_social_id)
               break
             case "buscar_turnos_disponibles":
               result = await buscarTurnosDisponiblesHerramienta(
-                args.cliente_id,
+                clienteId,
                 args.rango_fechas,
                 args.profesional,
                 args.especialidad,
@@ -425,20 +387,20 @@ export async function processWebChatMessage({
               )
               break
             case "reservar_turno":
-              result = await reservarTurno(args.cliente_id, args.turno_id, args.paciente_datos)
+              result = await reservarTurno(clienteId, args.turno_id, args.paciente_datos)
               break
             case "obtener_datos_sede":
-              const sedeData = await obtenerDatosSede(args.cliente_id, args.sede_id)
+              const sedeData = await obtenerDatosSede(clienteId, args.sede_id)
               result = sedeData ? formatearDatosSede(sedeData.sede) : "No se pudieron obtener los datos de la sede"
               break
             case "validar_obra_social":
-              result = await validarObraSocialHerramienta(args.cliente_id, args.busqueda)
+              result = await validarObraSocialHerramienta(clienteId, args.busqueda)
               break
             case "buscar_profesionales":
-              result = await buscarProfesionalesHerramienta(args.cliente_id, args.busqueda)
+              result = await buscarProfesionalesHerramienta(clienteId, args.busqueda)
               break
             case "validar_dni":
-              result = await validarDni(args.cliente_id, args.dni)
+              result = await validarDni(clienteId, args.dni)
               break
             default:
               result = "Función no reconocida"
