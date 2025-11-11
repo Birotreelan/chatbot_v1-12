@@ -330,114 +330,18 @@ export async function processWebChatMessage({
     const maxAttempts = 30
     let attempts = 0
 
-    while (runStatus.status === "in_progress" || runStatus.status === "queued") {
-      attempts++
-      if (attempts > maxAttempts) {
-        console.error(`[WEB-CHAT] ❌ Timeout esperando respuesta del asistente`)
-        return {
-          response: "Lo siento, la consulta está tomando más tiempo del esperado. Por favor, intenta nuevamente.",
-          error: "Timeout",
-        }
-      }
+    const maxToolRounds = 10 // Máximo de rondas de tool execution para evitar loops infinitos
+    let toolRound = 0
 
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
-        thread_id: threadId,
-      })
-      console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
-    }
-
-    if (runStatus.status === "requires_action") {
-      console.log(`[WEB-CHAT] 🔧 Run requiere acción - procesando tool calls`)
-
-      const toolCalls = runStatus.required_action?.submit_tool_outputs?.tool_calls || []
-      const toolOutputs = []
-
-      for (const toolCall of toolCalls) {
-        console.log(`[WEB-CHAT] 🛠️ Ejecutando tool: ${toolCall.function.name}`)
-
-        try {
-          const args = JSON.parse(toolCall.function.arguments)
-          let result = null
-
-          switch (toolCall.function.name) {
-            case "obtener_obras_sociales":
-              result = await obtenerObrasSociales(clienteId)
-              break
-            case "obtener_subespecialidades":
-              const subespecialidadesResult = await obtenerSubespecialidades(clienteId)
-              result = subespecialidadesResult.exito
-                ? JSON.stringify({
-                    exito: true,
-                    especialidades: subespecialidadesResult.datos,
-                    total: subespecialidadesResult.datos?.length || 0,
-                  })
-                : JSON.stringify({ exito: false, mensaje: "No se encontraron especialidades" })
-              break
-            case "obtener_turnos_disponibles":
-              result = await obtenerTurnosDisponibles(clienteId, args.especialidad_id, args.obra_social_id)
-              break
-            case "buscar_turnos_disponibles":
-              result = await buscarTurnosDisponiblesHerramienta(
-                clienteId,
-                args.rango_fechas,
-                args.profesional,
-                args.especialidad,
-                args.profesional_id,
-              )
-              break
-            case "reservar_turno":
-              result = await reservarTurno(clienteId, args.turno_id, args.paciente_datos)
-              break
-            case "obtener_datos_sede":
-              const sedeData = await obtenerDatosSede(clienteId, args.sede_id)
-              result = sedeData ? formatearDatosSede(sedeData.sede) : "No se pudieron obtener los datos de la sede"
-              break
-            case "validar_obra_social":
-              result = await validarObraSocialHerramienta(clienteId, args.busqueda)
-              break
-            case "buscar_profesionales":
-              result = await buscarProfesionalesHerramienta(clienteId, args.busqueda)
-              break
-            case "validar_dni":
-              result = await validarDni(clienteId, args.dni)
-              break
-            default:
-              result = "Función no reconocida"
-          }
-
-          toolOutputs.push({
-            tool_call_id: toolCall.id,
-            output: typeof result === "string" ? result : JSON.stringify(result),
-          })
-
-          console.log(`[WEB-CHAT] ✅ Tool ${toolCall.function.name} ejecutado exitosamente`)
-        } catch (error) {
-          console.error(`[WEB-CHAT] ❌ Error ejecutando tool ${toolCall.function.name}:`, error)
-          toolOutputs.push({
-            tool_call_id: toolCall.id,
-            output: "Error al ejecutar la función",
-          })
-        }
-      }
-
-      await openai.beta.threads.runs.submitToolOutputs(run.id, {
-        thread_id: threadId,
-        tool_outputs: toolOutputs,
-      })
-
-      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
-        thread_id: threadId,
-      })
-      attempts = 0
-
+    while (toolRound < maxToolRounds) {
+      // Esperar a que el run complete o requiera acción
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
         attempts++
         if (attempts > maxAttempts) {
-          console.error(`[WEB-CHAT] ❌ Timeout después de tool calls`)
+          console.error(`[WEB-CHAT] ❌ Timeout esperando respuesta del asistente`)
           return {
-            response: "Lo siento, la consulta está tomando más tiempo del esperado.",
-            error: "Timeout after tool calls",
+            response: "Lo siento, la consulta está tomando más tiempo del esperado. Por favor, intenta nuevamente.",
+            error: "Timeout",
           }
         }
 
@@ -445,13 +349,128 @@ export async function processWebChatMessage({
         runStatus = await openai.beta.threads.runs.retrieve(run.id, {
           thread_id: threadId,
         })
-        console.log(`[WEB-CHAT] 📊 Estado post-tools (intento ${attempts}): ${runStatus.status}`)
+        console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
+      }
+
+      // Si el run está completado, salir del loop
+      if (runStatus.status === "completed") {
+        console.log(`[WEB-CHAT] ✅ Run completado exitosamente`)
+        break
+      }
+
+      // Si el run requiere acción, procesar tool calls
+      if (runStatus.status === "requires_action") {
+        toolRound++
+        console.log(`[WEB-CHAT] 🔧 Run requiere acción - procesando tool calls (ronda ${toolRound})`)
+
+        const toolCalls = runStatus.required_action?.submit_tool_outputs?.tool_calls || []
+        const toolOutputs = []
+
+        for (const toolCall of toolCalls) {
+          console.log(`[WEB-CHAT] 🛠️ Ejecutando tool: ${toolCall.function.name}`)
+
+          try {
+            const args = JSON.parse(toolCall.function.arguments)
+            let result = null
+
+            switch (toolCall.function.name) {
+              case "obtener_obras_sociales":
+                result = await obtenerObrasSociales(clienteId)
+                break
+              case "obtener_subespecialidades":
+                const subespecialidadesResult = await obtenerSubespecialidades(clienteId)
+                result = subespecialidadesResult.exito
+                  ? JSON.stringify({
+                      exito: true,
+                      especialidades: subespecialidadesResult.datos,
+                      total: subespecialidadesResult.datos?.length || 0,
+                    })
+                  : JSON.stringify({ exito: false, mensaje: "No se encontraron especialidades" })
+                break
+              case "obtener_turnos_disponibles":
+                result = await obtenerTurnosDisponibles(clienteId, args.especialidad_id, args.obra_social_id)
+                break
+              case "buscar_turnos_disponibles":
+                result = await buscarTurnosDisponiblesHerramienta(
+                  clienteId,
+                  args.rango_fechas,
+                  args.profesional,
+                  args.especialidad,
+                  args.profesional_id,
+                )
+                break
+              case "reservar_turno":
+                result = await reservarTurno(clienteId, args.turno_id, args.paciente_datos)
+                break
+              case "obtener_datos_sede":
+                const sedeData = await obtenerDatosSede(clienteId, args.sede_id)
+                result = sedeData ? formatearDatosSede(sedeData.sede) : "No se pudieron obtener los datos de la sede"
+                break
+              case "validar_obra_social":
+                result = await validarObraSocialHerramienta(clienteId, args.busqueda)
+                break
+              case "buscar_profesionales":
+                result = await buscarProfesionalesHerramienta(clienteId, args.busqueda)
+                break
+              case "validar_dni":
+                result = await validarDni(clienteId, args.dni)
+                break
+              default:
+                result = "Función no reconocida"
+            }
+
+            toolOutputs.push({
+              tool_call_id: toolCall.id,
+              output: typeof result === "string" ? result : JSON.stringify(result),
+            })
+
+            console.log(`[WEB-CHAT] ✅ Tool ${toolCall.function.name} ejecutado exitosamente`)
+          } catch (error) {
+            console.error(`[WEB-CHAT] ❌ Error ejecutando tool ${toolCall.function.name}:`, error)
+            toolOutputs.push({
+              tool_call_id: toolCall.id,
+              output: "Error al ejecutar la función",
+            })
+          }
+        }
+
+        // Enviar los resultados de los tools
+        await openai.beta.threads.runs.submitToolOutputs(run.id, {
+          thread_id: threadId,
+          tool_outputs: toolOutputs,
+        })
+
+        // Obtener el nuevo estado después de enviar los tool outputs
+        runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+          thread_id: threadId,
+        })
+
+        // Resetear el contador de intentos para la siguiente ronda
+        attempts = 0
+        console.log(`[WEB-CHAT] 📊 Estado después de tool outputs (ronda ${toolRound}): ${runStatus.status}`)
+
+        // Continuar el loop para procesar más tool calls si es necesario
+        continue
+      }
+
+      // Si el run falló o tiene otro estado, salir del loop
+      console.error(`[WEB-CHAT] ❌ Run falló con estado: ${runStatus.status}`)
+      return {
+        response: "Lo siento, ocurrió un error al procesar tu consulta.",
+        error: `Run failed with status: ${runStatus.status}`,
+      }
+    }
+
+    // Si llegamos aquí después del loop de tool rounds, verificar si completó
+    if (toolRound >= maxToolRounds) {
+      console.error(`[WEB-CHAT] ❌ Demasiadas rondas de tool execution (${toolRound})`)
+      return {
+        response: "Lo siento, la consulta requirió demasiadas operaciones. Por favor, reformula tu pregunta.",
+        error: "Too many tool rounds",
       }
     }
 
     if (runStatus.status === "completed") {
-      console.log(`[WEB-CHAT] ✅ Run completado exitosamente`)
-
       const messages = await openai.beta.threads.messages.list(threadId, {
         order: "desc",
         limit: 1,
