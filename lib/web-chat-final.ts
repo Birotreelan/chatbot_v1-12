@@ -360,7 +360,9 @@ export async function processWebChatMessage({
       throw new Error(`Invalid threadId before retrieve: ${threadId}`)
     }
 
-    let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+    let runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+      thread_id: threadId,
+    })
     console.log(`[WEB-CHAT] 📊 Estado inicial del run: ${runStatus.status}`)
 
     const maxAttempts = 30
@@ -377,8 +379,9 @@ export async function processWebChatMessage({
       }
 
       await new Promise((resolve) => setTimeout(resolve, 1000))
-      console.log(`[v0] IN LOOP - threadId: "${threadId}", run.id: "${run.id}"`)
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+        thread_id: threadId,
+      })
       console.log(`[WEB-CHAT] 📊 Estado del run (intento ${attempts}): ${runStatus.status}`)
     }
 
@@ -456,11 +459,14 @@ export async function processWebChatMessage({
         }
       }
 
-      await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
+      await openai.beta.threads.runs.submitToolOutputs(run.id, {
+        thread_id: threadId,
         tool_outputs: toolOutputs,
       })
 
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+        thread_id: threadId,
+      })
       attempts = 0
 
       while (runStatus.status === "in_progress" || runStatus.status === "queued") {
@@ -474,8 +480,9 @@ export async function processWebChatMessage({
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1000))
-        console.log(`[v0] IN LOOP POST TOOLS - threadId: "${threadId}", run.id: "${run.id}"`)
-        runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id)
+        runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+          thread_id: threadId,
+        })
         console.log(`[WEB-CHAT] 📊 Estado post-tools (intento ${attempts}): ${runStatus.status}`)
       }
     }
