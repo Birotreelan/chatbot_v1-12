@@ -1,5 +1,5 @@
 import { OpenAI } from "openai"
-import { getThread as getThreadFromDB } from "./db"
+import { getThread as getThreadFromDB, setThread } from "./db"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -109,7 +109,13 @@ export async function createThread(sessionId: string, configId: string) {
     })
 
     console.log(`[THREAD-MANAGER] Thread web creado: ${thread.id}`)
-    return thread
+
+    // Guardar el thread en la base de datos
+    await setThread(sessionId, configId, thread.id)
+    console.log(`[THREAD-MANAGER] Thread guardado en DB para session: ${sessionId}`)
+
+    // Retornar en el formato esperado
+    return { thread_id: thread.id }
   } catch (error: any) {
     console.error("[THREAD-MANAGER] Error creating web thread:", error)
     throw new Error(`Error creating web thread: ${error.message}`)
@@ -136,7 +142,13 @@ export async function createNewThread(userIdentifier: string, configId: string) 
     })
 
     console.log(`[THREAD-MANAGER] Nuevo thread creado: ${thread.id} (${isWebThread ? "web" : "whatsapp"})`)
-    return thread
+
+    // Guardar el thread en la base de datos
+    await setThread(userIdentifier, configId, thread.id)
+    console.log(`[THREAD-MANAGER] Thread guardado en DB para userIdentifier: ${userIdentifier}`)
+
+    // Retornar en el formato esperado
+    return { thread_id: thread.id }
   } catch (error: any) {
     console.error("Error creating thread:", error)
     throw new Error(error)

@@ -92,16 +92,27 @@ export async function processWebChatMessage({
     console.log(`[WEB-CHAT] Sede ID efectivo:`, effectiveSedeId, sedeId ? "(del request)" : "(del config)")
 
     let threadData
+    let threadId: string
+
     try {
       threadData = await getThreadForUser(sessionId, config.id)
-      console.log(`[WEB-CHAT] ✅ Thread existente recuperado: ${threadData.thread_id}`)
+      threadId = threadData.thread_id
+      console.log(`[WEB-CHAT] ✅ Thread existente recuperado: ${threadId}`)
     } catch (error) {
       console.log(`[WEB-CHAT] 📝 Creando nuevo thread para session: ${sessionId}`)
       threadData = await createThread(sessionId, config.id)
-      console.log(`[WEB-CHAT] ✅ Thread creado: ${threadData.thread_id}`)
+      threadId = threadData.thread_id
+      console.log(`[WEB-CHAT] ✅ Thread creado: ${threadId}`)
     }
 
-    const threadId = threadData.thread_id
+    // Validar que threadId no sea undefined
+    if (!threadId) {
+      console.error(`[WEB-CHAT] ❌ Error crítico: threadId is undefined`)
+      console.error(`[WEB-CHAT] threadData:`, threadData)
+      throw new Error("Thread ID is undefined")
+    }
+
+    console.log(`[WEB-CHAT] 🔍 Thread ID a usar: ${threadId} (tipo: ${typeof threadId})`)
 
     const systemBlock = await createSystemBlock(
       config.displayName,
