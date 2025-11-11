@@ -1,4 +1,5 @@
 import { OpenAI } from "openai"
+import { getThread as getThreadFromDB } from "./db"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -7,6 +8,24 @@ const openai = new OpenAI({
 interface Message {
   role: "system" | "user" | "assistant"
   content: string
+}
+
+export async function getThreadForUser(userIdentifier: string, configId: string) {
+  console.log(`[THREAD-MANAGER] 🔍 Buscando thread para usuario: ${userIdentifier}, config: ${configId}`)
+
+  try {
+    const threadData = await getThreadFromDB(userIdentifier, configId)
+
+    if (!threadData || !threadData.thread_id) {
+      throw new Error(`No thread found for user ${userIdentifier}`)
+    }
+
+    console.log(`[THREAD-MANAGER] ✅ Thread encontrado en DB: ${threadData.thread_id}`)
+    return threadData
+  } catch (error) {
+    console.error(`[THREAD-MANAGER] ❌ Error obteniendo thread:`, error)
+    throw error
+  }
 }
 
 export async function getThread(userIdentifier: string, configId: string) {
@@ -22,6 +41,15 @@ export async function getThread(userIdentifier: string, configId: string) {
     // Verificar que OpenAI esté correctamente inicializado
     if (!openai || !openai.beta || !openai.beta.threads) {
       throw new Error("OpenAI client not properly initialized")
+    }
+
+    // Primero intentar buscar el thread en la base de datos local
+    try {
+      const threadData = await getThreadForUser(userIdentifier, configId)
+      console.log(`[THREAD-MANAGER] Thread encontrado en DB: ${threadData.thread_id}`)
+      return threadData
+    } catch (error) {
+      console.error(`[THREAD-MANAGER] ❌ Error obteniendo thread de DB:`, error)
     }
 
     // Para threads web, intentar buscar por metadata primero

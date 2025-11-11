@@ -13,12 +13,13 @@ const WidgetPage: React.FC<WidgetPageProps> = async ({ searchParams }) => {
   const params = await searchParams
   const { clienteId, config, embedded } = params
 
-  // Parse config string to JSON object
   let parsedConfig = {}
-  try {
-    parsedConfig = JSON.parse(config)
-  } catch (error) {
-    console.error("Error parsing config:", error)
+  if (config && config !== "undefined") {
+    try {
+      parsedConfig = JSON.parse(config)
+    } catch (error) {
+      console.error("Error parsing config:", error)
+    }
   }
 
   return (

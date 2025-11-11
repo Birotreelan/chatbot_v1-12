@@ -765,3 +765,59 @@ export async function getWhatsAppConfigById(id: string): Promise<WhatsAppConfig 
 export const getWhatsappConfigByClienteId = getConfigByClienteId
 export const getConfigById = getWhatsAppConfig // Alias para compatibilidad
 export const getWhatsAppConfigByClienteId = getConfigByClienteId
+
+export async function getThread(userIdentifier: string, configId: string): Promise<{ thread_id: string } | null> {
+  console.log(`[DB] 🔍 getThread llamado para ${userIdentifier}, config: ${configId}`)
+
+  const normalizedIdentifier = normalizePhoneNumber(userIdentifier)
+  const key = `${THREAD_PREFIX}${normalizedIdentifier}:${configId}`
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    const threadData = await redisClient.get(key)
+    const threadInfo = safeJsonParse(threadData, key)
+
+    if (threadInfo && threadInfo.threadId) {
+      console.log(`[DB] ✅ Thread encontrado en Redis: ${threadInfo.threadId}`)
+      return { thread_id: threadInfo.threadId }
+    }
+
+    console.log(`[DB] ❌ Thread no encontrado en Redis`)
+    return null
+  } else {
+    const threadInfo = memoryStorage.threads.get(key)
+
+    if (threadInfo && threadInfo.threadId) {
+      console.log(`[DB] ✅ Thread encontrado en memoria: ${threadInfo.threadId}`)
+      return { thread_id: threadInfo.threadId }
+    }
+
+    console.log(`[DB] ❌ Thread no encontrado en memoria`)
+    return null
+  }
+}
+
+export async function setThread(userIdentifier: string, configId: string, threadId: string): Promise<void> {
+  console.log(`[DB] 💾 setThread llamado para ${userIdentifier}, config: ${configId}, thread: ${threadId}`)
+
+  const normalizedIdentifier = normalizePhoneNumber(userIdentifier)
+  const key = `${THREAD_PREFIX}${normalizedIdentifier}:${configId}`
+  const redisClient = getRedisClient()
+
+  const threadInfo: ThreadInfo = {
+    threadId,
+    phoneNumber: normalizedIdentifier,
+    whatsappConfigId: configId,
+    lastMessageAt: new Date().toISOString(),
+    messageCount: 1,
+    createdAt: new Date().toISOString(),
+  }
+
+  if (redisClient) {
+    await redisClient.set(key, JSON.stringify(threadInfo))
+    console.log(`[DB] ✅ Thread guardado en Redis: ${threadId}`)
+  } else {
+    memoryStorage.threads.set(key, threadInfo)
+    console.log(`[DB] ✅ Thread guardado en memoria: ${threadId}`)
+  }
+}

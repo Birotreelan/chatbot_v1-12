@@ -79,15 +79,17 @@ export async function POST(request: NextRequest) {
     })
 
     console.log("[API-CHAT] ✅ Respuesta generada:")
-    console.log("[API-CHAT] - Longitud:", response.length, "caracteres")
-    console.log("[API-CHAT] - Contenido:", response.substring(0, 200) + "...")
+    console.log("[API-CHAT] - Longitud:", response.response?.length || 0, "caracteres")
+    if (response.response) {
+      console.log("[API-CHAT] - Contenido:", response.response.substring(0, 200) + "...")
+    }
 
     const responseData = {
       success: true,
-      response: response,
+      response: response.response,
     }
 
-    console.log("[API-CHAT] 📤 Enviando respuesta:", JSON.stringify(responseData, null, 2))
+    console.log("[API-CHAT] 📤 Enviando respuesta OK")
 
     return NextResponse.json(responseData)
   } catch (error) {
