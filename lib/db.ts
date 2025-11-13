@@ -769,6 +769,11 @@ export const getWhatsAppConfigByClienteId = getConfigByClienteId
 export async function getThread(userIdentifier: string, configId: string): Promise<{ thread_id: string } | null> {
   console.log(`[DB] 🔍 getThread llamado para ${userIdentifier}, config: ${configId}`)
 
+  if (userIdentifier.startsWith("web_")) {
+    console.log(`[DB] 🌐 Thread web detectado - NO se reutilizará thread anterior`)
+    return null
+  }
+
   const normalizedIdentifier = normalizePhoneNumber(userIdentifier)
   const key = `${THREAD_PREFIX}${normalizedIdentifier}:${configId}`
   const redisClient = getRedisClient()
@@ -799,6 +804,11 @@ export async function getThread(userIdentifier: string, configId: string): Promi
 
 export async function setThread(userIdentifier: string, configId: string, threadId: string): Promise<void> {
   console.log(`[DB] 💾 setThread llamado para ${userIdentifier}, config: ${configId}, thread: ${threadId}`)
+
+  if (userIdentifier.startsWith("web_")) {
+    console.log(`[DB] 🌐 Thread web detectado - NO se guardará en Redis (efímero)`)
+    return
+  }
 
   const normalizedIdentifier = normalizePhoneNumber(userIdentifier)
   const key = `${THREAD_PREFIX}${normalizedIdentifier}:${configId}`

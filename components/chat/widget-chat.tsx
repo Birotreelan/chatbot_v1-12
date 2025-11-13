@@ -49,10 +49,11 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   useEffect(() => {
     console.log("[WIDGET-CHAT] 🔄 useEffect de inicialización ejecutándose...")
 
-    // Generar session_id único
-    const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const randomPart = Math.random().toString(36).substr(2, 12) // Mayor longitud para más unicidad
+    const timePart = Date.now()
+    const newSessionId = `web_${timePart}_${randomPart}`
     setSessionId(newSessionId)
-    console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
+    console.log("[WIDGET-CHAT] 🆔 Session ID generado (único por carga):", newSessionId)
 
     // Agregar mensaje de bienvenida
     if (defaultConfig.widgetWelcomeMessage) {
