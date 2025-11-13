@@ -5,7 +5,15 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Send, MessageCircle } from "lucide-react"
+import { Send, MessageCircle, Trash2 } from "lucide-react"
+import {
+  saveChatSession,
+  addMessageToSession,
+  clearChatSession,
+  getSavedSessionId,
+  loadSavedMessages,
+  updateSessionThreadId,
+} from "@/lib/utils/chat-storage"
 
 interface Message {
   id: string
@@ -26,6 +34,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string>("")
   const [widgetConfig, setWidgetConfig] = useState<any>(null)
+  const [isRestoredSession, setIsRestoredSession] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -33,12 +42,10 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   console.log("[WIDGET-CHAT] 📅 Timestamp:", new Date().toISOString())
   console.log("[WIDGET-CHAT] 🆔 Cliente ID:", clienteId)
 
-  // Función para obtener la configuración actualizada con cache busting
   const fetchWidgetConfig = async () => {
     try {
       console.log("[WIDGET-CHAT] 🔄 Obteniendo configuración actualizada...")
 
-      // Agregar timestamp para evitar caché
       const timestamp = Date.now()
       const url = `/api/widget?cliente_id=${encodeURIComponent(clienteId)}&_t=${timestamp}`
 
@@ -66,10 +73,8 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     }
   }
 
-  // Usar la configuración obtenida o la pasada por props
   const activeConfig = widgetConfig || config
 
-  // Configuración por defecto - usar los valores del config activo
   const defaultConfig = {
     widgetTitle: activeConfig?.widgetTitle || "Asistente Virtual",
     widgetSubtitle: activeConfig?.widgetSubtitle || "Estamos aquí para ayudarte",
@@ -83,23 +88,47 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   console.log("[WIDGET-CHAT] 📋 Config obtenido de API:", widgetConfig)
   console.log("[WIDGET-CHAT] 📋 Configuración final:", defaultConfig)
 
-  // Inicialización
   useEffect(() => {
     console.log("[WIDGET-CHAT] 🔄 useEffect de inicialización ejecutándose...")
 
-    // Obtener configuración actualizada
     fetchWidgetConfig()
 
-    // Generar session_id único
-    const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    setSessionId(newSessionId)
-    console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
+    const existingSessionId = getSavedSessionId(clienteId)
+    const savedMessages = loadSavedMessages(clienteId)
 
-    // Configurar actualización periódica de la configuración
+    if (existingSessionId && savedMessages.length > 0) {
+      console.log("[WIDGET-CHAT] 📂 Restaurando sesión existente:", existingSessionId)
+      console.log("[WIDGET-CHAT] 💬 Mensajes guardados:", savedMessages.length)
+
+      setSessionId(existingSessionId)
+      setIsRestoredSession(true)
+
+      const restoredMessages: Message[] = savedMessages.map((msg) => ({
+        id: msg.id,
+        content: msg.content,
+        isUser: msg.isUser,
+        timestamp: new Date(msg.timestamp),
+      }))
+
+      setMessages(restoredMessages)
+    } else {
+      const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      setSessionId(newSessionId)
+      console.log("[WIDGET-CHAT] 🆔 Nueva sesión creada:", newSessionId)
+
+      saveChatSession({
+        sessionId: newSessionId,
+        messages: [],
+        createdAt: Date.now(),
+        lastAccessAt: Date.now(),
+        clienteId,
+      })
+    }
+
     const configInterval = setInterval(() => {
       console.log("[WIDGET-CHAT] 🔄 Actualizando configuración periódicamente...")
       fetchWidgetConfig()
-    }, 5000) // Actualizar cada 5 segundos
+    }, 5000)
 
     console.log("[WIDGET-CHAT] ✅ Inicialización completada")
 
@@ -108,10 +137,8 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     }
   }, [clienteId])
 
-  // Agregar mensaje de bienvenida cuando la configuración esté lista
   useEffect(() => {
-    if (defaultConfig.widgetWelcomeMessage) {
-      // Limpiar mensajes anteriores y agregar el nuevo mensaje de bienvenida
+    if (defaultConfig.widgetWelcomeMessage && !isRestoredSession && messages.length === 0) {
       const welcomeMessage: Message = {
         id: "welcome",
         content: defaultConfig.widgetWelcomeMessage,
@@ -119,11 +146,11 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
         timestamp: new Date(),
       }
       setMessages([welcomeMessage])
-      console.log("[WIDGET-CHAT] 👋 Mensaje de bienvenida actualizado:", welcomeMessage)
+      addMessageToSession(clienteId, sessionId, welcomeMessage.content, false)
+      console.log("[WIDGET-CHAT] 👋 Mensaje de bienvenida agregado")
     }
-  }, [defaultConfig.widgetWelcomeMessage])
+  }, [defaultConfig.widgetWelcomeMessage, isRestoredSession, messages.length, clienteId, sessionId])
 
-  // Auto-scroll
   useEffect(() => {
     if (messagesEndRef.current) {
       console.log("[WIDGET-CHAT] 📜 Haciendo scroll automático")
@@ -157,6 +184,8 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     setMessages((prev) => [...prev, userMessage])
     if (!text) setInputValue("")
     setIsLoading(true)
+
+    addMessageToSession(clienteId, sessionId, messageText, true)
 
     try {
       const requestBody = {
@@ -206,6 +235,12 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
 
         console.log("[WIDGET-CHAT] 🤖 Agregando mensaje del bot:", botMessage)
         setMessages((prev) => [...prev, botMessage])
+
+        addMessageToSession(clienteId, sessionId, content.trim(), false)
+
+        if (data.threadId) {
+          updateSessionThreadId(clienteId, data.threadId)
+        }
       } else {
         console.error("[WIDGET-CHAT] ❌ Respuesta inválida:", data)
         throw new Error(data.error || "Error desconocido en la respuesta")
@@ -219,6 +254,8 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
         timestamp: new Date(),
       }
       setMessages((prev) => [...prev, errorMessage])
+
+      addMessageToSession(clienteId, sessionId, errorMessage.content, false)
     } finally {
       setIsLoading(false)
       console.log("[WIDGET-CHAT] ✅ Proceso de envío completado")
@@ -240,23 +277,58 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     })
   }
 
+  const handleClearConversation = () => {
+    if (confirm("¿Estás seguro de que deseas borrar esta conversación?")) {
+      clearChatSession()
+      const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      setSessionId(newSessionId)
+      setMessages([])
+      setIsRestoredSession(false)
+      saveChatSession({
+        sessionId: newSessionId,
+        messages: [],
+        createdAt: Date.now(),
+        lastAccessAt: Date.now(),
+        clienteId,
+      })
+      console.log("[WIDGET-CHAT] 🗑️ Conversación limpiada, nueva sesión:", newSessionId)
+    }
+  }
+
   console.log("[WIDGET-CHAT] 🎨 Renderizando interfaz con", messages.length, "mensajes")
 
   return (
     <div className="flex flex-col h-screen bg-white">
-      {/* Header */}
       {!hideHeader && (
-        <div className="bg-sky-600 text-white p-4 flex items-center space-x-3 flex-shrink-0">
-          <MessageCircle className="h-6 w-6" />
-          <div>
-            <h3 className="font-semibold text-lg">{defaultConfig.widgetTitle}</h3>
-            <p className="text-sm opacity-90">{defaultConfig.widgetSubtitle}</p>
+        <div className="bg-sky-600 text-white p-4 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center space-x-3">
+            <MessageCircle className="h-6 w-6" />
+            <div>
+              <h3 className="font-semibold text-lg">{defaultConfig.widgetTitle}</h3>
+              <p className="text-sm opacity-90">{defaultConfig.widgetSubtitle}</p>
+            </div>
           </div>
+          {messages.length > 0 && (
+            <Button
+              onClick={handleClearConversation}
+              variant="ghost"
+              size="sm"
+              className="text-white hover:bg-sky-700"
+              title="Borrar conversación"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       )}
 
-      {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+        {isRestoredSession && messages.length > 0 && (
+          <div className="flex justify-center mb-4">
+            <div className="bg-sky-100 text-sky-800 px-4 py-2 rounded-full text-xs">Conversación restaurada</div>
+          </div>
+        )}
+
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[85%] ${message.isUser ? "order-2" : "order-1"}`}>
@@ -279,7 +351,6 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
           </div>
         ))}
 
-        {/* Loading indicator */}
         {isLoading && (
           <div className="flex justify-start">
             <div className="bg-white rounded-2xl rounded-bl-md px-4 py-3 shadow-sm border">
@@ -301,7 +372,6 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
       <div className="p-4 bg-white border-t flex-shrink-0">
         <div className="flex space-x-2">
           <Input
@@ -322,7 +392,6 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
         </div>
       </div>
 
-      {/* Footer */}
       <div className="px-4 py-2 bg-gray-50 border-t flex-shrink-0">
         <p className="text-xs text-gray-500 text-center">Powered by Treelan</p>
       </div>
