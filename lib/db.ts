@@ -769,11 +769,6 @@ export const getWhatsAppConfigByClienteId = getConfigByClienteId
 export async function getThread(userIdentifier: string, configId: string): Promise<{ thread_id: string } | null> {
   console.log(`[DB] 🔍 getThread llamado para ${userIdentifier}, config: ${configId}`)
 
-  if (userIdentifier.startsWith("web_")) {
-    console.log(`[DB] 🌐 Thread web detectado - NO se reutilizará thread anterior`)
-    return null
-  }
-
   const normalizedIdentifier = normalizePhoneNumber(userIdentifier)
   const key = `${THREAD_PREFIX}${normalizedIdentifier}:${configId}`
   const redisClient = getRedisClient()
@@ -805,11 +800,6 @@ export async function getThread(userIdentifier: string, configId: string): Promi
 export async function setThread(userIdentifier: string, configId: string, threadId: string): Promise<void> {
   console.log(`[DB] 💾 setThread llamado para ${userIdentifier}, config: ${configId}, thread: ${threadId}`)
 
-  if (userIdentifier.startsWith("web_")) {
-    console.log(`[DB] 🌐 Thread web detectado - NO se guardará en Redis (efímero)`)
-    return
-  }
-
   const normalizedIdentifier = normalizePhoneNumber(userIdentifier)
   const key = `${THREAD_PREFIX}${normalizedIdentifier}:${configId}`
   const redisClient = getRedisClient()
@@ -824,8 +814,14 @@ export async function setThread(userIdentifier: string, configId: string, thread
   }
 
   if (redisClient) {
-    await redisClient.set(key, JSON.stringify(threadInfo))
-    console.log(`[DB] ✅ Thread guardado en Redis: ${threadId}`)
+    // Para threads de WhatsApp, sin TTL (permanente)
+    if (userIdentifier.startsWith("web_")) {
+      await redisClient.set(key, JSON.stringify(threadInfo), { ex: 7200 })
+      console.log(`[DB] ✅ Thread web guardado en Redis con TTL de 2 horas: ${threadId}`)
+    } else {
+      await redisClient.set(key, JSON.stringify(threadInfo))
+      console.log(`[DB] ✅ Thread de WhatsApp guardado en Redis (permanente): ${threadId}`)
+    }
   } else {
     memoryStorage.threads.set(key, threadInfo)
     console.log(`[DB] ✅ Thread guardado en memoria: ${threadId}`)
