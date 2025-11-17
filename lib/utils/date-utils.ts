@@ -34,15 +34,13 @@ export function getArgentinaDateTime(): string {
  */
 export function formatDateWithDayOfWeek(dateString: string): string {
   try {
-    // Parse the date string
-    // If it's in format YYYY-MM-DD, we need to be careful with timezone
     let date: Date
 
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
       // ISO date format (YYYY-MM-DD)
       // Parse as local date to avoid timezone issues
       const [year, month, day] = dateString.split("-").map(Number)
-      date = new Date(year, month - 1, day)
+      date = new Date(year, month - 1, day, 12, 0, 0) // Set to noon to avoid timezone issues
     } else {
       // Other formats
       date = new Date(dateString)
@@ -53,13 +51,12 @@ export function formatDateWithDayOfWeek(dateString: string): string {
       return dateString // Return original if parsing fails
     }
 
-    // Format with day of week in Spanish
+    // Format with day of week in Spanish - removing timeZone option to use local interpretation
     const options: Intl.DateTimeFormatOptions = {
       weekday: "long",
       day: "numeric",
       month: "long",
       year: "numeric",
-      timeZone: "America/Argentina/Buenos_Aires",
     }
 
     const formatter = new Intl.DateTimeFormat("es-AR", options)
