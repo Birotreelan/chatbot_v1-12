@@ -673,6 +673,7 @@ Paciente_Apellido: ${paciente.apellido || ""}
 Paciente_DNI: ${paciente.dni || ""}
 Paciente_Telefono: ${paciente.telefono || ""}
 Paciente_Mail: ${paciente.mail || ""}
+Paciente_Obra_Social_ID: ${paciente.obra_social_id || ""}
 Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`
 
               console.log("[PROXYLISTENER] 📝 Bloque CONTEXTO_COMPLETO_TURNO generado:")
@@ -681,6 +682,7 @@ Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`
               console.log(`[PROXYLISTENER]   Paciente_DNI: ${paciente.dni || ""}`)
               console.log(`[PROXYLISTENER]   Paciente_Telefono: ${paciente.telefono || ""}`)
               console.log(`[PROXYLISTENER]   Paciente_Mail: ${paciente.mail || "(VACÍO)"}`)
+              console.log(`[PROXYLISTENER]   Paciente_Obra_Social_ID: ${paciente.obra_social_id || ""}`)
               console.log(`[PROXYLISTENER]   Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`)
             }
 
@@ -697,7 +699,9 @@ Cantidad_Turnos: ${chatbotDataParsed.cantidad_turnos || chatbotDataParsed.turnos
 
 Turno_${index + 1}:
   - Fecha: ${fechaFormateada}
+  - Fecha_Formateada: ${turno.fecha_formateada || ""}
   - Hora: ${turno.hora || ""}
+  - Hora_Formateada: ${turno.hora_formateada || ""}
   - Profesional: ${turno.profesional || ""}
   - Profesional_ID: ${turno.profesional_id || ""}
   - Sede: ${turno.sede || ""}
