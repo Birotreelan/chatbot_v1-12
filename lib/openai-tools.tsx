@@ -16,6 +16,7 @@ import {
 import type { AbortSignal } from "abort-controller"
 import { saveConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
+import { getRedisClient } from "./redis"
 
 // Re-export functions for compatibility
 export { obtenerTurnosDisponibles } from "./api-tools/api-functions"
@@ -803,6 +804,46 @@ function createTimeoutSignal(timeoutMs: number): AbortSignal {
   return controller.signal
 }
 
+async function getPhoneNumberFromThread(threadId: string, configId: string): Promise<string | null> {
+  console.log(`[OPENAI] 🔍 Obteniendo número de teléfono para thread: ${threadId}`)
+  
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) {
+      console.error(`[OPENAI] ❌ Redis no disponible`)
+      return null
+    }
+
+    // Buscar el thread en Redis
+    const threadKeys = await redisClient.keys(`thread:*:${configId}`)
+    console.log(`[OPENAI] 📋 Claves de threads encontradas: ${threadKeys.length}`)
+    
+    for (const key of threadKeys) {
+      const threadData = await redisClient.get(key)
+      if (typeof threadData === 'string') {
+        const threadInfo = JSON.parse(threadData)
+        if (threadInfo.threadId === threadId) {
+          console.log(`[OPENAI] ✅ Número de teléfono encontrado: ${threadInfo.phoneNumber}`)
+          return threadInfo.phoneNumber
+        }
+      } else if (threadData && typeof threadData === 'object') {
+        const threadInfo = threadData as any
+        if (threadInfo.threadId === threadId) {
+          console.log(`[OPENAI] ✅ Número de teléfono encontrado: ${threadInfo.phoneNumber}`)
+          return threadInfo.phoneNumber
+        }
+      }
+    }
+    
+    console.error(`[OPENAI] ❌ No se encontró el thread ${threadId} en Redis`)
+    return null
+  } catch (error) {
+    console.error(`[OPENAI] ❌ Error obteniendo número de teléfono del thread:`, error)
+    return null
+  }
+}
+// </CHANGE>
+
 // Función principal para obtener respuesta del asistente
 export async function getAssistantResponse(
   threadId: string,
@@ -912,19 +953,30 @@ async function processRunWithCorrectFlow(
       )
 
       const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
-      if (config) {
-        await saveConversationMessage({
-          id: nanoid(),
-          role: "assistant",
-          content: messageContent,
-          timestamp: new Date().toISOString(),
-          phoneNumber: config.lastUserPhoneNumber || "", // Use lastUserPhoneNumber from config
-          configId: config.id,
-        })
+      if (!config) {
+        throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
       }
 
-      await sendWhatsAppMessage(phoneNumberId, accessToken, config.lastUserPhoneNumber || "", messageContent)
-      console.log(`[OPENAI] 📱 Enviado a WhatsApp`)
+      const userPhoneNumber = await getPhoneNumberFromThread(threadId, config.id)
+      if (!userPhoneNumber) {
+        throw new Error(`No se pudo obtener el número de teléfono para el thread ${threadId}`)
+      }
+
+      console.log(`[OPENAI] 📞 Número de teléfono obtenido del thread: ${userPhoneNumber}`)
+      // </CHANGE>
+
+      await saveConversationMessage({
+        id: nanoid(),
+        role: "assistant",
+        content: messageContent,
+        timestamp: new Date().toISOString(),
+        phoneNumber: userPhoneNumber,
+        configId: config.id,
+      })
+
+      await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, messageContent)
+      console.log(`[OPENAI] 📱 Enviado a WhatsApp: ${userPhoneNumber}`)
+      // </CHANGE>
 
       await incrementMetric("messages_sent")
 
@@ -938,6 +990,17 @@ async function processRunWithCorrectFlow(
 
         console.log(`[OPENAI] 🔧 ${toolCalls.length} herramientas a ejecutar`)
 
+        const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+        if (!config) {
+          throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
+        }
+
+        const userPhoneNumber = await getPhoneNumberFromThread(threadId, config.id)
+        if (!userPhoneNumber) {
+          throw new Error(`No se pudo obtener el número de teléfono para el thread ${threadId}`)
+        }
+        // </CHANGE>
+
         for (const toolCall of toolCalls) {
           const functionName = toolCall.function.name
           const functionArgs = JSON.parse(toolCall.function.arguments)
@@ -947,8 +1010,9 @@ async function processRunWithCorrectFlow(
           const waitingMessage = FUNCTION_MESSAGES[functionName]
           if (waitingMessage) {
             try {
-              await sendWhatsAppMessage(phoneNumberId, accessToken, config.lastUserPhoneNumber || "", waitingMessage)
+              await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
               console.log(`[OPENAI] ⏳ Mensaje de espera enviado: ${functionName}`)
+              // </CHANGE>
             } catch (error) {
               console.error(`[OPENAI] ❌ Error enviando mensaje de espera:`, error)
             }
@@ -1072,23 +1136,29 @@ async function processRunWithCorrectFlow(
           "Lo siento, tu consulta está tomando más tiempo del esperado. Por favor, intenta nuevamente en unos momentos."
       }
 
-      // Save error message to conversation database
       const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
       if (config) {
-        await saveConversationMessage({
-          id: nanoid(),
-          role: "assistant",
-          content: errorMessage,
-          timestamp: new Date().toISOString(),
-          phoneNumber: config.lastUserPhoneNumber || "", // Use lastUserPhoneNumber from config
-          configId: config.id,
-          messageType: "error",
-        })
-        console.log(`[OPENAI] 💾 Mensaje de error guardado en conversación`)
-      }
+        const userPhoneNumber = await getPhoneNumberFromThread(threadId, config.id)
+        
+        if (userPhoneNumber) {
+          await saveConversationMessage({
+            id: nanoid(),
+            role: "assistant",
+            content: errorMessage,
+            timestamp: new Date().toISOString(),
+            phoneNumber: userPhoneNumber,
+            configId: config.id,
+            messageType: "error",
+          })
+          console.log(`[OPENAI] 💾 Mensaje de error guardado en conversación`)
 
-      await sendWhatsAppMessage(phoneNumberId, accessToken, config.lastUserPhoneNumber || "", errorMessage)
-      console.log(`[OPENAI] 📱 Mensaje de error enviado al usuario`)
+          await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, errorMessage)
+          console.log(`[OPENAI] 📱 Mensaje de error enviado al usuario: ${userPhoneNumber}`)
+        } else {
+          console.error(`[OPENAI] ❌ No se pudo obtener número de teléfono para enviar mensaje de error`)
+        }
+      }
+      // </CHANGE>
     } catch (sendError) {
       console.error(`[OPENAI] ❌ Error enviando mensaje de error:`, sendError)
     }

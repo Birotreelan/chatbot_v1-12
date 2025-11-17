@@ -80,6 +80,13 @@ export async function sendWhatsAppMessage(
 ): Promise<any> {
   const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`
 
+  console.log("[WHATSAPP-API] 🎯 ===== ENVÍO CRÍTICO =====")
+  console.log("[WHATSAPP-API] Destinatario TO:", to)
+  console.log("[WHATSAPP-API] Phone Number ID:", phoneNumberId)
+  console.log("[WHATSAPP-API] Contenido del mensaje:", text.substring(0, 100) + (text.length > 100 ? "..." : ""))
+  console.log("[WHATSAPP-API] Timestamp:", new Date().toISOString())
+  console.log("[WHATSAPP-API] ================================")
+  
   logger.info("WHATSAPP-API", `Enviando mensaje a ${to} (${text.length} chars)`)
 
   try {
@@ -108,9 +115,11 @@ export async function sendWhatsAppMessage(
     }
 
     const responseData = await response.json()
+    console.log("[WHATSAPP-API] ✅ Mensaje enviado exitosamente a:", to, "- ID:", responseData.messages?.[0]?.id)
     logger.info("WHATSAPP-API", `Mensaje enviado ✓: ${responseData.messages?.[0]?.id}`)
     return responseData
   } catch (error) {
+    console.error("[WHATSAPP-API] ❌ Error enviando mensaje a:", to, "- Error:", error)
     logger.error("WHATSAPP-API", "Error en sendWhatsAppMessage", error)
     throw error
   }
@@ -125,6 +134,13 @@ export async function sendWhatsAppTemplate(
 ): Promise<any> {
   const endpointId = phoneNumberId
 
+  console.log("[WHATSAPP-API] 🎯 ===== ENVÍO PLANTILLA CRÍTICO =====")
+  console.log("[WHATSAPP-API] Destinatario TO:", to)
+  console.log("[WHATSAPP-API] Phone Number ID:", phoneNumberId)
+  console.log("[WHATSAPP-API] Template Data:", JSON.stringify(templateData).substring(0, 200))
+  console.log("[WHATSAPP-API] Timestamp:", new Date().toISOString())
+  console.log("[WHATSAPP-API] ================================")
+  
   logger.info("WHATSAPP-API", `Enviando plantilla a ${to}`)
 
   const url = `https://graph.facebook.com/v18.0/${endpointId}/messages`
@@ -152,6 +168,8 @@ export async function sendWhatsAppTemplate(
       ...templateBody,
     }
 
+    console.log("[WHATSAPP-API] 📤 Request body para Meta API:", JSON.stringify(requestBody, null, 2))
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -176,9 +194,11 @@ export async function sendWhatsAppTemplate(
     }
 
     const responseData = await response.json()
+    console.log("[WHATSAPP-API] ✅ Plantilla enviada exitosamente a:", to, "- ID:", responseData.messages?.[0]?.id)
     logger.info("WHATSAPP-API", `Plantilla enviada ✓: ${responseData.messages?.[0]?.id}`)
     return responseData
   } catch (error) {
+    console.error("[WHATSAPP-API] ❌ Error enviando plantilla a:", to, "- Error:", error)
     logger.error("WHATSAPP-API", "Error en sendWhatsAppTemplate", error)
     throw error
   }
