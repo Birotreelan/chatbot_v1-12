@@ -132,12 +132,6 @@ export async function handleMessage(value: WhatsAppValue) {
     // Actualizar estadísticas - mensaje recibido
     await updateWhatsAppStats(config.id, { messagesReceived: 1 })
 
-    // Guardar el número de teléfono del usuario en la configuración
-    if (config.lastUserPhoneNumber !== userPhoneNumber) {
-      console.log(`[WHATSAPP] Actualizando número de teléfono del usuario: ${userPhoneNumber}`)
-      await updateWhatsAppConfig(config.id, { lastUserPhoneNumber: userPhoneNumber })
-    }
-
     // Detectar si es una respuesta de botón y enviarla al proxy
     if (message.type === "button" && message.button) {
       console.log(

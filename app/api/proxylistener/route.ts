@@ -377,6 +377,22 @@ async function handleTemplateSend(data: any) {
       return NextResponse.json({ success: false, error: "Se requiere el parámetro Body" }, { status: 400 })
     }
 
+    if (!Phone) {
+      console.error("[PROXYLISTENER] ❌ ERROR CRÍTICO: No se proporcionó el parámetro Phone")
+      console.error("[PROXYLISTENER] Este es un error de configuración del sistema externo")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "PHONE_REQUIRED",
+          message:
+            "El parámetro 'Phone' es obligatorio. No se puede enviar mensaje sin número de teléfono explícito.",
+          details:
+            "Este error previene el envío de mensajes al contacto incorrecto. Verifica la configuración del sistema que envía plantillas.",
+        },
+        { status: 400 },
+      )
+    }
+
     if (!Phone_Number_Id && !Phone) {
       return NextResponse.json(
         { success: false, error: "Se requiere al menos uno de los parámetros: Phone_Number_Id o Phone" },
@@ -467,31 +483,24 @@ async function handleTemplateSend(data: any) {
       // This prevents blocking legitimate messages due to API issues
     }
 
-    // Determinar número de teléfono destinatario
-    let destinationPhone = Phone
+    // NUNCA usar lastUserPhoneNumber como fallback
+    const destinationPhone = Phone.startsWith("+") ? Phone : `+${Phone}`
 
-    if (!destinationPhone) {
-      if (!config.lastUserPhoneNumber) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "No se proporcionó un número de teléfono y no hay un número registrado en la configuración",
-          },
-          { status: 400 },
-        )
-      }
-      destinationPhone = config.lastUserPhoneNumber
-    }
-
-    // Formatear número de teléfono
-    if (!destinationPhone.startsWith("+")) {
-      destinationPhone = `+${destinationPhone}`
-    }
+    console.log("[PROXYLISTENER] ✅ Número de teléfono validado:", destinationPhone)
+    console.log("[PROXYLISTENER] ✅ Origen del número: Parámetro 'Phone' (explícito)")
+    console.log("[PROXYLISTENER] Enviando mensaje tipo:", messageType)
 
     const cleanPhoneNumber = normalizePhoneNumber(destinationPhone)
 
-    console.log("[PROXYLISTENER] Número de teléfono formateado:", destinationPhone)
-    console.log("[PROXYLISTENER] Enviando mensaje tipo:", messageType)
+    console.log("[PROXYLISTENER] 📤 ===== RASTREO DE ENVÍO =====")
+    console.log("[PROXYLISTENER] Destinatario normalizado:", cleanPhoneNumber)
+    console.log("[PROXYLISTENER] Destinatario con formato:", destinationPhone)
+    console.log("[PROXYLISTENER] Config ID:", config.id)
+    console.log("[PROXYLISTENER] Phone Number ID:", config.phoneNumberId)
+    console.log("[PROXYLISTENER] Tipo de mensaje:", messageType)
+    console.log("[PROXYLISTENER] Cliente ID:", Cliente_Id)
+    console.log("[PROXYLISTENER] Timestamp:", new Date().toISOString())
+    console.log("[PROXYLISTENER] ================================")
 
     // Enviar mensaje según el tipo
     let whatsappResponse = null

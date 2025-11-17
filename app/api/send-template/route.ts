@@ -22,6 +22,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Se requiere el parámetro Body" }, { status: 400 })
     }
 
+    if (!Telefono) {
+      console.error("[SEND-TEMPLATE] ❌ ERROR CRÍTICO: No se proporcionó el parámetro Telefono")
+      console.error("[SEND-TEMPLATE] Este es un error de configuración del sistema externo")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "TELEFONO_REQUIRED",
+          message:
+            "El parámetro 'Telefono' es obligatorio. No se puede enviar mensaje sin número de teléfono explícito.",
+          details:
+            "Este error previene el envío de mensajes al contacto incorrecto. Verifica la configuración del sistema que envía plantillas.",
+        },
+        { status: 400 },
+      )
+    }
+
     if (!Phone_Number_Id && !Telefono) {
       return NextResponse.json(
         { success: false, error: "Se requiere al menos uno de los parámetros: Phone_Number_Id o Telefono" },
@@ -62,34 +78,27 @@ export async function POST(request: Request) {
       )
     }
 
-    // Determinar el número de teléfono del destinatario
-    let destinationPhone = Telefono
+    // NUNCA usar lastUserPhoneNumber como fallback
+    const destinationPhone = Telefono.startsWith("+") ? Telefono : `+${Telefono}`
 
-    // Si no se proporcionó un número de teléfono específico, usamos el último número
-    // de teléfono registrado en la configuración
-    if (!destinationPhone) {
-      if (!config.lastUserPhoneNumber) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "No se proporcionó un número de teléfono y no hay un número registrado en la configuración",
-          },
-          { status: 400 },
-        )
-      }
-      destinationPhone = config.lastUserPhoneNumber
-    }
+    console.log("[SEND-TEMPLATE] ✅ Número de teléfono validado:", destinationPhone)
+    console.log("[SEND-TEMPLATE] ✅ Origen del número: Parámetro 'Telefono' (explícito)")
 
-    // Asegurarse de que el número de teléfono tenga el formato correcto (con código de país)
-    if (!destinationPhone.startsWith("+")) {
-      // Si no tiene el prefijo +, asumimos que es un número de Argentina
-      destinationPhone = `+${destinationPhone}`
-    }
+    const cleanPhoneNumber = normalizePhoneNumber(destinationPhone)
+    
+    console.log("[SEND-TEMPLATE] 📤 ===== RASTREO DE ENVÍO =====")
+    console.log("[SEND-TEMPLATE] Destinatario normalizado:", cleanPhoneNumber)
+    console.log("[SEND-TEMPLATE] Destinatario con formato:", destinationPhone)
+    console.log("[SEND-TEMPLATE] Config ID:", config.id)
+    console.log("[SEND-TEMPLATE] Phone Number ID:", config.phoneNumberId)
+    console.log("[SEND-TEMPLATE] Cliente ID:", Cliente_Id)
+    console.log("[SEND-TEMPLATE] Template Name:", Template_Name || "N/A")
+    console.log("[SEND-TEMPLATE] Timestamp:", new Date().toISOString())
+    console.log("[SEND-TEMPLATE] ================================")
 
     // Enviar el mensaje a través de la API de WhatsApp
     await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, destinationPhone, Body)
 
-    const cleanPhoneNumber = normalizePhoneNumber(destinationPhone)
     await saveConversationMessage({
       id: nanoid(),
       role: "assistant",

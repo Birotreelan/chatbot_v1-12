@@ -842,7 +842,6 @@ export async function getAssistantResponse(
       run.id,
       config.accessToken,
       phoneNumberId,
-      config.lastUserPhoneNumber || "",
       config.cliente_id || "",
     )
 
@@ -862,7 +861,6 @@ async function processRunWithCorrectFlow(
   runId: string,
   accessToken: string,
   phoneNumberId: string,
-  userPhoneNumber: string,
   clienteId: string,
   retryCount = 0,
 ) {
@@ -920,12 +918,12 @@ async function processRunWithCorrectFlow(
           role: "assistant",
           content: messageContent,
           timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
+          phoneNumber: config.lastUserPhoneNumber || "", // Use lastUserPhoneNumber from config
           configId: config.id,
         })
       }
 
-      await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, messageContent)
+      await sendWhatsAppMessage(phoneNumberId, accessToken, config.lastUserPhoneNumber || "", messageContent)
       console.log(`[OPENAI] 📱 Enviado a WhatsApp`)
 
       await incrementMetric("messages_sent")
@@ -949,7 +947,7 @@ async function processRunWithCorrectFlow(
           const waitingMessage = FUNCTION_MESSAGES[functionName]
           if (waitingMessage) {
             try {
-              await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
+              await sendWhatsAppMessage(phoneNumberId, accessToken, config.lastUserPhoneNumber || "", waitingMessage)
               console.log(`[OPENAI] ⏳ Mensaje de espera enviado: ${functionName}`)
             } catch (error) {
               console.error(`[OPENAI] ❌ Error enviando mensaje de espera:`, error)
@@ -992,7 +990,6 @@ async function processRunWithCorrectFlow(
           runId,
           accessToken,
           phoneNumberId,
-          userPhoneNumber,
           clienteId,
           retryCount,
         )
@@ -1055,7 +1052,6 @@ async function processRunWithCorrectFlow(
           newRun.id, // Use new run ID
           accessToken,
           phoneNumberId,
-          userPhoneNumber,
           clienteId,
           retryCount + 1,
         )
@@ -1084,14 +1080,14 @@ async function processRunWithCorrectFlow(
           role: "assistant",
           content: errorMessage,
           timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
+          phoneNumber: config.lastUserPhoneNumber || "", // Use lastUserPhoneNumber from config
           configId: config.id,
           messageType: "error",
         })
         console.log(`[OPENAI] 💾 Mensaje de error guardado en conversación`)
       }
 
-      await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, errorMessage)
+      await sendWhatsAppMessage(phoneNumberId, accessToken, config.lastUserPhoneNumber || "", errorMessage)
       console.log(`[OPENAI] 📱 Mensaje de error enviado al usuario`)
     } catch (sendError) {
       console.error(`[OPENAI] ❌ Error enviando mensaje de error:`, sendError)
