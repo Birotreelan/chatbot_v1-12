@@ -814,35 +814,53 @@ async function getPhoneNumberFromThread(threadId: string, configId: string): Pro
       return null
     }
 
-    // Buscar el thread en Redis
-    const threadKeys = await redisClient.keys(`thread:*:${configId}`)
-    console.log(`[OPENAI] 📋 Claves de threads encontradas: ${threadKeys.length}`)
+    const pattern = `thread:*:${configId}`
+    console.log(`[OPENAI] 🔍 Buscando threads con patrón: ${pattern}`)
     
-    for (const key of threadKeys) {
-      const threadData = await redisClient.get(key)
-      if (typeof threadData === 'string') {
-        const threadInfo = JSON.parse(threadData)
-        if (threadInfo.threadId === threadId) {
-          console.log(`[OPENAI] ✅ Número de teléfono encontrado: ${threadInfo.phoneNumber}`)
-          return threadInfo.phoneNumber
-        }
-      } else if (threadData && typeof threadData === 'object') {
-        const threadInfo = threadData as any
-        if (threadInfo.threadId === threadId) {
-          console.log(`[OPENAI] ✅ Número de teléfono encontrado: ${threadInfo.phoneNumber}`)
-          return threadInfo.phoneNumber
+    let cursor = 0
+    let keysFound = 0
+    
+    do {
+      // SCAN devuelve [cursor, keys]
+      const result = await redisClient.scan(cursor, {
+        match: pattern,
+        count: 100 // Procesar 100 claves por vez
+      })
+      
+      cursor = result[0]
+      const keys = result[1]
+      keysFound += keys.length
+      
+      console.log(`[OPENAI] 📋 SCAN cursor=${cursor}, encontradas=${keys.length}`)
+      
+      // Revisar cada clave encontrada
+      for (const key of keys) {
+        const threadData = await redisClient.get(key)
+        if (typeof threadData === 'string') {
+          const threadInfo = JSON.parse(threadData)
+          if (threadInfo.threadId === threadId) {
+            console.log(`[OPENAI] ✅ Thread encontrado en clave: ${key}`)
+            console.log(`[OPENAI] ✅ Número de teléfono: ${threadInfo.phoneNumber}`)
+            return threadInfo.phoneNumber
+          }
+        } else if (threadData && typeof threadData === 'object') {
+          const threadInfo = threadData as any
+          if (threadInfo.threadId === threadId) {
+            console.log(`[OPENAI] ✅ Thread encontrado en clave: ${key}`)
+            console.log(`[OPENAI] ✅ Número de teléfono: ${threadInfo.phoneNumber}`)
+            return threadInfo.phoneNumber
+          }
         }
       }
-    }
+    } while (cursor !== 0) // Continuar hasta que cursor vuelva a 0
     
-    console.error(`[OPENAI] ❌ No se encontró el thread ${threadId} en Redis`)
+    console.error(`[OPENAI] ❌ No se encontró el thread ${threadId} después de revisar ${keysFound} claves`)
     return null
   } catch (error) {
     console.error(`[OPENAI] ❌ Error obteniendo número de teléfono del thread:`, error)
     return null
   }
 }
-// </CHANGE>
 
 // Función principal para obtener respuesta del asistente
 export async function getAssistantResponse(
