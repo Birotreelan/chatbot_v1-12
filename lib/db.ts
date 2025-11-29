@@ -36,6 +36,27 @@ const THREAD_PREFIX = "thread:"
 const PHONE_TO_CONFIG_PREFIX = "phone_to_config:"
 const STATS_KEY = "system_stats"
 
+const THREAD_EXPIRY_HOURS = Number.parseInt(process.env.THREAD_EXPIRY_HOURS || "24", 10)
+
+// Función auxiliar para verificar si un thread ha expirado
+function isThreadExpired(threadInfo: ThreadInfo): boolean {
+  if (!threadInfo.createdAt) {
+    // Si no tiene createdAt, usar lastMessageAt como fallback
+    const lastMessage = new Date(threadInfo.lastMessageAt)
+    const now = new Date()
+    const hoursDiff = (now.getTime() - lastMessage.getTime()) / (1000 * 60 * 60)
+    return hoursDiff >= THREAD_EXPIRY_HOURS
+  }
+
+  const createdAt = new Date(threadInfo.createdAt)
+  const now = new Date()
+  const hoursDiff = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60)
+
+  console.log(`[DB] 🕐 Thread creado hace ${hoursDiff.toFixed(2)} horas (expira a las ${THREAD_EXPIRY_HOURS} horas)`)
+
+  return hoursDiff >= THREAD_EXPIRY_HOURS
+}
+
 // Función auxiliar para manejar la serialización/deserialización segura
 function safeJsonParse(data: any, key?: string): any {
   if (typeof data === "string") {
@@ -457,27 +478,48 @@ export async function getThreadForUser(
         const threadInfo = safeJsonParse(threadData, key)
 
         if (threadInfo) {
-          console.log(`[DB] ✅ Thread encontrado: ${threadInfo.threadId}`)
+          if (isThreadExpired(threadInfo)) {
+            console.log(`[DB] ⏰ Thread ${threadInfo.threadId} ha EXPIRADO. Creando uno nuevo...`)
 
-          // Verificar si es un thread reseteado
-          const isResetThread = threadInfo.isResetThread === true
+            // Eliminar el thread antiguo de OpenAI
+            try {
+              const openai = new (await import("openai")).default({
+                apiKey: process.env.OPENAI_API_KEY,
+              })
+              await openai.beta.threads.delete(threadInfo.threadId)
+              console.log(`[DB] 🗑️ Thread expirado eliminado de OpenAI: ${threadInfo.threadId}`)
+            } catch (deleteError: any) {
+              console.warn(`[DB] ⚠️ No se pudo eliminar thread expirado de OpenAI: ${deleteError.message}`)
+            }
 
-          // Actualizar la información del thread
-          const updatedThreadInfo = {
-            ...threadInfo,
-            lastMessageAt: new Date().toISOString(),
-            messageCount: (threadInfo.messageCount || 0) + 1,
-            // Limpiar el flag de reset después del primer uso
-            isResetThread: false,
-          }
+            // Eliminar de Redis
+            await redisClient.del(key)
+            console.log(`[DB] 🗑️ Thread expirado eliminado de Redis`)
 
-          // Guardar en Redis - siempre como cadena JSON
-          await redisClient.set(key, JSON.stringify(updatedThreadInfo))
+            // Continuar para crear uno nuevo (el código abajo lo manejará)
+          } else {
+            console.log(`[DB] ✅ Thread encontrado y válido: ${threadInfo.threadId}`)
 
-          return {
-            threadId: threadInfo.threadId,
-            isNewThread: false,
-            isResetThread,
+            // Verificar si es un thread reseteado
+            const isResetThread = threadInfo.isResetThread === true
+
+            // Actualizar la información del thread
+            const updatedThreadInfo = {
+              ...threadInfo,
+              lastMessageAt: new Date().toISOString(),
+              messageCount: (threadInfo.messageCount || 0) + 1,
+              // Limpiar el flag de reset después del primer uso
+              isResetThread: false,
+            }
+
+            // Guardar en Redis - siempre como cadena JSON
+            await redisClient.set(key, JSON.stringify(updatedThreadInfo))
+
+            return {
+              threadId: threadInfo.threadId,
+              isNewThread: false,
+              isResetThread,
+            }
           }
         }
       } else {
@@ -485,29 +527,50 @@ export async function getThreadForUser(
         const threadInfo = memoryStorage.threads.get(key)
 
         if (threadInfo) {
-          console.log(`[DB] ✅ Thread encontrado en memoria: ${threadInfo.threadId}`)
+          if (isThreadExpired(threadInfo)) {
+            console.log(`[DB] ⏰ Thread ${threadInfo.threadId} en memoria ha EXPIRADO. Creando uno nuevo...`)
 
-          const isResetThread = threadInfo.isResetThread === true
+            // Eliminar el thread antiguo de OpenAI
+            try {
+              const openai = new (await import("openai")).default({
+                apiKey: process.env.OPENAI_API_KEY,
+              })
+              await openai.beta.threads.delete(threadInfo.threadId)
+              console.log(`[DB] 🗑️ Thread expirado eliminado de OpenAI: ${threadInfo.threadId}`)
+            } catch (deleteError: any) {
+              console.warn(`[DB] ⚠️ No se pudo eliminar thread expirado de OpenAI: ${deleteError.message}`)
+            }
 
-          const updatedThreadInfo = {
-            ...threadInfo,
-            lastMessageAt: new Date().toISOString(),
-            messageCount: (threadInfo.messageCount || 0) + 1,
-            isResetThread: false,
-          }
+            // Eliminar de memoria
+            memoryStorage.threads.delete(key)
+            console.log(`[DB] 🗑️ Thread expirado eliminado de memoria`)
 
-          memoryStorage.threads.set(key, updatedThreadInfo)
+            // Continuar para crear uno nuevo
+          } else {
+            console.log(`[DB] ✅ Thread encontrado en memoria y válido: ${threadInfo.threadId}`)
 
-          return {
-            threadId: threadInfo.threadId,
-            isNewThread: false,
-            isResetThread,
+            const isResetThread = threadInfo.isResetThread === true
+
+            const updatedThreadInfo = {
+              ...threadInfo,
+              lastMessageAt: new Date().toISOString(),
+              messageCount: (threadInfo.messageCount || 0) + 1,
+              isResetThread: false,
+            }
+
+            memoryStorage.threads.set(key, updatedThreadInfo)
+
+            return {
+              threadId: threadInfo.threadId,
+              isNewThread: false,
+              isResetThread,
+            }
           }
         }
       }
 
       // Crear un nuevo thread
-      console.log(`[DB] 📝 No se encontró thread existente, creando uno nuevo`)
+      console.log(`[DB] 📝 No se encontró thread existente o expiró, creando uno nuevo`)
       const openai = new (await import("openai")).default({
         apiKey: process.env.OPENAI_API_KEY,
       })
@@ -515,13 +578,13 @@ export async function getThreadForUser(
       const thread = await openai.beta.threads.create()
       console.log(`[DB] ✅ Nuevo thread creado: ${thread.id}`)
 
-      // Guardar la información del thread
       const newThreadInfo: ThreadInfo = {
         threadId: thread.id,
         phoneNumber: normalizedPhone,
         whatsappConfigId,
         lastMessageAt: new Date().toISOString(),
         messageCount: 1,
+        createdAt: new Date().toISOString(), // Importante para la expiración
       }
 
       if (redisClient) {
