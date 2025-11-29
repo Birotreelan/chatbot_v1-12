@@ -780,6 +780,8 @@ const MAX_RETRIES = Number.parseInt(process.env.MAX_RETRIES || "3", 10)
 // Tiempo de espera entre reintentos (en milisegundos)
 const RETRY_DELAY = Number.parseInt(process.env.RETRY_DELAY || "2000", 10)
 
+const CANCEL_WAIT_TIMEOUT = 10000 // 10 segundos máximo para esperar cancelación
+
 function calculateBackoffDelay(retryCount: number, baseDelay: number = RETRY_DELAY): number {
   // Exponential backoff: 2s, 4s, 8s, 16s...
   const exponentialDelay = baseDelay * Math.pow(2, retryCount)
@@ -806,7 +808,7 @@ function createTimeoutSignal(timeoutMs: number): AbortSignal {
 
 async function getPhoneNumberFromThread(threadId: string, configId: string): Promise<string | null> {
   console.log(`[OPENAI] 🔍 Obteniendo número de teléfono para thread: ${threadId}`)
-  
+
   try {
     const redisClient = getRedisClient()
     if (!redisClient) {
@@ -816,34 +818,34 @@ async function getPhoneNumberFromThread(threadId: string, configId: string): Pro
 
     const pattern = `thread:*:${configId}`
     console.log(`[OPENAI] 🔍 Buscando threads con patrón: ${pattern}`)
-    
+
     let cursor = 0
     let keysFound = 0
-    
+
     do {
       // SCAN devuelve [cursor, keys]
       const result = await redisClient.scan(cursor, {
         match: pattern,
-        count: 100 // Procesar 100 claves por vez
+        count: 100, // Procesar 100 claves por vez
       })
-      
+
       cursor = result[0]
       const keys = result[1]
       keysFound += keys.length
-      
+
       console.log(`[OPENAI] 📋 SCAN cursor=${cursor}, encontradas=${keys.length}`)
-      
+
       // Revisar cada clave encontrada
       for (const key of keys) {
         const threadData = await redisClient.get(key)
-        if (typeof threadData === 'string') {
+        if (typeof threadData === "string") {
           const threadInfo = JSON.parse(threadData)
           if (threadInfo.threadId === threadId) {
             console.log(`[OPENAI] ✅ Thread encontrado en clave: ${key}`)
             console.log(`[OPENAI] ✅ Número de teléfono: ${threadInfo.phoneNumber}`)
             return threadInfo.phoneNumber
           }
-        } else if (threadData && typeof threadData === 'object') {
+        } else if (threadData && typeof threadData === "object") {
           const threadInfo = threadData as any
           if (threadInfo.threadId === threadId) {
             console.log(`[OPENAI] ✅ Thread encontrado en clave: ${key}`)
@@ -853,12 +855,85 @@ async function getPhoneNumberFromThread(threadId: string, configId: string): Pro
         }
       }
     } while (cursor !== 0) // Continuar hasta que cursor vuelva a 0
-    
+
     console.error(`[OPENAI] ❌ No se encontró el thread ${threadId} después de revisar ${keysFound} claves`)
     return null
   } catch (error) {
     console.error(`[OPENAI] ❌ Error obteniendo número de teléfono del thread:`, error)
     return null
+  }
+}
+
+async function cancelRunAndWait(threadId: string, runId: string): Promise<boolean> {
+  const startTime = Date.now()
+
+  try {
+    console.log(`[OPENAI] 🛑 Cancelando run ${runId}`)
+
+    // Solicitar cancelación
+    const cancelResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}/cancel`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "assistants=v2",
+      },
+    })
+
+    if (!cancelResponse.ok) {
+      const errorText = await cancelResponse.text()
+      console.error(`[OPENAI] ❌ Error en request de cancelación: ${cancelResponse.status} ${errorText}`)
+      return false
+    }
+
+    console.log(`[OPENAI] 📤 Solicitud de cancelación enviada, esperando confirmación...`)
+
+    // Esperar a que el run realmente se cancele
+    let attempts = 0
+    const maxAttempts = 20 // 20 intentos x 500ms = 10 segundos máximo
+
+    while (Date.now() - startTime < CANCEL_WAIT_TIMEOUT && attempts < maxAttempts) {
+      attempts++
+      await wait(500)
+
+      try {
+        const statusResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "assistants=v2",
+          },
+        })
+
+        if (!statusResponse.ok) {
+          console.log(`[OPENAI] ⚠️ No se pudo verificar estado del run (intento ${attempts})`)
+          continue
+        }
+
+        const runStatus = await statusResponse.json()
+        console.log(`[OPENAI] 🔍 Estado del run: ${runStatus.status} (intento ${attempts})`)
+
+        // Estados terminales - el run ya no está activo
+        if (["cancelled", "failed", "completed", "expired"].includes(runStatus.status)) {
+          console.log(`[OPENAI] ✅ Run ${runId} terminado con estado: ${runStatus.status}`)
+          return true
+        }
+
+        // Si sigue en 'cancelling', continuar esperando
+        if (runStatus.status === "cancelling") {
+          console.log(`[OPENAI] ⏳ Run en proceso de cancelación...`)
+        }
+      } catch (checkError) {
+        console.error(`[OPENAI] ⚠️ Error verificando estado:`, checkError)
+      }
+    }
+
+    console.error(`[OPENAI] ⚠️ Timeout esperando cancelación del run ${runId}`)
+    return false
+  } catch (error) {
+    console.error(`[OPENAI] ❌ Error cancelando run:`, error)
+    return false
   }
 }
 
@@ -1083,17 +1158,21 @@ async function processRunWithCorrectFlow(
     } else {
       throw new Error(`Estado inesperado del run: ${completedRun.status}`)
     }
-  } catch (error) {
+  } catch (error: any) {
+    // Changed to 'any' to access error.message property
     console.error(`[OPENAI] ❌ Error en processRunWithCorrectFlow:`, error)
 
     const isTimeout = error.message && error.message.includes("Timeout esperando run")
     const isRateLimitError = error.message && error.message.includes("Please try again in")
+    const isActiveRunError = error.message && error.message.includes("already has an active run")
 
     // Log error type for debugging
     if (isTimeout) {
       console.log(`[OPENAI] ⏰ Timeout detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
     } else if (isRateLimitError) {
       console.log(`[OPENAI] 🚦 Rate limit detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
+    } else if (isActiveRunError) {
+      console.log(`[OPENAI] 🔒 Run activo detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
     }
 
     // Check if we should retry
@@ -1112,6 +1191,9 @@ async function processRunWithCorrectFlow(
         // Use exponential backoff for timeouts
         waitTime = calculateBackoffDelay(retryCount)
         console.log(`[OPENAI] ⏰ Usando backoff exponencial: ${waitTime}ms`)
+      } else if (isActiveRunError) {
+        waitTime = 5000 // Esperar 5 segundos antes de reintentar
+        console.log(`[OPENAI] 🔒 Esperando ${waitTime}ms para que el run anterior termine...`)
       } else {
         // Use exponential backoff for other errors too
         waitTime = calculateBackoffDelay(retryCount)
@@ -1122,6 +1204,22 @@ async function processRunWithCorrectFlow(
       await wait(waitTime)
 
       try {
+        console.log(`[OPENAI] 🔍 Verificando runs activos en el thread...`)
+        const activeRuns = await checkForActiveRuns(threadId)
+
+        if (activeRuns.hasActive) {
+          console.log(`[OPENAI] 🔒 Run activo encontrado: ${activeRuns.runId} (${activeRuns.status})`)
+
+          // Intentar cancelar el run activo
+          if (activeRuns.runId) {
+            const cancelled = await cancelRunAndWait(threadId, activeRuns.runId)
+            if (!cancelled) {
+              console.error(`[OPENAI] ❌ No se pudo cancelar el run activo, abortando reintento`)
+              throw new Error(`No se pudo cancelar el run activo: ${activeRuns.runId}`)
+            }
+          }
+        }
+
         console.log(`[OPENAI] 🔄 Creando nuevo run para reintento...`)
         const newRun = await openai.beta.threads.runs.create(threadId, {
           assistant_id: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
@@ -1137,7 +1235,8 @@ async function processRunWithCorrectFlow(
           clienteId,
           retryCount + 1,
         )
-      } catch (retryError) {
+      } catch (retryError: any) {
+        // Changed to 'any' to access error.message property
         console.error(`[OPENAI] ❌ Error creando nuevo run para reintento:`, retryError)
         // Fall through to final error handling
       }
@@ -1157,7 +1256,7 @@ async function processRunWithCorrectFlow(
       const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
       if (config) {
         const userPhoneNumber = await getPhoneNumberFromThread(threadId, config.id)
-        
+
         if (userPhoneNumber) {
           await saveConversationMessage({
             id: nanoid(),
@@ -1190,6 +1289,44 @@ async function processRunWithCorrectFlow(
     }
 
     return { success: false, error: isTimeout ? "timeout" : "error" }
+  }
+}
+
+async function checkForActiveRuns(threadId: string): Promise<{ hasActive: boolean; runId?: string; status?: string }> {
+  try {
+    const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs?limit=1`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "assistants=v2",
+      },
+    })
+
+    if (!response.ok) {
+      console.error(`[OPENAI] ❌ Error obteniendo runs del thread`)
+      return { hasActive: false }
+    }
+
+    const data = await response.json()
+    const runs = data.data || []
+
+    // Buscar runs en estados activos
+    const activeStates = ["queued", "in_progress", "cancelling", "requires_action"]
+    const activeRun = runs.find((run: any) => activeStates.includes(run.status))
+
+    if (activeRun) {
+      return {
+        hasActive: true,
+        runId: activeRun.id,
+        status: activeRun.status,
+      }
+    }
+
+    return { hasActive: false }
+  } catch (error) {
+    console.error(`[OPENAI] ❌ Error verificando runs activos:`, error)
+    return { hasActive: false }
   }
 }
 
@@ -1235,19 +1372,9 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
     if (elapsed > OPENAI_TIMEOUT) {
       console.error(`[OPENAI] ⏰ Timeout: ${OPENAI_TIMEOUT}ms (estado: ${run.status}, polls: ${pollCount})`)
 
-      try {
-        console.log(`[OPENAI] 🛑 Cancelando run ${runId}`)
-        await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}/cancel`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-            "OpenAI-Beta": "assistants=v2",
-          },
-        })
-        console.log(`[OPENAI] ✅ Run cancelado`)
-      } catch (cancelError) {
-        console.error(`[OPENAI] ❌ Error cancelando run:`, cancelError)
+      const cancelled = await cancelRunAndWait(threadId, runId)
+      if (!cancelled) {
+        console.error(`[OPENAI] ⚠️ No se pudo confirmar la cancelación del run`)
       }
 
       throw new Error(`Timeout esperando run: ${OPENAI_TIMEOUT}ms (estado: ${run.status})`)
