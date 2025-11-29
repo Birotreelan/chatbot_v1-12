@@ -1,6 +1,7 @@
-import { Redis } from "@upstash/redis"
 import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse, SedeResponse } from "./types"
 import { getClinicApiConfig } from "./types"
+import { getRedisClient } from "../redis"
+import { TIMEOUTS, fetchWithTimeout } from "../config/timeouts"
 
 // Obtener la URL del proxy desde las variables de entorno
 function getProxyUrl(): string {
@@ -15,16 +16,6 @@ function getProxyUrl(): string {
 const CACHE_PREFIX = "api_cache:"
 // TTL para la caché (en segundos)
 const CACHE_TTL = 60 * 5 // 5 minutos
-
-// Obtener cliente de Redis
-function getRedisClient() {
-  try {
-    return Redis.fromEnv()
-  } catch (error) {
-    console.warn("Upstash Redis no está disponible:", error)
-    return null
-  }
-}
 
 // Función para generar clave de caché
 function getCacheKey(action: string, params: Record<string, any>): string {
@@ -70,14 +61,17 @@ async function fetchProxyApi<T>(
     console.log(`[API] 📤 ${action} → ${proxyUrl}`)
     console.log(`[API] 📋 Params: ${JSON.stringify(params)}`)
 
-    // Hacer la petición POST
-    const response = await fetch(proxyUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      proxyUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
       },
-      body: JSON.stringify(requestBody),
-    })
+      TIMEOUTS.PROXY_TIMEOUT,
+    )
 
     // Obtener el texto de la respuesta
     const responseText = await response.text()

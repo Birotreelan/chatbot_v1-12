@@ -1,4 +1,5 @@
 import type { ApiResponse, Paciente } from "./api-tools/types"
+import { TIMEOUTS, fetchWithTimeout } from "./config/timeouts"
 
 // Función helper para obtener fechas dinámicas
 function getDefaultDateRange(): string {
@@ -45,14 +46,17 @@ export class ClinicAPI {
 
       console.log(`Cuerpo de la solicitud: ${JSON.stringify(requestBody)}`)
 
-      // Hacer la petición POST
-      const response = await fetch(this.proxyUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetchWithTimeout(
+        this.proxyUrl,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
         },
-        body: JSON.stringify(requestBody),
-      })
+        TIMEOUTS.PROXY_TIMEOUT,
+      )
 
       // Obtener el texto de la respuesta
       const responseText = await response.text()

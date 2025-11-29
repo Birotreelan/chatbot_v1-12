@@ -1,11 +1,5 @@
 import type { WhatsAppValue } from "@/lib/types"
-import {
-  getWhatsAppConfigByPhoneId,
-  updateWhatsAppStats,
-  getThreadForUser,
-  resetThreadForUser,
-  updateWhatsAppConfig,
-} from "@/lib/db"
+import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getAssistantResponse } from "@/lib/openai-tools"
 import { getArgentinaDateTime } from "@/lib/utils/date-utils"
@@ -14,6 +8,7 @@ import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
+import { TIMEOUTS, fetchWithTimeout } from "./config/timeouts"
 
 // Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): string {
@@ -150,14 +145,17 @@ export async function handleMessage(value: WhatsAppValue) {
         console.log(`[WHATSAPP] Enviando al proxy: ${config.proxy}`)
         console.log(`[WHATSAPP] Payload del proxy:`, JSON.stringify(proxyPayload, null, 2))
 
-        // Enviar la respuesta completa al proxy
-        const response = await fetch(`${config.proxy}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
+        const response = await fetchWithTimeout(
+          `${config.proxy}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(proxyPayload),
           },
-          body: JSON.stringify(proxyPayload),
-        })
+          TIMEOUTS.PROXY_TIMEOUT,
+        )
 
         console.log(`[WHATSAPP] Respuesta del proxy - Status: ${response.status}`)
         console.log(`[WHATSAPP] Respuesta del proxy - StatusText: ${response.statusText}`)
