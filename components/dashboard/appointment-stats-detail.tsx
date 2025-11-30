@@ -1,0 +1,227 @@
+"use client"
+
+import { useState, useEffect, useCallback } from "react"
+import type { ClientAppointmentStats } from "@/lib/types"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, Clock, TrendingUp } from "lucide-react"
+
+interface AppointmentStatsDetailProps {
+  clienteId: string
+  displayName: string
+}
+
+export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentStatsDetailProps) {
+  const [stats, setStats] = useState<ClientAppointmentStats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const loadStats = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/appointment-stats?clienteId=${clienteId}`)
+      if (response.ok) {
+        const data = await response.json()
+        setStats(data)
+      }
+    } catch (error) {
+      console.error("Error cargando estadísticas:", error)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [clienteId])
+
+  useEffect(() => {
+    setLoading(true)
+    loadStats()
+  }, [clienteId, loadStats])
+
+  const handleRefresh = () => {
+    setRefreshing(true)
+    loadStats()
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  // Formatear tiempo promedio en minutos a formato legible
+  const formatTime = (minutes: number) => {
+    if (minutes < 60) {
+      return `${Math.round(minutes)} min`
+    }
+    const hours = Math.floor(minutes / 60)
+    const mins = Math.round(minutes % 60)
+    return `${hours}h ${mins}m`
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header con botón de refresh */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">{displayName}</h2>
+          <p className="text-sm text-muted-foreground">
+            Última actualización:{" "}
+            {stats?.lastUpdated ? new Date(stats.lastUpdated).toLocaleString("es-AR") : "Sin datos"}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
+          Actualizar
+        </Button>
+      </div>
+
+      {/* Tarjetas de métricas principales */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Recordatorios Enviados</CardTitle>
+            <Send className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats?.totalTemplatesSent || 0}</div>
+            <p className="text-xs text-muted-foreground">Total de plantillas enviadas</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Confirmados</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{stats?.totalConfirmed || 0}</div>
+            <p className="text-xs text-muted-foreground">Tasa: {stats?.confirmationRate?.toFixed(1) || 0}%</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Cancelados</CardTitle>
+            <XCircle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{stats?.totalCancelled || 0}</div>
+            <p className="text-xs text-muted-foreground">Tasa: {stats?.cancellationRate?.toFixed(1) || 0}%</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Reagendados</CardTitle>
+            <CalendarClock className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">{stats?.totalRescheduled || 0}</div>
+            <p className="text-xs text-muted-foreground">Solicitudes de reagendamiento</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Métricas de tiempos y tasas */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tiempo Promedio de Respuesta</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats?.avgResponseTime ? formatTime(stats.avgResponseTime) : "—"}</div>
+            <p className="text-xs text-muted-foreground">Desde envío de recordatorio hasta respuesta</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tiempo hasta Confirmación</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats?.avgConfirmationTime ? formatTime(stats.avgConfirmationTime) : "—"}
+            </div>
+            <p className="text-xs text-muted-foreground">Promedio de respuesta para confirmar</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tiempo hasta Cancelación</CardTitle>
+            <XCircle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats?.avgCancellationTime ? formatTime(stats.avgCancellationTime) : "—"}
+            </div>
+            <p className="text-xs text-muted-foreground">Promedio de respuesta para cancelar</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tasa de respuesta general */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Tasa de Respuesta General
+          </CardTitle>
+          <CardDescription>
+            Porcentaje de pacientes que respondieron al recordatorio (confirmando o cancelando)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-4">
+            <div className="text-4xl font-bold">{stats?.responseRate?.toFixed(1) || 0}%</div>
+            <div className="flex-1">
+              <div className="h-4 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-500"
+                  style={{ width: `${Math.min(stats?.responseRate || 0, 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+            <div className="text-center p-2 bg-green-50 rounded-lg">
+              <div className="font-semibold text-green-700">{stats?.confirmationRate?.toFixed(1) || 0}%</div>
+              <div className="text-green-600">Confirmaciones</div>
+            </div>
+            <div className="text-center p-2 bg-red-50 rounded-lg">
+              <div className="font-semibold text-red-700">{stats?.cancellationRate?.toFixed(1) || 0}%</div>
+              <div className="text-red-600">Cancelaciones</div>
+            </div>
+            <div className="text-center p-2 bg-muted rounded-lg">
+              <div className="font-semibold text-muted-foreground">
+                {(100 - (stats?.responseRate || 0)).toFixed(1)}%
+              </div>
+              <div className="text-muted-foreground">Sin respuesta</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Mensaje informativo si no hay datos */}
+      {(!stats || (stats.totalTemplatesSent === 0 && stats.totalConfirmed === 0)) && (
+        <Card className="border-dashed">
+          <CardContent className="py-8 text-center">
+            <p className="text-muted-foreground">Aún no hay datos de estadísticas para este cliente.</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Las estadísticas se actualizarán automáticamente cuando:
+            </p>
+            <ul className="text-sm text-muted-foreground mt-2 space-y-1">
+              <li>• Se reciban recordatorios de turnos a través del proxylistener</li>
+              <li>• Los pacientes confirmen sus turnos presionando el botón de confirmación</li>
+              <li>• Los pacientes cancelen sus turnos presionando el botón de cancelación</li>
+              <li>• Se reagenden turnos mediante la función de reserva (set_turno)</li>
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}

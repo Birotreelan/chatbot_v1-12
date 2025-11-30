@@ -17,6 +17,7 @@ import type { AbortSignal } from "abort-controller"
 import { saveConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 import { getRedisClient } from "./redis"
+import { trackAppointmentEvent } from "./appointment-stats"
 
 // Re-export functions for compatibility
 export { obtenerTurnosDisponibles } from "./api-tools/api-functions"
@@ -157,6 +158,22 @@ export const openaiTools = {
       required: ["busqueda"],
     },
   },
+  // Agregar tool para registrar eventos de cita
+  registrar_evento_cita: {
+    description: "Registra un evento relacionado con una cita médica (ej. reagendamiento)",
+    parameters: {
+      type: "object",
+      properties: {
+        evento: {
+          type: "string",
+          description: "Tipo de evento (ej. 'reagendamiento', 'cancelacion')",
+        },
+        turno_id: { type: "string", description: "ID del turno médico" },
+        motivo: { type: "string", description: "Motivo del evento (opcional)" },
+      },
+      required: ["evento", "turno_id"],
+    },
+  },
 }
 
 // Mensajes predefinidos para cada función
@@ -169,6 +186,8 @@ const FUNCTION_MESSAGES: Record<string, string> = {
   validar_obra_social: "Verificando la obra social, aguardá unos instantes.",
   obtener_datos_sede: "Consultando información de la sede, aguardá unos instantes.",
   obtener_obras_sociales: "Consultando obras sociales disponibles, aguardá unos instantes.",
+  // Mensaje para registrar evento de cita
+  registrar_evento_cita: "Registrando el evento de la cita...",
 }
 
 // Función para truncar respuestas largas de herramientas
@@ -281,6 +300,10 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
 
       case "validar_obra_social":
         return await validarObraSocialHerramienta(clienteId, args.busqueda)
+
+      // Ejecutar la nueva herramienta para registrar eventos de cita
+      case "registrar_evento_cita":
+        return await registrarEventoCitaHerramienta(clienteId, args.evento, args.turno_id, args.motivo)
 
       default:
         console.warn(`[OPENAI-TOOLS] Tool desconocido: ${toolName}`)
@@ -499,7 +522,24 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
       })
     }
 
-    console.log(`[TOOLS] ✅ Turno reservado exitosamente`)
+    console.log(`[TOOLS] ✅ Turno reservado exitosamente, registrando estadística de reagendamiento`)
+    try {
+      await trackAppointmentEvent({
+        clienteId: clienteId,
+        phoneNumber: pacienteDatos.telefono || "unknown",
+        eventType: "rescheduled",
+        timestamp: new Date().toISOString(),
+        appointmentInfo: {
+          turnoId: turnoId,
+          paciente: pacienteDatos,
+        },
+      })
+      console.log(`[TOOLS] 📊 Estadística de reagendamiento registrada para cliente ${clienteId}`)
+    } catch (statsError) {
+      console.error(`[TOOLS] ⚠️ Error al registrar estadística de reagendamiento:`, statsError)
+      // No fallamos la reserva por error de estadísticas
+    }
+
     return JSON.stringify({
       exito: true,
       datos: data,
@@ -766,6 +806,55 @@ export async function validarObraSocialHerramienta(clienteId: string, busqueda: 
     return JSON.stringify({
       exito: false,
       mensaje: "Error al validar la obra social",
+    })
+  }
+}
+
+// Implementar la nueva herramienta para registrar eventos de cita
+export async function registrarEventoCitaHerramienta(
+  clienteId: string,
+  evento: string,
+  turnoId: string,
+  motivo?: string,
+): Promise<string> {
+  try {
+    console.log(`[TOOLS] 📅 Registrando evento "${evento}" para turno ${turnoId} (cliente: ${clienteId})`)
+
+    // Validar entrada
+    if (!evento || !turnoId) {
+      return JSON.stringify({
+        exito: false,
+        mensaje: "El evento y el ID del turno son requeridos.",
+      })
+    }
+
+    // Llamar a la función de la API para registrar el evento
+    const resultado = await trackAppointmentEvent({
+      clienteId,
+      evento,
+      turnoId,
+      motivo: motivo || "", // Asegurarse de que motivo sea una cadena
+    })
+
+    if (resultado.success) {
+      console.log(`[TOOLS] ✅ Evento "${evento}" registrado exitosamente para turno ${turnoId}`)
+      return JSON.stringify({
+        exito: true,
+        mensaje: `Evento "${evento}" registrado correctamente.`,
+        data: resultado.data,
+      })
+    } else {
+      console.error(`[TOOLS] ❌ Error al registrar evento "${evento}" para turno ${turnoId}:`, resultado.error)
+      return JSON.stringify({
+        exito: false,
+        mensaje: resultado.error?.message || "No se pudo registrar el evento de la cita.",
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error inesperado en registrarEventoCitaHerramienta:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error interno al registrar el evento de la cita.",
     })
   }
 }
@@ -1054,8 +1143,6 @@ async function processRunWithCorrectFlow(
       if (!userPhoneNumber) {
         throw new Error(`No se pudo obtener el número de teléfono para el thread ${threadId}`)
       }
-
-      console.log(`[OPENAI] 📞 Número de teléfono obtenido del thread: ${userPhoneNumber}`)
       // </CHANGE>
 
       await saveConversationMessage({

@@ -9,6 +9,7 @@ import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithTimeout } from "./config/timeouts"
+import { trackAppointmentEvent, getTemplateSentTime } from "./appointment-stats"
 
 // Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): string {
@@ -194,9 +195,25 @@ export async function handleMessage(value: WhatsAppValue) {
         if (proxyResponse.success) {
           // Si el proxy responde exitosamente
           if (proxyResponse.action_type) {
+            const templateSentAt = config.cliente_id
+              ? await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+              : null
+
             // Usar la información específica del proxy para crear el mensaje
             switch (proxyResponse.action_type) {
               case "confirmacion_turno":
+                if (config.cliente_id) {
+                  await trackAppointmentEvent({
+                    clienteId: config.cliente_id,
+                    phoneNumber: userPhoneNumber,
+                    eventType: "confirmed",
+                    timestamp: new Date().toISOString(),
+                    templateSentAt: templateSentAt || undefined,
+                    metadata: { proxyResponse },
+                  })
+                  console.log(`[WHATSAPP] Evento de confirmación registrado para cliente ${config.cliente_id}`)
+                }
+
                 userMessage = `El paciente confirmó su turno presionando "${originalMessage}".
 
 [CONFIRMACION_TURNO_EXITOSA]
@@ -211,6 +228,18 @@ IMPORTANTE: Busca en el historial de la conversación la información del turno 
                 break
 
               case "cancelacion_turno":
+                if (config.cliente_id) {
+                  await trackAppointmentEvent({
+                    clienteId: config.cliente_id,
+                    phoneNumber: userPhoneNumber,
+                    eventType: "cancelled",
+                    timestamp: new Date().toISOString(),
+                    templateSentAt: templateSentAt || undefined,
+                    metadata: { proxyResponse },
+                  })
+                  console.log(`[WHATSAPP] Evento de cancelación registrado para cliente ${config.cliente_id}`)
+                }
+
                 userMessage = `El paciente canceló su turno presionando "${originalMessage}".
 
 [CANCELACION_TURNO_EXITOSA]
@@ -225,6 +254,18 @@ IMPORTANTE: Busca en el historial de la conversación la información del turno 
                 break
 
               case "reprogramacion_turno":
+                if (config.cliente_id) {
+                  await trackAppointmentEvent({
+                    clienteId: config.cliente_id,
+                    phoneNumber: userPhoneNumber,
+                    eventType: "rescheduled",
+                    timestamp: new Date().toISOString(),
+                    templateSentAt: templateSentAt || undefined,
+                    metadata: { proxyResponse },
+                  })
+                  console.log(`[WHATSAPP] Evento de reprogramación registrado para cliente ${config.cliente_id}`)
+                }
+
                 userMessage = `El paciente solicitó reprogramar su turno presionando "${originalMessage}".
 
 [REPROGRAMACION_TURNO_SOLICITADA]
@@ -682,7 +723,11 @@ ${userMessage}`
         }
 
         // Enviar mensaje de error al usuario
-        await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
+        try {
+          await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
+        } catch (sendError) {
+          console.error("[WHATSAPP] Error al enviar mensaje de error:", sendError)
+        }
       }
     }
 
