@@ -294,11 +294,61 @@ Responde de manera apropiada según la acción realizada.`
             }
           } else {
             // Si success es true pero no hay action_type específico
-            const accionDetectada = originalMessage.toLowerCase().includes("confirmar")
+            const buttonTextLower = originalMessage.toLowerCase()
+            const accionDetectada = buttonTextLower.includes("confirmar")
               ? "confirmacion"
-              : originalMessage.toLowerCase().includes("cancelar")
+              : buttonTextLower.includes("cancelar")
                 ? "cancelacion"
-                : "respuesta_generica"
+                : buttonTextLower.includes("reprogramar") || buttonTextLower.includes("reagendar")
+                  ? "reprogramacion"
+                  : "respuesta_generica"
+
+            console.log(
+              `[WHATSAPP] 📊 Proxy respondió sin action_type, detectando acción desde botón: ${accionDetectada}`,
+            )
+            console.log(`[WHATSAPP] 📊 config.cliente_id disponible: ${config.cliente_id || "NO DISPONIBLE"}`)
+            console.log(`[WHATSAPP] 📊 userPhoneNumber: ${userPhoneNumber}`)
+
+            if (config.cliente_id) {
+              console.log(`[WHATSAPP] 📊 Intentando obtener templateSentAt para cliente ${config.cliente_id}`)
+              const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+              console.log(`[WHATSAPP] 📊 templateSentAt obtenido: ${templateSentAt || "NO ENCONTRADO"}`)
+
+              let eventType: "confirmed" | "cancelled" | "rescheduled"
+              if (accionDetectada === "confirmacion") {
+                eventType = "confirmed"
+              } else if (accionDetectada === "cancelacion") {
+                eventType = "cancelled"
+              } else {
+                eventType = "rescheduled"
+              }
+
+              console.log(`[WHATSAPP] 📊 Registrando evento: ${eventType} para cliente ${config.cliente_id}`)
+
+              try {
+                await trackAppointmentEvent({
+                  clienteId: config.cliente_id,
+                  phoneNumber: userPhoneNumber,
+                  eventType: eventType,
+                  timestamp: new Date().toISOString(),
+                  templateSentAt: templateSentAt || undefined,
+                  metadata: {
+                    source: "proxy_simple_response",
+                    buttonText: originalMessage,
+                    proxyResponse,
+                  },
+                })
+                console.log(
+                  `[WHATSAPP] ✅ Evento ${eventType} registrado exitosamente para cliente ${config.cliente_id}`,
+                )
+              } catch (trackError) {
+                console.error(`[WHATSAPP] ❌ Error al registrar evento de estadísticas:`, trackError)
+              }
+            } else {
+              console.log(
+                `[WHATSAPP] ⚠️ No se registró evento - cliente_id: ${config.cliente_id || "VACÍO"}, accion: ${accionDetectada}`,
+              )
+            }
 
             userMessage = `El paciente respondió "${originalMessage}" a una plantilla.
 

@@ -1,6 +1,6 @@
 import { Redis } from "@upstash/redis"
 import type { AppointmentEvent, ClientAppointmentStats } from "./types"
-import { getWhatsAppConfig } from "./db"
+import { getAllWhatsAppConfigs } from "./db"
 
 // Prefijos para las claves en Redis
 const APPOINTMENT_EVENT_PREFIX = "appointment_event:"
@@ -32,18 +32,20 @@ export async function trackAppointmentEvent(event: Omit<AppointmentEvent, "id">)
       id: eventId,
     }
 
-    console.log(`[APPOINTMENT_STATS] Registrando evento: ${event.eventType} para cliente ${event.clienteId}`)
+    console.log(`[APPOINTMENT_STATS] 📊 Registrando evento: ${event.eventType} para cliente ${event.clienteId}`)
+    console.log(`[APPOINTMENT_STATS] 📊 Datos del evento:`, JSON.stringify(fullEvent, null, 2))
 
     // Guardar evento individual (para auditoría)
     const eventKey = `${APPOINTMENT_EVENT_PREFIX}${eventId}`
     await redis.set(eventKey, JSON.stringify(fullEvent), { ex: 60 * 60 * 24 * 90 }) // 90 días
+    console.log(`[APPOINTMENT_STATS] ✅ Evento individual guardado en: ${eventKey}`)
 
     // Actualizar estadísticas agregadas
     await updateAggregatedStats(event.clienteId, fullEvent)
 
-    console.log(`[APPOINTMENT_STATS] Evento registrado exitosamente: ${eventId}`)
+    console.log(`[APPOINTMENT_STATS] ✅ Evento registrado exitosamente: ${eventId}`)
   } catch (error) {
-    console.error("[APPOINTMENT_STATS] Error al trackear evento:", error)
+    console.error("[APPOINTMENT_STATS] ❌ Error al trackear evento:", error)
   }
 }
 
@@ -56,16 +58,22 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
   const date = new Date(event.timestamp).toISOString().split("T")[0] // YYYY-MM-DD
 
   try {
+    console.log(`[APPOINTMENT_STATS] 📈 Actualizando estadísticas agregadas para ${clienteId}`)
+    console.log(`[APPOINTMENT_STATS] 📈 Clave de stats: ${statsKey}`)
+    console.log(`[APPOINTMENT_STATS] 📈 Tipo de evento: ${event.eventType}`)
+
     // Incrementar contadores según el tipo de evento
     switch (event.eventType) {
       case "template_sent":
         await redis.hincrby(statsKey, "totalTemplatesSent", 1)
         await redis.hincrby(`${statsKey}:daily:templates`, date, 1)
+        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalTemplatesSent`)
         break
 
       case "confirmed":
         await redis.hincrby(statsKey, "totalConfirmed", 1)
         await redis.hincrby(`${statsKey}:daily:confirmed`, date, 1)
+        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalConfirmed`)
 
         // Calcular tiempo de respuesta si tenemos templateSentAt
         if (event.templateSentAt) {
@@ -73,12 +81,14 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
           const responseTimeMinutes = Math.round(responseTime / 1000 / 60)
           await redis.lpush(`${statsKey}:response_times:confirmed`, responseTimeMinutes)
           await redis.ltrim(`${statsKey}:response_times:confirmed`, 0, 999) // Mantener últimos 1000
+          console.log(`[APPOINTMENT_STATS] ✅ Tiempo de respuesta registrado: ${responseTimeMinutes} minutos`)
         }
         break
 
       case "cancelled":
         await redis.hincrby(statsKey, "totalCancelled", 1)
         await redis.hincrby(`${statsKey}:daily:cancelled`, date, 1)
+        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalCancelled`)
 
         // Calcular tiempo de respuesta
         if (event.templateSentAt) {
@@ -86,21 +96,34 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
           const responseTimeMinutes = Math.round(responseTime / 1000 / 60)
           await redis.lpush(`${statsKey}:response_times:cancelled`, responseTimeMinutes)
           await redis.ltrim(`${statsKey}:response_times:cancelled`, 0, 999)
+          console.log(`[APPOINTMENT_STATS] ✅ Tiempo de respuesta registrado: ${responseTimeMinutes} minutos`)
         }
         break
 
       case "rescheduled":
         await redis.hincrby(statsKey, "totalRescheduled", 1)
         await redis.hincrby(`${statsKey}:daily:rescheduled`, date, 1)
+        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalRescheduled`)
         break
     }
 
     // Actualizar timestamp de última actualización
     await redis.hset(statsKey, "lastUpdated", new Date().toISOString())
 
-    console.log(`[APPOINTMENT_STATS] Estadísticas actualizadas para cliente ${clienteId}`)
+    console.log(`[APPOINTMENT_STATS] ✅ Estadísticas actualizadas para cliente ${clienteId}`)
   } catch (error) {
-    console.error("[APPOINTMENT_STATS] Error al actualizar estadísticas agregadas:", error)
+    console.error("[APPOINTMENT_STATS] ❌ Error al actualizar estadísticas agregadas:", error)
+  }
+}
+
+async function getClientNameByClienteId(clienteId: string): Promise<string> {
+  try {
+    const configs = await getAllWhatsAppConfigs()
+    const config = configs.find((c) => c.cliente_id === clienteId)
+    return config?.displayName || "Cliente Desconocido"
+  } catch (error) {
+    console.error("[APPOINTMENT_STATS] Error al obtener nombre del cliente:", error)
+    return "Cliente Desconocido"
   }
 }
 
@@ -113,15 +136,17 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
   }
 
   try {
-    console.log(`[APPOINTMENT_STATS] Obteniendo estadísticas para cliente ${clienteId}`)
+    console.log(`[APPOINTMENT_STATS] 📊 Obteniendo estadísticas para cliente ${clienteId}`)
 
     const statsKey = `${APPOINTMENT_STATS_PREFIX}${clienteId}`
+    console.log(`[APPOINTMENT_STATS] 📊 Clave de stats: ${statsKey}`)
 
     // Obtener totales
     const totals = (await redis.hgetall(statsKey)) as Record<string, string>
+    console.log(`[APPOINTMENT_STATS] 📊 Totales obtenidos:`, JSON.stringify(totals, null, 2))
 
     if (!totals || Object.keys(totals).length === 0) {
-      console.log(`[APPOINTMENT_STATS] No hay estadísticas para cliente ${clienteId}`)
+      console.log(`[APPOINTMENT_STATS] ⚠️ No hay estadísticas para cliente ${clienteId}`)
       return null
     }
 
@@ -164,9 +189,7 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
     const cancellationRate = totalTemplatesSent > 0 ? (totalCancelled / totalTemplatesSent) * 100 : 0
     const responseRate = totalTemplatesSent > 0 ? ((totalConfirmed + totalCancelled) / totalTemplatesSent) * 100 : 0
 
-    // Obtener nombre del cliente
-    const config = await getWhatsAppConfig(clienteId)
-    const clientName = config?.displayName || "Cliente Desconocido"
+    const clientName = await getClientNameByClienteId(clienteId)
 
     const stats: ClientAppointmentStats = {
       clienteId,
@@ -188,10 +211,10 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
       lastUpdated: totals.lastUpdated || new Date().toISOString(),
     }
 
-    console.log(`[APPOINTMENT_STATS] Estadísticas obtenidas exitosamente para cliente ${clienteId}`)
+    console.log(`[APPOINTMENT_STATS] ✅ Estadísticas obtenidas exitosamente para cliente ${clienteId}`)
     return stats
   } catch (error) {
-    console.error("[APPOINTMENT_STATS] Error al obtener estadísticas:", error)
+    console.error("[APPOINTMENT_STATS] ❌ Error al obtener estadísticas:", error)
     return null
   }
 }
@@ -203,11 +226,19 @@ export async function trackTemplateSent(
   appointmentInfo?: any,
 ): Promise<string> {
   const redis = getRedisClient()
-  if (!redis) return ""
+  if (!redis) {
+    console.log("[APPOINTMENT_STATS] ⚠️ Redis no disponible para trackTemplateSent")
+    return ""
+  }
 
   try {
     const trackingId = `${clienteId}_${phoneNumber}_${Date.now()}`
     const trackingKey = `${TEMPLATE_TRACKING_PREFIX}${trackingId}`
+
+    console.log(`[APPOINTMENT_STATS] 📊 trackTemplateSent llamado`)
+    console.log(`[APPOINTMENT_STATS] 📊 - clienteId: ${clienteId}`)
+    console.log(`[APPOINTMENT_STATS] 📊 - phoneNumber: ${phoneNumber}`)
+    console.log(`[APPOINTMENT_STATS] 📊 - trackingKey: ${trackingKey}`)
 
     const trackingData = {
       clienteId,
@@ -218,11 +249,18 @@ export async function trackTemplateSent(
 
     // Guardar por 7 días (suficiente para respuestas)
     await redis.set(trackingKey, JSON.stringify(trackingData), { ex: 60 * 60 * 24 * 7 })
+    console.log(`[APPOINTMENT_STATS] ✅ Template tracking guardado: ${trackingId}`)
 
-    console.log(`[APPOINTMENT_STATS] Template tracking guardado: ${trackingId}`)
+    await trackAppointmentEvent({
+      clienteId,
+      phoneNumber,
+      eventType: "template_sent",
+      timestamp: new Date().toISOString(),
+    })
+
     return trackingId
   } catch (error) {
-    console.error("[APPOINTMENT_STATS] Error al guardar tracking de template:", error)
+    console.error("[APPOINTMENT_STATS] ❌ Error al guardar tracking de template:", error)
     return ""
   }
 }
@@ -230,25 +268,43 @@ export async function trackTemplateSent(
 // Obtener timestamp de envío de template
 export async function getTemplateSentTime(clienteId: string, phoneNumber: string): Promise<string | null> {
   const redis = getRedisClient()
-  if (!redis) return null
+  if (!redis) {
+    console.log("[APPOINTMENT_STATS] ⚠️ Redis no disponible para getTemplateSentTime")
+    return null
+  }
 
   try {
+    console.log(`[APPOINTMENT_STATS] 📊 getTemplateSentTime llamado`)
+    console.log(`[APPOINTMENT_STATS] 📊 - clienteId: ${clienteId}`)
+    console.log(`[APPOINTMENT_STATS] 📊 - phoneNumber: ${phoneNumber}`)
+
     // Buscar el tracking más reciente para este cliente y teléfono
     const pattern = `${TEMPLATE_TRACKING_PREFIX}${clienteId}_${phoneNumber}_*`
-    const keys = await redis.keys(pattern)
+    console.log(`[APPOINTMENT_STATS] 📊 - buscando patrón: ${pattern}`)
 
-    if (keys.length === 0) return null
+    const keys = await redis.keys(pattern)
+    console.log(`[APPOINTMENT_STATS] 📊 - keys encontradas: ${keys.length}`)
+
+    if (keys.length === 0) {
+      console.log(`[APPOINTMENT_STATS] ⚠️ No se encontraron keys para el patrón`)
+      return null
+    }
 
     // Ordenar por timestamp (más reciente primero)
     keys.sort().reverse()
+    console.log(`[APPOINTMENT_STATS] 📊 - usando key más reciente: ${keys[0]}`)
 
     const trackingData = await redis.get(keys[0])
-    if (!trackingData) return null
+    if (!trackingData) {
+      console.log(`[APPOINTMENT_STATS] ⚠️ Key encontrada pero sin datos`)
+      return null
+    }
 
     const parsed = typeof trackingData === "string" ? JSON.parse(trackingData) : trackingData
+    console.log(`[APPOINTMENT_STATS] ✅ Template sent time encontrado: ${parsed.sentAt}`)
     return parsed.sentAt || null
   } catch (error) {
-    console.error("[APPOINTMENT_STATS] Error al obtener template sent time:", error)
+    console.error("[APPOINTMENT_STATS] ❌ Error al obtener template sent time:", error)
     return null
   }
 }

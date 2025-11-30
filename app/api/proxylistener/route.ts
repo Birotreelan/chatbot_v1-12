@@ -384,8 +384,7 @@ async function handleTemplateSend(data: any) {
         {
           success: false,
           error: "PHONE_REQUIRED",
-          message:
-            "El parámetro 'Phone' es obligatorio. No se puede enviar mensaje sin número de teléfono explícito.",
+          message: "El parámetro 'Phone' es obligatorio. No se puede enviar mensaje sin número de teléfono explícito.",
           details:
             "Este error previene el envío de mensajes al contacto incorrecto. Verifica la configuración del sistema que envía plantillas.",
         },
@@ -540,143 +539,143 @@ async function handleTemplateSend(data: any) {
       console.log("[PROXYLISTENER] ✅ Mensaje de plantilla guardado en Redis")
 
       const appointmentInfo = extractAppointmentInfo(Body)
-      await trackTemplateSent(config.id, cleanPhoneNumber, appointmentInfo)
+      console.log(`[PROXYLISTENER] 📊 config.id: ${config.id}`)
+      console.log(`[PROXYLISTENER] 📊 config.cliente_id: ${config.cliente_id || "NO DISPONIBLE"}`)
 
-      await trackAppointmentEvent({
-        clienteId: config.id,
-        phoneNumber: cleanPhoneNumber,
-        eventType: "template_sent",
-        timestamp: new Date().toISOString(),
-        appointmentInfo,
-      })
+      if (config.cliente_id) {
+        console.log(`[PROXYLISTENER] 📊 Trackeando template con cliente_id: ${config.cliente_id}`)
+        await trackTemplateSent(config.cliente_id, cleanPhoneNumber, appointmentInfo)
+        console.log(`[PROXYLISTENER] ✅ Template tracked para cliente_id: ${config.cliente_id}`)
+      } else {
+        console.warn(`[PROXYLISTENER] ⚠️ No hay cliente_id para config ${config.id}, no se puede trackear template`)
+      }
 
       // Notificar a OpenAI sobre la plantilla enviada
-      if (messageType === "template") {
+      try {
+        console.log("[PROXYLISTENER] Notificando a OpenAI sobre plantilla enviada...")
+
+        const threadResult = await getThreadForUser(cleanPhoneNumber, config.id)
+
+        if (!threadResult || !threadResult.threadId) {
+          console.error("[PROXYLISTENER] ❌ No se pudo obtener threadId válido")
+          console.error("[PROXYLISTENER] threadResult:", threadResult)
+          throw new Error("ThreadId no disponible")
+        }
+
+        console.log("[PROXYLISTENER] Thread obtenido:", threadResult.threadId)
+        console.log("[PROXYLISTENER] Tipo de threadId:", typeof threadResult.threadId)
+
+        // Extraer información del turno desde el template
+        // (appointmentInfo ya fue extraído arriba)
+
+        // Analizar plantilla
+        const templateAnalysis = {
+          name: "plantilla_desconocida",
+          content: "Plantilla enviada",
+          appointmentInfo: appointmentInfo,
+        }
+
         try {
-          console.log("[PROXYLISTENER] Notificando a OpenAI sobre plantilla enviada...")
+          const templateData = typeof Body === "string" ? JSON.parse(Body) : Body
+          console.log("[PROXYLISTENER] Datos de plantilla parseados:", JSON.stringify(templateData, null, 2))
 
-          const threadResult = await getThreadForUser(cleanPhoneNumber, config.id)
-
-          if (!threadResult || !threadResult.threadId) {
-            console.error("[PROXYLISTENER] ❌ No se pudo obtener threadId válido")
-            console.error("[PROXYLISTENER] threadResult:", threadResult)
-            throw new Error("ThreadId no disponible")
+          if (templateData.template && templateData.template.name) {
+            templateAnalysis.name = templateData.template.name
+          } else if (templateData.name) {
+            templateAnalysis.name = templateData.name
           }
 
-          console.log("[PROXYLISTENER] Thread obtenido:", threadResult.threadId)
-          console.log("[PROXYLISTENER] Tipo de threadId:", typeof threadResult.threadId)
+          if (templateData.template && templateData.template.components) {
+            const components = templateData.template.components
+            let textContent = ""
 
-          // Extraer información del turno desde el template
-          // (appointmentInfo ya fue extraído arriba)
+            for (const component of components) {
+              if (component.type === "body" && component.parameters) {
+                textContent = `Plantilla ${templateAnalysis.name} con parámetros enviada`
+                break
+              }
+            }
 
-          // Analizar plantilla
-          const templateAnalysis = {
-            name: "plantilla_desconocida",
-            content: "Plantilla enviada",
-            appointmentInfo: appointmentInfo,
+            if (textContent) {
+              templateAnalysis.content = textContent
+            }
           }
 
+          console.log("[PROXYLISTENER] Análisis de plantilla completado:", templateAnalysis)
+        } catch (e) {
+          console.log("[PROXYLISTENER] Error al parsear template data:", e)
+        }
+
+        let chatbotDataParsed = null
+        if (Chatbot_Data) {
           try {
-            const templateData = typeof Body === "string" ? JSON.parse(Body) : Body
-            console.log("[PROXYLISTENER] Datos de plantilla parseados:", JSON.stringify(templateData, null, 2))
+            chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
+            console.log("[PROXYLISTENER] 📋 ===== CHATBOT_DATA PARSEADO =====")
+            console.log("[PROXYLISTENER] Chatbot_Data completo:", JSON.stringify(chatbotDataParsed, null, 2))
 
-            if (templateData.template && templateData.template.name) {
-              templateAnalysis.name = templateData.template.name
-            } else if (templateData.name) {
-              templateAnalysis.name = templateData.name
+            if (chatbotDataParsed.paciente) {
+              console.log("[PROXYLISTENER] 👤 Datos del paciente:")
+              console.log("[PROXYLISTENER]   - Nombres:", chatbotDataParsed.paciente.nombres)
+              console.log("[PROXYLISTENER]   - Apellido:", chatbotDataParsed.paciente.apellido)
+              console.log("[PROXYLISTENER]   - DNI:", chatbotDataParsed.paciente.dni)
+              console.log("[PROXYLISTENER]   - Teléfono:", chatbotDataParsed.paciente.telefono)
+              console.log("[PROXYLISTENER]   - Mail:", chatbotDataParsed.paciente.mail || "(VACÍO)")
+              console.log("[PROXYLISTENER]   - Obra Social ID:", chatbotDataParsed.paciente.obra_social_id)
+              console.log("[PROXYLISTENER]   - Obra Social Nombre:", chatbotDataParsed.paciente.obra_social_nombre)
             }
 
-            if (templateData.template && templateData.template.components) {
-              const components = templateData.template.components
-              let textContent = ""
-
-              for (const component of components) {
-                if (component.type === "body" && component.parameters) {
-                  textContent = `Plantilla ${templateAnalysis.name} con parámetros enviada`
-                  break
-                }
-              }
-
-              if (textContent) {
-                templateAnalysis.content = textContent
-              }
+            if (chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
+              console.log("[PROXYLISTENER] 📅 Turnos encontrados:", chatbotDataParsed.turnos.length)
+              chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
+                console.log(`[PROXYLISTENER] Turno ${index + 1}:`)
+                console.log(`[PROXYLISTENER]   - Fecha: ${turno.fecha}`)
+                console.log(`[PROXYLISTENER]   - Hora: ${turno.hora}`)
+                console.log(`[PROXYLISTENER]   - Profesional: ${turno.profesional}`)
+                console.log(`[PROXYLISTENER]   - Profesional ID: ${turno.profesional_id}`)
+                console.log(`[PROXYLISTENER]   - Sede: ${turno.sede}`)
+                console.log(`[PROXYLISTENER]   - Dirección: ${turno.direccion}`)
+                console.log(`[PROXYLISTENER]   - Agenda ID: ${turno.agenda_id}`)
+              })
             }
 
-            console.log("[PROXYLISTENER] Análisis de plantilla completado:", templateAnalysis)
+            console.log("[PROXYLISTENER] =====================================")
           } catch (e) {
-            console.log("[PROXYLISTENER] Error al parsear template data:", e)
+            console.error("[PROXYLISTENER] ❌ Error al parsear Chatbot_Data:", e)
           }
+        }
 
-          let chatbotDataParsed = null
-          if (Chatbot_Data) {
-            try {
-              chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
-              console.log("[PROXYLISTENER] 📋 ===== CHATBOT_DATA PARSEADO =====")
-              console.log("[PROXYLISTENER] Chatbot_Data completo:", JSON.stringify(chatbotDataParsed, null, 2))
-
-              if (chatbotDataParsed.paciente) {
-                console.log("[PROXYLISTENER] 👤 Datos del paciente:")
-                console.log("[PROXYLISTENER]   - Nombres:", chatbotDataParsed.paciente.nombres)
-                console.log("[PROXYLISTENER]   - Apellido:", chatbotDataParsed.paciente.apellido)
-                console.log("[PROXYLISTENER]   - DNI:", chatbotDataParsed.paciente.dni)
-                console.log("[PROXYLISTENER]   - Teléfono:", chatbotDataParsed.paciente.telefono)
-                console.log("[PROXYLISTENER]   - Mail:", chatbotDataParsed.paciente.mail || "(VACÍO)")
-                console.log("[PROXYLISTENER]   - Obra Social ID:", chatbotDataParsed.paciente.obra_social_id)
-                console.log("[PROXYLISTENER]   - Obra Social Nombre:", chatbotDataParsed.paciente.obra_social_nombre)
-              }
-
-              if (chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
-                console.log("[PROXYLISTENER] 📅 Turnos encontrados:", chatbotDataParsed.turnos.length)
-                chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
-                  console.log(`[PROXYLISTENER] Turno ${index + 1}:`)
-                  console.log(`[PROXYLISTENER]   - Fecha: ${turno.fecha}`)
-                  console.log(`[PROXYLISTENER]   - Hora: ${turno.hora}`)
-                  console.log(`[PROXYLISTENER]   - Profesional: ${turno.profesional}`)
-                  console.log(`[PROXYLISTENER]   - Profesional ID: ${turno.profesional_id}`)
-                  console.log(`[PROXYLISTENER]   - Sede: ${turno.sede}`)
-                  console.log(`[PROXYLISTENER]   - Dirección: ${turno.direccion}`)
-                  console.log(`[PROXYLISTENER]   - Agenda ID: ${turno.agenda_id}`)
-                })
-              }
-
-              console.log("[PROXYLISTENER] =====================================")
-            } catch (e) {
-              console.error("[PROXYLISTENER] ❌ Error al parsear Chatbot_Data:", e)
-            }
-          }
-
-          let notificationMessage = `[SISTEMA_PLANTILLA]
+        let notificationMessage = `[SISTEMA_PLANTILLA]
 Plantilla_Nombre: ${templateAnalysis.name}
 Plantilla_Contenido: ${templateAnalysis.content}`
 
-          // Agregar información del turno si está disponible
-          if (appointmentInfo && (appointmentInfo.fecha || appointmentInfo.hora || appointmentInfo.profesional)) {
-            // Format the date with day of week if available
-            const fechaFormateada = appointmentInfo.fecha
-              ? extractAndFormatDate(appointmentInfo.fecha)
-              : "No especificada"
+        // Agregar información del turno si está disponible
+        if (appointmentInfo && (appointmentInfo.fecha || appointmentInfo.hora || appointmentInfo.profesional)) {
+          // Format the date with day of week if available
+          const fechaFormateada = appointmentInfo.fecha
+            ? extractAndFormatDate(appointmentInfo.fecha)
+            : "No especificada"
 
-            notificationMessage += `
+          notificationMessage += `
 Turno_Fecha: ${fechaFormateada}
 Turno_Hora: ${appointmentInfo.hora || "No especificada"}
 Turno_Profesional: ${appointmentInfo.profesional || "No especificado"}
 Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
-          }
+        }
 
-          if (chatbotDataParsed) {
-            notificationMessage += `
+        if (chatbotDataParsed) {
+          notificationMessage += `
 
 [CONTEXTO_COMPLETO_TURNO]`
 
-            // Información del paciente
-            if (chatbotDataParsed.paciente) {
-              const paciente = chatbotDataParsed.paciente
+          // Información del paciente
+          if (chatbotDataParsed.paciente) {
+            const paciente = chatbotDataParsed.paciente
 
-              if (!paciente.mail || paciente.mail.trim() === "") {
-                console.warn("[PROXYLISTENER] ⚠️ ADVERTENCIA: El campo 'mail' está vacío en Chatbot_Data")
-              }
+            if (!paciente.mail || paciente.mail.trim() === "") {
+              console.warn("[PROXYLISTENER] ⚠️ ADVERTENCIA: El campo 'mail' está vacío en Chatbot_Data")
+            }
 
-              notificationMessage += `
+            notificationMessage += `
 Paciente_Nombres: ${paciente.nombres || ""}
 Paciente_Apellido: ${paciente.apellido || ""}
 Paciente_DNI: ${paciente.dni || ""}
@@ -685,26 +684,26 @@ Paciente_Mail: ${paciente.mail || ""}
 Paciente_Obra_Social_ID: ${paciente.obra_social_id || ""}
 Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`
 
-              console.log("[PROXYLISTENER] 📝 Bloque CONTEXTO_COMPLETO_TURNO generado:")
-              console.log(`[PROXYLISTENER]   Paciente_Nombres: ${paciente.nombres || ""}`)
-              console.log(`[PROXYLISTENER]   Paciente_Apellido: ${paciente.apellido || ""}`)
-              console.log(`[PROXYLISTENER]   Paciente_DNI: ${paciente.dni || ""}`)
-              console.log(`[PROXYLISTENER]   Paciente_Telefono: ${paciente.telefono || ""}`)
-              console.log(`[PROXYLISTENER]   Paciente_Mail: ${paciente.mail || "(VACÍO)"}`)
-              console.log(`[PROXYLISTENER]   Paciente_Obra_Social_ID: ${paciente.obra_social_id || ""}`)
-              console.log(`[PROXYLISTENER]   Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`)
-            }
+            console.log("[PROXYLISTENER] 📝 Bloque CONTEXTO_COMPLETO_TURNO generado:")
+            console.log(`[PROXYLISTENER]   Paciente_Nombres: ${paciente.nombres || ""}`)
+            console.log(`[PROXYLISTENER]   Paciente_Apellido: ${paciente.apellido || ""}`)
+            console.log(`[PROXYLISTENER]   Paciente_DNI: ${paciente.dni || ""}`)
+            console.log(`[PROXYLISTENER]   Paciente_Telefono: ${paciente.telefono || ""}`)
+            console.log(`[PROXYLISTENER]   Paciente_Mail: ${paciente.mail || "(VACÍO)"}`)
+            console.log(`[PROXYLISTENER]   Paciente_Obra_Social_ID: ${paciente.obra_social_id || ""}`)
+            console.log(`[PROXYLISTENER]   Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`)
+          }
 
-            // Información de los turnos
-            if (chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
-              notificationMessage += `
+          // Información de los turnos
+          if (chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
+            notificationMessage += `
 
 Cantidad_Turnos: ${chatbotDataParsed.cantidad_turnos || chatbotDataParsed.turnos.length}`
 
-              chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
-                const fechaFormateada = turno.fecha ? extractAndFormatDate(turno.fecha) : ""
+            chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
+              const fechaFormateada = turno.fecha ? extractAndFormatDate(turno.fecha) : ""
 
-                notificationMessage += `
+              notificationMessage += `
 
 Turno_${index + 1}:
   - Fecha: ${fechaFormateada}
@@ -716,60 +715,59 @@ Turno_${index + 1}:
   - Sede: ${turno.sede || ""}
   - Dirección: ${turno.direccion || ""}
   - Agenda_ID: ${turno.agenda_id || ""}`
-              })
-            }
-
-            // Información de la clínica y tipo de mensaje
-            if (chatbotDataParsed.clinica) {
-              notificationMessage += `
-
-Clinica: ${chatbotDataParsed.clinica}`
-            }
-
-            if (chatbotDataParsed.tipo_mensaje) {
-              notificationMessage += `
-Tipo_Mensaje: ${chatbotDataParsed.tipo_mensaje}`
-            }
-
-            notificationMessage += `
-[/CONTEXTO_COMPLETO_TURNO]`
-          } else {
-            console.warn("[PROXYLISTENER] ⚠️ ADVERTENCIA: No se recibió Chatbot_Data en la solicitud")
+            })
           }
 
-          if (Sede_Id) {
+          // Información de la clínica y tipo de mensaje
+          if (chatbotDataParsed.clinica) {
             notificationMessage += `
-Sede_ID: ${Sede_Id}`
+
+Clinica: ${chatbotDataParsed.clinica}`
+          }
+
+          if (chatbotDataParsed.tipo_mensaje) {
+            notificationMessage += `
+Tipo_Mensaje: ${chatbotDataParsed.tipo_mensaje}`
           }
 
           notificationMessage += `
+[/CONTEXTO_COMPLETO_TURNO]`
+        } else {
+          console.warn("[PROXYLISTENER] ⚠️ ADVERTENCIA: No se recibió Chatbot_Data en la solicitud")
+        }
+
+        if (Sede_Id) {
+          notificationMessage += `
+Sede_ID: ${Sede_Id}`
+        }
+
+        notificationMessage += `
 [/SISTEMA_PLANTILLA]`
 
-          console.log("[PROXYLISTENER] 🔍 Validando threadId antes de agregar mensaje:", threadResult.threadId)
+        console.log("[PROXYLISTENER] 🔍 Validando threadId antes de agregar mensaje:", threadResult.threadId)
 
-          if (!threadResult.threadId || typeof threadResult.threadId !== "string") {
-            throw new Error(`ThreadId inválido: ${threadResult.threadId} (tipo: ${typeof threadResult.threadId})`)
-          }
-
-          console.log("[v0] 🚀 ===== ENVIANDO MENSAJE A OPENAI =====")
-          console.log("[v0] ThreadID:", threadResult.threadId)
-          console.log("[v0] Mensaje completo que se enviará:")
-          console.log(notificationMessage)
-          console.log("[v0] ==========================================")
-
-          await safelyAddMessageToThread(threadResult.threadId, {
-            role: "user",
-            content: notificationMessage,
-          })
-
-          console.log("[v0] ✅ MENSAJE ENVIADO A OPENAI EXITOSAMENTE")
-          console.log("[PROXYLISTENER] Notificación enviada a OpenAI exitosamente")
-          console.log("[PROXYLISTENER] 📤 Mensaje enviado a OpenAI:")
-          console.log(notificationMessage)
-        } catch (error: any) {
-          console.error("[PROXYLISTENER] Error al notificar a OpenAI:", error)
-          console.error("[PROXYLISTENER] Stack trace:", error.stack)
+        if (!threadResult.threadId || typeof threadResult.threadId !== "string") {
+          throw new Error(`ThreadId inválido: ${threadResult.threadId} (tipo: ${typeof threadResult.threadId})`)
         }
+
+        console.log("[v0] 🚀 ===== ENVIANDO MENSAJE A OPENAI =====")
+        console.log("[v0] ThreadID:", threadResult.threadId)
+        console.log("[v0] Mensaje completo que se enviará:")
+        console.log(notificationMessage)
+        console.log("[v0] ==========================================")
+
+        await safelyAddMessageToThread(threadResult.threadId, {
+          role: "user",
+          content: notificationMessage,
+        })
+
+        console.log("[v0] ✅ MENSAJE ENVIADO A OPENAI EXITOSAMENTE")
+        console.log("[PROXYLISTENER] Notificación enviada a OpenAI exitosamente")
+        console.log("[PROXYLISTENER] 📤 Mensaje enviado a OpenAI:")
+        console.log(notificationMessage)
+      } catch (error: any) {
+        console.error("[PROXYLISTENER] Error al notificar a OpenAI:", error)
+        console.error("[PROXYLISTENER] Stack trace:", error.stack)
       }
     }
 
