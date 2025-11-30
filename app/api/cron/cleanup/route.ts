@@ -2,6 +2,27 @@ import { NextResponse } from "next/server"
 import { Redis } from "@upstash/redis"
 import { incrementMetric, logError } from "@/lib/monitoring"
 
+async function scanKeys(redis: Redis, pattern: string, maxKeys = 1000): Promise<string[]> {
+  const keys: string[] = []
+  let cursor = 0
+
+  do {
+    // SCAN returns [cursor, keys[]]
+    const result = await redis.scan(cursor, { match: pattern, count: 100 })
+    cursor = result[0]
+    const foundKeys = result[1] as string[]
+
+    keys.push(...foundKeys)
+
+    // Stop if we've collected enough keys
+    if (keys.length >= maxKeys) {
+      break
+    }
+  } while (cursor !== 0)
+
+  return keys.slice(0, maxKeys)
+}
+
 // Función para limpiar datos antiguos
 export async function GET(req: Request) {
   try {
@@ -21,14 +42,11 @@ export async function GET(req: Request) {
     const MAX_ITEMS_PER_CATEGORY = 1000
 
     // 1. Limpiar threads inactivos
-    const threadKeys = await redis.keys("thread:*")
+    const threadKeys = await scanKeys(redis, "thread:*", MAX_ITEMS_PER_CATEGORY)
     let threadsDeleted = 0
     let threadsConverted = 0
 
-    // Limitar el número de threads a procesar
-    const threadsToProcess = threadKeys.slice(0, MAX_ITEMS_PER_CATEGORY)
-
-    for (const key of threadsToProcess) {
+    for (const key of threadKeys) {
       const threadData = await redis.get(key)
       if (threadData) {
         try {
@@ -67,13 +85,10 @@ export async function GET(req: Request) {
     }
 
     // 2. Limpiar métricas antiguas
-    const metricKeys = await redis.keys("metrics:*")
+    const metricKeys = await scanKeys(redis, "metrics:*", MAX_ITEMS_PER_CATEGORY)
     let metricsCleanedUp = 0
 
-    // Limitar el número de métricas a procesar
-    const metricsToProcess = metricKeys.slice(0, MAX_ITEMS_PER_CATEGORY)
-
-    for (const key of metricsToProcess) {
+    for (const key of metricKeys) {
       const metrics = await redis.hgetall(key)
       if (metrics) {
         for (const [date, _] of Object.entries(metrics)) {
@@ -87,13 +102,10 @@ export async function GET(req: Request) {
     }
 
     // 3. Limpiar caché de API
-    const cacheKeys = await redis.keys("api_cache:*")
+    const cacheKeys = await scanKeys(redis, "api_cache:*", MAX_ITEMS_PER_CATEGORY)
     let cacheEntriesDeleted = 0
 
-    // Limitar el número de entradas de caché a procesar
-    const cacheToProcess = cacheKeys.slice(0, MAX_ITEMS_PER_CATEGORY)
-
-    for (const key of cacheToProcess) {
+    for (const key of cacheKeys) {
       const cacheData = await redis.get(key)
       if (cacheData) {
         try {
@@ -113,13 +125,10 @@ export async function GET(req: Request) {
     }
 
     // 4. Limpiar datos de rate limiting antiguos
-    const rateLimitKeys = await redis.keys("ratelimit:*")
+    const rateLimitKeys = await scanKeys(redis, "ratelimit:*", MAX_ITEMS_PER_CATEGORY)
     let rateLimitEntriesDeleted = 0
 
-    // Limitar el número de entradas de rate limiting a procesar
-    const rateLimitToProcess = rateLimitKeys.slice(0, MAX_ITEMS_PER_CATEGORY)
-
-    for (const key of rateLimitToProcess) {
+    for (const key of rateLimitKeys) {
       // Los datos de rate limiting se limpian automáticamente con TTL,
       // pero verificamos si hay alguno antiguo que no se haya limpiado
       const oldTokens = await redis.zcount(key, 0, CACHE_CUTOFF)
@@ -137,12 +146,6 @@ export async function GET(req: Request) {
     await incrementMetric("cleanup_cache_deleted", cacheEntriesDeleted)
     await incrementMetric("cleanup_ratelimit_deleted", rateLimitEntriesDeleted)
 
-    // Indicar si hay más elementos por procesar
-    const remainingThreads = threadKeys.length - threadsToProcess.length
-    const remainingMetrics = metricKeys.length - metricsToProcess.length
-    const remainingCache = cacheKeys.length - cacheToProcess.length
-    const remainingRateLimit = rateLimitKeys.length - rateLimitToProcess.length
-
     return NextResponse.json({
       success: true,
       threadsDeleted,
@@ -150,11 +153,11 @@ export async function GET(req: Request) {
       metricsCleanedUp,
       cacheEntriesDeleted,
       rateLimitEntriesDeleted,
-      remaining: {
-        threads: remainingThreads,
-        metrics: remainingMetrics,
-        cache: remainingCache,
-        rateLimit: remainingRateLimit,
+      keysScanned: {
+        threads: threadKeys.length,
+        metrics: metricKeys.length,
+        cache: cacheKeys.length,
+        rateLimit: rateLimitKeys.length,
       },
       timestamp: new Date().toISOString(),
     })
