@@ -79,9 +79,18 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
         if (event.templateSentAt) {
           const responseTime = new Date(event.timestamp).getTime() - new Date(event.templateSentAt).getTime()
           const responseTimeMinutes = Math.round(responseTime / 1000 / 60)
+
           await redis.lpush(`${statsKey}:response_times:confirmed`, responseTimeMinutes)
           await redis.ltrim(`${statsKey}:response_times:confirmed`, 0, 999) // Mantener últimos 1000
-          console.log(`[APPOINTMENT_STATS] ✅ Tiempo de respuesta registrado: ${responseTimeMinutes} minutos`)
+
+          await redis.lpush(`${statsKey}:response_times:confirmed:${date}`, responseTimeMinutes)
+          await redis.ltrim(`${statsKey}:response_times:confirmed:${date}`, 0, 999)
+          // Registrar que existe data para esta fecha
+          await redis.sadd(`${statsKey}:response_times:confirmed:dates`, date)
+
+          console.log(
+            `[APPOINTMENT_STATS] ✅ Tiempo de respuesta registrado: ${responseTimeMinutes} minutos para fecha ${date}`,
+          )
         }
         break
 
@@ -94,9 +103,18 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
         if (event.templateSentAt) {
           const responseTime = new Date(event.timestamp).getTime() - new Date(event.templateSentAt).getTime()
           const responseTimeMinutes = Math.round(responseTime / 1000 / 60)
+
           await redis.lpush(`${statsKey}:response_times:cancelled`, responseTimeMinutes)
           await redis.ltrim(`${statsKey}:response_times:cancelled`, 0, 999)
-          console.log(`[APPOINTMENT_STATS] ✅ Tiempo de respuesta registrado: ${responseTimeMinutes} minutos`)
+
+          await redis.lpush(`${statsKey}:response_times:cancelled:${date}`, responseTimeMinutes)
+          await redis.ltrim(`${statsKey}:response_times:cancelled:${date}`, 0, 999)
+          // Registrar que existe data para esta fecha
+          await redis.sadd(`${statsKey}:response_times:cancelled:dates`, date)
+
+          console.log(
+            `[APPOINTMENT_STATS] ✅ Tiempo de respuesta registrado: ${responseTimeMinutes} minutos para fecha ${date}`,
+          )
         }
         break
 
@@ -273,25 +291,58 @@ export async function getAppointmentStatsByClienteIdFiltered(
     const cancellationRate = totalTemplatesSent > 0 ? (totalCancelled / totalTemplatesSent) * 100 : 0
     const responseRate = totalTemplatesSent > 0 ? ((totalConfirmed + totalCancelled) / totalTemplatesSent) * 100 : 0
 
-    // Obtener tiempos promedio (estos son globales, no filtrados por fecha)
-    const confirmedTimes = (await redis.lrange(`${statsKey}:response_times:confirmed`, 0, -1)) as number[]
-    const cancelledTimes = (await redis.lrange(`${statsKey}:response_times:cancelled`, 0, -1)) as number[]
+    let confirmedTimes: number[] = []
+    let cancelledTimes: number[] = []
+
+    if (startDate || endDate) {
+      // Obtener las fechas que tienen datos de tiempos de respuesta
+      const confirmedDates = (await redis.smembers(`${statsKey}:response_times:confirmed:dates`)) as string[]
+      const cancelledDates = (await redis.smembers(`${statsKey}:response_times:cancelled:dates`)) as string[]
+
+      // Filtrar fechas dentro del rango
+      const filterDates = (dates: string[]): string[] => {
+        return dates.filter((date) => {
+          const inRange = (!startDate || date >= startDate) && (!endDate || date <= endDate)
+          return inRange
+        })
+      }
+
+      const filteredConfirmedDates = filterDates(confirmedDates)
+      const filteredCancelledDates = filterDates(cancelledDates)
+
+      // Obtener tiempos de respuesta para las fechas filtradas
+      for (const date of filteredConfirmedDates) {
+        const times = (await redis.lrange(`${statsKey}:response_times:confirmed:${date}`, 0, -1)) as number[]
+        confirmedTimes.push(...times.map((t) => Number(t)))
+      }
+
+      for (const date of filteredCancelledDates) {
+        const times = (await redis.lrange(`${statsKey}:response_times:cancelled:${date}`, 0, -1)) as number[]
+        cancelledTimes.push(...times.map((t) => Number(t)))
+      }
+
+      console.log(
+        `[APPOINTMENT_STATS] 📊 Tiempos filtrados - Confirmed: ${confirmedTimes.length}, Cancelled: ${cancelledTimes.length}`,
+      )
+    } else {
+      // Sin filtro de fecha, usar los datos globales
+      confirmedTimes = ((await redis.lrange(`${statsKey}:response_times:confirmed`, 0, -1)) as number[]).map((t) =>
+        Number(t),
+      )
+      cancelledTimes = ((await redis.lrange(`${statsKey}:response_times:cancelled`, 0, -1)) as number[]).map((t) =>
+        Number(t),
+      )
+    }
 
     const avgConfirmationTime =
-      confirmedTimes.length > 0
-        ? confirmedTimes.reduce((sum, time) => sum + Number(time), 0) / confirmedTimes.length
-        : 0
+      confirmedTimes.length > 0 ? confirmedTimes.reduce((sum, time) => sum + time, 0) / confirmedTimes.length : 0
 
     const avgCancellationTime =
-      cancelledTimes.length > 0
-        ? cancelledTimes.reduce((sum, time) => sum + Number(time), 0) / cancelledTimes.length
-        : 0
+      cancelledTimes.length > 0 ? cancelledTimes.reduce((sum, time) => sum + time, 0) / cancelledTimes.length : 0
 
     const allResponseTimes = [...confirmedTimes, ...cancelledTimes]
     const avgResponseTime =
-      allResponseTimes.length > 0
-        ? allResponseTimes.reduce((sum, time) => sum + Number(time), 0) / allResponseTimes.length
-        : 0
+      allResponseTimes.length > 0 ? allResponseTimes.reduce((sum, time) => sum + time, 0) / allResponseTimes.length : 0
 
     const clientName = await getClientNameByClienteId(clienteId)
 
