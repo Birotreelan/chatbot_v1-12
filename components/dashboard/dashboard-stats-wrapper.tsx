@@ -1,42 +1,61 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { DashboardStats } from "./dashboard-stats"
+import { DateRangeFilter } from "./date-range-filter"
 import type { SystemStats } from "@/lib/types"
+import { format } from "date-fns"
 
 export default function DashboardStatsWrapper() {
   const [stats, setStats] = useState<SystemStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [dateFilter, setDateFilter] = useState<{ startDate: string | null; endDate: string | null }>({
+    startDate: format(new Date(), "yyyy-MM-dd"),
+    endDate: format(new Date(), "yyyy-MM-dd"),
+  })
+
+  const fetchStats = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (dateFilter.startDate) params.append("startDate", dateFilter.startDate)
+      if (dateFilter.endDate) params.append("endDate", dateFilter.endDate)
+
+      const url = `/api/dashboard/stats${params.toString() ? `?${params.toString()}` : ""}`
+      const response = await fetch(url)
+
+      if (response.ok) {
+        const data = await response.json()
+        setStats(data)
+      }
+    } catch (error) {
+      console.error("Error al cargar estadísticas:", error)
+    } finally {
+      setLoading(false)
+    }
+  }, [dateFilter])
 
   useEffect(() => {
-    async function fetchStats() {
-      try {
-        const response = await fetch("/api/dashboard/stats")
-        if (response.ok) {
-          const data = await response.json()
-          setStats(data)
-        }
-      } catch (error) {
-        console.error("Error al cargar estadísticas:", error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
     fetchStats()
-  }, [])
+  }, [fetchStats])
 
-  if (loading) {
-    return <div className="p-4 border rounded-md my-4">Cargando estadísticas...</div>
+  const handleFilterChange = (startDate: string | null, endDate: string | null) => {
+    setDateFilter({ startDate, endDate })
   }
 
-  if (!stats) {
-    return (
-      <div className="p-4 border rounded-md my-4 text-center">
-        No se pudieron cargar las estadísticas. Por favor, intenta de nuevo más tarde.
-      </div>
-    )
-  }
+  return (
+    <div>
+      <DateRangeFilter onFilterChange={handleFilterChange} />
 
-  return <DashboardStats stats={stats} />
+      {loading ? (
+        <div className="p-4 border rounded-md my-4">Cargando estadísticas...</div>
+      ) : !stats ? (
+        <div className="p-4 border rounded-md my-4 text-center">
+          No se pudieron cargar las estadísticas. Por favor, intenta de nuevo más tarde.
+        </div>
+      ) : (
+        <DashboardStats stats={stats} />
+      )}
+    </div>
+  )
 }

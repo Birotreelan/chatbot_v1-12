@@ -890,3 +890,33 @@ export async function setThread(userIdentifier: string, configId: string, thread
     console.log(`[DB] ✅ Thread guardado en memoria: ${threadId}`)
   }
 }
+
+export async function getSystemStatsFiltered(startDate?: string, endDate?: string): Promise<SystemStats> {
+  const configs = await getAllWhatsAppConfigs()
+  let threads = await getAllThreads()
+
+  // Filtrar threads por rango de fechas si se proporcionan
+  if (startDate || endDate) {
+    const start = startDate ? new Date(startDate) : new Date(0)
+    const end = endDate ? new Date(endDate) : new Date()
+
+    // Ajustar el fin del día para incluir todo el día final
+    end.setHours(23, 59, 59, 999)
+
+    threads = threads.filter((thread) => {
+      // Usar createdAt o lastMessageAt para filtrar
+      const threadDate = new Date(thread.createdAt || thread.lastMessageAt)
+      return threadDate >= start && threadDate <= end
+    })
+  }
+
+  const stats: SystemStats = {
+    totalConfigs: configs.length,
+    activeConfigs: configs.filter((c) => c.active).length,
+    totalMessages: threads.reduce((sum, t) => sum + (t.messageCount || 0), 0),
+    totalThreads: threads.length,
+    lastUpdated: new Date().toISOString(),
+  }
+
+  return stats
+}
