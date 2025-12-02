@@ -12,6 +12,7 @@ import {
   obtenerSubespecialidades,
   buscarTurnosDisponibles,
   validarObraSocial,
+  cancelarTurno as apiCancelarTurno, // Importar la nueva función
 } from "./api-tools/api-functions"
 import type { AbortSignal } from "abort-controller"
 import { saveConversationMessage } from "./conversations"
@@ -71,6 +72,25 @@ export const openaiTools = {
         },
       },
       required: ["turno_id", "paciente_datos"],
+    },
+  },
+  cancelar_turno: {
+    description: "Cancela un turno médico existente. Usar cuando el paciente solicita cancelar su turno.",
+    parameters: {
+      type: "object",
+      properties: {
+        turno_id: { type: "string", description: "ID del turno a cancelar" },
+        motivo: { type: "string", description: "Motivo de la cancelación (opcional)" },
+        paciente_datos: {
+          type: "object",
+          description: "Datos del paciente para validación",
+          properties: {
+            dni: { type: "string" },
+            telefono: { type: "string" },
+          },
+        },
+      },
+      required: ["turno_id"],
     },
   },
   obtener_datos_sede: {
@@ -188,6 +208,8 @@ const FUNCTION_MESSAGES: Record<string, string> = {
   obtener_obras_sociales: "Consultando obras sociales disponibles, aguardá unos instantes.",
   // Mensaje para registrar evento de cita
   registrar_evento_cita: "Registrando el evento de la cita...",
+  // Mensaje para cancelar turno
+  cancelar_turno: "Procesando la cancelación de tu turno, aguardá unos instantes...",
 }
 
 // Función para truncar respuestas largas de herramientas
@@ -263,6 +285,10 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
           turno_id: args.turno_id,
           paciente_datos: args.paciente_datos,
         })
+
+      // Implementar la nueva herramienta cancelar_turno
+      case "cancelar_turno":
+        return await cancelarTurnoHerramienta(clienteId, args.turno_id, args.motivo, args.paciente_datos)
 
       case "obtener_datos_sede":
         return await obtenerDatosSedeHerramienta(clienteId, args.sede_id)
@@ -855,6 +881,52 @@ export async function registrarEventoCitaHerramienta(
     return JSON.stringify({
       exito: false,
       mensaje: "Error interno al registrar el evento de la cita.",
+    })
+  }
+}
+
+// Implementar la función cancelarTurnoHerramienta
+export async function cancelarTurnoHerramienta(
+  clienteId: string,
+  turnoId: string,
+  motivo?: string,
+  pacienteDatos?: { dni: string; telefono: string },
+): Promise<string> {
+  try {
+    console.log(`[TOOLS] ❌ Cancelando turno: ${turnoId} para cliente: ${clienteId}`)
+    if (motivo) console.log(`[TOOLS] 📝 Motivo: ${motivo}`)
+    if (pacienteDatos) console.log(`[TOOLS] 👤 Datos del paciente:`, pacienteDatos)
+
+    // Validar si se proporcionaron datos del paciente si el motivo no está vacío o si el turno ID es válido
+    if (!turnoId) {
+      return JSON.stringify({
+        exito: false,
+        mensaje: "El ID del turno es requerido para cancelarlo.",
+      })
+    }
+
+    // Llamar a la función de la API para cancelar el turno
+    const resultado = await apiCancelarTurno(clienteId, turnoId, motivo, pacienteDatos)
+
+    if (resultado.success) {
+      console.log(`[TOOLS] ✅ Turno ${turnoId} cancelado exitosamente.`)
+      return JSON.stringify({
+        exito: true,
+        mensaje: "Tu turno ha sido cancelado correctamente.",
+        data: resultado.data,
+      })
+    } else {
+      console.error(`[TOOLS] ❌ Error al cancelar turno ${turnoId}:`, resultado.error)
+      return JSON.stringify({
+        exito: false,
+        mensaje: resultado.error?.message || "No se pudo cancelar el turno.",
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error inesperado en cancelarTurnoHerramienta:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error interno al cancelar el turno.",
     })
   }
 }
