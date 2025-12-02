@@ -8,7 +8,7 @@ import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
-import { TIMEOUTS, fetchWithRetry, RETRY_CONFIG } from "./config/timeouts"
+import { TIMEOUTS, fetchWithTimeout } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime } from "./appointment-stats"
 
 // Función para extraer el contenido del mensaje según su tipo
@@ -146,7 +146,7 @@ export async function handleMessage(value: WhatsAppValue) {
         console.log(`[WHATSAPP] Enviando al proxy: ${config.proxy}`)
         console.log(`[WHATSAPP] Payload del proxy:`, JSON.stringify(proxyPayload, null, 2))
 
-        const response = await fetchWithRetry(
+        const response = await fetchWithTimeout(
           `${config.proxy}`,
           {
             method: "POST",
@@ -156,7 +156,6 @@ export async function handleMessage(value: WhatsAppValue) {
             body: JSON.stringify(proxyPayload),
           },
           TIMEOUTS.PROXY_TIMEOUT,
-          RETRY_CONFIG,
         )
 
         console.log(`[WHATSAPP] Respuesta del proxy - Status: ${response.status}`)
