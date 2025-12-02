@@ -6,6 +6,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppointmentStatsDetail } from "./appointment-stats-detail"
 import { Loader2 } from "lucide-react"
+import { format } from "date-fns"
 
 interface ClientWithStats {
   configId: string
@@ -25,7 +26,8 @@ export function AppointmentStatsView() {
 
   async function loadClients() {
     try {
-      const response = await fetch("/api/appointment-stats")
+      const today = format(new Date(), "yyyy-MM-dd")
+      const response = await fetch(`/api/appointment-stats?startDate=${today}&endDate=${today}`)
       if (response.ok) {
         const data = await response.json()
         setClients(data)

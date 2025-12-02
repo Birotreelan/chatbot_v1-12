@@ -5,6 +5,8 @@ import type { ClientAppointmentStats } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, Clock, TrendingUp } from "lucide-react"
+import { DateRangeFilter } from "./date-range-filter"
+import { format } from "date-fns"
 
 interface AppointmentStatsDetailProps {
   clienteId: string
@@ -15,10 +17,18 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
   const [stats, setStats] = useState<ClientAppointmentStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const today = format(new Date(), "yyyy-MM-dd")
+  const [startDate, setStartDate] = useState<string | null>(today)
+  const [endDate, setEndDate] = useState<string | null>(today)
 
   const loadStats = useCallback(async () => {
     try {
-      const response = await fetch(`/api/appointment-stats?clienteId=${clienteId}`)
+      const params = new URLSearchParams()
+      params.set("clienteId", clienteId)
+      if (startDate) params.set("startDate", startDate)
+      if (endDate) params.set("endDate", endDate)
+
+      const response = await fetch(`/api/appointment-stats?${params.toString()}`)
       if (response.ok) {
         const data = await response.json()
         setStats(data)
@@ -29,7 +39,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
       setLoading(false)
       setRefreshing(false)
     }
-  }, [clienteId])
+  }, [clienteId, startDate, endDate])
 
   useEffect(() => {
     setLoading(true)
@@ -41,15 +51,23 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
     loadStats()
   }
 
+  const handleFilterChange = (newStartDate: string | null, newEndDate: string | null) => {
+    setStartDate(newStartDate)
+    setEndDate(newEndDate)
+    setLoading(true)
+  }
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-4">
+        <DateRangeFilter onFilterChange={handleFilterChange} />
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
       </div>
     )
   }
 
-  // Formatear tiempo promedio en minutos a formato legible
   const formatTime = (minutes: number) => {
     if (minutes < 60) {
       return `${Math.round(minutes)} min`
@@ -61,7 +79,8 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
 
   return (
     <div className="space-y-6">
-      {/* Header con botón de refresh */}
+      <DateRangeFilter onFilterChange={handleFilterChange} />
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold">{displayName}</h2>
@@ -76,7 +95,6 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </Button>
       </div>
 
-      {/* Tarjetas de métricas principales */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -123,7 +141,6 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </Card>
       </div>
 
-      {/* Métricas de tiempos y tasas */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -163,7 +180,6 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </Card>
       </div>
 
-      {/* Tasa de respuesta general */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -205,7 +221,6 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </CardContent>
       </Card>
 
-      {/* Mensaje informativo si no hay datos */}
       {(!stats || (stats.totalTemplatesSent === 0 && stats.totalConfirmed === 0)) && (
         <Card className="border-dashed">
           <CardContent className="py-8 text-center">

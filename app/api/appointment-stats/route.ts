@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getAppointmentStatsByClienteId } from "@/lib/appointment-stats"
+import { getAppointmentStatsByClienteId, getAppointmentStatsByClienteIdFiltered } from "@/lib/appointment-stats"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 
 // GET - Obtener estadísticas por cliente_id o lista de todos los clientes con sus estadísticas
@@ -7,10 +7,15 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const clienteId = searchParams.get("clienteId")
+    const startDate = searchParams.get("startDate")
+    const endDate = searchParams.get("endDate")
 
     // Si se especifica un cliente, devolver sus estadísticas
     if (clienteId) {
-      const stats = await getAppointmentStatsByClienteId(clienteId)
+      const stats =
+        startDate || endDate
+          ? await getAppointmentStatsByClienteIdFiltered(clienteId, startDate || undefined, endDate || undefined)
+          : await getAppointmentStatsByClienteId(clienteId)
 
       if (!stats) {
         return NextResponse.json({
@@ -43,7 +48,15 @@ export async function GET(request: Request) {
 
     for (const config of configs) {
       if (config.cliente_id) {
-        const stats = await getAppointmentStatsByClienteId(config.cliente_id)
+        const stats =
+          startDate || endDate
+            ? await getAppointmentStatsByClienteIdFiltered(
+                config.cliente_id,
+                startDate || undefined,
+                endDate || undefined,
+              )
+            : await getAppointmentStatsByClienteId(config.cliente_id)
+
         clientsWithStats.push({
           configId: config.id,
           clienteId: config.cliente_id,

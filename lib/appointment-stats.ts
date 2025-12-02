@@ -219,6 +219,110 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
   }
 }
 
+export async function getAppointmentStatsByClienteIdFiltered(
+  clienteId: string,
+  startDate?: string,
+  endDate?: string,
+): Promise<ClientAppointmentStats | null> {
+  const redis = getRedisClient()
+  if (!redis) {
+    console.warn("[APPOINTMENT_STATS] Redis no disponible")
+    return null
+  }
+
+  try {
+    console.log(`[APPOINTMENT_STATS] 📊 Obteniendo estadísticas filtradas para cliente ${clienteId}`)
+    console.log(`[APPOINTMENT_STATS] 📊 Rango: ${startDate} - ${endDate}`)
+
+    const statsKey = `${APPOINTMENT_STATS_PREFIX}${clienteId}`
+
+    // Obtener datos diarios
+    const confirmedByDay = ((await redis.hgetall(`${statsKey}:daily:confirmed`)) as Record<string, number>) || {}
+    const cancelledByDay = ((await redis.hgetall(`${statsKey}:daily:cancelled`)) as Record<string, number>) || {}
+    const rescheduledByDay = ((await redis.hgetall(`${statsKey}:daily:rescheduled`)) as Record<string, number>) || {}
+    const templatesSentByDay = ((await redis.hgetall(`${statsKey}:daily:templates`)) as Record<string, number>) || {}
+
+    // Filtrar por fecha si se especifica
+    const filterByDateRange = (data: Record<string, number>): Record<string, number> => {
+      if (!startDate && !endDate) return data
+
+      const filtered: Record<string, number> = {}
+      for (const [date, value] of Object.entries(data)) {
+        const dateStr = date
+        const inRange = (!startDate || dateStr >= startDate) && (!endDate || dateStr <= endDate)
+        if (inRange) {
+          filtered[date] = Number(value)
+        }
+      }
+      return filtered
+    }
+
+    const filteredConfirmed = filterByDateRange(confirmedByDay)
+    const filteredCancelled = filterByDateRange(cancelledByDay)
+    const filteredRescheduled = filterByDateRange(rescheduledByDay)
+    const filteredTemplates = filterByDateRange(templatesSentByDay)
+
+    // Calcular totales filtrados
+    const totalConfirmed = Object.values(filteredConfirmed).reduce((sum, val) => sum + Number(val), 0)
+    const totalCancelled = Object.values(filteredCancelled).reduce((sum, val) => sum + Number(val), 0)
+    const totalRescheduled = Object.values(filteredRescheduled).reduce((sum, val) => sum + Number(val), 0)
+    const totalTemplatesSent = Object.values(filteredTemplates).reduce((sum, val) => sum + Number(val), 0)
+
+    // Calcular tasas de conversión
+    const confirmationRate = totalTemplatesSent > 0 ? (totalConfirmed / totalTemplatesSent) * 100 : 0
+    const cancellationRate = totalTemplatesSent > 0 ? (totalCancelled / totalTemplatesSent) * 100 : 0
+    const responseRate = totalTemplatesSent > 0 ? ((totalConfirmed + totalCancelled) / totalTemplatesSent) * 100 : 0
+
+    // Obtener tiempos promedio (estos son globales, no filtrados por fecha)
+    const confirmedTimes = (await redis.lrange(`${statsKey}:response_times:confirmed`, 0, -1)) as number[]
+    const cancelledTimes = (await redis.lrange(`${statsKey}:response_times:cancelled`, 0, -1)) as number[]
+
+    const avgConfirmationTime =
+      confirmedTimes.length > 0
+        ? confirmedTimes.reduce((sum, time) => sum + Number(time), 0) / confirmedTimes.length
+        : 0
+
+    const avgCancellationTime =
+      cancelledTimes.length > 0
+        ? cancelledTimes.reduce((sum, time) => sum + Number(time), 0) / cancelledTimes.length
+        : 0
+
+    const allResponseTimes = [...confirmedTimes, ...cancelledTimes]
+    const avgResponseTime =
+      allResponseTimes.length > 0
+        ? allResponseTimes.reduce((sum, time) => sum + Number(time), 0) / allResponseTimes.length
+        : 0
+
+    const clientName = await getClientNameByClienteId(clienteId)
+
+    const stats: ClientAppointmentStats = {
+      clienteId,
+      clientName,
+      totalConfirmed,
+      totalCancelled,
+      totalRescheduled,
+      totalTemplatesSent,
+      confirmedByDay: filteredConfirmed,
+      cancelledByDay: filteredCancelled,
+      rescheduledByDay: filteredRescheduled,
+      templatesSentByDay: filteredTemplates,
+      confirmationRate: Math.round(confirmationRate * 100) / 100,
+      cancellationRate: Math.round(cancellationRate * 100) / 100,
+      responseRate: Math.round(responseRate * 100) / 100,
+      avgResponseTime: Math.round(avgResponseTime * 100) / 100,
+      avgConfirmationTime: Math.round(avgConfirmationTime * 100) / 100,
+      avgCancellationTime: Math.round(avgCancellationTime * 100) / 100,
+      lastUpdated: new Date().toISOString(),
+    }
+
+    console.log(`[APPOINTMENT_STATS] ✅ Estadísticas filtradas obtenidas para cliente ${clienteId}`)
+    return stats
+  } catch (error) {
+    console.error("[APPOINTMENT_STATS] ❌ Error al obtener estadísticas filtradas:", error)
+    return null
+  }
+}
+
 // Guardar timestamp de envío de template para tracking
 export async function trackTemplateSent(
   clienteId: string,
