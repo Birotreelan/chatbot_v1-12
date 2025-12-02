@@ -179,6 +179,6 @@ export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 
 // Configuración de cron usando la nueva sintaxis
-export const maxDuration = 60 // 60 segundos máximo de ejecución (límite permitido)
+export const maxDuration = 300 // 300 segundos máximo de ejecución (límite permitido)
 
 // La configuración del cron se debe hacer en vercel.json

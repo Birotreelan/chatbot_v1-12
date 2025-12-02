@@ -1,20 +1,21 @@
 // Configuración centralizada de timeouts para llamadas HTTP
 // Todos los valores en milisegundos
+// VERCEL PRO: maxDuration = 300 segundos (5 minutos)
 
 import { Agent } from "undici"
 
 export const TIMEOUTS = {
   // Timeout para llamadas al proxy externo (treelan.net)
-  PROXY_TIMEOUT: Number.parseInt(process.env.PROXY_TIMEOUT || "30000", 10), // 30 segundos por defecto
+  PROXY_TIMEOUT: Number.parseInt(process.env.PROXY_TIMEOUT || "280000", 10), // 280 segundos por defecto
 
   // Timeout para llamadas a la API de WhatsApp
-  WHATSAPP_TIMEOUT: Number.parseInt(process.env.WHATSAPP_TIMEOUT || "30000", 10), // 30 segundos
+  WHATSAPP_TIMEOUT: Number.parseInt(process.env.WHATSAPP_TIMEOUT || "120000", 10), // 120 segundos
 
   // Timeout para llamadas a OpenAI
-  OPENAI_TIMEOUT: Number.parseInt(process.env.OPENAI_TIMEOUT || "120000", 10), // 2 minutos
+  OPENAI_TIMEOUT: Number.parseInt(process.env.OPENAI_TIMEOUT || "280000", 10), // 280 segundos
 
-  // Aumentamos a 60 segundos para cubrir servidores lentos
-  CONNECT_TIMEOUT: Number.parseInt(process.env.CONNECT_TIMEOUT || "60000", 10), // 60 segundos
+  // Aumentamos a 120 segundos para cubrir servidores lentos
+  CONNECT_TIMEOUT: Number.parseInt(process.env.CONNECT_TIMEOUT || "120000", 10), // 120 segundos
 }
 
 // Helper para crear AbortController con timeout

@@ -6,7 +6,7 @@ import { incrementMetric, logError } from "@/lib/monitoring"
 import { rateLimit } from "@/lib/rate-limit"
 import { logger } from "@/lib/logger"
 
-export const maxDuration = 60
+export const maxDuration = 300
 
 export async function GET(req: Request) {
   try {

@@ -3,7 +3,7 @@ import { handleMessage } from "@/lib/whatsapp"
 import { logError, incrementMetric } from "@/lib/monitoring"
 import { logger } from "@/lib/logger"
 
-export const maxDuration = 60
+export const maxDuration = 300
 
 async function processMessage(req: Request) {
   try {
