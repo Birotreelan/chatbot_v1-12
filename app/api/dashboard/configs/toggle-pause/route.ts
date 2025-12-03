@@ -1,30 +1,36 @@
 import { NextResponse } from "next/server"
-import { getWhatsAppConfig, updateWhatsAppConfig } from "@/lib/db"
+import { isConversationPaused, setConversationPaused } from "@/lib/conversations"
 
 export async function POST(request: Request) {
   try {
-    const { configId } = await request.json()
+    const { configId, phoneNumber } = await request.json()
 
     if (!configId) {
       return NextResponse.json({ error: "Config ID es requerido" }, { status: 400 })
     }
 
-    // Get current config
-    const config = await getWhatsAppConfig(configId)
-    if (!config) {
-      return NextResponse.json({ error: "Configuración no encontrada" }, { status: 404 })
+    if (!phoneNumber) {
+      return NextResponse.json({ error: "Phone number es requerido para pausar una conversación" }, { status: 400 })
     }
 
-    // Toggle paused state
-    const newPausedState = !config.paused
-    await updateWhatsAppConfig(configId, { paused: newPausedState })
+    // Obtener estado actual de la conversación
+    const currentlyPaused = await isConversationPaused(configId, phoneNumber)
+    const newPausedState = !currentlyPaused
 
-    console.log(`[API] IA ${newPausedState ? "pausada" : "reanudada"} para config ${configId}`)
+    // Cambiar estado de pausa
+    const success = await setConversationPaused(configId, phoneNumber, newPausedState)
+
+    if (!success) {
+      return NextResponse.json({ error: "Error al cambiar estado de pausa" }, { status: 500 })
+    }
+
+    console.log(`[API] IA ${newPausedState ? "pausada" : "reanudada"} para conversación ${configId}:${phoneNumber}`)
 
     return NextResponse.json({
       success: true,
       paused: newPausedState,
-      message: newPausedState ? "IA pausada exitosamente" : "IA reanudada exitosamente",
+      phoneNumber,
+      message: newPausedState ? "IA pausada para esta conversación" : "IA reanudada para esta conversación",
     })
   } catch (error) {
     console.error("[API] Error al cambiar estado de pausa:", error)

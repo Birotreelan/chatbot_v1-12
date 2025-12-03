@@ -4,6 +4,7 @@ import { getRedisClient } from "./redis"
 const CONVERSATION_PREFIX = "conversation:"
 const CONVERSATION_CONTACT_PREFIX = "conversation_contact:"
 const CONVERSATION_CONTACTS_SET_PREFIX = "conversation_contacts:"
+const CONVERSATION_PAUSED_PREFIX = "conversation_paused:"
 
 // Duración de almacenamiento: 15 días en segundos
 const CONVERSATION_TTL = 15 * 24 * 60 * 60 // 15 días
@@ -330,4 +331,84 @@ export async function updateContactMessageCount(configId: string, phoneNumber: s
   } catch (error) {
     console.error("[CONVERSATIONS] Error actualizando contador:", error)
   }
+}
+
+export async function isConversationPaused(configId: string, phoneNumber: string): Promise<boolean> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) {
+      console.warn("[CONVERSATIONS] Redis no disponible, asumiendo no pausado")
+      return false
+    }
+
+    const pauseKey = `${CONVERSATION_PAUSED_PREFIX}${configId}:${phoneNumber}`
+    const isPaused = await redisClient.get(pauseKey)
+
+    return isPaused === "1" || isPaused === true
+  } catch (error) {
+    console.error("[CONVERSATIONS] Error verificando estado de pausa:", error)
+    return false
+  }
+}
+
+export async function setConversationPaused(configId: string, phoneNumber: string, paused: boolean): Promise<boolean> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) {
+      console.warn("[CONVERSATIONS] Redis no disponible, no se puede cambiar estado de pausa")
+      return false
+    }
+
+    const pauseKey = `${CONVERSATION_PAUSED_PREFIX}${configId}:${phoneNumber}`
+
+    if (paused) {
+      // Pausar la conversación (sin TTL para que permanezca hasta que se reanude manualmente)
+      await redisClient.set(pauseKey, "1")
+      console.log(`[CONVERSATIONS] ⏸️ Conversación pausada: ${configId}:${phoneNumber}`)
+    } else {
+      // Reanudar la conversación
+      await redisClient.del(pauseKey)
+      console.log(`[CONVERSATIONS] ▶️ Conversación reanudada: ${configId}:${phoneNumber}`)
+    }
+
+    return true
+  } catch (error) {
+    console.error("[CONVERSATIONS] Error cambiando estado de pausa:", error)
+    return false
+  }
+}
+
+export async function getPausedConversations(configId: string): Promise<string[]> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) {
+      return []
+    }
+
+    const pattern = `${CONVERSATION_PAUSED_PREFIX}${configId}:*`
+    const keys = await scanRedisKeysConversations(redisClient, pattern)
+
+    // Extraer los números de teléfono de las claves
+    const prefix = `${CONVERSATION_PAUSED_PREFIX}${configId}:`
+    return keys.map((key) => key.replace(prefix, ""))
+  } catch (error) {
+    console.error("[CONVERSATIONS] Error obteniendo conversaciones pausadas:", error)
+    return []
+  }
+}
+
+async function scanRedisKeysConversations(redisClient: any, pattern: string): Promise<string[]> {
+  const allKeys: string[] = []
+  let cursor = "0"
+
+  do {
+    const result = await redisClient.scan(cursor, {
+      match: pattern,
+      count: 100,
+    })
+    cursor = typeof result[0] === "number" ? result[0].toString() : result[0]
+    allKeys.push(...result[1])
+  } while (cursor !== "0")
+
+  return allKeys
 }

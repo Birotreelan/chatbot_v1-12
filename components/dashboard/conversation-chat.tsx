@@ -102,10 +102,12 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
 
   async function loadPauseState() {
     try {
-      const response = await fetch(`/api/dashboard/configs/${configId}`)
+      const response = await fetch(
+        `/api/dashboard/conversation-pause-status?configId=${configId}&phoneNumber=${encodeURIComponent(phoneNumber)}`,
+      )
       if (response.ok) {
-        const config = await response.json()
-        setIsPaused(config.paused || false)
+        const data = await response.json()
+        setIsPaused(data.paused || false)
       }
     } catch (error) {
       console.error("Error cargando estado de pausa:", error)
@@ -118,7 +120,7 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
       const response = await fetch("/api/dashboard/configs/toggle-pause", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ configId }),
+        body: JSON.stringify({ configId, phoneNumber }),
       })
 
       if (response.ok) {

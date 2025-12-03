@@ -6,7 +6,7 @@ import { getArgentinaDateTime } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
-import { saveConversationMessage } from "./conversations"
+import { saveConversationMessage, isConversationPaused } from "./conversations"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime } from "./appointment-stats"
@@ -109,9 +109,20 @@ export async function handleMessage(value: WhatsAppValue) {
 
     console.log(`[WHATSAPP] Configuración encontrada: ${config.displayName} (ID: ${config.id})`)
 
-    if (config.paused) {
-      console.log(`[WHATSAPP] ⏸️ IA pausada para config ${config.id}, mensaje ignorado`)
+    const conversationPaused = await isConversationPaused(config.id, userPhoneNumber)
+    if (conversationPaused) {
+      console.log(`[WHATSAPP] ⏸️ Conversación pausada para ${userPhoneNumber} en config ${config.id}, mensaje ignorado`)
       await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+      // Guardar el mensaje aunque la IA esté pausada para mantener el historial
+      await saveConversationMessage({
+        id: nanoid(),
+        role: "user",
+        content: userMessage,
+        timestamp: new Date().toISOString(),
+        phoneNumber: userPhoneNumber,
+        configId: config.id,
+        messageType: message.type,
+      })
       return
     }
 
@@ -125,10 +136,6 @@ export async function handleMessage(value: WhatsAppValue) {
       messageType: message.type,
     })
 
-    // Actualizar estadísticas - mensaje recibido
-    await updateWhatsAppStats(config.id, { messagesReceived: 1 })
-
-    // Detectar si es una respuesta de botón y enviarla al proxy
     if (message.type === "button" && message.button) {
       console.log(
         `[WHATSAPP] Detectada respuesta de botón: ${message.button.text} (payload: ${message.button.payload})`,
