@@ -935,6 +935,9 @@ export async function cancelarTurnoHerramienta(
 const OPENAI_TIMEOUT = Number.parseInt(process.env.OPENAI_TIMEOUT || "45000", 10)
 const EARLY_WARNING_TIME = 30000 // 30 seconds
 
+// Si el run queda en "queued" por más de este tiempo, cancelar y reintentar
+const QUEUED_TIMEOUT = Number.parseInt(process.env.QUEUED_TIMEOUT || "60000", 10) // 60 segundos por defecto
+
 // Número máximo de reintentos
 const MAX_RETRIES = Number.parseInt(process.env.MAX_RETRIES || "3", 10)
 
@@ -1324,10 +1327,13 @@ async function processRunWithCorrectFlow(
     const isTimeout = error.message && error.message.includes("Timeout esperando run")
     const isRateLimitError = error.message && error.message.includes("Please try again in")
     const isActiveRunError = error.message && error.message.includes("already has an active run")
+    const isQueuedTimeout = error.message && error.message.includes("Run atascado en cola")
 
     // Log error type for debugging
     if (isTimeout) {
       console.log(`[OPENAI] ⏰ Timeout detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
+    } else if (isQueuedTimeout) {
+      console.log(`[OPENAI] 🔄 Run atascado en cola detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
     } else if (isRateLimitError) {
       console.log(`[OPENAI] 🚦 Rate limit detectado (intento ${retryCount + 1}/${MAX_RETRIES + 1})`)
     } else if (isActiveRunError) {
@@ -1346,6 +1352,9 @@ async function processRunWithCorrectFlow(
           waitTime = Math.ceil(Number.parseFloat(match[1]) * 1000) + 1000
           console.log(`[OPENAI] 🚦 Usando delay sugerido por OpenAI: ${waitTime}ms`)
         }
+      } else if (isQueuedTimeout) {
+        waitTime = 3000 // 3 segundos antes de reintentar
+        console.log(`[OPENAI] 🔄 Reintentando rápido después de run atascado en cola: ${waitTime}ms`)
       } else if (isTimeout) {
         // Use exponential backoff for timeouts
         waitTime = calculateBackoffDelay(retryCount)
@@ -1407,7 +1416,10 @@ async function processRunWithCorrectFlow(
       let errorMessage =
         "Lo siento, no pude procesar tu consulta en este momento. Por favor, intenta nuevamente en unos momentos."
 
-      if (isTimeout) {
+      if (isQueuedTimeout) {
+        errorMessage =
+          "Lo siento, los servidores están experimentando alta demanda. Por favor, intenta nuevamente en unos minutos."
+      } else if (isTimeout) {
         errorMessage =
           "Lo siento, tu consulta está tomando más tiempo del esperado. Por favor, intenta nuevamente en unos momentos."
       }
@@ -1441,13 +1453,15 @@ async function processRunWithCorrectFlow(
     // </CHANGE>
 
     // Log error for monitoring
-    if (isTimeout) {
+    if (isQueuedTimeout) {
+      await logError("openai_queued_timeout", error instanceof Error ? error : new Error(String(error)))
+    } else if (isTimeout) {
       await logError("openai_timeout", error instanceof Error ? error : new Error(String(error)))
     } else {
       await logError("openai_run", error instanceof Error ? error : new Error(String(error)))
     }
 
-    return { success: false, error: isTimeout ? "timeout" : "error" }
+    return { success: false, error: isQueuedTimeout ? "queued_timeout" : isTimeout ? "timeout" : "error" }
   }
 }
 
@@ -1495,6 +1509,7 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
   let pollInterval = 800 // Start with 800ms for faster initial response
   const maxPollInterval = 2500 // Max 2.5 seconds between polls
   let earlyWarningSent = false
+  let queuedStartTime: number | null = null
 
   const makeDirectAPICall = async (tId: string, rId: string) => {
     const url = `https://api.openai.com/v1/threads/${tId}/runs/${rId}`
@@ -1519,9 +1534,36 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
   let pollCount = 0
   let lastStatus = run.status
 
+  if (run.status === "queued") {
+    queuedStartTime = Date.now()
+  }
+
   while (run.status === "queued" || run.status === "in_progress") {
     pollCount++
     const elapsed = Date.now() - startTime
+
+    if (run.status === "queued") {
+      if (queuedStartTime === null) {
+        queuedStartTime = Date.now()
+      }
+      const queuedElapsed = Date.now() - queuedStartTime
+
+      if (queuedElapsed > QUEUED_TIMEOUT) {
+        console.error(`[OPENAI] ⏰ QUEUED_TIMEOUT: Run en cola por ${queuedElapsed}ms (máximo: ${QUEUED_TIMEOUT}ms)`)
+        console.log(`[OPENAI] 🔄 El run está atascado en cola de OpenAI, cancelando para reintentar...`)
+
+        const cancelled = await cancelRunAndWait(threadId, runId)
+        if (!cancelled) {
+          console.error(`[OPENAI] ⚠️ No se pudo confirmar la cancelación del run atascado en cola`)
+        }
+
+        // Lanzar error específico para que processRunWithCorrectFlow pueda reintentar
+        throw new Error(`Run atascado en cola: ${queuedElapsed}ms en estado queued`)
+      }
+    } else {
+      // Si ya no está en queued, resetear el contador
+      queuedStartTime = null
+    }
 
     if (!earlyWarningSent && elapsed > EARLY_WARNING_TIME) {
       earlyWarningSent = true
