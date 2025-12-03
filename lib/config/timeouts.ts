@@ -69,3 +69,105 @@ export async function fetchWithTimeout(url: string, options: RequestInit = {}, t
     await agent.close()
   }
 }
+
+// Errores que se pueden reintentar (transitorios)
+const RETRYABLE_ERROR_CODES = [
+  "ETIMEDOUT",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EPIPE",
+  "UND_ERR_CONNECT_TIMEOUT",
+]
+
+const RETRYABLE_ERROR_MESSAGES = ["fetch failed", "network error", "socket hang up", "connection refused"]
+
+function isRetryableError(error: any): boolean {
+  // Verificar código de error
+  const errorCode = error.cause?.code || error.code
+  if (errorCode && RETRYABLE_ERROR_CODES.includes(errorCode)) {
+    return true
+  }
+
+  // Verificar errno para ETIMEDOUT (-110 en Linux)
+  if (error.cause?.errno === -110 || error.errno === -110) {
+    return true
+  }
+
+  // Verificar mensaje de error
+  const errorMessage = (error.message || "").toLowerCase()
+  if (RETRYABLE_ERROR_MESSAGES.some((msg) => errorMessage.includes(msg))) {
+    return true
+  }
+
+  return false
+}
+
+export interface RetryOptions {
+  maxRetries?: number
+  initialDelayMs?: number
+  maxDelayMs?: number
+  backoffMultiplier?: number
+}
+
+const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
+  maxRetries: 3,
+  initialDelayMs: 2000,
+  maxDelayMs: 10000,
+  backoffMultiplier: 2,
+}
+
+// Función de espera
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// Fetch con reintentos automáticos para errores de red
+export async function fetchWithRetry(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs: number,
+  retryOptions: RetryOptions = {},
+): Promise<Response> {
+  const opts = { ...DEFAULT_RETRY_OPTIONS, ...retryOptions }
+  let lastError: Error | null = null
+  let currentDelay = opts.initialDelayMs
+
+  for (let attempt = 1; attempt <= opts.maxRetries + 1; attempt++) {
+    try {
+      console.log(`[FETCH-RETRY] Intento ${attempt}/${opts.maxRetries + 1} para ${url}`)
+      const response = await fetchWithTimeout(url, options, timeoutMs)
+
+      if (attempt > 1) {
+        console.log(`[FETCH-RETRY] Éxito en intento ${attempt} para ${url}`)
+      }
+
+      return response
+    } catch (error: any) {
+      lastError = error
+
+      // Verificar si el error es reinentable
+      if (!isRetryableError(error)) {
+        console.log(`[FETCH-RETRY] Error no reinentable: ${error.message}`)
+        throw error
+      }
+
+      // Si es el último intento, no reintentar
+      if (attempt > opts.maxRetries) {
+        console.error(`[FETCH-RETRY] Todos los ${opts.maxRetries + 1} intentos fallaron para ${url}`)
+        throw error
+      }
+
+      console.warn(
+        `[FETCH-RETRY] Intento ${attempt} falló (${error.cause?.code || error.message}), reintentando en ${currentDelay}ms...`,
+      )
+
+      await sleep(currentDelay)
+      currentDelay = Math.min(currentDelay * opts.backoffMultiplier, opts.maxDelayMs)
+    }
+  }
+
+  // Esto no debería alcanzarse, pero por seguridad
+  throw lastError || new Error("Fetch failed after retries")
+}
