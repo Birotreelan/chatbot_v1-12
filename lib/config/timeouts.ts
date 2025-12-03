@@ -113,8 +113,8 @@ export interface RetryOptions {
 
 const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
   maxRetries: 3,
-  initialDelayMs: 2000,
-  maxDelayMs: 10000,
+  initialDelayMs: 8000, // 8 segundos inicial (antes 2s)
+  maxDelayMs: 45000, // 45 segundos máximo (antes 10s)
   backoffMultiplier: 2,
 }
 
