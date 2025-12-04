@@ -12,7 +12,8 @@ import {
   obtenerSubespecialidades,
   buscarTurnosDisponibles,
   validarObraSocial,
-  cancelarTurno as apiCancelarTurno, // Importar la nueva función
+  cancelarTurno as apiCancelarTurno,
+  obtenerTodasLasSedes,
 } from "./api-tools/api-functions"
 import type { AbortSignal } from "abort-controller"
 import { saveConversationMessage } from "./conversations"
@@ -94,13 +95,20 @@ export const openaiTools = {
     },
   },
   obtener_datos_sede: {
-    description: "Obtiene info de una sede",
+    description: "Obtiene info de una sede específica",
     parameters: {
       type: "object",
       properties: {
         sede_id: { type: "string", description: "ID de la sede" },
       },
       required: ["sede_id"],
+    },
+  },
+  obtener_sedes: {
+    description: "Obtiene el listado completo de todas las sedes disponibles",
+    parameters: {
+      type: "object",
+      properties: {},
     },
   },
   obtener_obras_sociales: {
@@ -210,6 +218,7 @@ const FUNCTION_MESSAGES: Record<string, string> = {
   registrar_evento_cita: "Registrando el evento de la cita...",
   // Mensaje para cancelar turno
   cancelar_turno: "Procesando la cancelación de tu turno, aguardá unos instantes...",
+  obtener_sedes: "Consultando las sedes disponibles, aguardá unos instantes.",
 }
 
 // Función para truncar respuestas largas de herramientas
@@ -292,6 +301,10 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
 
       case "obtener_datos_sede":
         return await obtenerDatosSedeHerramienta(clienteId, args.sede_id)
+
+      case "obtener_sedes":
+        // Cambiado para usar la nueva función importada
+        return await obtenerSedesHerramienta(clienteId)
 
       case "obtener_obras_sociales":
         return await obtenerObrasSociales(clienteId)
@@ -599,6 +612,37 @@ export async function obtenerDatosSedeHerramienta(clienteId: string, sedeId: str
   } catch (error) {
     console.error("[TOOLS] ❌ Error obteniendo datos de sede:", error)
     return "Error al obtener los datos de la sede"
+  }
+}
+
+// Nueva función para obtener listado de todas las sedes
+export async function obtenerSedesHerramienta(clienteId: string): Promise<string> {
+  try {
+    console.log(`[TOOLS] 🏥 Obteniendo listado de sedes para cliente: ${clienteId}`)
+
+    const resultado = await obtenerTodasLasSedes(clienteId)
+
+    if (resultado.success && resultado.sedes && Array.isArray(resultado.sedes)) {
+      console.log(`[TOOLS] ✅ Sedes obtenidas: ${resultado.sedes.length}`)
+      return JSON.stringify({
+        exito: true,
+        sedes: resultado.sedes,
+        total: resultado.total || resultado.sedes.length,
+        mensaje: `Se encontraron ${resultado.sedes.length} sedes.`,
+      })
+    } else {
+      console.log(`[TOOLS] ⚠️ No se encontraron sedes.`)
+      return JSON.stringify({
+        exito: false,
+        mensaje: resultado.error || "No se encontraron sedes disponibles.",
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error obteniendo sedes:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error al obtener las sedes.",
+    })
   }
 }
 

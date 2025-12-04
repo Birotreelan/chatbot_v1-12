@@ -402,6 +402,76 @@ export async function obtenerDatosSede(clienteId: string, sedeId: string): Promi
   }
 }
 
+// Función para obtener listado de todas las sedes
+export async function obtenerTodasLasSedes(clienteId: string): Promise<{
+  success: boolean
+  sedes?: Array<{
+    Id: string
+    Nombre_Completo: string
+    Domicilio: string
+    Telefono: string
+    E_Mail: string
+    Localidad: string
+    Provincia: string
+    Horario: string
+    Dominio_Web: string
+  }>
+  total?: number
+  error?: string
+}> {
+  try {
+    console.log(`[API] 🏥 Obteniendo listado de todas las sedes para cliente: ${clienteId}`)
+
+    const config = getClinicApiConfig()
+
+    if (!config.baseUrl) {
+      console.error("[API] ❌ URL de API no configurada")
+      return { success: false, error: "URL de API no configurada" }
+    }
+
+    const requestBody = {
+      Cliente_Id: clienteId,
+      Action: "get_data_sedes",
+    }
+
+    console.log("[API] 📤 Enviando request:", requestBody)
+
+    const response = await fetch(config.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(config.timeout),
+    })
+
+    if (!response.ok) {
+      console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
+      return { success: false, error: `Error HTTP: ${response.status}` }
+    }
+
+    const data = await response.json()
+    console.log("[API] 📥 Respuesta recibida:", data)
+
+    if (data.success && data.sedes) {
+      console.log(`[API] ✅ Listado de sedes obtenido: ${data.sedes.length} sedes`)
+      return {
+        success: true,
+        sedes: data.sedes,
+        total: data.total || data.sedes.length,
+      }
+    } else {
+      console.error("[API] ❌ Respuesta no exitosa:", data)
+      return { success: false, error: data.error || "Error desconocido" }
+    }
+  } catch (error) {
+    console.error("[API] ❌ Error al obtener listado de sedes:", error)
+    return { success: false, error: error instanceof Error ? error.message : "Error desconocido" }
+  }
+}
+
+export const obtenerSedes = obtenerTodasLasSedes
+
 // Función auxiliar para formatear los datos de sede para el bloque SISTEMA
 export function formatearDatosSede(sedeData: SedeResponse["sede"]): string {
   return `Sede: ${sedeData.Nombre_Completo}
@@ -491,6 +561,7 @@ export async function confirmarTurno(clienteId: string, turnoData: any): Promise
       return {
         exito: false,
         error: `Error HTTP ${response.status}`,
+        mensaje: "No se pudo confirmar el turno. Por favor, intente nuevamente o comuníquese con la clínica.",
       }
     }
 
@@ -503,6 +574,7 @@ export async function confirmarTurno(clienteId: string, turnoData: any): Promise
     return {
       exito: false,
       error: error instanceof Error ? error.message : "Error desconocido",
+      mensaje: "Ocurrió un error al confirmar el turno. Por favor, intente nuevamente.",
     }
   }
 }
