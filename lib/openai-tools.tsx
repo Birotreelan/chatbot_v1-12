@@ -906,20 +906,25 @@ export async function cancelarTurnoHerramienta(
     }
 
     // Llamar a la función de la API para cancelar el turno
-    const resultado = await apiCancelarTurno(clienteId, turnoId, motivo, pacienteDatos)
+    const resultado = await apiCancelarTurno(clienteId, {
+      turno_id: turnoId,
+      motivo: motivo,
+      paciente_datos: pacienteDatos,
+    })
 
-    if (resultado.success) {
+    if (resultado.exito || resultado.success) {
       console.log(`[TOOLS] ✅ Turno ${turnoId} cancelado exitosamente.`)
       return JSON.stringify({
         exito: true,
-        mensaje: "Tu turno ha sido cancelado correctamente.",
-        data: resultado.data,
+        mensaje: resultado.mensaje || "Tu turno ha sido cancelado correctamente.",
+        data: resultado.datos || resultado.data,
       })
     } else {
       console.error(`[TOOLS] ❌ Error al cancelar turno ${turnoId}:`, resultado.error)
       return JSON.stringify({
         exito: false,
-        mensaje: resultado.error?.message || "No se pudo cancelar el turno.",
+        mensaje:
+          resultado.error?.mensaje || resultado.error?.message || resultado.mensaje || "No se pudo cancelar el turno.",
       })
     }
   } catch (error) {
@@ -1578,7 +1583,7 @@ async function processRunWithCorrectFlow(
                 }
               }
             } else {
-              // Para otros estados activos (queued, in_progress), intentar cancelar normally
+              // Para otros estados activos (queued, in_progress), intentar<bos>dar cancelar normally
               const cancelled = await cancelRunAndWait(threadId, activeRuns.runId)
               if (!cancelled) {
                 console.error(`[OPENAI] ❌ No se pudo cancelar el run activo, intentando crear nuevo thread...`)
