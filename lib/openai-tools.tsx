@@ -50,6 +50,7 @@ export const openaiTools = {
         profesional: { type: "string", description: "Nombre profesional (opcional)" },
         especialidad: { type: "string", description: "Nombre especialidad (opcional)" },
         profesional_id: { type: "string", description: "ID profesional (opcional)" },
+        sede_id: { type: "string", description: "ID de la sede donde buscar turnos (opcional)" },
       },
       required: [], // Made all parameters optional since OpenAI might not pass rango_fechas
     },
@@ -287,6 +288,7 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
           args.profesional,
           args.especialidad,
           args.profesional_id,
+          args.sede_id,
         )
 
       case "confirmar_turno":
@@ -785,6 +787,7 @@ export async function buscarTurnosDisponiblesHerramienta(
   profesional?: string,
   especialidad?: string,
   profesionalId?: string,
+  sedeId?: string, // Added sedeId parameter
 ): Promise<string> {
   try {
     if (!rangoFechas) {
@@ -798,11 +801,20 @@ export async function buscarTurnosDisponiblesHerramienta(
       console.log(`[TOOLS] 📅 No se proporcionó rango de fechas, usando por defecto: ${rangoFechas}`)
     }
 
+    // Pass sedeId to the api function
     console.log(
-      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}, profesional_id=${profesionalId}`,
+      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}, profesional_id=${profesionalId}, sede_id=${sedeId}`, // Log sedeId
     )
 
-    const resultado = await buscarTurnosDisponibles(rangoFechas, profesional, especialidad, profesionalId, clienteId)
+    // Pass sedeId to the api function
+    const resultado = await buscarTurnosDisponibles(
+      rangoFechas,
+      profesional,
+      especialidad,
+      profesionalId,
+      clienteId,
+      sedeId,
+    )
 
     if (resultado.exito && resultado.datos) {
       if (resultado.datos.multiple) {
