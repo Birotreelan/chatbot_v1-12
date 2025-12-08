@@ -721,11 +721,19 @@ export async function validarTelefono(clienteId: string, telefono: string): Prom
 
     if (resultado.exito && resultado.datos) {
       console.log(`[TOOLS] ✅ Teléfono validado exitosamente: ${telefono}`)
-      return JSON.stringify({
+      const response: any = {
         exito: true,
         paciente: resultado.datos,
         mensaje: "Paciente encontrado por número de teléfono",
-      })
+      }
+
+      // Add turnos_proximos if available
+      if ((resultado as any).turnosProximos && (resultado as any).turnosProximos.length > 0) {
+        response.turnos_proximos = (resultado as any).turnosProximos
+        console.log(`[TOOLS] 📅 Turnos próximos encontrados: ${(resultado as any).turnosProximos.length}`)
+      }
+
+      return JSON.stringify(response)
     } else {
       console.log(`[TOOLS] ⚠️ Teléfono no encontrado: ${telefono}`)
       return JSON.stringify({

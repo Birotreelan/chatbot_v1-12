@@ -202,9 +202,11 @@ export async function buscarPaciente(
 
   if (resultado.exito && resultado.datos) {
     const pacienteData = resultado.datos.paciente || resultado.datos
+    const turnosProximos = resultado.datos.turnos_proximos || []
     return {
       exito: true,
       datos: pacienteData,
+      turnosProximos: turnosProximos,
     }
   }
 
