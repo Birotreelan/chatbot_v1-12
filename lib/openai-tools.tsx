@@ -227,7 +227,11 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
   const responseStr = JSON.stringify(response)
   const originalLength = responseStr.length
 
+  console.log(`[OPENAI] 📊 Respuesta ORIGINAL completa (${originalLength} chars):`)
+  console.log(`[OPENAI] 📊 ${responseStr}`)
+
   if (responseStr.length <= maxLength) {
+    console.log(`[OPENAI] ✅ Respuesta NO truncada, se envía completa a OpenAI`)
     return response
   }
 
@@ -246,18 +250,23 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
       }
 
       console.log(`[OPENAI] ✂️ Array truncado: ${originalCount} → ${truncatedData.length} elementos`)
+      console.log(`[OPENAI] 📤 Respuesta TRUNCADA que se envía a OpenAI:`)
+      console.log(`[OPENAI] 📤 ${JSON.stringify(truncatedResponse)}`)
       return truncatedResponse
     }
   }
 
   // Fallback: truncar el string completo
   const truncatedString = responseStr.substring(0, maxLength - 100) + "... [TRUNCADO]"
-  return {
+  const fallbackResponse = {
     exito: response.exito || false,
     datos: truncatedString,
     _truncated: true,
     _originalLength: originalLength,
   }
+  console.log(`[OPENAI] 📤 Respuesta TRUNCADA (fallback) que se envía a OpenAI:`)
+  console.log(`[OPENAI] 📤 ${JSON.stringify(fallbackResponse)}`)
+  return fallbackResponse
 }
 
 // Implementación directa de todas las funciones

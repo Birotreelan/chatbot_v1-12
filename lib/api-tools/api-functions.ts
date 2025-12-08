@@ -75,9 +75,9 @@ async function fetchProxyApi<T>(
 
     // Obtener el texto de la respuesta
     const responseText = await response.text()
-    console.log(
-      `[API] 📥 ${response.status} ${responseText.substring(0, 200)}${responseText.length > 200 ? "..." : ""}`,
-    )
+    console.log(`[API] 📥 ${response.status} Respuesta COMPLETA del proxy:`)
+    console.log(`[API] 📥 ${responseText}`)
+    console.log(`[API] 📥 Longitud total: ${responseText.length} caracteres`)
 
     // Intentar parsear la respuesta como JSON
     let data
