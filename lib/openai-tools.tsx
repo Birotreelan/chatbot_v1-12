@@ -445,9 +445,34 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         })
       }
 
-      await openai.beta.threads.runs.submitToolOutputs(threadId, runId, {
-        tool_outputs: toolOutputs,
+      const submitUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`
+      const submitResponse = await fetch(submitUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+          "OpenAI-Beta": "assistants=v2",
+        },
+        body: JSON.stringify({ tool_outputs: toolOutputs }),
       })
+
+      if (!submitResponse.ok) {
+        const errorText = await submitResponse.text()
+        throw new Error(`Submit tool outputs failed: ${submitResponse.status} ${errorText}`)
+      }
+
+      console.log(`[OPENAI] 📤 Resultados enviados a OpenAI`)
+
+      console.log(`[OPENAI] 📤 ===== ENVIANDO A OPENAI =====`)
+      console.log(`[OPENAI] 📤 Cantidad de tool outputs: ${toolOutputs.length}`)
+      toolOutputs.forEach((output, index) => {
+        console.log(`[OPENAI] 📤 Tool Output ${index + 1}:`)
+        console.log(`[OPENAI] 📤   - tool_call_id: ${output.tool_call_id}`)
+        console.log(`[OPENAI] 📤   - output (${output.output.length} chars):`)
+        console.log(`[OPENAI] 📤   ${output.output}`)
+      })
+      console.log(`[OPENAI] 📤 ===== FIN DATOS ENVIADOS =====`)
+      // </CHANGE>
 
       // Continuar procesando
       await processWebRunOnly(openai, threadId, runId, clienteId)
@@ -1538,6 +1563,17 @@ async function processRunWithCorrectFlow(
 
         console.log(`[OPENAI] 📤 Resultados enviados a OpenAI`)
 
+        console.log(`[OPENAI] 📤 ===== ENVIANDO A OPENAI =====`)
+        console.log(`[OPENAI] 📤 Cantidad de tool outputs: ${toolOutputs.length}`)
+        toolOutputs.forEach((output, index) => {
+          console.log(`[OPENAI] 📤 Tool Output ${index + 1}:`)
+          console.log(`[OPENAI] 📤   - tool_call_id: ${output.tool_call_id}`)
+          console.log(`[OPENAI] 📤   - output (${output.output.length} chars):`)
+          console.log(`[OPENAI] 📤   ${output.output}`)
+        })
+        console.log(`[OPENAI] 📤 ===== FIN DATOS ENVIADOS =====`)
+        // </CHANGE>
+
         return await processRunWithCorrectFlow(
           openai,
           threadId,
@@ -1895,7 +1931,7 @@ async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, ru
   console.log(`[OPENAI] ⏱️ Completado en ${totalTime}ms (${pollCount} polls, ${run.status})`)
 
   if (totalTime > 20000) {
-    console.warn(`[OPENAI] 🐌 Respuesta lenta: ${totalTime}ms`)
+    console.warn(`[OPENAI] 🐌 Respuesta હતી: ${totalTime}ms`)
   }
 
   return run
