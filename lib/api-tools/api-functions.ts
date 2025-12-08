@@ -17,6 +17,14 @@ const CACHE_PREFIX = "api_cache:"
 // TTL para la caché (en segundos)
 const CACHE_TTL = 60 * 5 // 5 minutos
 
+const NO_CACHE_ACTIONS = [
+  "get_paciente", // Incluye turnos_proximos que pueden cambiar
+  "get_turnos_paciente", // Turnos del paciente
+  "cancelar_turno", // Acciones de modificación
+  "confirmar_turno",
+  "reservar_turno",
+]
+
 // Función para generar clave de caché
 function getCacheKey(action: string, params: Record<string, any>): string {
   return `${CACHE_PREFIX}${action}:${JSON.stringify(params)}`
@@ -29,12 +37,14 @@ async function fetchProxyApi<T>(
   params: Record<string, any> = {},
   useCache = true,
 ): Promise<ApiResponse<T>> {
+  const shouldUseCache = useCache && !NO_CACHE_ACTIONS.includes(action)
+
   // Generar clave de caché
   const cacheKey = getCacheKey(action, { clienteId, ...params })
   const redis = getRedisClient()
 
   // Verificar caché si está habilitada
-  if (useCache && redis) {
+  if (shouldUseCache && redis) {
     const cachedData = await redis.get(cacheKey)
     if (cachedData) {
       console.log(`[CACHE] ✅ Hit para ${action}`)
@@ -46,6 +56,8 @@ async function fetchProxyApi<T>(
         return cachedData as ApiResponse<T>
       }
     }
+  } else if (NO_CACHE_ACTIONS.includes(action)) {
+    console.log(`[CACHE] 🚫 Sin caché para ${action} (datos dinámicos)`)
   }
 
   try {
@@ -143,8 +155,7 @@ async function fetchProxyApi<T>(
         }
       }
 
-      // Guardar en caché si es exitoso
-      if (useCache && redis) {
+      if (shouldUseCache && redis) {
         const result = { exito: true, datos: data.data }
         await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
         console.log(`[CACHE] 💾 Guardado ${action}`)
@@ -159,8 +170,7 @@ async function fetchProxyApi<T>(
     // Si llegamos aquí, asumimos que la respuesta es exitosa
     const result = { exito: true, datos: data }
 
-    // Guardar en caché
-    if (useCache && redis) {
+    if (shouldUseCache && redis) {
       await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
       console.log(`[CACHE] 💾 Guardado ${action}`)
     }
