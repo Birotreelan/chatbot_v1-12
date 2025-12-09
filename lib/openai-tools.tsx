@@ -1196,15 +1196,19 @@ async function getPhoneNumberFromThread(threadId: string, configId: string): Pro
           const threadInfo = JSON.parse(threadData)
           if (threadInfo.threadId === threadId) {
             console.log(`[OPENAI] ✅ Thread encontrado en clave: ${key}`)
-            console.log(`[OPENAI] ✅ Número de teléfono: ${threadInfo.phoneNumber}`)
-            return threadInfo.phoneNumber
+            // Use the phoneNumber stored in threadData if available, otherwise derive it
+            const phoneNumber = threadInfo.phoneNumber || key.split(":")[1]
+            console.log(`[OPENAI] ✅ Número de teléfono: ${phoneNumber}`)
+            return phoneNumber
           }
         } else if (threadData && typeof threadData === "object") {
           const threadInfo = threadData as any
           if (threadInfo.threadId === threadId) {
             console.log(`[OPENAI] ✅ Thread encontrado en clave: ${key}`)
-            console.log(`[OPENAI] ✅ Número de teléfono: ${threadInfo.phoneNumber}`)
-            return threadInfo.phoneNumber
+            // Use the phoneNumber stored in threadData if available, otherwise derive it
+            const phoneNumber = threadInfo.phoneNumber || key.split(":")[1]
+            console.log(`[OPENAI] ✅ Número de teléfono: ${phoneNumber}`)
+            return phoneNumber
           }
         }
       }
@@ -1431,6 +1435,7 @@ async function createNewThreadForStuckRun(
 
       const threadData = {
         threadId: newThread.id,
+        phoneNumber: userPhone,
         createdAt: new Date().toISOString(),
         lastUsed: new Date().toISOString(),
         previousThreadId: oldThreadId,
