@@ -60,29 +60,27 @@ export const openaiTools = {
     parameters: {
       type: "object",
       properties: {
-        turno_id: { type: "string", description: "ID del turno" },
+        fecha: { type: "string", description: "Fecha del turno a confirmar (YYYY-MM-DD)" },
         paciente_datos: {
           type: "object",
           description: "Datos del paciente",
           properties: {
-            nombre: { type: "string" },
-            apellido: { type: "string" },
             dni: { type: "string" },
             telefono: { type: "string" },
-            email: { type: "string" },
           },
+          required: ["dni", "telefono"],
         },
       },
-      required: ["turno_id", "paciente_datos"],
+      required: ["fecha", "paciente_datos"],
     },
   },
   cancelar_turno: {
-    description: "Cancela un turno médico existente. Usar cuando el paciente solicita cancelar su turno.",
+    description: "Cancela un turno médico previamente reservado o confirmado",
     parameters: {
       type: "object",
       properties: {
-        turno_id: { type: "string", description: "ID del turno a cancelar" },
-        motivo: { type: "string", description: "Motivo de la cancelación (opcional)" },
+        fecha: { type: "string", description: "Fecha del turno a cancelar (YYYY-MM-DD)" },
+        motivo: { type: "string", description: "Motivo de la cancelación" },
         paciente_datos: {
           type: "object",
           description: "Datos del paciente para validación",
@@ -90,9 +88,10 @@ export const openaiTools = {
             dni: { type: "string" },
             telefono: { type: "string" },
           },
+          required: ["dni", "telefono"],
         },
       },
-      required: ["turno_id"],
+      required: ["fecha", "motivo", "paciente_datos"],
     },
   },
   obtener_datos_sede: {
@@ -220,6 +219,8 @@ const FUNCTION_MESSAGES: Record<string, string> = {
   // Mensaje para cancelar turno
   cancelar_turno: "Procesando la cancelación de tu turno, aguardá unos instantes...",
   obtener_sedes: "Consultando las sedes disponibles, aguardá unos instantes.",
+  // Mensaje para confirmar turno
+  confirmar_turno: "Procesando la confirmación de tu turno, aguardá unos instantes...",
 }
 
 // Función para truncar respuestas largas de herramientas
@@ -301,14 +302,12 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
         )
 
       case "confirmar_turno":
-        return await confirmarTurno(clienteId, {
-          turno_id: args.turno_id,
-          paciente_datos: args.paciente_datos,
-        })
+        // Use new arguments: fecha and paciente_datos with dni/telefono
+        return await confirmarTurnoHerramienta(clienteId, args.fecha, args.paciente_datos)
 
       // Implementar la nueva herramienta cancelar_turno
       case "cancelar_turno":
-        return await cancelarTurnoHerramienta(clienteId, args.turno_id, args.motivo, args.paciente_datos)
+        return await cancelarTurnoHerramienta(clienteId, args.fecha, args.motivo, args.paciente_datos)
 
       case "obtener_datos_sede":
         return await obtenerDatosSedeHerramienta(clienteId, args.sede_id)
@@ -986,43 +985,74 @@ export async function registrarEventoCitaHerramienta(
 // Implementar la función cancelarTurnoHerramienta
 export async function cancelarTurnoHerramienta(
   clienteId: string,
-  turnoId: string,
-  motivo?: string,
-  pacienteDatos?: { dni: string; telefono: string },
+  fecha: string, // Changed from turnoId
+  motivo: string, // Added as required
+  pacienteDatos: { dni: string; telefono: string }, // Added as required
 ): Promise<string> {
   try {
-    console.log(`[TOOLS] ❌ Cancelando turno: ${turnoId} para cliente: ${clienteId}`)
-    if (motivo) console.log(`[TOOLS] 📝 Motivo: ${motivo}`)
-    if (pacienteDatos) console.log(`[TOOLS] 👤 Datos del paciente:`, pacienteDatos)
+    console.log(`[TOOLS] ❌ Cancelando turno para fecha: ${fecha} cliente: ${clienteId}`)
+    console.log(`[TOOLS] 📝 Motivo: ${motivo}`)
+    console.log(`[TOOLS] 👤 Datos del paciente:`, pacienteDatos)
 
-    // Validar si se proporcionaron datos del paciente si el motivo no está vacío o si el turno ID es válido
-    if (!turnoId) {
+    // Validar parámetros requeridos
+    if (!fecha) {
       return JSON.stringify({
         exito: false,
-        mensaje: "El ID del turno es requerido para cancelarlo.",
+        mensaje: "La fecha del turno es requerida para cancelarlo.",
+      })
+    }
+
+    if (!motivo) {
+      return JSON.stringify({
+        exito: false,
+        mensaje: "El motivo de la cancelación es requerido.",
+      })
+    }
+
+    if (!pacienteDatos?.dni || !pacienteDatos?.telefono) {
+      return JSON.stringify({
+        exito: false,
+        mensaje: "Se requieren el DNI y teléfono del paciente para cancelar el turno.",
       })
     }
 
     // Llamar a la función de la API para cancelar el turno
     const resultado = await apiCancelarTurno(clienteId, {
-      turno_id: turnoId,
+      // Use 'fecha' instead of 'turno_id'
+      fecha: fecha,
       motivo: motivo,
       paciente_datos: pacienteDatos,
     })
 
-    if (resultado.exito || resultado.success) {
-      console.log(`[TOOLS] ✅ Turno ${turnoId} cancelado exitosamente.`)
-      return JSON.stringify({
+    // Manejar respuesta con el nuevo formato de la API
+    if (resultado.success) {
+      console.log(`[TOOLS] ✅ Turno(s) cancelado(s) exitosamente para fecha ${fecha}`)
+
+      // Formatear respuesta para OpenAI
+      const response: any = {
         exito: true,
-        mensaje: resultado.mensaje || "Tu turno ha sido cancelado correctamente.",
-        data: resultado.datos || resultado.data,
-      })
+        fecha: resultado.fecha,
+        cantidad_cancelados: resultado.cantidad_cancelados,
+        mensaje: resultado.mensaje,
+      }
+
+      if (resultado.turnos_cancelados?.length > 0) {
+        response.turnos_cancelados = resultado.turnos_cancelados
+      }
+
+      if (resultado.turnos_no_cancelables?.length > 0) {
+        response.turnos_no_cancelables = resultado.turnos_no_cancelables
+        response.cantidad_no_cancelables = resultado.cantidad_no_cancelables
+      }
+
+      return JSON.stringify(response)
     } else {
-      console.error(`[TOOLS] ❌ Error al cancelar turno ${turnoId}:`, resultado.error)
+      console.error(`[TOOLS] ❌ Error al cancelar turno para fecha ${fecha}:`, resultado)
       return JSON.stringify({
         exito: false,
-        mensaje:
-          resultado.error?.mensaje || resultado.error?.message || resultado.mensaje || "No se pudo cancelar el turno.",
+        fecha: resultado.fecha,
+        mensaje: resultado.mensaje || "No se pudo cancelar el turno.",
+        turnos_no_cancelables: resultado.turnos_no_cancelables,
       })
     }
   } catch (error) {
@@ -1030,6 +1060,61 @@ export async function cancelarTurnoHerramienta(
     return JSON.stringify({
       exito: false,
       mensaje: "Error interno al cancelar el turno.",
+    })
+  }
+}
+
+// Implementar la función confirmarTurnoHerramienta
+export async function confirmarTurnoHerramienta(
+  clienteId: string,
+  fecha: string, // Changed from turnoId
+  pacienteDatos: { dni: string; telefono: string }, // Changed from { turno_id: string; paciente_datos: any }
+): Promise<string> {
+  try {
+    console.log(`[TOOLS] ✅ Confirmando turno para fecha: ${fecha} para cliente: ${clienteId}`)
+    if (pacienteDatos) console.log(`[TOOLS] 👤 Datos del paciente:`, pacienteDatos)
+
+    // Validar entrada
+    if (!fecha) {
+      return JSON.stringify({
+        exito: false,
+        mensaje: "La fecha del turno es requerida para confirmarlo.",
+      })
+    }
+    if (!pacienteDatos || !pacienteDatos.dni || !pacienteDatos.telefono) {
+      return JSON.stringify({
+        exito: false,
+        mensaje: "Los datos del paciente (DNI y teléfono) son requeridos para la confirmación.",
+      })
+    }
+
+    // Llamar a la función de la API para confirmar el turno
+    const resultado = await confirmarTurno(clienteId, {
+      // Use 'fecha' instead of 'turno_id'
+      fecha: fecha,
+      paciente_datos: pacienteDatos,
+    })
+
+    if (resultado.exito || resultado.success) {
+      console.log(`[TOOLS] ✅ Turno del ${fecha} confirmado exitosamente.`)
+      return JSON.stringify({
+        exito: true,
+        mensaje: resultado.mensaje || "Tu turno ha sido confirmado correctamente.",
+        data: resultado.datos || resultado.data,
+      })
+    } else {
+      console.error(`[TOOLS] ❌ Error al confirmar turno del ${fecha}:`, resultado.error)
+      return JSON.stringify({
+        exito: false,
+        mensaje:
+          resultado.error?.mensaje || resultado.error?.message || resultado.mensaje || "No se pudo confirmar el turno.",
+      })
+    }
+  } catch (error) {
+    console.error("[TOOLS] ❌ Error inesperado en confirmarTurnoHerramienta:", error)
+    return JSON.stringify({
+      exito: false,
+      mensaje: "Error interno al confirmar el turno.",
     })
   }
 }

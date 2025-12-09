@@ -550,7 +550,16 @@ export async function obtenerTurnosDisponibles(
 }
 
 // Función para confirmar turno
-export async function confirmarTurno(clienteId: string, turnoData: any): Promise<ApiResponse<any>> {
+export async function confirmarTurno(
+  clienteId: string,
+  turnoData: {
+    fecha: string
+    paciente_datos: {
+      dni: string
+      telefono: string
+    }
+  },
+): Promise<ApiResponse<any>> {
   try {
     console.log(`[API] 🎯 Confirmando turno:`, turnoData)
 
@@ -559,7 +568,8 @@ export async function confirmarTurno(clienteId: string, turnoData: any): Promise
     const requestBody = {
       Cliente_Id: clienteId,
       Action: "confirmar_turno",
-      ...turnoData,
+      fecha: turnoData.fecha,
+      paciente_datos: turnoData.paciente_datos,
     }
 
     console.log("[API] 📤 Enviando request:", requestBody)
@@ -585,6 +595,7 @@ export async function confirmarTurno(clienteId: string, turnoData: any): Promise
     const data = await response.json()
     console.log("[API] 📥 Respuesta recibida:", data)
 
+    // Retornar la respuesta directamente (nuevo formato de API)
     return data
   } catch (error) {
     console.error("[API] ❌ Error al confirmar turno:", error)
@@ -600,14 +611,14 @@ export async function confirmarTurno(clienteId: string, turnoData: any): Promise
 export async function cancelarTurno(
   clienteId: string,
   turnoData: {
-    turno_id: string
-    motivo?: string
-    paciente_datos?: {
-      dni?: string
-      telefono?: string
+    fecha: string
+    motivo: string
+    paciente_datos: {
+      dni: string
+      telefono: string
     }
   },
-): Promise<ApiResponse<any>> {
+): Promise<any> {
   try {
     console.log(`[API] ❌ Cancelando turno:`, turnoData)
 
@@ -616,9 +627,9 @@ export async function cancelarTurno(
     const requestBody = {
       Cliente_Id: clienteId,
       Action: "cancelar_turno",
-      turno_id: turnoData.turno_id,
-      motivo: turnoData.motivo || "Cancelado por solicitud del paciente",
-      ...(turnoData.paciente_datos && { paciente_datos: turnoData.paciente_datos }),
+      fecha: turnoData.fecha,
+      motivo: turnoData.motivo,
+      paciente_datos: turnoData.paciente_datos,
     }
 
     console.log("[API] 📤 Enviando request de cancelación:", requestBody)
@@ -635,7 +646,7 @@ export async function cancelarTurno(
     if (!response.ok) {
       console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
       return {
-        exito: false,
+        success: false,
         error: `Error HTTP ${response.status}`,
         mensaje: "No se pudo cancelar el turno. Por favor, intente nuevamente o comuníquese con la clínica.",
       }
@@ -644,21 +655,12 @@ export async function cancelarTurno(
     const data = await response.json()
     console.log("[API] 📥 Respuesta de cancelación recibida:", data)
 
-    // Si la cancelación fue exitosa, agregar mensaje de confirmación
-    if (data.exito || data.success) {
-      return {
-        ...data,
-        exito: true,
-        mensaje: data.mensaje || "El turno ha sido cancelado exitosamente.",
-        next_steps: "Si desea reagendar, puede solicitar un nuevo turno.",
-      }
-    }
-
+    // Retornar la respuesta directamente (nuevo formato de API)
     return data
   } catch (error) {
     console.error("[API] ❌ Error al cancelar turno:", error)
     return {
-      exito: false,
+      success: false,
       error: error instanceof Error ? error.message : "Error desconocido",
       mensaje: "Ocurrió un error al cancelar el turno. Por favor, intente nuevamente.",
     }
