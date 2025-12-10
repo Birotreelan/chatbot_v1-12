@@ -690,11 +690,29 @@ export async function validarDni(clienteId: string, dni: string): Promise<string
 
     if (resultado.exito && resultado.datos) {
       console.log(`[TOOLS] ✅ DNI validado exitosamente: ${dni}`)
-      return JSON.stringify({
+
+      const response: any = {
         exito: true,
         paciente: resultado.datos,
         mensaje: "DNI validado correctamente",
-      })
+      }
+
+      // Agregar turnos_proximos si existen
+      if ((resultado as any).turnosProximos && (resultado as any).turnosProximos.length > 0) {
+        response.turnos_proximos = (resultado as any).turnosProximos
+        console.log(`[TOOLS] 📅 Turnos próximos encontrados: ${(resultado as any).turnosProximos.length}`)
+      } else {
+        response.turnos_proximos = []
+        console.log(`[TOOLS] 📅 No hay turnos próximos`)
+      }
+
+      // Agregar es_primera_vez si existe
+      if ((resultado as any).esPrimeraVez !== undefined && (resultado as any).esPrimeraVez !== null) {
+        response.es_primera_vez = (resultado as any).esPrimeraVez
+        console.log(`[TOOLS] 🆕 Es primera vez: ${(resultado as any).esPrimeraVez}`)
+      }
+
+      return JSON.stringify(response)
     } else {
       console.log(`[TOOLS] ⚠️ DNI no encontrado: ${dni}`)
       return JSON.stringify({
