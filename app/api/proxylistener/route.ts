@@ -730,15 +730,22 @@ Clinica: ${chatbotDataParsed.clinica}`
 Tipo_Mensaje: ${chatbotDataParsed.tipo_mensaje}`
           }
 
+          if (Sede_Id) {
+            notificationMessage += `
+Sede_ID: ${Sede_Id}`
+            console.log(`[PROXYLISTENER] 📍 Sede_ID agregado al contexto: ${Sede_Id}`)
+          }
+
           notificationMessage += `
 [/CONTEXTO_COMPLETO_TURNO]`
         } else {
           console.warn("[PROXYLISTENER] ⚠️ ADVERTENCIA: No se recibió Chatbot_Data en la solicitud")
-        }
 
-        if (Sede_Id) {
-          notificationMessage += `
+          if (Sede_Id) {
+            notificationMessage += `
 Sede_ID: ${Sede_Id}`
+            console.log(`[PROXYLISTENER] 📍 Sede_ID agregado (sin contexto completo): ${Sede_Id}`)
+          }
         }
 
         notificationMessage += `
