@@ -39,6 +39,7 @@
     "@radix-ui/react-tooltip": "1.1.6",
     "@upstash/qstash": "latest",
     "@upstash/redis": "latest",
+    "@vercel/kv": "3.0.0",
     "abort-controller": "3.0.0",
     "autoprefixer": "^10.4.20",
     "bufferutil": "latest",

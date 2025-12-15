@@ -37,14 +37,14 @@ Se ha refactorizado el sistema para que el `Sede_Id` se tome desde cada request 
 ### Flujo de Datos
 
 #### Para requests desde ProxyListener:
-\`\`\`
+```
 Request → Sede_Id extraído → Incluido en notificación a OpenAI
-\`\`\`
+```
 
 #### Para requests desde Web Chat:
-\`\`\`
+```
 Request → sede_id extraído → processWebChatMessage → createSystemBlock → obtenerDatosSede
-\`\`\`
+```
 
 ## Compatibilidad
 
@@ -54,7 +54,7 @@ Request → sede_id extraído → processWebChatMessage → createSystemBlock �
 
 ## Ejemplo de Request
 
-\`\`\`json
+```json
 {
   "Cliente_Id": "a9454478-89c1-11e3-a751-081012379997",
   "Phone_Number_Id": "383559004834703",
@@ -64,7 +64,7 @@ Request → sede_id extraído → processWebChatMessage → createSystemBlock �
   "Chatbot_Data": "{...}",
   "Sede_Id": "cfe6a025-1b9d-102d-b564-6096d05021b3"
 }
-\`\`\`
+```
 
 ## Testing
 
