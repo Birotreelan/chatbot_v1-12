@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DeleteWhatsAppConfig } from "@/components/dashboard/delete-whatsapp-config"
 import { Pause, Play, Activity, AlertTriangle, XCircle } from "lucide-react"
-// </CHANGE>
 import { useState } from "react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -19,7 +18,6 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
   const [configs, setConfigs] = useState(initialConfigs)
   const [loadingPause, setLoadingPause] = useState<string | null>(null)
   const [loadingHealth, setLoadingHealth] = useState<string | null>(null)
-  // </CHANGE>
   const { toast } = useToast()
 
   const handleTogglePause = async (configId: string) => {
@@ -137,7 +135,6 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
         )
     }
   }
-  // </CHANGE>
 
   return (
     <div className="rounded-md border">
@@ -147,9 +144,9 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
             <TableHead>Nombre</TableHead>
             <TableHead>ID de Número</TableHead>
             <TableHead>ID de Asistente</TableHead>
+            <TableHead>Asistentes Extra</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead>Health Status</TableHead>
-            {/* </CHANGE> */}
             <TableHead>Mensajes</TableHead>
             <TableHead>Acciones</TableHead>
           </TableRow>
@@ -161,6 +158,13 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
               <TableCell>{config.phoneNumberId}</TableCell>
               <TableCell>
                 <span className="truncate max-w-[150px] inline-block">{config.whatsappAssistantId}</span>
+              </TableCell>
+              <TableCell>
+                {config.additionalAssistants && config.additionalAssistants.length > 0 ? (
+                  <Badge variant="secondary">{config.additionalAssistants.length} configurados</Badge>
+                ) : (
+                  <span className="text-muted-foreground text-sm">-</span>
+                )}
               </TableCell>
               <TableCell>
                 <div className="flex flex-col gap-1">
@@ -187,7 +191,6 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
                   )}
                 </div>
               </TableCell>
-              {/* </CHANGE> */}
               <TableCell>
                 {config.stats?.messagesReceived || 0} recibidos
                 <br />
@@ -204,7 +207,6 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
                   >
                     <Activity className="h-4 w-4" />
                   </Button>
-                  {/* </CHANGE> */}
                   <Button
                     variant={config.paused ? "default" : "outline"}
                     size="sm"

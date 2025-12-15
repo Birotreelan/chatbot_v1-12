@@ -20,6 +20,8 @@ export interface WhatsAppConfig {
   lastHealthCheck?: string
   healthCheckError?: string
 
+  additionalAssistants?: AdditionalAssistant[]
+
   // Widget configuration
   widgetEnabled?: boolean
   widgetTitle?: string
@@ -127,4 +129,10 @@ export interface ClientAppointmentStats extends AppointmentStats {
     evening: number // 6pm - 10pm
   }
   byDayOfWeek?: Record<string, number>
+}
+
+export interface AdditionalAssistant {
+  functionName: string // Nombre de la función, ej: "route_to_reagendamiento"
+  assistantId: string // ID del asistente, ej: "asst_4cN7IH01SVAp2witTAfhU3So"
+  description?: string // Descripción opcional del asistente
 }
