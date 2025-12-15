@@ -7,10 +7,25 @@ import type { WhatsAppConfig, AdditionalAssistant } from "./types"
  * @returns El Assistant ID correspondiente o null si no se encuentra
  */
 export function getAssistantIdByFunction(config: WhatsAppConfig, functionName: string): string | null {
+  console.log(`[AssistantUtils] 🔍 Buscando asistente para función: "${functionName}"`)
+  console.log(`[AssistantUtils] 🔍 Config recibido:`, {
+    displayName: config.displayName,
+    hasAdditionalAssistants: !!config.additionalAssistants,
+    additionalAssistantsType: typeof config.additionalAssistants,
+    additionalAssistantsLength: config.additionalAssistants?.length,
+    additionalAssistants: config.additionalAssistants,
+  })
+
   if (!config.additionalAssistants || config.additionalAssistants.length === 0) {
     console.log(`[AssistantUtils] ⚠️ No hay asistentes adicionales configurados`)
+    console.log(`[AssistantUtils] ⚠️ additionalAssistants value:`, config.additionalAssistants)
     return null
   }
+
+  console.log(`[AssistantUtils] 📋 Asistentes adicionales disponibles:`)
+  config.additionalAssistants.forEach((a, idx) => {
+    console.log(`[AssistantUtils]   ${idx + 1}. functionName: "${a.functionName}", assistantId: "${a.assistantId}"`)
+  })
 
   const assistant = config.additionalAssistants.find((a) => a.functionName === functionName)
 
@@ -20,6 +35,10 @@ export function getAssistantIdByFunction(config: WhatsAppConfig, functionName: s
   }
 
   console.log(`[AssistantUtils] ❌ No se encontró asistente para función "${functionName}"`)
+  console.log(
+    `[AssistantUtils] ❌ Nombres de función disponibles:`,
+    config.additionalAssistants.map((a) => a.functionName),
+  )
   return null
 }
 
