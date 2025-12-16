@@ -321,7 +321,6 @@ async function handleAssistantSwitch(
   console.log(`[OPENAI-SWITCH] 🔀 Detectada función de routing: ${functionName}`)
 
   try {
-    // Obtener configuración para acceder a los asistentes adicionales
     const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
     if (!config) {
       console.error(`[OPENAI-SWITCH] ❌ No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
@@ -340,7 +339,6 @@ async function handleAssistantSwitch(
     console.log(`[OPENAI-SWITCH] 🔄 Creando NUEVO thread para el asistente especializado...`)
     console.log(`[OPENAI-SWITCH] 📋 Argumentos recibidos:`, JSON.stringify(functionArgs, null, 2))
 
-    // Crear un NUEVO thread para el nuevo asistente
     const newThread = await openai.beta.threads.create({
       metadata: {
         name: `whatsapp-${userPhoneNumber}-${config.id}`,
@@ -350,10 +348,12 @@ async function handleAssistantSwitch(
     })
     console.log(`[OPENAI-SWITCH] ✨ Nuevo thread creado: ${newThread.id}`)
 
+    await updateThreadId(userPhoneNumber, config.id, newThread.id)
+    console.log(`[OPENAI-SWITCH] 💾 Thread actualizado INMEDIATAMENTE en base de datos para usuario ${userPhoneNumber}`)
+
     const { getArgentinaDateTime } = await import("@/lib/utils/date-utils")
     const fechaHora = getArgentinaDateTime()
 
-    // Construir mensaje con bloque [SISTEMA] + argumentos del function calling
     const systemBlock = `[SISTEMA]
 Nombre: ${config.displayName}
 FechaHora: ${fechaHora}
@@ -372,21 +372,12 @@ ${JSON.stringify(functionArgs, null, 2)}`
 
     console.log(`[OPENAI-SWITCH] 📤 Mensaje inicial enviado al nuevo thread (con datos de sistema)`)
 
-    // Actualizar el mapping de thread en la base de datos para que las futuras interacciones usen el nuevo thread
-    // Assuming updateThreadId works with phoneNumber and configId to update the thread mapping.
-    // If the userPhoneNumber is not available, we might need to retrieve it from the old thread.
-    await updateThreadId(userPhoneNumber, config.id, newThread.id)
-    console.log(`[OPENAI-SWITCH] 💾 Thread actualizado en base de datos para usuario ${userPhoneNumber}`)
-
-    // Crear un nuevo run con el nuevo asistente
     const newRun = await openai.beta.threads.runs.create(newThread.id, {
       assistant_id: newAssistantId,
     })
 
     console.log(`[OPENAI-SWITCH] 🏃 Nuevo run creado con asistente ${newAssistantId}: ${newRun.id}`)
 
-    // Procesar el nuevo run - el nuevo asistente toma control completamente
-    // Pass the correct arguments to processRunWithCorrectFlow
     await processRunWithCorrectFlow(openai, newThread.id, newRun.id, accessToken, phoneNumberId, clienteId)
 
     console.log(`[OPENAI-SWITCH] ✅ Switch completado - control transferido al nuevo asistente`)
@@ -1969,7 +1960,7 @@ export async function processRunWithCorrectFlow(
         const activeRuns = await checkForActiveRuns(threadId)
 
         if (activeRuns.hasActive && activeRuns.runId) {
-          console.log(`[OPENAI] 🔒 Run activo encontrado: ${activeRuns.runId} (${activeRuns.status})`)
+          console.log(`[OPENAI] 🔒 Run activo encontrado: ${activeRuns.runId} (${activeRuns.runStatus})`)
 
           if (activeRuns.runId) {
             if (activeRuns.runStatus === "cancelling") {
