@@ -922,7 +922,6 @@ export async function getSystemStatsFiltered(startDate?: string, endDate?: strin
   return stats
 }
 
-// Actualizar threadId con lock para evitar condiciones de carrera
 export async function updateThreadId(
   phoneNumber: string,
   whatsappConfigId: string,
@@ -930,44 +929,26 @@ export async function updateThreadId(
 ): Promise<void> {
   const normalizedPhone = normalizePhoneNumber(phoneNumber)
   const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
-  const lockKey = `thread:${normalizedPhone}:${whatsappConfigId}`
+  const redisClient = getRedisClient()
 
   console.log(`[DB] 🔄 Actualizando threadId para ${normalizedPhone} con config ${whatsappConfigId} -> ${newThreadId}`)
 
-  await withLock(
-    lockKey,
-    async () => {
-      const redisClient = getRedisClient()
+  const threadInfo: ThreadInfo = {
+    threadId: newThreadId,
+    phoneNumber: normalizedPhone,
+    whatsappConfigId,
+    lastMessageAt: new Date().toISOString(),
+    messageCount: 0,
+    createdAt: new Date().toISOString(),
+    isResetThread: false,
+  }
 
-      // Obtener el thread actual para preservar información
-      let existingThreadInfo: ThreadInfo | null = null
-
-      if (redisClient) {
-        const threadData = await redisClient.get(key)
-        existingThreadInfo = safeJsonParse(threadData, key)
-      } else {
-        existingThreadInfo = memoryStorage.threads.get(key) || null
-      }
-
-      const threadInfo: ThreadInfo = {
-        threadId: newThreadId,
-        phoneNumber: normalizedPhone,
-        whatsappConfigId,
-        lastMessageAt: new Date().toISOString(),
-        messageCount: existingThreadInfo?.messageCount || 0, // Preserve message count
-        createdAt: new Date().toISOString(), // New thread = new creation time
-        isResetThread: false,
-      }
-
-      if (redisClient) {
-        await redisClient.set(key, JSON.stringify(threadInfo))
-        console.log(`[DB] ✅ ThreadId actualizado en Redis con lock: ${newThreadId}`)
-      } else {
-        memoryStorage.threads.set(key, threadInfo)
-        console.log(`[DB] ✅ ThreadId actualizado en memoria con lock: ${newThreadId}`)
-      }
-    },
-    30, // Lock timeout
-    15, // Max retries
-  )
+  if (redisClient) {
+    await redisClient.set(key, JSON.stringify(threadInfo))
+    console.log(`[DB] ✅ ThreadId actualizado en Redis: ${newThreadId}`)
+  } else {
+    memoryStorage.threads.set(key, threadInfo)
+    console.log(`[DB] ✅ ThreadId actualizado en memoria: ${newThreadId}`)
+  }
 }
+// </CHANGE>

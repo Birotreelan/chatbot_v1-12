@@ -390,13 +390,15 @@ ${JSON.stringify(functionArgs, null, 2)}`
 
     console.log(`[OPENAI-SWITCH] 🔄 Procesando el nuevo run...`)
     await processRunWithCorrectFlow(
-      openai,
+      openai, // Pass openai client
       newThread.id,
       newRun.id,
-      accessToken, // Correcto: accessToken va primero
-      phoneNumberId, // Correcto: phoneNumberId va después
-      clienteId,
-      userPhoneNumber,
+      // The following parameters were missing in the original call to processRunWithCorrectFlow
+      // and are needed for sendWhatsAppMessage and getWhatsAppConfigByPhoneId inside it.
+      phoneNumberId, // This is needed to get the config and send messages
+      accessToken, // This is the token to send WhatsApp messages
+      clienteId, // This is the client ID for the tools
+      userPhoneNumber, // This is the user's phone number
     )
     console.log(`[OPENAI-SWITCH] ✅ Procesamiento del nuevo run completado`)
 
