@@ -621,6 +621,9 @@ export async function processIndividualMessage(
       console.log(`[WHATSAPP] Obteniendo thread para usuario ${userPhoneNumber} y config ${config.id}`)
       threadResult = await getThreadForUser(userPhoneNumber, config.id)
       console.log(`[WHATSAPP] Thread obtenido: ${threadResult.threadId}, isNewThread: ${threadResult.isNewThread}`)
+      if (threadResult.assistantId) {
+        console.log(`[WHATSAPP] 🤖 Thread tiene asistente personalizado: ${threadResult.assistantId}`)
+      }
     } catch (error) {
       console.error("[WHATSAPP] Error al obtener thread ID:", error)
 
@@ -676,23 +679,23 @@ ${userMessage}`
 
     console.log(`[WHATSAPP] Mensaje preparado para OpenAI:`, messageToSend)
 
+    const assistantToUse = threadResult.assistantId || config.whatsappAssistantId
+    if (threadResult.assistantId) {
+      console.log(`[WHATSAPP] ✨ Usando asistente del thread: ${assistantToUse}`)
+    } else {
+      console.log(`[WHATSAPP] 🔵 Usando asistente por defecto: ${assistantToUse}`)
+    }
+
     // Obtener respuesta del asistente
     try {
       console.log(`[v0] 📞 Antes de llamar getAssistantResponse:`, {
         userPhoneNumber,
         threadId: threadResult.threadId,
         phoneNumberId,
-        assistantId: config.whatsappAssistantId,
+        assistantId: assistantToUse,
       })
       console.log(`[WHATSAPP] Llamando a getAssistantResponse...`)
-      // Usar el ID de asistente específico para esta configuración y pasar el phoneNumberId
-      await getAssistantResponse(
-        threadResult.threadId,
-        messageToSend,
-        phoneNumberId,
-        config.whatsappAssistantId,
-        userPhoneNumber,
-      )
+      await getAssistantResponse(threadResult.threadId, messageToSend, phoneNumberId, assistantToUse, userPhoneNumber)
 
       console.log(`[WHATSAPP] getAssistantResponse completado exitosamente`)
 
@@ -734,18 +737,6 @@ ${userMessage}`
             await redisClient.set(key, JSON.stringify(threadInfo))
           }
 
-          // Preparar mensaje con parámetros iniciales
-          const fechaHora = getArgentinaDateTime()
-          messageToSend = `[SISTEMA]
-Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
-PrimerMensaje: true
-TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
-[/SISTEMA]
-
-${userMessage}`
-
           console.log(`[WHATSAPP] Reintentando con nuevo thread...`)
           console.log(`[v0] 📞 Antes de reintentar con nuevo thread:`, {
             userPhoneNumber,
@@ -760,6 +751,8 @@ ${userMessage}`
             config.whatsappAssistantId,
             userPhoneNumber,
           )
+
+          console.log(`[WHATSAPP] getAssistantResponse completado exitosamente con nuevo thread`)
 
           // Actualizar estadísticas - mensaje procesado
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -785,10 +778,11 @@ ${userMessage}`
           }
 
           // Enviar mensaje de error al usuario
-          await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
-
-          // Actualizar estadísticas - error
-          await updateWhatsAppStats(config.id, { errors: 1 })
+          try {
+            await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
+          } catch (sendError) {
+            console.error("[WHATSAPP] Error al enviar mensaje de error:", sendError)
+          }
         }
       } else {
         const errorMessage =

@@ -461,7 +461,7 @@ export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppC
 export async function getThreadForUser(
   phoneNumber: string,
   whatsappConfigId: string,
-): Promise<{ threadId: string; isNewThread: boolean; isResetThread?: boolean }> {
+): Promise<{ threadId: string; isNewThread: boolean; isResetThread?: boolean; assistantId?: string }> {
   const normalizedPhone = normalizePhoneNumber(phoneNumber)
   const lockKey = `thread:${normalizedPhone}:${whatsappConfigId}`
 
@@ -520,6 +520,7 @@ export async function getThreadForUser(
               threadId: threadInfo.threadId,
               isNewThread: false,
               isResetThread,
+              assistantId: threadInfo.assistantId,
             }
           }
         }
@@ -565,6 +566,7 @@ export async function getThreadForUser(
               threadId: threadInfo.threadId,
               isNewThread: false,
               isResetThread,
+              assistantId: threadInfo.assistantId,
             }
           }
         }
@@ -926,12 +928,16 @@ export async function updateThreadId(
   phoneNumber: string,
   whatsappConfigId: string,
   newThreadId: string,
+  assistantId?: string,
 ): Promise<void> {
   const normalizedPhone = normalizePhoneNumber(phoneNumber)
   const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
   const redisClient = getRedisClient()
 
   console.log(`[DB] 🔄 Actualizando threadId para ${normalizedPhone} con config ${whatsappConfigId} -> ${newThreadId}`)
+  if (assistantId) {
+    console.log(`[DB] 🤖 Guardando assistantId: ${assistantId}`)
+  }
 
   const threadInfo: ThreadInfo = {
     threadId: newThreadId,
@@ -941,14 +947,18 @@ export async function updateThreadId(
     messageCount: 0,
     createdAt: new Date().toISOString(),
     isResetThread: false,
+    assistantId: assistantId,
   }
 
   if (redisClient) {
     await redisClient.set(key, JSON.stringify(threadInfo))
-    console.log(`[DB] ✅ ThreadId actualizado en Redis: ${newThreadId}`)
+    console.log(
+      `[DB] ✅ ThreadId actualizado en Redis: ${newThreadId}${assistantId ? ` con assistant: ${assistantId}` : ""}`,
+    )
   } else {
     memoryStorage.threads.set(key, threadInfo)
-    console.log(`[DB] ✅ ThreadId actualizado en memoria: ${newThreadId}`)
+    console.log(
+      `[DB] ✅ ThreadId actualizado en memoria: ${newThreadId}${assistantId ? ` con assistant: ${assistantId}` : ""}`,
+    )
   }
 }
-// </CHANGE>

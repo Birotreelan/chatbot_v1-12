@@ -354,12 +354,13 @@ async function handleAssistantSwitch(
         name: `whatsapp-${userPhoneNumber}-${config.id}`,
         previousThread: oldThreadId,
         reason: "assistant_switch",
+        assistantId: newAssistantId,
       },
     })
     console.log(`[OPENAI-SWITCH] ✨ Nuevo thread creado: ${newThread.id}`)
 
-    await updateThreadId(userPhoneNumber, config.id, newThread.id)
-    console.log(`[OPENAI-SWITCH] 💾 Thread actualizado INMEDIATAMENTE en base de datos para usuario ${userPhoneNumber}`)
+    await updateThreadId(userPhoneNumber, config.id, newThread.id, newAssistantId)
+    console.log(`[OPENAI-SWITCH] 💾 Thread y AssistantId actualizados en base de datos para usuario ${userPhoneNumber}`)
 
     const { getArgentinaDateTime } = await import("@/lib/utils/date-utils")
     const fechaHora = getArgentinaDateTime()

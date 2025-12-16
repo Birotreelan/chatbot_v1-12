@@ -63,6 +63,7 @@ export interface ThreadInfo {
   messageCount: number
   isResetThread?: boolean
   createdAt?: string
+  assistantId?: string
 }
 
 export interface SystemStats {
