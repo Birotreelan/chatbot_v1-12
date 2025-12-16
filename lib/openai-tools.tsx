@@ -390,13 +390,15 @@ ${JSON.stringify(functionArgs, null, 2)}`
 
     console.log(`[OPENAI-SWITCH] 🔄 Procesando el nuevo run...`)
     await processRunWithCorrectFlow(
-      openai,
+      openai, // Pass openai client
       newThread.id,
       newRun.id,
-      accessToken, // Correct order: accessToken is parameter 4
-      phoneNumberId, // Correct order: phoneNumberId is parameter 5
-      clienteId,
-      userPhoneNumber,
+      // The following parameters were missing in the original call to processRunWithCorrectFlow
+      // and are needed for sendWhatsAppMessage and getWhatsAppConfigByPhoneId inside it.
+      phoneNumberId, // This is needed to get the config and send messages
+      accessToken, // This is the token to send WhatsApp messages
+      clienteId, // This is the client ID for the tools
+      userPhoneNumber, // This is the user's phone number
     )
     console.log(`[OPENAI-SWITCH] ✅ Procesamiento del nuevo run completado`)
 
@@ -416,7 +418,7 @@ ${JSON.stringify(functionArgs, null, 2)}`
 }
 // Implementación directa de todas las funciones
 export async function executeOpenAITool(toolName: string, args: any, clienteId: string) {
-  // console.log(`[OPENAI-TOOLS] Ejecutando tool: ${toolName} con args:`, args)
+  console.log(`[OPENAI-TOOLS] Ejecutando tool: ${toolName} con args:`, args)
 
   try {
     switch (toolName) {
@@ -464,7 +466,7 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
         return await obtenerObrasSociales(clienteId)
 
       case "reservar_turno":
-        console.log(`[OPENAI-TOOLS] 🔍 DEBUG<bos> reservar_turno:`)
+        console.log(`[OPENAI-TOOLS] 🔍 DEBUG reservar_turno:`)
         console.log(`[OPENAI-TOOLS] 🔍 args completo:`, JSON.stringify(args, null, 2))
         console.log(`[OPENAI-TOOLS] 🔍 args.agendaId:`, args.agendaId)
         console.log(`[OPENAI-TOOLS] 🔍 args.dni:`, args.dni)
@@ -502,7 +504,7 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
       case "route_to_reservas_assistant":
       case "route_to_turnos_assistant":
         console.log(`[OPENAI-TOOLS] 🔀 Iniciando switch de asistente para: ${toolName}`)
-        // Retornar el resultado del switch de asistente directamente
+        // Retornar el resultado del switch de<bos>sistente directamente
         // The following arguments are not needed for the initial call to executeOpenAITool,
         // but they are required by handleAssistantSwitch. We will pass dummy values or null.
         // In a real scenario, these would be available in the context of the webhook handler.
@@ -617,8 +619,8 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         })
       }
 
-      const submitUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`
-      const submitResponse = await fetch(submitUrl, {
+      const url = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs` // FIX: 'url' variable declared
+      const submitResponse = await fetch(url, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -1714,7 +1716,6 @@ export async function getAssistantResponse(
       config.accessToken,
       phoneNumberId,
       config.cliente_id || "",
-      undefined, // userPhoneNumber - will be retrieved from thread if needed
     )
 
     console.log(`[OPENAI] ✅ Conversación completada`)
@@ -2151,6 +2152,7 @@ async function executeToolCall(
     try {
       // Obtain userPhoneNumber - assuming it might be available in thread metadata or needs to be fetched
       // For now, let's assume getUserPhoneNumberFromThread can get it if thread_id is available.
+      // `toolCall.thread_id` should be available for this purpose if the API provides it.
       // If not, this part might need adjustment based on how `toolCall` is structured.
       // Let's assume `thread_id` is available on `toolCall` for this example.
       const userPhoneNumber = await getUserPhoneNumberFromThread(toolCall.thread_id) // Need thread_id here
