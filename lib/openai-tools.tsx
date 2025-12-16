@@ -1853,7 +1853,8 @@ export async function processRunWithCorrectFlow(
 
         try {
           console.log(`[v0] 🔍 Submit tool outputs - retrieve con threadId="${threadId}" runId="${run.id}"`)
-          run = await openai.beta.threads.runs.submitToolOutputsAndPoll(threadId, run.id, {
+          run = await openai.beta.threads.runs.submitToolOutputsAndPoll(run.id, {
+            thread_id: threadId,
             tool_outputs: toolOutputs,
           })
           console.log(`[v0] ✅ Submit tool outputs completado, nuevo status: ${run.status}`)
