@@ -1736,8 +1736,21 @@ export async function processRunWithCorrectFlow(
   userPhoneNumber?: string, // Made optional for the initial call from handleAssistantSwitch
   retryCount = 0, // Changed from isRetry to retryCount
 ): Promise<{ success: boolean }> {
+  console.log(`[v0] 🔍 processRunWithCorrectFlow ENTRADA:`, {
+    threadId,
+    runId,
+    accessToken: accessToken ? `${accessToken.substring(0, 10)}...` : "undefined",
+    phoneNumberId,
+    clienteId,
+    userPhoneNumber,
+    retryCount,
+  })
+
   try {
+    console.log(`[v0] 🔍 Llamando retrieve con threadId="${threadId}" runId="${runId}"`)
     let run = await openai.beta.threads.runs.retrieve(threadId, runId)
+    console.log(`[v0] ✅ Retrieve exitoso, run status: ${run.status}`)
+
     const MAX_ITERATIONS = 30
     let iterations = 0
 
@@ -1839,27 +1852,23 @@ export async function processRunWithCorrectFlow(
         })
         console.log(`[OPENAI] 📤 ===== FIN DATOS ENVIADOS =====`)
 
-        const submitUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`
-        const submitResponse = await fetch(submitUrl, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-            "OpenAI-Beta": "assistants=v2",
-          },
-          body: JSON.stringify({ tool_outputs: toolOutputs }),
-        })
-
-        if (!submitResponse.ok) {
-          const errorText = await submitResponse.text()
-          throw new Error(`Submit tool outputs failed: ${submitResponse.status} ${errorText}`)
+        try {
+          console.log(`[v0] 🔍 Submit tool outputs - retrieve con threadId="${threadId}" runId="${run.id}"`)
+          run = await openai.beta.threads.runs.submitToolOutputsAndPoll(threadId, run.id, {
+            tool_outputs: toolOutputs,
+          })
+          console.log(`[v0] ✅ Submit tool outputs completado, nuevo status: ${run.status}`)
+        } catch (error: any) {
+          console.error(`[OPENAI] ❌ Error submitToolOutputsAndPoll:`, error)
+          // Si submitToolOutputsAndPoll falla, debemos reintentar el run completo
+          // Lanzar el error para que el bloque catch principal lo maneje
+          throw error
         }
-
-        // After submitting tool outputs, we need to restart the loop to wait for the next status
-        run = await openai.beta.threads.runs.retrieve(threadId, runId) // Re-fetch the run to get its new status
       } else {
-        // If not requires_action, break the loop and proceed to check status
-        break
+        await wait(1000)
+        console.log(`[v0] 🔍 Polling retrieve con threadId="${threadId}" runId="${runId}"`)
+        run = await openai.beta.threads.runs.retrieve(threadId, runId)
+        console.log(`[v0] ✅ Polling retrieve exitoso, status: ${run.status}`)
       }
     }
 
@@ -1935,7 +1944,7 @@ export async function processRunWithCorrectFlow(
     }
   } catch (error: any) {
     // Changed to 'any' to access error.message property
-    console.error(`[OPENAI] ❌ Error en processRunWithCorrectFlow:`, error)
+    console.error("[OPENAI] ❌ Error en processRunWithCorrectFlow:", error)
 
     const isTimeout = error.message && error.message.includes("Timeout esperando run")
     const isRateLimitError = error.message && error.message.includes("Please try again in")
@@ -1986,7 +1995,9 @@ export async function processRunWithCorrectFlow(
 
       try {
         console.log(`[OPENAI] 🔍 Verificando runs activos en el thread...`)
+        console.log(`[v0] 🔍 Llamando checkForActiveRuns con threadId="${threadId}"`)
         const activeRuns = await checkForActiveRuns(threadId)
+        console.log(`[v0] 📊 checkForActiveRuns resultado:`, activeRuns)
 
         if (activeRuns.hasActive && activeRuns.runId) {
           console.log(`[OPENAI] 🔒 Run activo encontrado: ${activeRuns.runId} (${activeRuns.status})`)
@@ -2011,6 +2022,13 @@ export async function processRunWithCorrectFlow(
                     assistant_id: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
                   })
                   console.log(`[OPENAI] 🔄 Nuevo run creado: ${newRun.id}`)
+
+                  console.log(`[v0] 🔄 Llamada recursiva con:`, {
+                    threadId: newThreadResult.newThreadId,
+                    runId: newRun.id,
+                    accessToken: accessToken ? `${accessToken.substring(0, 10)}...` : "undefined",
+                    phoneNumberId,
+                  })
 
                   return processRunWithCorrectFlow(
                     openai,
@@ -2043,6 +2061,14 @@ export async function processRunWithCorrectFlow(
                   })
                   console.log(`[OPENAI] 🔄 Nuevo run creado: ${newRun.id}`)
 
+                  // Log recursive call parameters fallback with:
+                  console.log(`[v0] 🔄 Llamada recursiva fallback con:`, {
+                    threadId: newThreadResult.newThreadId,
+                    runId: newRun.id,
+                    accessToken: accessToken ? `${accessToken.substring(0, 10)}...` : "undefined",
+                    phoneNumberId,
+                  })
+
                   return processRunWithCorrectFlow(
                     openai,
                     newThreadResult.newThreadId,
@@ -2066,6 +2092,14 @@ export async function processRunWithCorrectFlow(
           assistant_id: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
         })
         console.log(`[OPENAI] 🔄 Nuevo run creado: ${newRun.id}`)
+
+        console.log(`[v0] 🔄 Llamada recursiva normal con:`, {
+          threadId,
+          runId: newRun.id,
+          accessToken: accessToken ? `${accessToken.substring(0, 10)}...` : "undefined",
+          phoneNumberId,
+          userPhoneNumber,
+        })
 
         return processRunWithCorrectFlow(
           openai,
@@ -2150,7 +2184,6 @@ async function executeToolCall(
     try {
       // Obtain userPhoneNumber - assuming it might be available in thread metadata or needs to be fetched
       // For now, let's assume getUserPhoneNumberFromThread can get it if thread_id is available.
-      // `toolCall.thread_id` should be available for this purpose if the API provides it.
       // If not, this part might need adjustment based on how `toolCall` is structured.
       // Let's assume `thread_id` is available on `toolCall` for this example.
       const userPhoneNumber = await getUserPhoneNumberFromThread(toolCall.thread_id) // Need thread_id here
@@ -2173,8 +2206,14 @@ async function executeToolCall(
   return JSON.stringify(toolResult)
 }
 
-async function checkForActiveRuns(threadId: string): Promise<{ hasActive: boolean; runId?: string; status?: string }> {
+async function checkForActiveRuns(threadId: string): Promise<{
+  hasActive: boolean
+  runId?: string
+  status?: string
+}> {
   try {
+    console.log(`[v0] 🔍 checkForActiveRuns - Llamando API con threadId="${threadId}"`)
+
     const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs?limit=1`, {
       method: "GET",
       headers: {
@@ -2192,11 +2231,21 @@ async function checkForActiveRuns(threadId: string): Promise<{ hasActive: boolea
     const data = await response.json()
     const runs = data.data || []
 
+    console.log(`[v0] 📊 checkForActiveRuns - Respuesta API:`, {
+      runsCount: runs.length,
+      firstRun: runs[0] ? { id: runs[0].id, status: runs[0].status } : null,
+    })
+
     // Buscar runs en estados activos
     const activeStates = ["queued", "in_progress", "cancelling", "requires_action"]
     const activeRun = runs.find((run: any) => activeStates.includes(run.status))
 
     if (activeRun) {
+      console.log(`[v0] ✅ checkForActiveRuns - Run activo encontrado:`, {
+        runId: activeRun.id,
+        status: activeRun.status,
+      })
+
       return {
         hasActive: true,
         runId: activeRun.id,
@@ -2204,9 +2253,14 @@ async function checkForActiveRuns(threadId: string): Promise<{ hasActive: boolea
       }
     }
 
+    console.log(`[v0] ℹ️ checkForActiveRuns - No hay runs activos`)
     return { hasActive: false }
   } catch (error) {
     console.error(`[OPENAI] ❌ Error verificando runs activos:`, error)
+    console.error(`[v0] ❌ checkForActiveRuns error details:`, {
+      error: error instanceof Error ? error.message : String(error),
+      threadId,
+    })
     return { hasActive: false }
   }
 }
