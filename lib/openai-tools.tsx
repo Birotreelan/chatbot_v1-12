@@ -231,7 +231,6 @@ export const openaiTools = {
       required: ["query"],
     },
   },
-  // </CHANGE>
 }
 
 // Mensajes predefinidos para cada función
@@ -254,7 +253,6 @@ const FUNCTION_MESSAGES: Record<string, string> = {
   // Mensajes para routing
   route_to_reservas_assistant: "Redirigiendo al asistente de reservas...",
   route_to_turnos_assistant: "Redirigiendo al asistente de gestión de turnos...",
-  // </CHANGE>
 }
 
 // Función para truncar respuestas largas de herramientas
@@ -330,8 +328,7 @@ async function handleAssistantSwitch(
       return { switchedAssistant: false }
     }
 
-    // Buscar el Assistant ID correspondiente
-    const newAssistantId = getAssistantIdByFunction(functionName, config)
+    const newAssistantId = getAssistantIdByFunction(config, functionName)
 
     if (!newAssistantId) {
       console.log(`[OPENAI-SWITCH] ⚠️ No se encontró asistente configurado para la función: ${functionName}`)
