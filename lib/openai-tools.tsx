@@ -593,11 +593,11 @@ export async function processWebOnlyMessage(
 
 // Función para procesar run sin enviar a WhatsApp
 async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string, clienteId: string): Promise<void> {
-  let run = await openai.beta.threads.runs.retrieve(threadId, runId)
+  let run = await openai.beta.threads.runs.retrieve(runId, { thread_id: threadId })
 
   while (run.status === "queued" || run.status === "in_progress") {
     await wait(1000)
-    run = await openai.beta.threads.runs.retrieve(threadId, runId)
+    run = await openai.beta.threads.runs.retrieve(runId, { thread_id: threadId })
   }
 
   if (run.status === "requires_action") {
@@ -1748,7 +1748,7 @@ export async function processRunWithCorrectFlow(
 
   try {
     console.log(`[v0] 🔍 Llamando retrieve con threadId="${threadId}" runId="${runId}"`)
-    let run = await openai.beta.threads.runs.retrieve(threadId, runId)
+    let run = await openai.beta.threads.runs.retrieve(runId, { thread_id: threadId })
     console.log(`[v0] ✅ Retrieve exitoso, run status: ${run.status}`)
 
     const MAX_ITERATIONS = 30
@@ -1758,7 +1758,6 @@ export async function processRunWithCorrectFlow(
       if (iterations >= MAX_ITERATIONS) {
         throw new Error(`Se alcanzó el límite de iteraciones (${MAX_ITERATIONS})`)
       }
-      iterations++
 
       if (run.status === "requires_action" && run.required_action?.type === "submit_tool_outputs") {
         const toolCalls = run.required_action.submit_tool_outputs.tool_calls
@@ -1867,13 +1866,14 @@ export async function processRunWithCorrectFlow(
       } else {
         await wait(1000)
         console.log(`[v0] 🔍 Polling retrieve con threadId="${threadId}" runId="${runId}"`)
-        run = await openai.beta.threads.runs.retrieve(threadId, runId)
+        run = await openai.beta.threads.runs.retrieve(runId, { thread_id: threadId })
         console.log(`[v0] ✅ Polling retrieve exitoso, status: ${run.status}`)
       }
+      iterations++
     }
 
     // Re-fetch run status after the loop
-    run = await openai.beta.threads.runs.retrieve(threadId, runId)
+    run = await openai.beta.threads.runs.retrieve(runId, { thread_id: threadId })
 
     if (run.status === "completed") {
       const messages = await openai.beta.threads.messages.list(threadId, {
