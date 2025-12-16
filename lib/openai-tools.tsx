@@ -390,15 +390,13 @@ ${JSON.stringify(functionArgs, null, 2)}`
 
     console.log(`[OPENAI-SWITCH] 🔄 Procesando el nuevo run...`)
     await processRunWithCorrectFlow(
-      openai, // Pass openai client
+      openai,
       newThread.id,
       newRun.id,
-      // The following parameters were missing in the original call to processRunWithCorrectFlow
-      // and are needed for sendWhatsAppMessage and getWhatsAppConfigByPhoneId inside it.
-      phoneNumberId, // This is needed to get the config and send messages
-      accessToken, // This is the token to send WhatsApp messages
-      clienteId, // This is the client ID for the tools
-      userPhoneNumber, // This is the user's phone number
+      accessToken, // Correct order: accessToken is parameter 4
+      phoneNumberId, // Correct order: phoneNumberId is parameter 5
+      clienteId,
+      userPhoneNumber,
     )
     console.log(`[OPENAI-SWITCH] ✅ Procesamiento del nuevo run completado`)
 
@@ -466,7 +464,7 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
         return await obtenerObrasSociales(clienteId)
 
       case "reservar_turno":
-        console.log(`[OPENAI-TOOLS] 🔍 DEBUG reservar_turno:`)
+        console.log(`[OPENAI-TOOLS] 🔍 DEBUG<bos> reservar_turno:`)
         console.log(`[OPENAI-TOOLS] 🔍 args completo:`, JSON.stringify(args, null, 2))
         console.log(`[OPENAI-TOOLS] 🔍 args.agendaId:`, args.agendaId)
         console.log(`[OPENAI-TOOLS] 🔍 args.dni:`, args.dni)
