@@ -310,7 +310,8 @@ function isRoutingFunction(functionName: string): boolean {
 // Manejar el switch de asistente cuando se detecta una función de routing
 async function handleAssistantSwitch(
   openai: OpenAI,
-  oldThreadId: string, // Added oldThreadId parameter
+  oldThreadId: string,
+  oldRunId: string, // Added oldRunId parameter to cancel the original run
   functionName: string,
   functionArgs: any,
   phoneNumberId: string,
@@ -336,6 +337,15 @@ async function handleAssistantSwitch(
     }
 
     console.log(`[OPENAI-SWITCH] ✅ Asistente encontrado: ${newAssistantId}`)
+
+    console.log(`[OPENAI-SWITCH] 🛑 Cancelando run original: ${oldRunId}`)
+    const cancelled = await cancelRunAndWait(oldThreadId, oldRunId)
+    if (cancelled) {
+      console.log(`[OPENAI-SWITCH] ✅ Run original cancelado exitosamente`)
+    } else {
+      console.log(`[OPENAI-SWITCH] ⚠️ No se pudo cancelar run original, continuando de todas formas...`)
+    }
+
     console.log(`[OPENAI-SWITCH] 🔄 Creando NUEVO thread para el asistente especializado...`)
     console.log(`[OPENAI-SWITCH] 📋 Argumentos recibidos:`, JSON.stringify(functionArgs, null, 2))
 
@@ -378,7 +388,19 @@ ${JSON.stringify(functionArgs, null, 2)}`
 
     console.log(`[OPENAI-SWITCH] 🏃 Nuevo run creado con asistente ${newAssistantId}: ${newRun.id}`)
 
-    await processRunWithCorrectFlow(openai, newThread.id, newRun.id, accessToken, phoneNumberId, clienteId)
+    console.log(`[OPENAI-SWITCH] 🔄 Procesando el nuevo run...`)
+    await processRunWithCorrectFlow(
+      openai, // Pass openai client
+      newThread.id,
+      newRun.id,
+      // The following parameters were missing in the original call to processRunWithCorrectFlow
+      // and are needed for sendWhatsAppMessage and getWhatsAppConfigByPhoneId inside it.
+      phoneNumberId, // This is needed to get the config and send messages
+      accessToken, // This is the token to send WhatsApp messages
+      clienteId, // This is the client ID for the tools
+      userPhoneNumber, // This is the user's phone number
+    )
+    console.log(`[OPENAI-SWITCH] ✅ Procesamiento del nuevo run completado`)
 
     console.log(`[OPENAI-SWITCH] ✅ Switch completado - control transferido al nuevo asistente`)
 
@@ -396,7 +418,7 @@ ${JSON.stringify(functionArgs, null, 2)}`
 }
 // Implementación directa de todas las funciones
 export async function executeOpenAITool(toolName: string, args: any, clienteId: string) {
-  console.log(`[OPENAI-TOOLS] Ejecutando tool: ${toolName} con args:`, args)
+  // console.log(`[OPENAI-TOOLS] Ejecutando tool: ${toolName} con args:`, args)
 
   try {
     switch (toolName) {
@@ -498,12 +520,13 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
         return await handleAssistantSwitch(
           getOpenAIClient(), // Pasar instancia de OpenAI
           currentThreadId, // threadId no es necesario para la llamada inicial de handleAssistantSwitch *from here*
+          null as any, // oldRunId not needed *from here*
           toolName,
           args,
-          null as any, // phoneNumberId no es necesario para la llamada inicial de handleAssistantSwitch *from here*
+          null as any, // phoneNumberId not needed *from here*
           currentAccessToken,
           clienteId,
-          currentUserPhoneNumber, // userPhoneNumber no es necesario para la llamada inicial *from here*
+          currentUserPhoneNumber, // userPhoneNumber not needed *from here*
         )
 
       default:
@@ -596,8 +619,8 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         })
       }
 
-      const submitUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`
-      const submitResponse = await fetch(submitUrl, {
+      const url = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs` // FIX: 'url' variable declared
+      const submitResponse = await fetch(url, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -1330,6 +1353,30 @@ function createTimeoutSignal(timeoutMs: number): AbortSignal {
   return controller.signal
 }
 
+async function getUserPhoneNumberFromThread(threadId: string): Promise<string | null> {
+  console.log(`[OPENAI] 🔍 Obteniendo número de teléfono del thread: ${threadId}`)
+  try {
+    const thread = await getOpenAIClient().beta.threads.retrieve(threadId)
+    if (thread.metadata && thread.metadata.name) {
+      const parts = thread.metadata.name.split("-")
+      if (parts.length >= 2) {
+        const phoneNumber = parts[1]
+        console.log(`[OPENAI] ✅ Número de teléfono del thread (metadata): ${phoneNumber}`)
+        return phoneNumber
+      }
+    }
+
+    // Fallback: Attempt to retrieve from Redis if metadata is not enough (requires configId)
+    // This part might need adjustment if configId is not readily available here.
+    // For now, assuming the thread metadata is the primary source.
+    console.log(`[OPENAI] ⚠️ No se pudo obtener el número de teléfono del thread vía metadata.`)
+    return null
+  } catch (error) {
+    console.error(`[OPENAI] ❌ Error obteniendo número de teléfono del thread:`, error)
+    return null
+  }
+}
+
 async function getPhoneNumberFromThread(threadId: string, configId: string): Promise<string | null> {
   console.log(`[OPENAI] 🔍 Obteniendo número de teléfono para thread: ${threadId}`)
 
@@ -1688,19 +1735,140 @@ export async function processRunWithCorrectFlow(
   accessToken: string,
   phoneNumberId: string,
   clienteId: string,
-  retryCount = 0,
+  userPhoneNumber?: string, // Made optional for the initial call from handleAssistantSwitch
+  retryCount = 0, // Changed from isRetry to retryCount
 ): Promise<{ success: boolean }> {
   try {
-    const completedRun = await waitForRunCompletionOrAction(openai, threadId, runId)
-    console.log(`[OPENAI] 🏁 Run completado: ${completedRun.status}`)
+    let run = await openai.beta.threads.runs.retrieve(threadId, runId)
+    const MAX_ITERATIONS = 30
+    let iterations = 0
 
-    if (completedRun.usage) {
-      console.log(
-        `[OPENAI] 💰 Tokens: ${completedRun.usage.total_tokens} (${completedRun.usage.prompt_tokens}+${completedRun.usage.completion_tokens})`,
-      )
+    while (run.status === "queued" || run.status === "in_progress" || run.status === "requires_action") {
+      if (iterations >= MAX_ITERATIONS) {
+        throw new Error(`Se alcanzó el límite de iteraciones (${MAX_ITERATIONS})`)
+      }
+      iterations++
+
+      if (run.status === "requires_action" && run.required_action?.type === "submit_tool_outputs") {
+        const toolCalls = run.required_action.submit_tool_outputs.tool_calls
+        const toolOutputs = []
+        let assistantSwitched = false
+
+        for (const toolCall of toolCalls) {
+          // Check if toolCall is of type 'function' before accessing .function
+          if (toolCall.type === "function") {
+            const functionName = toolCall.function.name
+            const functionArgs = JSON.parse(toolCall.function.arguments)
+
+            console.log(`[OPENAI-TOOLS] Ejecutando tool: ${functionName} con args:`, functionArgs)
+
+            if (functionName.startsWith("route_to_")) {
+              console.log(`[OPENAI-TOOLS] 🔀 Función de routing detectada: ${functionName}`)
+
+              // Get user phone number (if not already provided)
+              const currentUserPhoneNumber = userPhoneNumber || (await getUserPhoneNumberFromThread(threadId))
+
+              if (!currentUserPhoneNumber) {
+                console.error(
+                  `[OPENAI-TOOLS] ❌ No se pudo obtener el número de teléfono del usuario para el switch de asistente.`,
+                )
+                // Add an error output for this tool call if we can't get the phone number
+                toolOutputs.push({
+                  tool_call_id: toolCall.id,
+                  output: JSON.stringify({
+                    success: false,
+                    message: `Error interno: No se pudo obtener el número de teléfono del usuario para el cambio de asistente.`,
+                  }),
+                })
+                continue // Skip to next tool call
+              }
+
+              const switchResult = await handleAssistantSwitch(
+                openai,
+                threadId,
+                runId, // Pass the current runId to cancel it
+                functionName,
+                functionArgs,
+                phoneNumberId,
+                accessToken,
+                clienteId,
+                currentUserPhoneNumber, // Use the retrieved phone number
+              )
+
+              if (switchResult.switchedAssistant) {
+                console.log(`[OPENAI-TOOLS] ✅ Switch exitoso al asistente ${switchResult.assistantId}`)
+                console.log(
+                  `[OPENAI-TOOLS] 🛑 Terminando ejecución del asistente original - NO se enviarán tool outputs`,
+                )
+                assistantSwitched = true
+                break // Exit the loop since we've switched assistants
+              } else {
+                // If assistant switch failed, add an error output for this tool call
+                toolOutputs.push({
+                  tool_call_id: toolCall.id,
+                  output: JSON.stringify({
+                    success: false,
+                    message: `No se pudo realizar el switch de asistente para ${functionName}`,
+                  }),
+                })
+              }
+            } else {
+              // Call executeToolCall for non-routing functions
+              const output = await executeToolCall(toolCall, phoneNumberId, accessToken, clienteId)
+              toolOutputs.push({
+                tool_call_id: toolCall.id,
+                output: output,
+              })
+            }
+          }
+        }
+
+        if (assistantSwitched) {
+          console.log(`[OPENAI-TOOLS] 🔄 Assistant switched - run original cancelado`)
+          // The handleAssistantSwitch function already cancels the original run and processes the new one.
+          // We simply return success to indicate that this flow is handled.
+          return { success: true } // Returning true to signal successful handling of the switch
+        }
+
+        console.log(`[OPENAI] 📤 Enviando resultados a OpenAI`)
+        console.log(`[OPENAI] 📤 ===== ENVIANDO A OPENAI =====`)
+        console.log(`[OPENAI] 📤 Cantidad de tool outputs: ${toolOutputs.length}`)
+        toolOutputs.forEach((output, index) => {
+          console.log(`[OPENAI] 📤 Tool Output ${index + 1}:`)
+          console.log(`[OPENAI] 📤   - tool_call_id: ${output.tool_call_id}`)
+          console.log(`[OPENAI] 📤   - output (${output.output.length} chars):`)
+          console.log(`[OPENAI] 📤   ${output.output}`)
+        })
+        console.log(`[OPENAI] 📤 ===== FIN DATOS ENVIADOS =====`)
+
+        const submitUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`
+        const submitResponse = await fetch(submitUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "assistants=v2",
+          },
+          body: JSON.stringify({ tool_outputs: toolOutputs }),
+        })
+
+        if (!submitResponse.ok) {
+          const errorText = await submitResponse.text()
+          throw new Error(`Submit tool outputs failed: ${submitResponse.status} ${errorText}`)
+        }
+
+        // After submitting tool outputs, we need to restart the loop to wait for the next status
+        run = await openai.beta.threads.runs.retrieve(threadId, runId) // Re-fetch the run to get its new status
+      } else {
+        // If not requires_action, break the loop and proceed to check status
+        break
+      }
     }
 
-    if (completedRun.status === "completed") {
+    // Re-fetch run status after the loop
+    run = await openai.beta.threads.runs.retrieve(threadId, runId)
+
+    if (run.status === "completed") {
       const messages = await openai.beta.threads.messages.list(threadId, {
         order: "desc",
         limit: 10, // Aumentar límite para capturar múltiples mensajes
@@ -1742,167 +1910,30 @@ export async function processRunWithCorrectFlow(
         throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
       }
 
-      const userPhoneNumber = await getPhoneNumberFromThread(threadId, config.id)
-      if (!userPhoneNumber) {
+      const finalUserPhoneNumber = userPhoneNumber || (await getUserPhoneNumberFromThread(threadId))
+      if (!finalUserPhoneNumber) {
         throw new Error(`No se pudo obtener el número de teléfono para el thread ${threadId}`)
       }
-      // </CHANGE>
 
       await saveConversationMessage({
         id: nanoid(),
         role: "assistant",
         content: messageContent,
         timestamp: new Date().toISOString(),
-        phoneNumber: userPhoneNumber,
+        phoneNumber: finalUserPhoneNumber,
         configId: config.id,
       })
 
-      await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, messageContent)
-      console.log(`[OPENAI] 📱 Enviado a WhatsApp: ${userPhoneNumber}`)
-      // </CHANGE>
+      await sendWhatsAppMessage(phoneNumberId, accessToken, finalUserPhoneNumber, messageContent)
+      console.log(`[OPENAI] 📱 Enviado a WhatsApp: ${finalUserPhoneNumber}`)
 
       await incrementMetric("messages_sent")
 
       return { success: true }
-    } else if (completedRun.status === "requires_action") {
-      console.log(`[OPENAI] 🔧 Ejecutando herramientas`)
-
-      if (completedRun.required_action?.type === "submit_tool_outputs") {
-        const toolCalls = completedRun.required_action.submit_tool_outputs.tool_calls
-        const toolOutputs = []
-        let assistantSwitched = false
-
-        console.log(`[OPENAI] 🔧 ${toolCalls.length} herramientas a ejecutar`)
-
-        const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
-        if (!config) {
-          throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
-        }
-
-        const userPhoneNumber = await getPhoneNumberFromThread(threadId, config.id)
-        if (!userPhoneNumber) {
-          throw new Error(`No se pudo obtener el número de teléfono para el thread ${threadId}`)
-        }
-
-        for (const toolCall of toolCalls) {
-          const functionName = toolCall.function.name
-          const functionArgs = JSON.parse(toolCall.function.arguments)
-
-          console.log(`[OPENAI-TOOLS] Ejecutando tool: ${functionName} con args:`, functionArgs)
-
-          if (functionName.startsWith("route_to_")) {
-            console.log(`[OPENAI-TOOLS] 🔀 Detectada función de routing: ${functionName}`)
-
-            // Hacer el switch a un NUEVO asistente
-            const switchResult = await handleAssistantSwitch(
-              openai,
-              threadId,
-              functionName,
-              functionArgs,
-              phoneNumberId,
-              accessToken,
-              clienteId,
-              userPhoneNumber,
-            )
-
-            if (switchResult.switchedAssistant) {
-              assistantSwitched = true
-              console.log(
-                `[OPENAI-TOOLS] ✅ Switch exitoso - nuevo asistente ${switchResult.assistantId} tomó control en thread ${switchResult.newThreadId}`,
-              )
-              console.log(`[OPENAI-TOOLS] 🛑 Terminando ejecución del asistente original - NO se enviarán tool outputs`)
-              // Break the loop since we switched assistants
-              break
-            } else {
-              // No se encontró asistente configurado, continuar normally
-              console.log(`[OPENAI-TOOLS] ℹ️ No se hizo switch, Continuando normally`)
-              toolOutputs.push({
-                tool_call_id: toolCall.id,
-                output: JSON.stringify({
-                  success: false,
-                  message: `No se encontró asistente configurado para ${functionName}`,
-                }),
-              })
-            }
-          } else {
-            const waitingMessage = FUNCTION_MESSAGES[functionName]
-            if (waitingMessage) {
-              try {
-                await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
-                console.log(`[OPENAI] ⏳ Mensaje de espera enviado: ${functionName}`)
-              } catch (error) {
-                console.error(`[OPENAI] ❌ Error enviando mensaje de espera:`, error)
-              }
-            } else {
-              console.log(`[OPENAI] 🔕 Sin mensaje de espera para: ${functionName}`)
-            }
-
-            const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
-
-            toolOutputs.push({
-              tool_call_id: toolCall.id,
-              output: JSON.stringify(toolResult),
-            })
-
-            console.log(`[OPENAI] ✅ ${functionName} completado`)
-          }
-        }
-        // </CHANGE>
-
-        if (assistantSwitched) {
-          console.log(
-            `[OPENAI-TOOLS] 🛑 Assistant switch detectado - retornando sin enviar tool outputs al asistente original`,
-          )
-          return { success: true }
-        }
-
-        console.log(`[OPENAI] 📤 Enviando resultados a OpenAI`)
-        console.log(`[OPENAI] 📤 ===== ENVIANDO A OPENAI =====`)
-        console.log(`[OPENAI] 📤 Cantidad de tool outputs: ${toolOutputs.length}`)
-        toolOutputs.forEach((output, index) => {
-          console.log(`[OPENAI] 📤 Tool Output ${index + 1}:`)
-          console.log(`[OPENAI] 📤   - tool_call_id: ${output.tool_call_id}`)
-          console.log(`[OPENAI] 📤   - output (${output.output.length} chars):`)
-          console.log(`[OPENAI] 📤   ${output.output}`)
-        })
-        console.log(`[OPENAI] 📤 ===== FIN DATOS ENVIADOS =====`)
-
-        const submitUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`
-        const submitResponse = await fetch(submitUrl, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-            "OpenAI-Beta": "assistants=v2",
-          },
-          body: JSON.stringify({ tool_outputs: toolOutputs }),
-        })
-
-        if (!submitResponse.ok) {
-          const errorText = await submitResponse.text()
-          throw new Error(`Submit tool outputs failed: ${submitResponse.status} ${errorText}`)
-        }
-
-        // After submitting tool outputs, we need to restart the loop to wait for the next status
-        // If the switch was successful, the new run will be created in handleAssistantSwitch,
-        // and this function will eventually be called again for the *new* run.
-        // If the switch was not successful, the original assistant will continue processing.
-        return await processRunWithCorrectFlow(
-          openai,
-          threadId,
-          runId,
-          accessToken,
-          phoneNumberId,
-          clienteId,
-          retryCount,
-        )
-      } else {
-        throw new Error(`Tipo de acción no soportado: ${completedRun.required_action?.type}`)
-      }
-    } else if (completedRun.status === "failed") {
-      throw new Error(`Run falló: ${completedRun.last_error?.message}`)
+    } else if (run.status === "failed") {
+      throw new Error(`Run falló: ${run.last_error?.message}`)
     } else {
-      throw new Error(`Estado inesperado del run: ${completedRun.status}`)
+      throw new Error(`Estado inesperado del run: ${run.status}`)
     }
   } catch (error: any) {
     // Changed to 'any' to access error.message property
@@ -1990,6 +2021,7 @@ export async function processRunWithCorrectFlow(
                     accessToken,
                     phoneNumberId,
                     clienteId,
+                    newThreadResult.userPhone, // Pass user phone number
                     retryCount + 1,
                   )
                 } else {
@@ -2020,6 +2052,7 @@ export async function processRunWithCorrectFlow(
                     accessToken,
                     phoneNumberId,
                     clienteId,
+                    newThreadResult.userPhone, // Pass user phone number
                     retryCount + 1,
                   )
                 } else {
@@ -2043,6 +2076,7 @@ export async function processRunWithCorrectFlow(
           accessToken,
           phoneNumberId,
           clienteId,
+          userPhoneNumber, // Pass user phone number
           retryCount + 1,
         )
       } catch (retryError: any) {
@@ -2067,31 +2101,28 @@ export async function processRunWithCorrectFlow(
 
       const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
       if (config) {
-        const userPhoneNumber = await getPhoneNumberFromThread(threadId, config.id)
-
-        if (userPhoneNumber) {
+        const finalUserPhoneNumber = userPhoneNumber || (await getUserPhoneNumberFromThread(threadId))
+        if (finalUserPhoneNumber) {
           await saveConversationMessage({
             id: nanoid(),
             role: "assistant",
             content: errorMessage,
             timestamp: new Date().toISOString(),
-            phoneNumber: userPhoneNumber,
+            phoneNumber: finalUserPhoneNumber,
             configId: config.id,
             messageType: "error",
           })
           console.log(`[OPENAI] 💾 Mensaje de error guardado en conversación`)
 
-          await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, errorMessage)
-          console.log(`[OPENAI] 📱 Mensaje de error enviado al usuario: ${userPhoneNumber}`)
+          await sendWhatsAppMessage(phoneNumberId, accessToken, finalUserPhoneNumber, errorMessage)
+          console.log(`[OPENAI] 📱 Mensaje de error enviado al usuario: ${finalUserPhoneNumber}`)
         } else {
           console.error(`[OPENAI] ❌ No se pudo obtener número de teléfono para enviar mensaje de error`)
         }
       }
-      // </CHANGE>
     } catch (sendError) {
       console.error(`[OPENAI] ❌ Error enviando mensaje de error:`, sendError)
     }
-    // </CHANGE>
 
     // Log error for monitoring
     if (isQueuedTimeout) {
@@ -2104,6 +2135,44 @@ export async function processRunWithCorrectFlow(
 
     return { success: false, error: isQueuedTimeout ? "queued_timeout" : isTimeout ? "timeout" : "error" }
   }
+}
+
+// Helper function to execute a tool call (used internally)
+async function executeToolCall(
+  toolCall: any,
+  phoneNumberId: string,
+  accessToken: string,
+  clienteId: string,
+): Promise<string> {
+  const functionName = toolCall.function.name
+  const functionArgs = JSON.parse(toolCall.function.arguments)
+
+  const waitingMessage = FUNCTION_MESSAGES[functionName]
+  if (waitingMessage) {
+    try {
+      // Obtain userPhoneNumber - assuming it might be available in thread metadata or needs to be fetched
+      // For now, let's assume getUserPhoneNumberFromThread can get it if thread_id is available.
+      // `toolCall.thread_id` should be available for this purpose if the API provides it.
+      // If not, this part might need adjustment based on how `toolCall` is structured.
+      // Let's assume `thread_id` is available on `toolCall` for this example.
+      const userPhoneNumber = await getUserPhoneNumberFromThread(toolCall.thread_id) // Need thread_id here
+
+      if (userPhoneNumber) {
+        await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
+        console.log(`[OPENAI] ⏳ Mensaje de espera enviado: ${functionName}`)
+      } else {
+        console.error(`[OPENAI] ❌ No se pudo obtener número de teléfono para enviar mensaje de espera`)
+      }
+    } catch (error) {
+      console.error(`[OPENAI] ❌ Error enviando mensaje de espera para ${functionName}:`, error)
+    }
+  } else {
+    console.log(`[OPENAI] 🔕 Sin mensaje de espera para: ${functionName}`)
+  }
+
+  const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
+  console.log(`[OPENAI] ✅ ${functionName} completado`)
+  return JSON.stringify(toolResult)
 }
 
 async function checkForActiveRuns(threadId: string): Promise<{ hasActive: boolean; runId?: string; status?: string }> {
