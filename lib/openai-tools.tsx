@@ -1844,7 +1844,14 @@ export async function processRunWithCorrectFlow(
               }
             } else {
               // Call executeToolCall for non-routing functions
-              const output = await executeToolCall(toolCall, phoneNumberId, accessToken, clienteId)
+              const output = await executeToolCall(
+                toolCall,
+                phoneNumberId,
+                accessToken,
+                clienteId,
+                threadId,
+                userPhoneNumber,
+              )
               toolOutputs.push({
                 tool_call_id: toolCall.id,
                 output: output,
@@ -2196,6 +2203,8 @@ async function executeToolCall(
   phoneNumberId: string,
   accessToken: string,
   clienteId: string,
+  threadId: string, // Added threadId parameter
+  userPhoneNumber?: string, // Added userPhoneNumber parameter
 ): Promise<string> {
   const functionName = toolCall.function.name
   const functionArgs = JSON.parse(toolCall.function.arguments)
@@ -2203,14 +2212,10 @@ async function executeToolCall(
   const waitingMessage = FUNCTION_MESSAGES[functionName]
   if (waitingMessage) {
     try {
-      // Obtain userPhoneNumber - assuming it might be available in thread metadata or needs to be fetched
-      // For now, let's assume getUserPhoneNumberFromThread can get it if thread_id is available.
-      // If not, this part might need adjustment based on how `toolCall` is structured.
-      // Let's assume `thread_id` is available on `toolCall` for this example.
-      const userPhoneNumber = await getUserPhoneNumberFromThread(toolCall.thread_id) // Need thread_id here
+      const finalUserPhoneNumber = userPhoneNumber || (await getUserPhoneNumberFromThread(threadId))
 
-      if (userPhoneNumber) {
-        await sendWhatsAppMessage(phoneNumberId, accessToken, userPhoneNumber, waitingMessage)
+      if (finalUserPhoneNumber) {
+        await sendWhatsAppMessage(phoneNumberId, accessToken, finalUserPhoneNumber, waitingMessage)
         console.log(`[OPENAI] ⏳ Mensaje de espera enviado: ${functionName}`)
       } else {
         console.error(`[OPENAI] ❌ No se pudo obtener número de teléfono para enviar mensaje de espera`)
