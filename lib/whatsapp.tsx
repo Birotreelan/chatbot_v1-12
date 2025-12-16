@@ -678,9 +678,21 @@ ${userMessage}`
 
     // Obtener respuesta del asistente
     try {
+      console.log(`[v0] 📞 Antes de llamar getAssistantResponse:`, {
+        userPhoneNumber,
+        threadId: threadResult.threadId,
+        phoneNumberId,
+        assistantId: config.whatsappAssistantId,
+      })
       console.log(`[WHATSAPP] Llamando a getAssistantResponse...`)
       // Usar el ID de asistente específico para esta configuración y pasar el phoneNumberId
-      await getAssistantResponse(threadResult.threadId, messageToSend, phoneNumberId, config.whatsappAssistantId)
+      await getAssistantResponse(
+        threadResult.threadId,
+        messageToSend,
+        phoneNumberId,
+        config.whatsappAssistantId,
+        userPhoneNumber,
+      )
 
       console.log(`[WHATSAPP] getAssistantResponse completado exitosamente`)
 
@@ -735,7 +747,19 @@ PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDer
 ${userMessage}`
 
           console.log(`[WHATSAPP] Reintentando con nuevo thread...`)
-          await getAssistantResponse(newThread.id, messageToSend, phoneNumberId, config.whatsappAssistantId)
+          console.log(`[v0] 📞 Antes de reintentar con nuevo thread:`, {
+            userPhoneNumber,
+            newThreadId: newThread.id,
+            phoneNumberId,
+            assistantId: config.whatsappAssistantId,
+          })
+          await getAssistantResponse(
+            newThread.id,
+            messageToSend,
+            phoneNumberId,
+            config.whatsappAssistantId,
+            userPhoneNumber,
+          )
 
           // Actualizar estadísticas - mensaje procesado
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })

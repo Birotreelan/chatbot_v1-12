@@ -1680,7 +1680,17 @@ export async function getAssistantResponse(
   message: string,
   phoneNumberId: string,
   assistantId: string = process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
+  userPhoneNumber?: string,
 ) {
+  console.log(`[v0] 📥 getAssistantResponse recibió parámetros:`, {
+    threadId,
+    messageLength: message.length,
+    phoneNumberId,
+    assistantId,
+    userPhoneNumber,
+    userPhoneNumberType: typeof userPhoneNumber,
+    userPhoneNumberUndefined: userPhoneNumber === undefined,
+  })
   console.log(`[OPENAI] 🤖 Iniciando conversación`)
   console.log(`[OPENAI] 📝 Mensaje: "${message.substring(0, 100)}${message.length > 100 ? "..." : ""}"`)
 
@@ -1707,6 +1717,15 @@ export async function getAssistantResponse(
 
     console.log(`[OPENAI] 🏃 Run creado: ${run.id}`)
 
+    console.log(`[v0] 🚀 Antes de llamar processRunWithCorrectFlow:`, {
+      threadId,
+      runId: run.id,
+      accessToken: config.accessToken ? `${config.accessToken.substring(0, 10)}...` : "undefined",
+      phoneNumberId,
+      clienteId: config.cliente_id || "",
+      userPhoneNumber,
+    })
+
     await processRunWithCorrectFlow(
       openai,
       threadId,
@@ -1714,6 +1733,7 @@ export async function getAssistantResponse(
       config.accessToken,
       phoneNumberId,
       config.cliente_id || "",
+      userPhoneNumber,
     )
 
     console.log(`[OPENAI] ✅ Conversación completada`)
