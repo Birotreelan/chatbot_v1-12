@@ -350,14 +350,27 @@ async function handleAssistantSwitch(
     })
     console.log(`[OPENAI-SWITCH] ✨ Nuevo thread creado: ${newThread.id}`)
 
-    // Crear mensaje inicial con los argumentos del function calling
-    const initialMessage = JSON.stringify(functionArgs, null, 2)
+    const { getArgentinaDateTime } = await import("@/lib/utils/date-utils")
+    const fechaHora = getArgentinaDateTime()
+
+    // Construir mensaje con bloque [SISTEMA] + argumentos del function calling
+    const systemBlock = `[SISTEMA]
+Nombre: ${config.displayName}
+FechaHora: ${fechaHora}
+PrimerMensaje: true
+TipoMensaje: assistant_switch
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
+FuncionOrigen: ${functionName}
+[/SISTEMA]
+
+${JSON.stringify(functionArgs, null, 2)}`
+
     await openai.beta.threads.messages.create(newThread.id, {
       role: "user",
-      content: initialMessage,
+      content: systemBlock,
     })
 
-    console.log(`[OPENAI-SWITCH] 📤 Mensaje inicial enviado al nuevo thread`)
+    console.log(`[OPENAI-SWITCH] 📤 Mensaje inicial enviado al nuevo thread (con datos de sistema)`)
 
     // Actualizar el mapping de thread en la base de datos para que las futuras interacciones usen el nuevo thread
     // Assuming updateThreadId works with phoneNumber and configId to update the thread mapping.
@@ -1810,8 +1823,8 @@ export async function processRunWithCorrectFlow(
               // Break the loop since we switched assistants
               break
             } else {
-              // No se encontró asistente configurado, continuar normalmente
-              console.log(`[OPENAI-TOOLS] ℹ️ No se hizo switch, Continuando normalmente`)
+              // No se encontró asistente configurado, continuar normally
+              console.log(`[OPENAI-TOOLS] ℹ️ No se hizo switch, Continuando normally`)
               toolOutputs.push({
                 tool_call_id: toolCall.id,
                 output: JSON.stringify({
