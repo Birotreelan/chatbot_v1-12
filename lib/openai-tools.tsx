@@ -617,8 +617,8 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         })
       }
 
-      const url = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs` // FIX: 'url' variable declared
-      const submitResponse = await fetch(url, {
+      const submitUrl = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`
+      const submitResponse = await fetch(submitUrl, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -1714,6 +1714,7 @@ export async function getAssistantResponse(
       config.accessToken,
       phoneNumberId,
       config.cliente_id || "",
+      undefined, // userPhoneNumber - will be retrieved from thread if needed
     )
 
     console.log(`[OPENAI] ✅ Conversación completada`)
@@ -2150,7 +2151,6 @@ async function executeToolCall(
     try {
       // Obtain userPhoneNumber - assuming it might be available in thread metadata or needs to be fetched
       // For now, let's assume getUserPhoneNumberFromThread can get it if thread_id is available.
-      // `toolCall.thread_id` should be available for this purpose if the API provides it.
       // If not, this part might need adjustment based on how `toolCall` is structured.
       // Let's assume `thread_id` is available on `toolCall` for this example.
       const userPhoneNumber = await getUserPhoneNumberFromThread(toolCall.thread_id) // Need thread_id here
