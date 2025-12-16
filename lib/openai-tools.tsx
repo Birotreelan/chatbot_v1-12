@@ -343,7 +343,7 @@ async function handleAssistantSwitch(
     if (cancelled) {
       console.log(`[OPENAI-SWITCH] ✅ Run original cancelado exitosamente`)
     } else {
-      console.log(`[OPENAI-SWITCH] ⚠️ No se pudo cancelar run original, continuando de todas formas...`)
+      console.log(`[OPENAI-SWITCH] ⚠️ No se pudo cancelar run original, Continuando de todas formas...`)
     }
 
     console.log(`[OPENAI-SWITCH] 🔄 Creando NUEVO thread para el asistente especializado...`)
@@ -390,15 +390,13 @@ ${JSON.stringify(functionArgs, null, 2)}`
 
     console.log(`[OPENAI-SWITCH] 🔄 Procesando el nuevo run...`)
     await processRunWithCorrectFlow(
-      openai, // Pass openai client
+      openai,
       newThread.id,
       newRun.id,
-      // The following parameters were missing in the original call to processRunWithCorrectFlow
-      // and are needed for sendWhatsAppMessage and getWhatsAppConfigByPhoneId inside it.
-      phoneNumberId, // This is needed to get the config and send messages
-      accessToken, // This is the token to send WhatsApp messages
-      clienteId, // This is the client ID for the tools
-      userPhoneNumber, // This is the user's phone number
+      accessToken, // ✅ Fixed: Now passing accessToken as 4th parameter
+      phoneNumberId, // ✅ Fixed: Now passing phoneNumberId as 5th parameter
+      clienteId,
+      userPhoneNumber,
     )
     console.log(`[OPENAI-SWITCH] ✅ Procesamiento del nuevo run completado`)
 
@@ -504,7 +502,7 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
       case "route_to_reservas_assistant":
       case "route_to_turnos_assistant":
         console.log(`[OPENAI-TOOLS] 🔀 Iniciando switch de asistente para: ${toolName}`)
-        // Retornar el resultado del switch de<bos>sistente directamente
+        // Retornar el resultado del switch de asistente directamente
         // The following arguments are not needed for the initial call to executeOpenAITool,
         // but they are required by handleAssistantSwitch. We will pass dummy values or null.
         // In a real scenario, these would be available in the context of the webhook handler.
