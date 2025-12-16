@@ -396,7 +396,7 @@ ${JSON.stringify(functionArgs, null, 2)}`
       accessToken, // ✅ Fixed: Now passing accessToken as 4th parameter
       phoneNumberId, // ✅ Fixed: Now passing phoneNumberId as 5th parameter
       clienteId,
-      userPhoneNumber,
+      userPhoneNumber, // Pass user phone number
     )
     console.log(`[OPENAI-SWITCH] ✅ Procesamiento del nuevo run completado`)
 
@@ -1989,10 +1989,10 @@ export async function processRunWithCorrectFlow(
         const activeRuns = await checkForActiveRuns(threadId)
 
         if (activeRuns.hasActive && activeRuns.runId) {
-          console.log(`[OPENAI] 🔒 Run activo encontrado: ${activeRuns.runId} (${activeRuns.runStatus})`)
+          console.log(`[OPENAI] 🔒 Run activo encontrado: ${activeRuns.runId} (${activeRuns.status})`)
 
           if (activeRuns.runId) {
-            if (activeRuns.runStatus === "cancelling") {
+            if (activeRuns.status === "cancelling") {
               // Si ya está en cancelling, solo esperar a que termine (no intentar cancelar de nuevo)
               console.log(`[OPENAI] ⏳ Run ya está en cancelling, esperando a que termine...`)
               const finished = await waitForCancellingRunToFinish(threadId, activeRuns.runId)
