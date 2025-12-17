@@ -13,15 +13,16 @@ export function AppointmentChart({ stats }: AppointmentChartProps) {
   // Preparar datos para el gráfico (últimos 30 días)
   const chartData = []
   const today = new Date()
+  const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))
 
   for (let i = 29; i >= 0; i--) {
-    const date = new Date(today)
-    date.setDate(date.getDate() - i)
+    const date = new Date(todayUTC)
+    date.setUTCDate(date.getUTCDate() - i)
     const dateStr = date.toISOString().split("T")[0]
 
     chartData.push({
       date: dateStr,
-      displayDate: `${date.getDate()}/${date.getMonth() + 1}`,
+      displayDate: `${date.getUTCDate()}/${date.getUTCMonth() + 1}`,
       confirmados: Number(stats.confirmedByDay[dateStr]) || 0,
       cancelados: Number(stats.cancelledByDay[dateStr]) || 0,
       reprogramados: Number(stats.rescheduledByDay[dateStr]) || 0,

@@ -6,7 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, Clock, TrendingUp } from "lucide-react"
 import { DateRangeFilter } from "./date-range-filter"
-import { format } from "date-fns"
 
 interface AppointmentStatsDetailProps {
   clienteId: string
@@ -17,7 +16,10 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
   const [stats, setStats] = useState<ClientAppointmentStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const today = format(new Date(), "yyyy-MM-dd")
+  const todayUTC = new Date()
+  const today = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), todayUTC.getUTCDate()))
+    .toISOString()
+    .split("T")[0]
   const [startDate, setStartDate] = useState<string | null>(today)
   const [endDate, setEndDate] = useState<string | null>(today)
 

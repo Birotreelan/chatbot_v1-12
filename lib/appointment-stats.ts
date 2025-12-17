@@ -55,12 +55,14 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
   if (!redis) return
 
   const statsKey = `${APPOINTMENT_STATS_PREFIX}${clienteId}`
-  const date = new Date(event.timestamp).toISOString().split("T")[0] // YYYY-MM-DD
+  const eventDate = new Date(event.timestamp)
+  const date = eventDate.toISOString().split("T")[0] // YYYY-MM-DD en UTC
 
   try {
     console.log(`[APPOINTMENT_STATS] 📈 Actualizando estadísticas agregadas para ${clienteId}`)
     console.log(`[APPOINTMENT_STATS] 📈 Clave de stats: ${statsKey}`)
     console.log(`[APPOINTMENT_STATS] 📈 Tipo de evento: ${event.eventType}`)
+    console.log(`[APPOINTMENT_STATS] 📈 Fecha UTC: ${date}`)
 
     // Incrementar contadores según el tipo de evento
     switch (event.eventType) {

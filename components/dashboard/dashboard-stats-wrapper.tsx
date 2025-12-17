@@ -4,14 +4,17 @@ import { useEffect, useState, useCallback } from "react"
 import { DashboardStats } from "./dashboard-stats"
 import { DateRangeFilter } from "./date-range-filter"
 import type { SystemStats } from "@/lib/types"
-import { format } from "date-fns"
 
 export default function DashboardStatsWrapper() {
   const [stats, setStats] = useState<SystemStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const todayUTC = new Date()
+  const today = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), todayUTC.getUTCDate()))
+    .toISOString()
+    .split("T")[0]
   const [dateFilter, setDateFilter] = useState<{ startDate: string | null; endDate: string | null }>({
-    startDate: format(new Date(), "yyyy-MM-dd"),
-    endDate: format(new Date(), "yyyy-MM-dd"),
+    startDate: today,
+    endDate: today,
   })
 
   const fetchStats = useCallback(async () => {
