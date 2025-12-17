@@ -233,7 +233,50 @@ export const openaiTools = {
   },
 }
 
-// Mensajes predefinidos para cada función
+function generateDynamicWaitingMessage(functionName: string, functionArgs: any): string | null {
+  switch (functionName) {
+    case "buscar_turnos_disponibles":
+      if (functionArgs?.rango_fechas) {
+        const rango = functionArgs.rango_fechas
+        // Parse the date range (format: "2025-12-17 a 2025-12-24")
+        const rangoParts = rango.split(" a ")
+        if (rangoParts.length === 2) {
+          const [fechaInicio, fechaFin] = rangoParts
+          // Format dates from YYYY-MM-DD to DD/MM
+          const formatFecha = (fecha: string) => {
+            const partes = fecha.trim().split("-")
+            if (partes.length === 3) {
+              return `${partes[2]}/${partes[1]}`
+            }
+            return fecha
+          }
+          const fechaInicioFormateada = formatFecha(fechaInicio)
+          const fechaFinFormateada = formatFecha(fechaFin)
+          return `Voy a buscar turnos disponibles del ${fechaInicioFormateada} al ${fechaFinFormateada}, aguardá unos instantes.`
+        }
+      }
+      return "Voy a buscar turnos disponibles, aguardá unos instantes."
+
+    case "validar_dni":
+      return "Aguardá unos instantes mientras validamos tu DNI."
+
+    case "reservar_turno":
+      return "Realizando reserva de turno. aguardá unos instantes."
+
+    case "obtener_subespecialidades":
+      return "Consultando las especialidades disponibles, aguardá unos instantes."
+
+    case "buscar_profesionales":
+      return "Buscando profesionales, aguardá unos instantes."
+
+    case "validar_obra_social":
+      return "Verificando la obra social, aguardá unos instantes."
+
+    default:
+      return null
+  }
+}
+
 const FUNCTION_MESSAGES: Record<string, string> = {
   validar_dni: "Aguardá unos instantes mientras validamos tu DNI.",
   buscar_turnos_disponibles: "Voy a buscar turnos disponibles, aguardá unos instantes.",
@@ -241,18 +284,6 @@ const FUNCTION_MESSAGES: Record<string, string> = {
   obtener_subespecialidades: "Consultando las especialidades disponibles, aguardá unos instantes.",
   buscar_profesionales: "Buscando profesionales, aguardá unos instantes.",
   validar_obra_social: "Verificando la obra social, aguardá unos instantes.",
-  obtener_datos_sede: "Consultando información de la sede, aguardá unos instantes.",
-  obtener_obras_sociales: "Consultando obras sociales disponibles, aguardá unos instantes.",
-  // Mensaje para registrar evento de cita
-  registrar_evento_cita: "Registrando el evento de la cita...",
-  // Mensaje para cancelar turno
-  cancelar_turno: "Procesando la cancelación de tu turno, aguardá unos instantes...",
-  obtener_sedes: "Consultando las sedes disponibles, aguardá unos instantes.",
-  // Mensaje para confirmar turno
-  confirmar_turno: "Procesando la confirmación de tu turno, aguardá unos instantes...",
-  // Mensajes para routing
-  route_to_reservas_assistant: "Redirigiendo al asistente de reservas...",
-  route_to_turnos_assistant: "Redirigiendo al asistente de gestión de turnos...",
 }
 
 // Función para truncar respuestas largas de herramientas
@@ -2210,14 +2241,14 @@ async function executeToolCall(
   const functionName = toolCall.function.name
   const functionArgs = JSON.parse(toolCall.function.arguments)
 
-  const waitingMessage = FUNCTION_MESSAGES[functionName]
+  const waitingMessage = generateDynamicWaitingMessage(functionName, functionArgs)
   if (waitingMessage) {
     try {
       const finalUserPhoneNumber = userPhoneNumber || (await getUserPhoneNumberFromThread(threadId))
 
       if (finalUserPhoneNumber) {
         await sendWhatsAppMessage(phoneNumberId, accessToken, finalUserPhoneNumber, waitingMessage)
-        console.log(`[OPENAI] ⏳ Mensaje de espera enviado: ${functionName}`)
+        console.log(`[OPENAI] ⏳ Mensaje de espera enviado: ${functionName} - "${waitingMessage}"`)
       } else {
         console.error(`[OPENAI] ❌ No se pudo obtener número de teléfono para enviar mensaje de espera`)
       }
