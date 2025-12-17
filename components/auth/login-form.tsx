@@ -43,7 +43,7 @@ export function LoginForm({ error }: { error?: string }) {
     <Card className="w-full max-w-md">
       <CardHeader>
         <CardTitle className="text-2xl">Iniciar Sesión</CardTitle>
-        <CardDescription>Accede al panel de control de WhatsApp AI Assistant</CardDescription>
+        <CardDescription>Accede al panel de control de Treelan Iris AI</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
