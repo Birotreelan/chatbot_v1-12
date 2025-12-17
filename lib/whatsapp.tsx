@@ -567,12 +567,8 @@ export async function processIndividualMessage(
 
   try {
     const unsupportedMessageTypes: Record<string, string> = {
-      sticker:
-        "Lo siento, soy un asistente virtual y no tengo la capacidad de entender stickers o imagenes. Responda escribiendo texto, por favor.",
-      reaction:
-        "Lo siento, soy un asistente virtual y no tengo la capacidad de procesar reacciones o iconos en mensajes. Responda escribiendo texto, por favor.",
       audio:
-        "Lo siento, soy un asistente virtual y no tengo la capacidad de entender mensajes de audio. Responda escribiendo texto, por favor.",
+        "Lo siento, soy un asistente de inteligencia artificial y no puedo escuchar el audio que has enviado. ¿Podrías enviar tu mensaje escrito?",
     }
 
     if (messageType && unsupportedMessageTypes[messageType]) {
@@ -613,7 +609,13 @@ export async function processIndividualMessage(
         return
       }
     }
-    // </CHANGE>
+
+    if (messageType === "sticker" || messageType === "reaction") {
+      console.log(`[WHATSAPP] 🔇 Tipo de mensaje ${messageType} ignorado sin respuesta`)
+      // Update stats - message received but not processed
+      await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+      return // Exit early, don't process or respond
+    }
 
     // Obtener o crear un thread para este usuario
     let threadResult
