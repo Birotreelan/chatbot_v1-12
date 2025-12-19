@@ -31,6 +31,9 @@ export function DashboardNav() {
             <Link href="/dashboard/estadisticas" className="text-foreground/60 hover:text-foreground">
               Estadísticas
             </Link>
+            <Link href="/dashboard/consumos" className="text-foreground/60 hover:text-foreground">
+              Consumos
+            </Link>
             <Link href="/dashboard/config/new" className="text-foreground/60 hover:text-foreground">
               Nuevo Número
             </Link>

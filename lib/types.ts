@@ -137,3 +137,40 @@ export interface AdditionalAssistant {
   assistantId: string // ID del asistente, ej: "asst_4cN7IH01SVAp2witTAfhU3So"
   description?: string // Descripción opcional del asistente
 }
+
+export interface ConversationAnalytics {
+  start: number // UNIX timestamp
+  end: number // UNIX timestamp
+  conversation: number // Cantidad de conversaciones
+  phone_number?: string
+  country?: string
+  conversation_type?: "REGULAR" | "FREE_TIER" | "FREE_ENTRY_POINT"
+  conversation_category?: "AUTHENTICATION" | "MARKETING" | "SERVICE" | "UTILITY"
+  conversation_direction?: "BUSINESS_INITIATED" | "USER_INITIATED"
+  cost?: number // Costo en USD (solo disponible si no se factura a través de BSP)
+}
+
+export interface ConversationAnalyticsResponse {
+  conversation_analytics?: {
+    data: Array<{
+      data_points: ConversationAnalytics[]
+    }>
+  }
+}
+
+export interface ConsumptionSummary {
+  totalConversations: number
+  totalCost: number
+  messagesSent: number
+  messagesDelivered: number
+  byCategory: {
+    authentication: { count: number; cost: number }
+    marketing: { count: number; cost: number }
+    service: { count: number; cost: number }
+    utility: { count: number; cost: number }
+  }
+  byCountry: Record<string, { count: number; cost: number }>
+  periodStart: string
+  periodEnd: string
+  currency: string
+}
