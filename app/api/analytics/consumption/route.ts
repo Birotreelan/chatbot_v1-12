@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
       id: config.id,
       displayName: config.displayName,
       wabaId: config.wabaId,
+      phoneNumberId: config.phoneNumberId,
       hasAccessToken: !!config.accessToken,
       tokenLength: config.accessToken?.length || 0,
     })
@@ -72,14 +73,67 @@ export async function GET(request: NextRequest) {
       endTimestamp,
     })
 
-    // Construir URL para analytics de mensajería
-    const messagingFields = `analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${granularity}).phone_numbers(["${config.phoneNumberId}"])`
-    const messagingUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${encodeURIComponent(messagingFields)}`
+    // Messaging analytics usa: DAY, MONTH, HALF_HOUR
+    // Conversation analytics usa: DAILY, MONTHLY, HALF_HOUR
+    const messagingGranularity = granularity === "DAILY" ? "DAY" : granularity === "MONTHLY" ? "MONTH" : "HALF_HOUR"
+    const conversationGranularity = granularity // Ya viene en formato correcto desde el cliente
 
-    console.log("[v0 Analytics] Intentando primero con messaging analytics...")
-    console.log("[v0 Analytics] URL de Messaging API:", messagingUrl)
+    console.log("[v0 Analytics] Granularidad ajustada:", {
+      original: granularity,
+      messaging: messagingGranularity,
+      conversation: conversationGranularity,
+    })
 
-    // Probar analytics de mensajería
+    // Intentar primero conversation analytics (es lo más importante para costos)
+    const conversationFields = `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers(["${config.phoneNumberId}"]).dimensions(["CONVERSATION_CATEGORY","COUNTRY","CONVERSATION_TYPE"])`
+    const conversationUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${conversationFields}`
+
+    console.log("[v0 Analytics] =================================")
+    console.log("[v0 Analytics] Consultando Conversation Analytics...")
+    console.log("[v0 Analytics] WABA ID:", config.wabaId)
+    console.log("[v0 Analytics] Phone Number ID:", config.phoneNumberId)
+    console.log("[v0 Analytics] URL completa:", conversationUrl)
+    console.log("[v0 Analytics] =================================")
+
+    const conversationResponse = await fetch(conversationUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+      },
+    })
+
+    console.log("[v0 Analytics] Respuesta de Conversation API:", {
+      status: conversationResponse.status,
+      statusText: conversationResponse.statusText,
+      ok: conversationResponse.ok,
+    })
+
+    let conversationData: ConversationAnalyticsResponse | null = null
+    let conversationError = null
+
+    if (conversationResponse.ok) {
+      conversationData = await conversationResponse.json()
+      console.log("[v0 Analytics] 🎯 RESPUESTA CONVERSATION API:")
+      console.log(JSON.stringify(conversationData, null, 2))
+    } else {
+      const errorText = await conversationResponse.text()
+      console.log("[v0 Analytics] ❌ Error en Conversation API:", errorText)
+      try {
+        conversationError = JSON.parse(errorText)
+      } catch {
+        conversationError = { message: errorText }
+      }
+    }
+
+    // Ahora intentar messaging analytics
+    const messagingFields = `analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${messagingGranularity}).phone_numbers(["${config.phoneNumberId}"])`
+    const messagingUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${messagingFields}`
+
+    console.log("[v0 Analytics] =================================")
+    console.log("[v0 Analytics] Consultando Messaging Analytics...")
+    console.log("[v0 Analytics] URL completa:", messagingUrl)
+    console.log("[v0 Analytics] =================================")
+
     const messagingResponse = await fetch(messagingUrl, {
       method: "GET",
       headers: {
@@ -96,84 +150,34 @@ export async function GET(request: NextRequest) {
     let messagingData = null
     if (messagingResponse.ok) {
       messagingData = await messagingResponse.json()
-      console.log("[v0 Analytics] 🔍 RESPUESTA COMPLETA DE MESSAGING API:")
+      console.log("[v0 Analytics] 📨 RESPUESTA MESSAGING API:")
       console.log(JSON.stringify(messagingData, null, 2))
     } else {
       const errorText = await messagingResponse.text()
-      console.log("[v0 Analytics] Error en Messaging API:", errorText)
+      console.log("[v0 Analytics] ❌ Error en Messaging API:", errorText)
     }
 
-    // Construir la URL de conversation analytics
-    const fields = `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${granularity}).dimensions(["CONVERSATION_CATEGORY","COUNTRY","CONVERSATION_TYPE"])`
-    const metaApiUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${encodeURIComponent(fields)}`
-
-    console.log("[v0 Analytics] Intentando con conversation analytics...")
-    console.log("[v0 Analytics] URL de Conversation API:", metaApiUrl)
-    console.log("[v0 Analytics] WABA ID usado:", config.wabaId)
-
-    // Llamar a la API de Meta para conversation analytics
-    const response = await fetch(metaApiUrl, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${config.accessToken}`,
-      },
-    })
-
-    console.log("[v0 Analytics] Respuesta de Conversation API:", {
-      status: response.status,
-      statusText: response.statusText,
-      ok: response.ok,
-    })
-
-    if (!response.ok) {
-      const errorData = await response.text()
-      console.error("[v0 Analytics] Error de Meta API:", errorData)
-
-      // Intentar parsear el error
-      let parsedError
-      try {
-        parsedError = JSON.parse(errorData)
-      } catch {
-        parsedError = { message: errorData }
-      }
-
+    // Si ambas APIs fallaron, retornar error
+    if (!conversationData && conversationError) {
       return NextResponse.json(
         {
           error: "Error al consultar la API de Meta",
-          details: parsedError,
-          statusCode: response.status,
+          details: conversationError,
+          statusCode: conversationResponse.status,
           wabaId: config.wabaId,
         },
-        { status: response.status },
-      )
-    }
-
-    const data: ConversationAnalyticsResponse = await response.json()
-
-    console.log("[v0 Analytics] 🔍 RESPUESTA COMPLETA DE CONVERSATION API:")
-    console.log(JSON.stringify(data, null, 2))
-
-    console.log("[v0 Analytics] Datos recibidos de Meta:", {
-      hasConversationAnalytics: !!data.conversation_analytics,
-      hasData: !!data.conversation_analytics?.data,
-      dataLength: data.conversation_analytics?.data?.length || 0,
-      dataPointsCount: data.conversation_analytics?.data?.[0]?.data_points?.length || 0,
-    })
-
-    // Log completo de los datos para debugging
-    if (data.conversation_analytics?.data?.[0]?.data_points) {
-      console.log(
-        "[v0 Analytics] Primeros 3 data points:",
-        JSON.stringify(data.conversation_analytics.data[0].data_points.slice(0, 3), null, 2),
+        { status: conversationResponse.status },
       )
     }
 
     // Procesar y estructurar los datos
-    const summary = processAnalyticsData(data, messagingData, startDate, endDate)
+    const summary = processAnalyticsData(conversationData, messagingData, startDate, endDate)
 
-    console.log("[v0 Analytics] Resumen procesado:", {
+    console.log("[v0 Analytics] ✅ Resumen procesado:", {
       totalConversations: summary.totalConversations,
       totalCost: summary.totalCost,
+      messagesSent: summary.messagesSent,
+      messagesDelivered: summary.messagesDelivered,
       categories: Object.keys(summary.byCategory).map((key) => ({
         category: key,
         count: summary.byCategory[key as keyof typeof summary.byCategory].count,
@@ -196,7 +200,7 @@ export async function GET(request: NextRequest) {
 }
 
 function processAnalyticsData(
-  data: ConversationAnalyticsResponse,
+  data: ConversationAnalyticsResponse | null,
   messagingData: any,
   startDate: string,
   endDate: string,
@@ -218,32 +222,39 @@ function processAnalyticsData(
     currency: "USD",
   }
 
-  if (messagingData?.analytics?.data?.[0]?.data_points) {
-    console.log("[v0 Analytics] Procesando datos de messaging...")
+  // Procesar datos de messaging
+  if (messagingData?.analytics?.data_points) {
+    console.log("[v0 Analytics] Procesando datos de messaging desde data_points...")
+    messagingData.analytics.data_points.forEach((point: any) => {
+      summary.messagesSent += point.sent || 0
+      summary.messagesDelivered += point.delivered || 0
+    })
+  } else if (messagingData?.analytics?.data?.[0]?.data_points) {
+    console.log("[v0 Analytics] Procesando datos de messaging desde data[0].data_points...")
     messagingData.analytics.data[0].data_points.forEach((point: any) => {
       summary.messagesSent += point.sent || 0
       summary.messagesDelivered += point.delivered || 0
     })
-    console.log("[v0 Analytics] Mensajes procesados:", {
-      sent: summary.messagesSent,
-      delivered: summary.messagesDelivered,
-    })
   }
 
+  console.log("[v0 Analytics] Mensajes procesados:", {
+    sent: summary.messagesSent,
+    delivered: summary.messagesDelivered,
+  })
+
   // Si no hay datos de conversaciones, retornar el resumen con datos de messaging
-  if (!data.conversation_analytics?.data?.[0]?.data_points) {
-    console.log("[v0 Analytics] No hay data_points de conversaciones en la respuesta")
-    console.log("[v0 Analytics] ⚠️ Posibles razones:")
+  if (!data?.conversation_analytics?.data?.[0]?.data_points) {
+    console.log("[v0 Analytics] ⚠️ No hay data_points de conversaciones en la respuesta")
+    console.log("[v0 Analytics] Posibles razones:")
     console.log("  1. No hay conversaciones en el período seleccionado")
     console.log("  2. El token no tiene permisos de whatsapp_business_management")
-    console.log("  3. El WABA ID es incorrecto")
-    console.log("  4. Las analíticas de conversaciones no están disponibles para esta cuenta")
+    console.log("  3. Las analíticas de conversaciones no están disponibles para esta cuenta")
     return summary
   }
 
   const dataPoints = data.conversation_analytics.data[0].data_points
 
-  console.log("[v0 Analytics] Procesando", dataPoints.length, "data points de conversaciones")
+  console.log("[v0 Analytics] ✅ Procesando", dataPoints.length, "data points de conversaciones")
 
   dataPoints.forEach((point, index) => {
     const count = point.conversation || 0
@@ -251,13 +262,13 @@ function processAnalyticsData(
     const category = point.conversation_category?.toLowerCase() as keyof typeof summary.byCategory
     const country = point.country || "Unknown"
 
-    if (index < 5) {
+    if (index < 3) {
       console.log(`[v0 Analytics] Data point ${index}:`, {
         count,
         cost,
         category,
         country,
-        rawPoint: point,
+        type: point.conversation_type,
       })
     }
 
@@ -270,7 +281,7 @@ function processAnalyticsData(
       summary.byCategory[category].count += count
       summary.byCategory[category].cost += cost
     } else if (category) {
-      console.log(`[v0 Analytics] Categoría desconocida: ${category}`)
+      console.log(`[v0 Analytics] ⚠️ Categoría desconocida: ${category}`)
     }
 
     // Por país
@@ -280,6 +291,8 @@ function processAnalyticsData(
     summary.byCountry[country].count += count
     summary.byCountry[country].cost += cost
   })
+
+  console.log("[v0 Analytics] ✅ Procesamiento completado")
 
   return summary
 }
