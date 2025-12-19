@@ -62,16 +62,58 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Convertir fechas a UNIX timestamps
-    const startTimestamp = Math.floor(new Date(startDate).getTime() / 1000)
-    const endTimestamp = Math.floor(new Date(endDate).getTime() / 1000)
+    const startTimestamp = Math.floor(new Date(startDate + "T00:00:00Z").getTime() / 1000)
+    const endTimestamp = Math.floor(new Date(endDate + "T23:59:59Z").getTime() / 1000)
+
+    // Verificar que las fechas sean razonables (no en el futuro, no más de 1 año atrás)
+    const now = Math.floor(Date.now() / 1000)
+    const oneYearAgo = now - 365 * 24 * 60 * 60
 
     console.log("[v0 Analytics] Timestamps calculados:", {
       startDate,
       endDate,
       startTimestamp,
       endTimestamp,
+      now,
+      oneYearAgo,
+      isStartInFuture: startTimestamp > now,
+      isEndInFuture: endTimestamp > now,
+      isStartTooOld: startTimestamp < oneYearAgo,
     })
+
+    if (startTimestamp > now || endTimestamp > now) {
+      console.log("[v0 Analytics] ⚠️ ADVERTENCIA: Las fechas están en el futuro!")
+      return NextResponse.json(
+        {
+          error: "Las fechas no pueden estar en el futuro",
+          details: {
+            startDate,
+            endDate,
+            startTimestamp,
+            endTimestamp,
+            currentTimestamp: now,
+          },
+        },
+        { status: 400 },
+      )
+    }
+
+    if (startTimestamp < oneYearAgo || endTimestamp < oneYearAgo) {
+      console.log("[v0 Analytics] ⚠️ ADVERTENCIA: Las fechas están más de 1 año atrás!")
+      return NextResponse.json(
+        {
+          error: "Las fechas no pueden estar más de 1 año atrás",
+          details: {
+            startDate,
+            endDate,
+            startTimestamp,
+            endTimestamp,
+            oneYearAgoTimestamp: oneYearAgo,
+          },
+        },
+        { status: 400 },
+      )
+    }
 
     // Messaging analytics usa: DAY, MONTH, HALF_HOUR
     // Conversation analytics usa: DAILY, MONTHLY, HALF_HOUR
@@ -85,21 +127,20 @@ export async function GET(request: NextRequest) {
     })
 
     // Intentar primero conversation analytics (es lo más importante para costos)
-    const conversationFields = `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers(["${config.phoneNumberId}"]).dimensions(["CONVERSATION_CATEGORY","COUNTRY","CONVERSATION_TYPE"])`
-    const conversationUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${conversationFields}`
+    // Según docs oficiales: conversation_analytics.start().end().granularity().phone_numbers([])
+    const conversationFields = `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers([])`
+    const conversationUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${conversationFields}&access_token=${config.accessToken}`
 
     console.log("[v0 Analytics] =================================")
     console.log("[v0 Analytics] Consultando Conversation Analytics...")
     console.log("[v0 Analytics] WABA ID:", config.wabaId)
     console.log("[v0 Analytics] Phone Number ID:", config.phoneNumberId)
-    console.log("[v0 Analytics] URL completa:", conversationUrl)
+    console.log("[v0 Analytics] Fields:", conversationFields)
+    console.log("[v0 Analytics] URL completa:", conversationUrl.replace(config.accessToken, "TOKEN_OCULTO"))
     console.log("[v0 Analytics] =================================")
 
     const conversationResponse = await fetch(conversationUrl, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${config.accessToken}`,
-      },
     })
 
     console.log("[v0 Analytics] Respuesta de Conversation API:", {
@@ -125,20 +166,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Ahora intentar messaging analytics
-    const messagingFields = `analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${messagingGranularity}).phone_numbers(["${config.phoneNumberId}"])`
-    const messagingUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${messagingFields}`
+    const messagingFields = `analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${messagingGranularity}).phone_numbers([])`
+    const messagingUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${messagingFields}&access_token=${config.accessToken}`
 
     console.log("[v0 Analytics] =================================")
     console.log("[v0 Analytics] Consultando Messaging Analytics...")
-    console.log("[v0 Analytics] URL completa:", messagingUrl)
+    console.log("[v0 Analytics] URL completa:", messagingUrl.replace(config.accessToken, "TOKEN_OCULTO"))
     console.log("[v0 Analytics] =================================")
 
     const messagingResponse = await fetch(messagingUrl, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${config.accessToken}`,
-      },
     })
 
     console.log("[v0 Analytics] Respuesta de Messaging API:", {
@@ -222,16 +259,9 @@ function processAnalyticsData(
     currency: "USD",
   }
 
-  // Procesar datos de messaging
   if (messagingData?.analytics?.data_points) {
     console.log("[v0 Analytics] Procesando datos de messaging desde data_points...")
     messagingData.analytics.data_points.forEach((point: any) => {
-      summary.messagesSent += point.sent || 0
-      summary.messagesDelivered += point.delivered || 0
-    })
-  } else if (messagingData?.analytics?.data?.[0]?.data_points) {
-    console.log("[v0 Analytics] Procesando datos de messaging desde data[0].data_points...")
-    messagingData.analytics.data[0].data_points.forEach((point: any) => {
       summary.messagesSent += point.sent || 0
       summary.messagesDelivered += point.delivered || 0
     })
@@ -242,17 +272,18 @@ function processAnalyticsData(
     delivered: summary.messagesDelivered,
   })
 
-  // Si no hay datos de conversaciones, retornar el resumen con datos de messaging
-  if (!data?.conversation_analytics?.data?.[0]?.data_points) {
+  if (!data?.conversation_analytics?.data?.data_points) {
     console.log("[v0 Analytics] ⚠️ No hay data_points de conversaciones en la respuesta")
+    console.log("[v0 Analytics] Estructura recibida:", JSON.stringify(data?.conversation_analytics, null, 2))
     console.log("[v0 Analytics] Posibles razones:")
     console.log("  1. No hay conversaciones en el período seleccionado")
     console.log("  2. El token no tiene permisos de whatsapp_business_management")
     console.log("  3. Las analíticas de conversaciones no están disponibles para esta cuenta")
+    console.log("  4. El formato de la consulta no es correcto")
     return summary
   }
 
-  const dataPoints = data.conversation_analytics.data[0].data_points
+  const dataPoints = data.conversation_analytics.data.data_points
 
   console.log("[v0 Analytics] ✅ Procesando", dataPoints.length, "data points de conversaciones")
 

@@ -75,8 +75,23 @@ export function ConsumptionDashboard() {
             break
         }
 
-        const startDateStr = startDate.toISOString().split("T")[0]
-        const endDateStr = endDate.toISOString().split("T")[0]
+        // Formatear fechas manualmente para evitar problemas de timezone
+        const formatDate = (date: Date) => {
+          const year = date.getFullYear()
+          const month = String(date.getMonth() + 1).padStart(2, "0")
+          const day = String(date.getDate()).padStart(2, "0")
+          return `${year}-${month}-${day}`
+        }
+
+        const startDateStr = formatDate(startDate)
+        const endDateStr = formatDate(endDate)
+
+        console.log("[v0] Fechas calculadas (cliente):", {
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+          startDateStr,
+          endDateStr,
+        })
 
         const url = `/api/analytics/consumption?configId=${selectedConfigId}&startDate=${startDateStr}&endDate=${endDateStr}&granularity=DAILY`
 
