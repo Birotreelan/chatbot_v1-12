@@ -142,14 +142,53 @@ export async function GET(request: NextRequest) {
     })
 
     // Intentar primero conversation analytics (es lo más importante para costos)
-    // Según docs oficiales: conversation_analytics.start().end().granularity().phone_numbers([])
-    const conversationFields = `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers([])`
+    const messagingFields = `analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${messagingGranularity}).phone_numbers([])`
+    const messagingUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${messagingFields}&access_token=${config.accessToken}`
+
+    console.log("[v0 Analytics] =================================")
+    console.log("[v0 Analytics] Consultando Messaging Analytics primero para obtener el número de teléfono...")
+    console.log("[v0 Analytics] URL completa:", messagingUrl.replace(config.accessToken, "TOKEN_OCULTO"))
+    console.log("[v0 Analytics] =================================")
+
+    const messagingResponse = await fetch(messagingUrl, {
+      method: "GET",
+    })
+
+    console.log("[v0 Analytics] Respuesta de Messaging API:", {
+      status: messagingResponse.status,
+      statusText: messagingResponse.statusText,
+      ok: messagingResponse.ok,
+    })
+
+    let messagingData = null
+    let phoneNumber = null
+
+    if (messagingResponse.ok) {
+      messagingData = await messagingResponse.json()
+      console.log("[v0 Analytics] 📨 RESPUESTA MESSAGING API:")
+      console.log(JSON.stringify(messagingData, null, 2))
+
+      // Extraer el número de teléfono de la respuesta
+      if (messagingData?.analytics?.phone_numbers?.[0]) {
+        phoneNumber = messagingData.analytics.phone_numbers[0]
+        console.log("[v0 Analytics] ✅ Número de teléfono detectado:", phoneNumber)
+      }
+    } else {
+      const errorText = await messagingResponse.text()
+      console.log("[v0 Analytics] ❌ Error en Messaging API:", errorText)
+    }
+
+    // Según docs oficiales, necesitamos: dimensions, metric_types, y el número específico
+    const conversationFields = phoneNumber
+      ? `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers(["${phoneNumber}"]).metric_types(["COST","CONVERSATION"]).dimensions(["CONVERSATION_CATEGORY","COUNTRY","PHONE"])`
+      : `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).metric_types(["COST","CONVERSATION"]).dimensions(["CONVERSATION_CATEGORY","COUNTRY","PHONE"])`
+
     const conversationUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${conversationFields}&access_token=${config.accessToken}`
 
     console.log("[v0 Analytics] =================================")
     console.log("[v0 Analytics] Consultando Conversation Analytics...")
     console.log("[v0 Analytics] WABA ID:", config.wabaId)
-    console.log("[v0 Analytics] Phone Number ID:", config.phoneNumberId)
+    console.log("[v0 Analytics] Phone Number:", phoneNumber || "all")
     console.log("[v0 Analytics] Fields:", conversationFields)
     console.log("[v0 Analytics] URL completa:", conversationUrl.replace(config.accessToken, "TOKEN_OCULTO"))
     console.log("[v0 Analytics] =================================")
@@ -179,34 +218,6 @@ export async function GET(request: NextRequest) {
       } catch {
         conversationError = { message: errorText }
       }
-    }
-
-    const messagingFields = `analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${messagingGranularity}).phone_numbers([])`
-    const messagingUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${messagingFields}&access_token=${config.accessToken}`
-
-    console.log("[v0 Analytics] =================================")
-    console.log("[v0 Analytics] Consultando Messaging Analytics...")
-    console.log("[v0 Analytics] URL completa:", messagingUrl.replace(config.accessToken, "TOKEN_OCULTO"))
-    console.log("[v0 Analytics] =================================")
-
-    const messagingResponse = await fetch(messagingUrl, {
-      method: "GET",
-    })
-
-    console.log("[v0 Analytics] Respuesta de Messaging API:", {
-      status: messagingResponse.status,
-      statusText: messagingResponse.statusText,
-      ok: messagingResponse.ok,
-    })
-
-    let messagingData = null
-    if (messagingResponse.ok) {
-      messagingData = await messagingResponse.json()
-      console.log("[v0 Analytics] 📨 RESPUESTA MESSAGING API:")
-      console.log(JSON.stringify(messagingData, null, 2))
-    } else {
-      const errorText = await messagingResponse.text()
-      console.log("[v0 Analytics] ❌ Error en Messaging API:", errorText)
     }
 
     // Si ambas APIs fallaron, retornar error
