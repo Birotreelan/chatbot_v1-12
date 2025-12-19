@@ -72,14 +72,46 @@ export async function GET(request: NextRequest) {
       endTimestamp,
     })
 
-    // Construir la URL de la API de Meta
+    // Construir URL para analytics de mensajería
+    const messagingFields = `analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${granularity}).phone_numbers(["${config.phoneNumberId}"])`
+    const messagingUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${encodeURIComponent(messagingFields)}`
+
+    console.log("[v0 Analytics] Intentando primero con messaging analytics...")
+    console.log("[v0 Analytics] URL de Messaging API:", messagingUrl)
+
+    // Probar analytics de mensajería
+    const messagingResponse = await fetch(messagingUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+      },
+    })
+
+    console.log("[v0 Analytics] Respuesta de Messaging API:", {
+      status: messagingResponse.status,
+      statusText: messagingResponse.statusText,
+      ok: messagingResponse.ok,
+    })
+
+    let messagingData = null
+    if (messagingResponse.ok) {
+      messagingData = await messagingResponse.json()
+      console.log("[v0 Analytics] 🔍 RESPUESTA COMPLETA DE MESSAGING API:")
+      console.log(JSON.stringify(messagingData, null, 2))
+    } else {
+      const errorText = await messagingResponse.text()
+      console.log("[v0 Analytics] Error en Messaging API:", errorText)
+    }
+
+    // Construir la URL de conversation analytics
     const fields = `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${granularity}).dimensions(["CONVERSATION_CATEGORY","COUNTRY","CONVERSATION_TYPE"])`
     const metaApiUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${encodeURIComponent(fields)}`
 
-    console.log("[v0 Analytics] URL de Meta API construida:", metaApiUrl)
+    console.log("[v0 Analytics] Intentando con conversation analytics...")
+    console.log("[v0 Analytics] URL de Conversation API:", metaApiUrl)
     console.log("[v0 Analytics] WABA ID usado:", config.wabaId)
 
-    // Llamar a la API de Meta
+    // Llamar a la API de Meta para conversation analytics
     const response = await fetch(metaApiUrl, {
       method: "GET",
       headers: {
@@ -87,7 +119,7 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    console.log("[v0 Analytics] Respuesta de Meta API:", {
+    console.log("[v0 Analytics] Respuesta de Conversation API:", {
       status: response.status,
       statusText: response.statusText,
       ok: response.ok,
@@ -118,6 +150,9 @@ export async function GET(request: NextRequest) {
 
     const data: ConversationAnalyticsResponse = await response.json()
 
+    console.log("[v0 Analytics] 🔍 RESPUESTA COMPLETA DE CONVERSATION API:")
+    console.log(JSON.stringify(data, null, 2))
+
     console.log("[v0 Analytics] Datos recibidos de Meta:", {
       hasConversationAnalytics: !!data.conversation_analytics,
       hasData: !!data.conversation_analytics?.data,
@@ -134,7 +169,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Procesar y estructurar los datos
-    const summary = processAnalyticsData(data, startDate, endDate)
+    const summary = processAnalyticsData(data, messagingData, startDate, endDate)
 
     console.log("[v0 Analytics] Resumen procesado:", {
       totalConversations: summary.totalConversations,
@@ -162,6 +197,7 @@ export async function GET(request: NextRequest) {
 
 function processAnalyticsData(
   data: ConversationAnalyticsResponse,
+  messagingData: any,
   startDate: string,
   endDate: string,
 ): ConsumptionSummary {
@@ -182,15 +218,32 @@ function processAnalyticsData(
     currency: "USD",
   }
 
-  // Si no hay datos, retornar el resumen vacío
+  if (messagingData?.analytics?.data?.[0]?.data_points) {
+    console.log("[v0 Analytics] Procesando datos de messaging...")
+    messagingData.analytics.data[0].data_points.forEach((point: any) => {
+      summary.messagesSent += point.sent || 0
+      summary.messagesDelivered += point.delivered || 0
+    })
+    console.log("[v0 Analytics] Mensajes procesados:", {
+      sent: summary.messagesSent,
+      delivered: summary.messagesDelivered,
+    })
+  }
+
+  // Si no hay datos de conversaciones, retornar el resumen con datos de messaging
   if (!data.conversation_analytics?.data?.[0]?.data_points) {
-    console.log("[v0 Analytics] No hay data_points en la respuesta")
+    console.log("[v0 Analytics] No hay data_points de conversaciones en la respuesta")
+    console.log("[v0 Analytics] ⚠️ Posibles razones:")
+    console.log("  1. No hay conversaciones en el período seleccionado")
+    console.log("  2. El token no tiene permisos de whatsapp_business_management")
+    console.log("  3. El WABA ID es incorrecto")
+    console.log("  4. Las analíticas de conversaciones no están disponibles para esta cuenta")
     return summary
   }
 
   const dataPoints = data.conversation_analytics.data[0].data_points
 
-  console.log("[v0 Analytics] Procesando", dataPoints.length, "data points")
+  console.log("[v0 Analytics] Procesando", dataPoints.length, "data points de conversaciones")
 
   dataPoints.forEach((point, index) => {
     const count = point.conversation || 0
