@@ -20,31 +20,56 @@ export function ConsumptionSummaryCard({ data }: ConsumptionSummaryCardProps) {
     return new Intl.NumberFormat("es-AR").format(num)
   }
 
+  const hasMessagingData = data.messagesSent > 0 || data.messagesDelivered > 0
+  const hasConversationData = data.totalConversations > 0
+
   return (
     <Card className="p-6">
       <h2 className="text-xl font-semibold mb-6">Resumen del Período</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="space-y-2">
-          <div className="text-sm text-muted-foreground">Total Conversaciones</div>
-          <div className="text-3xl font-bold">{formatNumber(data.totalConversations)}</div>
-        </div>
-
-        <div className="space-y-2">
-          <div className="text-sm text-muted-foreground">Costo Total</div>
-          <div className="text-3xl font-bold">{formatCurrency(data.totalCost)}</div>
-          {data.totalCost === 0 && (
-            <div className="text-xs text-muted-foreground">
-              Los costos pueden no estar disponibles si facturas a través de un BSP
+        {hasConversationData && (
+          <>
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">Total Conversaciones</div>
+              <div className="text-3xl font-bold">{formatNumber(data.totalConversations)}</div>
             </div>
-          )}
-        </div>
 
-        <div className="space-y-2">
-          <div className="text-sm text-muted-foreground">Costo Promedio</div>
-          <div className="text-3xl font-bold">
-            {data.totalConversations > 0 ? formatCurrency(data.totalCost / data.totalConversations) : "$0.00"}
-          </div>
-        </div>
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">Costo Total</div>
+              <div className="text-3xl font-bold">{formatCurrency(data.totalCost)}</div>
+              {data.totalCost === 0 && (
+                <div className="text-xs text-muted-foreground">
+                  Los costos pueden no estar disponibles si facturas a través de un BSP
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">Costo Promedio</div>
+              <div className="text-3xl font-bold">
+                {data.totalConversations > 0 ? formatCurrency(data.totalCost / data.totalConversations) : "$0.00"}
+              </div>
+            </div>
+          </>
+        )}
+
+        {hasMessagingData && (
+          <>
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">Mensajes Enviados</div>
+              <div className="text-3xl font-bold">{formatNumber(data.messagesSent)}</div>
+              <div className="text-xs text-muted-foreground">Total en el período</div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">Mensajes Entregados</div>
+              <div className="text-3xl font-bold">{formatNumber(data.messagesDelivered)}</div>
+              <div className="text-xs text-muted-foreground">
+                Tasa: {data.messagesSent > 0 ? ((data.messagesDelivered / data.messagesSent) * 100).toFixed(1) : "0"}%
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="space-y-2">
           <div className="text-sm text-muted-foreground">Período</div>

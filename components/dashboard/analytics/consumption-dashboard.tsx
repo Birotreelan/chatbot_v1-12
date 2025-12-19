@@ -209,23 +209,48 @@ export function ConsumptionDashboard() {
         </Alert>
       )}
 
-      {!loading && consumptionData && consumptionData.totalConversations === 0 && (
+      {!loading && consumptionData && consumptionData.totalConversations === 0 && consumptionData.messagesSent > 0 && (
         <Alert>
           <Info className="h-4 w-4" />
-          <AlertTitle>Sin datos disponibles</AlertTitle>
+          <AlertTitle>Datos de mensajería disponibles</AlertTitle>
           <AlertDescription>
-            <p>No se encontraron conversaciones para el período seleccionado.</p>
+            <p>
+              Encontramos datos de mensajería para este período:{" "}
+              <strong>{consumptionData.messagesSent.toLocaleString()} mensajes enviados</strong> y{" "}
+              <strong>{consumptionData.messagesDelivered.toLocaleString()} entregados</strong>.
+            </p>
             <p className="mt-2 text-xs">
-              Esto puede ser normal si:
+              No hay datos de conversaciones disponibles. Esto puede significar:
               <ul className="list-disc list-inside mt-1 space-y-1">
-                <li>La cuenta no ha tenido actividad en este período</li>
-                <li>Es una cuenta nueva sin historial</li>
-                <li>El período seleccionado está fuera del rango de retención de datos (máx. 1 año)</li>
+                <li>Tu cuenta usa el modelo de facturación por mensajes (anterior a 2022)</li>
+                <li>La cuenta factura a través de un BSP que no expone datos de conversaciones</li>
+                <li>No hay suficiente actividad para generar analíticas de conversaciones</li>
               </ul>
             </p>
           </AlertDescription>
         </Alert>
       )}
+
+      {!loading &&
+        consumptionData &&
+        consumptionData.totalConversations === 0 &&
+        consumptionData.messagesSent === 0 && (
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertTitle>Sin datos disponibles</AlertTitle>
+            <AlertDescription>
+              <p>No se encontraron datos para el período seleccionado.</p>
+              <p className="mt-2 text-xs">
+                Esto puede ser normal si:
+                <ul className="list-disc list-inside mt-1 space-y-1">
+                  <li>La cuenta no ha tenido actividad en este período</li>
+                  <li>Es una cuenta nueva sin historial</li>
+                  <li>El período seleccionado está fuera del rango de retención de datos (máx. 1 año)</li>
+                </ul>
+              </p>
+            </AlertDescription>
+          </Alert>
+        )}
 
       {/* Contenido principal */}
       {loading && (
@@ -238,19 +263,23 @@ export function ConsumptionDashboard() {
         </Card>
       )}
 
-      {!loading && consumptionData && consumptionData.totalConversations > 0 && (
+      {!loading && consumptionData && (consumptionData.totalConversations > 0 || consumptionData.messagesSent > 0) && (
         <>
           {/* Resumen general */}
           <ConsumptionSummaryCard data={consumptionData} />
 
-          {/* Desglose por categoría */}
-          <ConversationCategoryBreakdown data={consumptionData} />
+          {consumptionData.totalConversations > 0 && (
+            <>
+              {/* Desglose por categoría */}
+              <ConversationCategoryBreakdown data={consumptionData} />
 
-          {/* Gráfico de tendencias */}
-          <ConsumptionChart data={consumptionData} />
+              {/* Gráfico de tendencias */}
+              <ConsumptionChart data={consumptionData} />
 
-          {/* Desglose por país */}
-          <CountryBreakdown data={consumptionData} />
+              {/* Desglose por país */}
+              <CountryBreakdown data={consumptionData} />
+            </>
+          )}
         </>
       )}
 

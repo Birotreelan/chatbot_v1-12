@@ -280,29 +280,30 @@ function processAnalyticsData(
       summary.messagesSent += point.sent || 0
       summary.messagesDelivered += point.delivered || 0
     })
+    console.log("[v0 Analytics] Mensajes procesados:", {
+      sent: summary.messagesSent,
+      delivered: summary.messagesDelivered,
+    })
   }
 
-  console.log("[v0 Analytics] Mensajes procesados:", {
-    sent: summary.messagesSent,
-    delivered: summary.messagesDelivered,
-  })
+  // La estructura según docs oficiales es: conversation_analytics.data.data_points
+  const conversationDataPoints = data?.conversation_analytics?.data?.data_points
 
-  if (!data?.conversation_analytics?.data?.data_points) {
+  if (!conversationDataPoints || conversationDataPoints.length === 0) {
     console.log("[v0 Analytics] ⚠️ No hay data_points de conversaciones en la respuesta")
     console.log("[v0 Analytics] Estructura recibida:", JSON.stringify(data?.conversation_analytics, null, 2))
-    console.log("[v0 Analytics] Posibles razones:")
-    console.log("  1. No hay conversaciones en el período seleccionado")
-    console.log("  2. El token no tiene permisos de whatsapp_business_management")
-    console.log("  3. Las analíticas de conversaciones no están disponibles para esta cuenta")
-    console.log("  4. El formato de la consulta no es correcto")
+    console.log("[v0 Analytics] Nota: Los datos de mensajería están disponibles")
+    console.log("[v0 Analytics] Posibles razones para no tener datos de conversaciones:")
+    console.log("  1. La cuenta usa facturación por mensajes (modelo antiguo)")
+    console.log("  2. No hay conversaciones en el período seleccionado")
+    console.log("  3. El token no tiene permisos de analytics completos")
+    console.log("  4. La cuenta factura a través de un BSP")
     return summary
   }
 
-  const dataPoints = data.conversation_analytics.data.data_points
+  console.log("[v0 Analytics] ✅ Procesando", conversationDataPoints.length, "data points de conversaciones")
 
-  console.log("[v0 Analytics] ✅ Procesando", dataPoints.length, "data points de conversaciones")
-
-  dataPoints.forEach((point, index) => {
+  conversationDataPoints.forEach((point, index) => {
     const count = point.conversation || 0
     const cost = point.cost || 0
     const category = point.conversation_category?.toLowerCase() as keyof typeof summary.byCategory
