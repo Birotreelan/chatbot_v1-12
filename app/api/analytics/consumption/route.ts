@@ -179,9 +179,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Según docs oficiales, necesitamos: dimensions, metric_types, y el número específico
+    // Los parámetros deben ir sin corchetes, separados por comas
     const conversationFields = phoneNumber
-      ? `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers([${phoneNumber}]).metric_types([COST,CONVERSATION]).dimensions([CONVERSATION_CATEGORY,COUNTRY,PHONE])`
-      : `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).metric_types([COST,CONVERSATION]).dimensions([CONVERSATION_CATEGORY,COUNTRY,PHONE])`
+      ? `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers(${phoneNumber})`
+      : `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity})`
 
     const conversationUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${conversationFields}&access_token=${config.accessToken}`
 
