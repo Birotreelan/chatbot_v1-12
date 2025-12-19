@@ -68,6 +68,8 @@ export async function GET(request: NextRequest) {
     // Verificar que las fechas sean razonables (no en el futuro, no más de 1 año atrás)
     const now = Math.floor(Date.now() / 1000)
     const oneYearAgo = now - 365 * 24 * 60 * 60
+    // Permitir hasta 24 horas en el futuro para manejar el día actual
+    const maxFutureTimestamp = now + 24 * 60 * 60
 
     console.log("[v0 Analytics] Timestamps calculados:", {
       startDate,
@@ -76,20 +78,33 @@ export async function GET(request: NextRequest) {
       endTimestamp,
       now,
       oneYearAgo,
-      isStartInFuture: startTimestamp > now,
-      isEndInFuture: endTimestamp > now,
+      isStartInFuture: startTimestamp > maxFutureTimestamp,
+      isEndInFuture: endTimestamp > maxFutureTimestamp,
       isStartTooOld: startTimestamp < oneYearAgo,
     })
 
-    if (startTimestamp > now || endTimestamp > now) {
-      console.log("[v0 Analytics] ⚠️ ADVERTENCIA: Las fechas están en el futuro!")
+    if (startTimestamp > maxFutureTimestamp) {
+      console.log("[v0 Analytics] ⚠️ ERROR: La fecha de inicio está demasiado en el futuro!")
       return NextResponse.json(
         {
-          error: "Las fechas no pueden estar en el futuro",
+          error: "La fecha de inicio no puede estar en el futuro",
           details: {
             startDate,
-            endDate,
             startTimestamp,
+            currentTimestamp: now,
+          },
+        },
+        { status: 400 },
+      )
+    }
+
+    if (endTimestamp > maxFutureTimestamp) {
+      console.log("[v0 Analytics] ⚠️ ERROR: La fecha de fin está demasiado en el futuro!")
+      return NextResponse.json(
+        {
+          error: "La fecha de fin no puede estar en el futuro",
+          details: {
+            endDate,
             endTimestamp,
             currentTimestamp: now,
           },
