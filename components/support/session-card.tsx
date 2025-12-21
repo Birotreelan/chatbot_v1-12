@@ -25,21 +25,38 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
   }
 
   async function handleAssign() {
+    console.log("[v0] [CLIENT] Iniciando asignación de sesión:", session.id)
     setAssigning(true)
+
     try {
-      const response = await fetch(`/api/support/session/${session.id}/assign`, {
+      const url = `/api/support/session/${session.id}/assign`
+      console.log("[v0] [CLIENT] URL de asignación:", url)
+      console.log("[v0] [CLIENT] Haciendo fetch con método POST...")
+
+      const response = await fetch(url, {
         method: "POST",
       })
 
-      if (!response.ok) throw new Error("Error al asignar sesión")
+      console.log("[v0] [CLIENT] Response status:", response.status)
+      console.log("[v0] [CLIENT] Response ok:", response.ok)
 
+      const data = await response.json()
+      console.log("[v0] [CLIENT] Response data:", data)
+
+      if (!response.ok) {
+        console.error("[v0] [CLIENT] Error en response:", data)
+        throw new Error(data.error || "Error al asignar sesión")
+      }
+
+      console.log("[v0] [CLIENT] Asignación exitosa, redirigiendo...")
       // Redirigir a la vista de conversación
       router.push(`/support/${session.id}`)
     } catch (error) {
-      console.error("Error:", error)
-      alert("Error al asignar la conversación")
+      console.error("[v0] [CLIENT] Error en handleAssign:", error)
+      alert("Error al asignar la conversación: " + (error instanceof Error ? error.message : "Error desconocido"))
     } finally {
       setAssigning(false)
+      console.log("[v0] [CLIENT] Proceso de asignación finalizado")
     }
   }
 
