@@ -45,18 +45,30 @@ export async function sendWhatsAppTemplate(
   try {
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
 
+    let templateData = template
+    if (typeof template === "string") {
+      try {
+        templateData = JSON.parse(template)
+      } catch (e) {
+        console.error("[WHATSAPP_API] Error parsing template string:", e)
+        throw new Error("Invalid template format")
+      }
+    }
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: to,
+      type: "template",
+      template: templateData.template || templateData, // Support both formats
+    }
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: to,
-        type: "template",
-        ...template,
-      }),
+      body: JSON.stringify(payload),
     })
 
     if (!response.ok) {
