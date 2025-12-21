@@ -94,20 +94,48 @@ export async function createSession(user: SessionData): Promise<string> {
 
 export async function getSession(): Promise<SessionData | null> {
   const sessionId = cookies().get("session_id")?.value
-
   if (!sessionId) return null
 
   const redis = getRedisClient()
-
   if (redis) {
-    const sessionData = await redis.get(`${SESSION_PREFIX}${sessionId}`)
+    try {
+      const sessionData = await redis.get(`${SESSION_PREFIX}${sessionId}`)
+      if (!sessionData) return null
 
-    if (!sessionData) return null
+      if (typeof sessionData === "string") {
+        // Si es solo "admin" (formato antiguo), convertir al nuevo formato
+        if (sessionData === "admin") {
+          const newSessionData: SessionData = {
+            userId: "super_admin",
+            username: ADMIN_USERNAME,
+            role: "super_admin",
+            tenantId: null,
+            displayName: "Super Administrador",
+          }
+          // Actualizar en Redis con el nuevo formato
+          await redis.set(`${SESSION_PREFIX}${sessionId}`, JSON.stringify(newSessionData), {
+            ex: SESSION_DURATION,
+          })
+          return newSessionData
+        }
 
-    if (typeof sessionData === "string") {
-      return JSON.parse(sessionData)
+        // Intentar parsear como JSON
+        try {
+          return JSON.parse(sessionData)
+        } catch (parseError) {
+          console.error("[Auth] Error parsing session data:", parseError)
+          // Si no se puede parsear, eliminar la sesión corrupta
+          await redis.del(`${SESSION_PREFIX}${sessionId}`)
+          cookies().delete("session_id")
+          return null
+        }
+      }
+
+      return sessionData as SessionData
+    } catch (error) {
+      console.error("[Auth] Error getting session:", error)
+      return null
     }
-    return sessionData as SessionData
   }
 
   return null
@@ -116,52 +144,41 @@ export async function getSession(): Promise<SessionData | null> {
 // Cerrar sesión
 export async function logout(): Promise<void> {
   const sessionId = cookies().get("session_id")?.value
-
   if (sessionId) {
     const redis = getRedisClient()
-
     if (redis) {
       await redis.del(`${SESSION_PREFIX}${sessionId}`)
     }
-
     cookies().delete("session_id")
   }
 }
 
 export async function requireAuth(): Promise<SessionData> {
   const session = await getSession()
-
   if (!session) {
     redirect("/login?error=unauthenticated")
   }
-
   return session
 }
 
 export async function requireSuperAdmin(): Promise<SessionData> {
   const session = await getSession()
-
   if (!session) {
     redirect("/login?error=unauthenticated")
   }
-
   if (session.role !== "super_admin") {
     redirect("/support")
   }
-
   return session
 }
 
 export async function requireSupportAgent(): Promise<SessionData> {
   const session = await getSession()
-
   if (!session) {
     redirect("/login?error=unauthenticated")
   }
-
   if (session.role !== "support_agent") {
     redirect("/dashboard")
   }
-
   return session
 }
