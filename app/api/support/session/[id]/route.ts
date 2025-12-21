@@ -13,8 +13,10 @@ import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { nanoid } from "nanoid"
 import type { HumanSupportMessage } from "@/lib/types"
 
+// GET: Obtener detalle de sesión
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    console.log("[v0] [API SESSION GET] Iniciando")
     const session = await requireAuth()
     const { id: sessionId } = await params
 
@@ -24,15 +26,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
     }
 
-    // Verificar permisos: super admin ve todo, agente solo su tenant
+    // Verificar permisos
     if (session.role === "support_agent" && supportSession.tenantId !== session.tenantId) {
       return NextResponse.json({ success: false, error: "No autorizado" }, { status: 403 })
     }
 
-    // Obtener historial completo de la conversación (incluye mensajes de IA)
     const conversationHistory = await getConversationMessages(supportSession.configId, supportSession.phoneNumber)
-
-    // Obtener mensajes de la sesión de soporte (solo mensajes del agente)
     const supportMessages = await getSupportMessages(sessionId)
 
     return NextResponse.json({
@@ -42,100 +41,104 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       supportMessages,
     })
   } catch (error: any) {
-    console.error("[API] Error obteniendo sesión:", error)
+    console.error("[API SESSION GET] Error:", error)
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }
 
+// POST: Acciones sobre la sesión (assign, message, close)
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: sessionId } = await params
     const body = await request.json()
     const { action } = body
 
-    console.log("[v0] [API SESSION] POST recibido:", { sessionId, action })
+    console.log("[v0] [API SESSION POST] Recibido:", { sessionId, action, body })
+
+    if (!action) {
+      console.log("[v0] [API SESSION POST] ERROR: Falta action")
+      return NextResponse.json({ success: false, error: "Falta parámetro 'action'" }, { status: 400 })
+    }
 
     switch (action) {
       case "assign":
+        console.log("[v0] [API SESSION POST] Ejecutando assign")
         return await handleAssign(sessionId)
 
       case "close":
+        console.log("[v0] [API SESSION POST] Ejecutando close")
         return await handleClose(sessionId, body.note)
 
       case "message":
+        console.log("[v0] [API SESSION POST] Ejecutando message")
         return await handleMessage(sessionId, body.message)
 
       default:
-        return NextResponse.json({ success: false, error: "Acción no válida" }, { status: 400 })
+        console.log("[v0] [API SESSION POST] ERROR: Acción no válida:", action)
+        return NextResponse.json({ success: false, error: `Acción no válida: ${action}` }, { status: 400 })
     }
   } catch (error: any) {
-    console.error("[API SESSION] Error:", error)
+    console.error("[v0] [API SESSION POST] Error general:", error)
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }
 
+// Handler para asignar sesión
 async function handleAssign(sessionId: string) {
-  console.log("[v0] [API ASSIGN] Iniciando asignación de sesión:", sessionId)
+  console.log("[v0] [ASSIGN] Iniciando:", sessionId)
 
   try {
-    console.log("[v0] [API ASSIGN] Verificando autenticación...")
     const session = await requireSupportAgent()
-    console.log("[v0] [API ASSIGN] Usuario autenticado:", { userId: session.userId, tenantId: session.tenantId })
+    console.log("[v0] [ASSIGN] Usuario:", { userId: session.userId, tenantId: session.tenantId })
 
-    console.log("[v0] [API ASSIGN] Buscando sesión de soporte...")
     const supportSession = await getSupportSession(sessionId)
-    console.log("[v0] [API ASSIGN] Sesión encontrada:", supportSession ? "SI" : "NO")
-
     if (!supportSession) {
-      console.log("[v0] [API ASSIGN] ERROR: Sesión no encontrada")
+      console.log("[v0] [ASSIGN] Sesión no encontrada")
       return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
     }
 
-    console.log("[v0] [API ASSIGN] Verificando tenant match...")
     if (supportSession.tenantId !== session.tenantId) {
-      console.log("[v0] [API ASSIGN] ERROR: Tenant no coincide")
+      console.log("[v0] [ASSIGN] Tenant no coincide")
       return NextResponse.json({ success: false, error: "No autorizado para esta sesión" }, { status: 403 })
     }
 
-    console.log("[v0] [API ASSIGN] Verificando status:", supportSession.status)
     if (supportSession.status !== "pending") {
-      console.log("[v0] [API ASSIGN] ERROR: Sesión no está en estado pending")
+      console.log("[v0] [ASSIGN] Status no es pending:", supportSession.status)
       return NextResponse.json({ success: false, error: "Sesión no disponible para asignar" }, { status: 400 })
     }
 
-    console.log("[v0] [API ASSIGN] Asignando sesión al agente...")
+    console.log("[v0] [ASSIGN] Asignando al agente...")
     const assigned = await assignSessionToAgent(sessionId, session.userId)
-    console.log("[v0] [API ASSIGN] Resultado de asignación:", assigned)
 
     if (!assigned) {
-      console.log("[v0] [API ASSIGN] ERROR: No se pudo asignar la sesión")
+      console.log("[v0] [ASSIGN] No se pudo asignar")
       return NextResponse.json({ success: false, error: "No se pudo asignar la sesión" }, { status: 500 })
     }
 
-    // Enviar mensaje automático al usuario
+    // Enviar mensaje automático
     try {
-      console.log("[v0] [API ASSIGN] Enviando mensaje de confirmación...")
       const config = await getWhatsAppConfigById(supportSession.configId)
       if (config) {
         const message = `Un agente está ahora contigo y te ayudará en breve. 👋`
         await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, supportSession.phoneNumber, message)
-        console.log("[v0] [API ASSIGN] Mensaje enviado")
+        console.log("[v0] [ASSIGN] Mensaje enviado")
       }
     } catch (error) {
-      console.error("[v0] [API ASSIGN] Error enviando mensaje:", error)
+      console.error("[v0] [ASSIGN] Error enviando mensaje:", error)
     }
 
-    console.log("[v0] [API ASSIGN] ✅ Asignación completada")
+    console.log("[v0] [ASSIGN] Completado exitosamente")
     return NextResponse.json({
       success: true,
       message: "Sesión asignada correctamente",
     })
   } catch (error: any) {
-    console.error("[v0] [API ASSIGN] ❌ ERROR:", error)
+    console.error("[v0] [ASSIGN] Error:", error)
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }
 
+// Handler para cerrar sesión
 async function handleClose(sessionId: string, note?: string) {
   try {
     const session = await requireAuth()
@@ -145,7 +148,6 @@ async function handleClose(sessionId: string, note?: string) {
       return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
     }
 
-    // Verificar permisos
     if (session.role === "support_agent" && supportSession.assignedTo !== session.userId) {
       return NextResponse.json({ success: false, error: "No estás asignado a esta sesión" }, { status: 403 })
     }
@@ -164,7 +166,7 @@ async function handleClose(sessionId: string, note?: string) {
         await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, supportSession.phoneNumber, message)
       }
     } catch (error) {
-      console.error("[API] Error enviando mensaje de cierre:", error)
+      console.error("[CLOSE] Error enviando mensaje:", error)
     }
 
     return NextResponse.json({
@@ -172,11 +174,12 @@ async function handleClose(sessionId: string, note?: string) {
       message: "Sesión cerrada correctamente",
     })
   } catch (error: any) {
-    console.error("[API] Error cerrando sesión:", error)
+    console.error("[CLOSE] Error:", error)
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }
 
+// Handler para enviar mensaje
 async function handleMessage(sessionId: string, message: string) {
   try {
     const session = await requireSupportAgent()
@@ -222,7 +225,7 @@ async function handleMessage(sessionId: string, message: string) {
       message: "Mensaje enviado correctamente",
     })
   } catch (error: any) {
-    console.error("[API] Error enviando mensaje:", error)
+    console.error("[MESSAGE] Error:", error)
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }
