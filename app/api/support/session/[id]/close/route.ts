@@ -4,10 +4,10 @@ import { getSupportSession, closeSession } from "@/lib/human-support"
 import { getWhatsAppConfigById } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireAuth()
-    const sessionId = params.id
+    const { id: sessionId } = await params
     const body = await request.json()
     const { note } = body || {}
 

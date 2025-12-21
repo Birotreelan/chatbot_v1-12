@@ -3,10 +3,10 @@ import { requireAuth } from "@/lib/auth"
 import { getSupportSession, getSupportMessages } from "@/lib/human-support"
 import { getConversationMessages } from "@/lib/conversations"
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireAuth()
-    const sessionId = params.id
+    const { id: sessionId } = await params
 
     const supportSession = await getSupportSession(sessionId)
 

@@ -6,10 +6,10 @@ import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { nanoid } from "nanoid"
 import type { HumanSupportMessage } from "@/lib/types"
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireSupportAgent()
-    const sessionId = params.id
+    const { id: sessionId } = await params
     const { message } = await request.json()
 
     if (!message || typeof message !== "string" || message.trim().length === 0) {
