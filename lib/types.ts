@@ -187,7 +187,7 @@ export interface HumanSupportSession {
 export interface HumanSupportMessage {
   id: string
   sessionId: string
-  from: "user" | "agent" | "system"
+  role: "user" | "agent" | "system"
   content: string
   timestamp: string
   agentId?: string
