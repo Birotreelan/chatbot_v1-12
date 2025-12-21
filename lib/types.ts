@@ -159,6 +159,41 @@ export interface SessionData {
   displayName: string
 }
 
+export interface HumanSupportSession {
+  id: string // sessionId único
+  phoneNumber: string
+  configId: string
+  tenantId: string // cliente_id para filtrar por cliente
+  status: "pending" | "in_progress" | "resolved"
+  priority: "low" | "medium" | "high"
+  reason: string // Razón del escalamiento
+  summary: string // Resumen del contexto
+  threadId: string
+  assistantId: string
+
+  // Metadatos de asignación
+  requestedAt: string
+  assignedTo: string | null // userId del agente
+  assignedAt: string | null
+  resolvedAt: string | null
+
+  // Datos del cliente
+  displayName: string // Nombre de la configuración/cliente
+
+  // Mensajes pendientes mientras espera asignación
+  pendingMessages: ConversationMessage[]
+}
+
+export interface HumanSupportMessage {
+  id: string
+  sessionId: string
+  from: "user" | "agent" | "system"
+  content: string
+  timestamp: string
+  agentId?: string
+  phoneNumber?: string
+}
+
 export interface ConversationAnalytics {
   start: number // UNIX timestamp
   end: number // UNIX timestamp
@@ -194,4 +229,11 @@ export interface ConsumptionSummary {
   periodStart: string
   periodEnd: string
   currency: string
+}
+
+export interface ConversationMessage {
+  id: string
+  content: string
+  timestamp: string
+  from: "user" | "assistant"
 }

@@ -10,6 +10,8 @@ import { saveConversationMessage, isConversationPaused } from "./conversations"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime } from "./appointment-stats"
+import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
+import type { HumanSupportMessage } from "./types"
 
 // Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): string {
@@ -108,6 +110,65 @@ export async function handleMessage(value: WhatsAppValue) {
     }
 
     console.log(`[WHATSAPP] Configuración encontrada: ${config.displayName} (ID: ${config.id})`)
+
+    const activeSession = await getActiveSessionByPhone(config.id, userPhoneNumber)
+
+    if (activeSession) {
+      console.log(`[WHATSAPP] 🆘 Usuario tiene sesión de soporte activa: ${activeSession.id} (${activeSession.status})`)
+
+      // Guardar el mensaje en el historial de conversación
+      await saveConversationMessage({
+        id: nanoid(),
+        role: "user",
+        content: userMessage,
+        timestamp: new Date().toISOString(),
+        phoneNumber: userPhoneNumber,
+        configId: config.id,
+        messageType: message.type,
+      })
+
+      if (activeSession.status === "pending") {
+        // Usuario aún esperando asignación - guardar mensaje como pendiente
+        console.log(`[WHATSAPP] ⏳ Sesión pendiente, guardando mensaje para cuando se asigne agente`)
+
+        await addPendingMessageToSession(activeSession.id, {
+          id: nanoid(),
+          role: "user",
+          content: userMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: message.type,
+        })
+
+        // Opcional: enviar mensaje de confirmación
+        const confirmMessage = "Tu mensaje ha sido recibido. Un agente te responderá pronto."
+        await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, confirmMessage)
+
+        await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+        return
+      } else if (activeSession.status === "in_progress") {
+        // Sesión activa con agente - guardar en historial de soporte
+        console.log(`[WHATSAPP] 👤 Sesión activa con agente, guardando mensaje en historial de soporte`)
+
+        const supportMessage: HumanSupportMessage = {
+          id: nanoid(),
+          sessionId: activeSession.id,
+          from: "user",
+          content: userMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+        }
+
+        await saveSupportMessage(supportMessage)
+        await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+
+        // El mensaje se envia al agente a través de WebSocket o polling en la UI
+        // No necesitamos enviar respuesta automática aquí
+        return
+      }
+    }
+    // </CHANGE>
 
     const conversationPaused = await isConversationPaused(config.id, userPhoneNumber)
     if (conversationPaused) {

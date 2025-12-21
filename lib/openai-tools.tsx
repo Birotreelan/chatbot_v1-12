@@ -1,6 +1,6 @@
 import OpenAI from "openai"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
-import { getWhatsAppConfigByPhoneId, updateThreadId } from "@/lib/db"
+import { getWhatsAppConfigByPhoneId, updateThreadId, getWhatsAppConfigById } from "@/lib/db"
 import {
   obtenerTurnosDisponibles,
   confirmarTurno,
@@ -22,6 +22,7 @@ import { trackAppointmentEvent } from "./appointment-stats"
 import { getAssistantIdByFunction } from "./assistant-utils"
 import { logError } from "./logging" // Assuming logError is in './logging'
 import { incrementMetric } from "./metrics" // Assuming incrementMetric is in './metrics'
+import { createSupportSession } from "./human-support"
 
 // Re-export functions for compatibility
 export { obtenerTurnosDisponibles } from "./api-tools/api-functions"
@@ -231,6 +232,32 @@ export const openaiTools = {
       required: ["query"],
     },
   },
+  // </CHANGE> Adding request_human_support tool
+  request_human_support: {
+    description:
+      "Solicita la intervención de un agente humano cuando el asistente no puede resolver la consulta del paciente o cuando el paciente explícitamente solicita hablar con una persona. IMPORTANTE: Usa esta función SOLO cuando sea estrictamente necesario (consultas complejas, quejas graves, o solicitud explícita del usuario).",
+    parameters: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "Breve descripción del motivo por el cual se solicita atención humana",
+        },
+        priority: {
+          type: "string",
+          enum: ["low", "medium", "high"],
+          description:
+            "Prioridad de la solicitud basada en la urgencia del caso. high: emergencias o quejas graves, medium: consultas complejas, low: consultas generales",
+        },
+        summary: {
+          type: "string",
+          description: "Resumen breve del contexto de la conversación hasta el momento",
+        },
+      },
+      required: ["reason", "priority", "summary"],
+    },
+  },
+  // </CHANGE>
 }
 
 function generateDynamicWaitingMessage(functionName: string, functionArgs: any): string | null {
@@ -558,6 +585,16 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
           clienteId,
           currentUserPhoneNumber, // userPhoneNumber not needed *from here*
         )
+
+      case "request_human_support":
+        console.log(`[OPENAI-TOOLS] 🆘 Solicitud de soporte humano recibida`)
+        // Este caso se maneja de forma especial en executeToolCall
+        // donde tenemos acceso a phoneNumber, threadId, etc.
+        return {
+          success: true,
+          message: "Solicitud de atención humana registrada. Un agente se pondrá en contacto contigo pronto.",
+        }
+      // </CHANGE>
 
       default:
         console.warn(`[OPENAI-TOOLS] Tool desconocido: ${toolName}`)
@@ -2240,6 +2277,70 @@ async function executeToolCall(
 ): Promise<string> {
   const functionName = toolCall.function.name
   const functionArgs = JSON.parse(toolCall.function.arguments)
+
+  if (functionName === "request_human_support") {
+    console.log(`[OPENAI] 🆘 Procesando solicitud de soporte humano`)
+    console.log(`[OPENAI] 📋 Argumentos:`, functionArgs)
+    console.log(`[OPENAI] 📱 PhoneNumber: ${userPhoneNumber}`)
+    console.log(`[OPENAI] 🧵 ThreadId: ${threadId}`)
+
+    try {
+      // Obtener configuración para obtener información completa
+      const config = await getWhatsAppConfigById(phoneNumberId)
+      if (!config) {
+        console.error(`[OPENAI] ❌ No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
+        return JSON.stringify({
+          success: false,
+          message: "Error interno: no se pudo procesar la solicitud",
+        })
+      }
+
+      const finalPhoneNumber = userPhoneNumber || (await getUserPhoneNumberFromThread(threadId))
+      if (!finalPhoneNumber) {
+        console.error(`[OPENAI] ❌ No se pudo obtener número de teléfono`)
+        return JSON.stringify({
+          success: false,
+          message: "Error interno: no se pudo identificar el usuario",
+        })
+      }
+
+      // Crear sesión de soporte humano
+      const session = await createSupportSession({
+        phoneNumber: finalPhoneNumber,
+        configId: config.id,
+        tenantId: config.cliente_id || "unknown",
+        threadId: threadId,
+        assistantId: config.whatsappAssistantId,
+        displayName: config.displayName,
+        reason: functionArgs.reason,
+        priority: functionArgs.priority || "medium",
+        summary: functionArgs.summary,
+      })
+
+      console.log(`[OPENAI] ✅ Sesión de soporte creada: ${session.id}`)
+
+      // Enviar mensaje automático al usuario
+      const autoMessage =
+        "Tu solicitud ha sido recibida. Un agente de atención al cliente se pondrá en contacto contigo pronto. Por favor, mantente atento a este chat."
+
+      await sendWhatsAppMessage(phoneNumberId, accessToken, finalPhoneNumber, autoMessage)
+
+      console.log(`[OPENAI] 📤 Mensaje automático enviado al usuario`)
+
+      return JSON.stringify({
+        success: true,
+        sessionId: session.id,
+        message: "Solicitud de atención humana procesada correctamente",
+      })
+    } catch (error) {
+      console.error(`[OPENAI] ❌ Error creando sesión de soporte:`, error)
+      return JSON.stringify({
+        success: false,
+        message: "No se pudo procesar la solicitud. Por favor, continúa con el asistente.",
+      })
+    }
+  }
+  // </CHANGE>
 
   const waitingMessage = generateDynamicWaitingMessage(functionName, functionArgs)
   if (waitingMessage) {
