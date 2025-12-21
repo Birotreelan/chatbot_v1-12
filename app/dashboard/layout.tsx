@@ -1,14 +1,14 @@
 import type React from "react"
 import { DashboardNav } from "@/components/dashboard/dashboard-nav"
-import { requireAuth } from "@/lib/auth"
+import { requireSuperAdmin } from "@/lib/auth"
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  // Verificar autenticación
-  await requireAuth()
+  // Verificar autenticación de super admin
+  await requireSuperAdmin()
 
   return (
     <div className="flex min-h-screen flex-col">

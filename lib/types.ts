@@ -138,6 +138,27 @@ export interface AdditionalAssistant {
   description?: string // Descripción opcional del asistente
 }
 
+export interface SupportUser {
+  id: string
+  username: string
+  passwordHash: string // bcrypt hash
+  role: "super_admin" | "support_agent"
+  tenantId: string | null // null = super_admin (ve todo), string = solo ese cliente
+  displayName: string
+  email?: string
+  active: boolean
+  createdAt: string
+  updatedAt?: string
+}
+
+export interface SessionData {
+  userId: string
+  username: string
+  role: "super_admin" | "support_agent"
+  tenantId: string | null
+  displayName: string
+}
+
 export interface ConversationAnalytics {
   start: number // UNIX timestamp
   end: number // UNIX timestamp

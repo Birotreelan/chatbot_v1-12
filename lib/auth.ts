@@ -2,6 +2,8 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { Redis } from "@upstash/redis"
 import { nanoid } from "nanoid"
+import type { SessionData } from "./types"
+import { verifySupportUserPassword } from "./support-users"
 
 // Prefijo para las sesiones en Redis
 const SESSION_PREFIX = "session:"
@@ -22,20 +24,61 @@ function getRedisClient() {
   }
 }
 
-// Verificar credenciales
-export async function verifyCredentials(username: string, password: string): Promise<boolean> {
-  // En un entorno de producción, deberías usar hashing para las contraseñas
-  return username === ADMIN_USERNAME && password === ADMIN_PASSWORD
+export async function verifyCredentials(
+  username: string,
+  password: string,
+): Promise<{ success: boolean; user?: SessionData; error?: string }> {
+  // 1. Verificar si es el super admin
+  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    return {
+      success: true,
+      user: {
+        userId: "super_admin",
+        username,
+        role: "super_admin",
+        tenantId: null,
+        displayName: "Super Administrador",
+      },
+    }
+  }
+
+  // 2. Buscar en usuarios de soporte
+  try {
+    const supportUser = await verifySupportUserPassword(username, password)
+
+    if (!supportUser) {
+      return {
+        success: false,
+        error: "Usuario o contraseña incorrectos",
+      }
+    }
+
+    return {
+      success: true,
+      user: {
+        userId: supportUser.id,
+        username: supportUser.username,
+        role: supportUser.role,
+        tenantId: supportUser.tenantId,
+        displayName: supportUser.displayName,
+      },
+    }
+  } catch (error) {
+    console.error("[Auth] Error verificando credenciales:", error)
+    return {
+      success: false,
+      error: "Error al procesar la solicitud",
+    }
+  }
 }
 
-// Crear una sesión
-export async function createSession(username: string): Promise<string> {
+export async function createSession(user: SessionData): Promise<string> {
   const sessionId = nanoid()
   const redis = getRedisClient()
 
   if (redis) {
-    // Guardar la sesión en Redis con expiración - como cadena, no como objeto
-    await redis.set(`${SESSION_PREFIX}${sessionId}`, username, { ex: SESSION_DURATION })
+    // Guardar la sesión completa en Redis con expiración
+    await redis.set(`${SESSION_PREFIX}${sessionId}`, JSON.stringify(user), { ex: SESSION_DURATION })
   }
 
   // Establecer la cookie de sesión
@@ -49,8 +92,7 @@ export async function createSession(username: string): Promise<string> {
   return sessionId
 }
 
-// Verificar sesión
-export async function getSession(): Promise<string | null> {
+export async function getSession(): Promise<SessionData | null> {
   const sessionId = cookies().get("session_id")?.value
 
   if (!sessionId) return null
@@ -58,8 +100,14 @@ export async function getSession(): Promise<string | null> {
   const redis = getRedisClient()
 
   if (redis) {
-    const username = await redis.get<string>(`${SESSION_PREFIX}${sessionId}`)
-    return username
+    const sessionData = await redis.get(`${SESSION_PREFIX}${sessionId}`)
+
+    if (!sessionData) return null
+
+    if (typeof sessionData === "string") {
+      return JSON.parse(sessionData)
+    }
+    return sessionData as SessionData
   }
 
   return null
@@ -80,12 +128,39 @@ export async function logout(): Promise<void> {
   }
 }
 
-// Middleware para proteger rutas
-export async function requireAuth() {
+export async function requireAuth(): Promise<SessionData> {
   const session = await getSession()
 
   if (!session) {
     redirect("/login?error=unauthenticated")
+  }
+
+  return session
+}
+
+export async function requireSuperAdmin(): Promise<SessionData> {
+  const session = await getSession()
+
+  if (!session) {
+    redirect("/login?error=unauthenticated")
+  }
+
+  if (session.role !== "super_admin") {
+    redirect("/support")
+  }
+
+  return session
+}
+
+export async function requireSupportAgent(): Promise<SessionData> {
+  const session = await getSession()
+
+  if (!session) {
+    redirect("/login?error=unauthenticated")
+  }
+
+  if (session.role !== "support_agent") {
+    redirect("/dashboard")
   }
 
   return session

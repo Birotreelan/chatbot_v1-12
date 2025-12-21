@@ -455,6 +455,17 @@ export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppC
   }
 }
 
+export async function getWhatsAppConfigsByTenant(tenantId: string | null): Promise<WhatsAppConfig[]> {
+  // Si tenantId es null, retornar TODAS (super admin)
+  if (tenantId === null) {
+    return await getAllWhatsAppConfigs()
+  }
+
+  // Si tenantId existe, filtrar solo ese cliente
+  const allConfigs = await getAllWhatsAppConfigs()
+  return allConfigs.filter((config) => config.cliente_id === tenantId)
+}
+
 // Funciones para la gestión de threads
 
 // Obtener o crear un thread para un usuario y configuración
