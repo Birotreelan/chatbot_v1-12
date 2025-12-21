@@ -21,17 +21,18 @@ export function SupportDashboard() {
       const response = await fetch("/api/support/sessions")
       if (!response.ok) throw new Error("Error al cargar sesiones")
       const data = await response.json()
-      setSessions(data.sessions)
+      setSessions(Array.isArray(data.sessions) ? data.sessions : [])
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido")
+      setSessions([])
     } finally {
       setLoading(false)
     }
   }
 
-  const pendingSessions = sessions.filter((s) => s.status === "pending")
-  const activeSessions = sessions.filter((s) => s.status === "in_progress")
+  const pendingSessions = Array.isArray(sessions) ? sessions.filter((s) => s.status === "pending") : []
+  const activeSessions = Array.isArray(sessions) ? sessions.filter((s) => s.status === "in_progress") : []
 
   if (loading) {
     return (
