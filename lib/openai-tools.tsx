@@ -1,6 +1,6 @@
 import OpenAI from "openai"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
-import { getWhatsAppConfigByPhoneId, updateThreadId, getWhatsAppConfigById } from "@/lib/db"
+import { getWhatsAppConfigByPhoneId, updateThreadId } from "@/lib/db"
 import {
   obtenerTurnosDisponibles,
   confirmarTurno,
@@ -2278,6 +2278,7 @@ async function executeToolCall(
   const functionName = toolCall.function.name
   const functionArgs = JSON.parse(toolCall.function.arguments)
 
+  // </CHANGE> Start of new code block
   if (functionName === "request_human_support") {
     console.log(`[OPENAI] 🆘 Procesando solicitud de soporte humano`)
     console.log(`[OPENAI] 📋 Argumentos:`, functionArgs)
@@ -2286,7 +2287,7 @@ async function executeToolCall(
 
     try {
       // Obtener configuración para obtener información completa
-      const config = await getWhatsAppConfigById(phoneNumberId)
+      const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
       if (!config) {
         console.error(`[OPENAI] ❌ No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
         return JSON.stringify({
