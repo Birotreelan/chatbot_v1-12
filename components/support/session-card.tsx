@@ -29,12 +29,14 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
     setAssigning(true)
 
     try {
-      const url = `/api/support/session/${session.id}/assign`
+      const url = `/api/support/session/${session.id}`
       console.log("[v0] [CLIENT] URL de asignación:", url)
-      console.log("[v0] [CLIENT] Haciendo fetch con método POST...")
+      console.log("[v0] [CLIENT] Haciendo fetch con método POST y action: assign")
 
       const response = await fetch(url, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "assign" }),
       })
 
       console.log("[v0] [CLIENT] Response status:", response.status)

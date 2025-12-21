@@ -44,10 +44,10 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
   async function handleSendMessage(message: string) {
     try {
-      const response = await fetch(`/api/support/session/${sessionId}/message`, {
+      const response = await fetch(`/api/support/session/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ action: "message", message }),
       })
 
       if (!response.ok) throw new Error("Error al enviar mensaje")
@@ -62,8 +62,10 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
   async function handleCloseSession() {
     try {
-      const response = await fetch(`/api/support/session/${sessionId}/close`, {
+      const response = await fetch(`/api/support/session/${sessionId}`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "close" }),
       })
 
       if (!response.ok) throw new Error("Error al cerrar sesión")
