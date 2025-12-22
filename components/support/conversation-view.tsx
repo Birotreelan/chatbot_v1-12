@@ -7,8 +7,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { MessageList } from "./message-list"
 import { MessageInput } from "./message-input"
 import { CloseSessionDialog } from "./close-session-dialog"
-import type { HumanSupportSession } from "@/lib/types"
+import type { HumanSupportSession, HumanSupportMessage } from "@/lib/types"
 import { ArrowLeft } from "lucide-react"
+
+interface ExtendedSession extends HumanSupportSession {
+  messages: HumanSupportMessage[]
+}
 
 interface ConversationViewProps {
   sessionId: string
@@ -16,7 +20,7 @@ interface ConversationViewProps {
 
 export function ConversationView({ sessionId }: ConversationViewProps) {
   const router = useRouter()
-  const [session, setSession] = useState<HumanSupportSession | null>(null)
+  const [session, setSession] = useState<ExtendedSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCloseDialog, setShowCloseDialog] = useState(false)
@@ -35,7 +39,11 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
       })
       if (!response.ok) throw new Error("Error al cargar sesión")
       const data = await response.json()
-      setSession(data.session)
+
+      setSession({
+        ...data.session,
+        messages: data.session.messages || [],
+      })
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido")

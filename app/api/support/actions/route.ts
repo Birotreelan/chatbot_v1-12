@@ -41,13 +41,30 @@ export async function GET(request: Request) {
     const conversationHistory = await getConversationMessages(supportSession.configId, supportSession.phoneNumber)
     const supportMessages = await getSupportMessages(sessionId)
 
-    console.log("[v0] [API SUPPORT ACTIONS GET] Sesión cargada exitosamente")
+    const allMessages: HumanSupportMessage[] = [
+      // Mensajes de la conversación (usuario y asistente)
+      ...conversationHistory.map((msg) => ({
+        id: msg.id,
+        sessionId,
+        role: msg.from === "user" ? ("user" as const) : ("assistant" as const),
+        content: msg.content,
+        timestamp: msg.timestamp,
+      })),
+      // Mensajes de soporte humano
+      ...supportMessages,
+    ]
+
+    // Ordenar por timestamp
+    allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+
+    console.log("[v0] [API SUPPORT ACTIONS GET] Sesión cargada con", allMessages.length, "mensajes")
 
     return NextResponse.json({
       success: true,
-      session: supportSession,
-      conversationHistory,
-      supportMessages,
+      session: {
+        ...supportSession,
+        messages: allMessages,
+      },
     })
   } catch (error: any) {
     console.error("[API SUPPORT ACTIONS GET] Error:", error)
