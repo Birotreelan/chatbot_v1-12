@@ -5,7 +5,22 @@ export async function sendWhatsAppMessage(
   message: string,
 ): Promise<any> {
   try {
+    console.log("[v0] [WHATSAPP_API] 📤 Preparando envío de mensaje")
+    console.log("[v0] [WHATSAPP_API] phoneNumberId:", phoneNumberId)
+    console.log("[v0] [WHATSAPP_API] to:", to)
+    console.log("[v0] [WHATSAPP_API] message:", message)
+    console.log("[v0] [WHATSAPP_API] accessToken length:", accessToken?.length || 0)
+
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
+    console.log("[v0] [WHATSAPP_API] URL:", url)
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: to,
+      type: "text",
+      text: { body: message },
+    }
+    console.log("[v0] [WHATSAPP_API] Payload:", JSON.stringify(payload, null, 2))
 
     const response = await fetch(url, {
       method: "POST",
@@ -13,24 +28,23 @@ export async function sendWhatsAppMessage(
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: to,
-        type: "text",
-        text: { body: message },
-      }),
+      body: JSON.stringify(payload),
     })
+
+    console.log("[v0] [WHATSAPP_API] Response status:", response.status)
+    console.log("[v0] [WHATSAPP_API] Response ok:", response.ok)
 
     if (!response.ok) {
       const error = await response.json()
-      console.error("[WHATSAPP_API] Error enviando mensaje:", error)
+      console.error("[v0] [WHATSAPP_API] ❌ Error response de WhatsApp:", JSON.stringify(error, null, 2))
       throw new Error(`WhatsApp API error: ${JSON.stringify(error)}`)
     }
 
     const data = await response.json()
+    console.log("[v0] [WHATSAPP_API] ✅ Respuesta exitosa de WhatsApp:", JSON.stringify(data, null, 2))
     return data
   } catch (error) {
-    console.error("[WHATSAPP_API] Error en sendWhatsAppMessage:", error)
+    console.error("[v0] [WHATSAPP_API] ❌ Error en sendWhatsAppMessage:", error)
     throw error
   }
 }
