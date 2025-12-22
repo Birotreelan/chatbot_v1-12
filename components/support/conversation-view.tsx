@@ -30,10 +30,8 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
   async function loadSession() {
     try {
-      const response = await fetch(`/api/support/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "load", sessionId }),
+      const response = await fetch(`/api/support/actions?sessionId=${sessionId}`, {
+        method: "GET",
       })
       if (!response.ok) throw new Error("Error al cargar sesión")
       const data = await response.json()
