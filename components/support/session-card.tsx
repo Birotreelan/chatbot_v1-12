@@ -29,14 +29,17 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
     setAssigning(true)
 
     try {
-      const url = `/api/support/session/${session.id}`
+      const url = `/api/support/actions`
       console.log("[v0] [CLIENT] URL de asignación:", url)
-      console.log("[v0] [CLIENT] Haciendo fetch con método POST y action: assign")
+      console.log("[v0] [CLIENT] Haciendo fetch con método POST")
 
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "assign" }),
+        body: JSON.stringify({
+          action: "assign",
+          sessionId: session.id,
+        }),
       })
 
       console.log("[v0] [CLIENT] Response status:", response.status)
@@ -49,10 +52,9 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
         data = await response.json()
         console.log("[v0] [CLIENT] Response data:", data)
       } else {
-        // Si no es JSON, obtener como texto para debugging
         const text = await response.text()
         console.error("[v0] [CLIENT] Response no es JSON:", text)
-        throw new Error(`Respuesta inválida del servidor (${response.status}): ${text.substring(0, 100)}`)
+        throw new Error(`Respuesta inválida del servidor (${response.status})`)
       }
 
       if (!response.ok) {
@@ -69,6 +71,8 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
       console.error("[v0] [CLIENT] Error en handleAssign:", error)
       alert("Error al asignar la conversación: " + (error instanceof Error ? error.message : "Error desconocido"))
       setAssigning(false)
+    } finally {
+      console.log("[v0] [CLIENT] Proceso de asignación finalizado")
     }
   }
 
