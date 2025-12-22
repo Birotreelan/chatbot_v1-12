@@ -42,23 +42,33 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
       console.log("[v0] [CLIENT] Response status:", response.status)
       console.log("[v0] [CLIENT] Response ok:", response.ok)
 
-      const data = await response.json()
-      console.log("[v0] [CLIENT] Response data:", data)
+      let data
+      const contentType = response.headers.get("content-type")
+
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json()
+        console.log("[v0] [CLIENT] Response data:", data)
+      } else {
+        // Si no es JSON, obtener como texto para debugging
+        const text = await response.text()
+        console.error("[v0] [CLIENT] Response no es JSON:", text)
+        throw new Error(`Respuesta inválida del servidor (${response.status}): ${text.substring(0, 100)}`)
+      }
 
       if (!response.ok) {
         console.error("[v0] [CLIENT] Error en response:", data)
         throw new Error(data.error || "Error al asignar sesión")
       }
 
-      console.log("[v0] [CLIENT] Asignación exitosa, redirigiendo...")
-      // Redirigir a la vista de conversación
+      console.log("[v0] [CLIENT] Asignación exitosa, actualizando lista...")
+      await onUpdate()
+
+      console.log("[v0] [CLIENT] Redirigiendo a la conversación...")
       router.push(`/support/${session.id}`)
     } catch (error) {
       console.error("[v0] [CLIENT] Error en handleAssign:", error)
       alert("Error al asignar la conversación: " + (error instanceof Error ? error.message : "Error desconocido"))
-    } finally {
       setAssigning(false)
-      console.log("[v0] [CLIENT] Proceso de asignación finalizado")
     }
   }
 

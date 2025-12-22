@@ -13,12 +13,16 @@ import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { nanoid } from "nanoid"
 import type { HumanSupportMessage } from "@/lib/types"
 
+type RouteContext = {
+  params: Promise<{ id: string }>
+}
+
 // GET: Obtener detalle de sesión
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: RouteContext) {
   try {
     console.log("[v0] [API SESSION GET] Iniciando")
     const session = await requireAuth()
-    const { id: sessionId } = await params
+    const { id: sessionId } = await context.params
 
     const supportSession = await getSupportSession(sessionId)
 
@@ -47,9 +51,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 }
 
 // POST: Acciones sobre la sesión (assign, message, close)
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, context: RouteContext) {
   try {
-    const { id: sessionId } = await params
+    const { id: sessionId } = await context.params
+    console.log("[v0] [API SESSION POST] Session ID recibido:", sessionId)
+
     const body = await request.json()
     const { action } = body
 
@@ -79,11 +85,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
   } catch (error: any) {
     console.error("[v0] [API SESSION POST] Error general:", error)
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    return NextResponse.json(
+      {
+        success: false,
+        error: error.message,
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+      },
+      { status: 500 },
+    )
   }
 }
 
-// Handler para asignar sesión
 async function handleAssign(sessionId: string) {
   console.log("[v0] [ASSIGN] Iniciando:", sessionId)
 
@@ -138,7 +150,6 @@ async function handleAssign(sessionId: string) {
   }
 }
 
-// Handler para cerrar sesión
 async function handleClose(sessionId: string, note?: string) {
   try {
     const session = await requireAuth()
@@ -179,7 +190,6 @@ async function handleClose(sessionId: string, note?: string) {
   }
 }
 
-// Handler para enviar mensaje
 async function handleMessage(sessionId: string, message: string) {
   try {
     const session = await requireSupportAgent()
