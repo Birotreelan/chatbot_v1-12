@@ -54,19 +54,34 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
   async function handleSendMessage(message: string) {
     try {
+      console.log("[v0] [CLIENT] Enviando mensaje:", message)
+      console.log("[v0] [CLIENT] SessionId:", sessionId)
+
       const response = await fetch(`/api/support/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "message", sessionId, message }),
       })
 
-      if (!response.ok) throw new Error("Error al enviar mensaje")
+      console.log("[v0] [CLIENT] Response status:", response.status)
+      console.log("[v0] [CLIENT] Response ok:", response.ok)
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error("[v0] [CLIENT] Error data:", errorData)
+        throw new Error(errorData.error || "Error al enviar mensaje")
+      }
+
+      const data = await response.json()
+      console.log("[v0] [CLIENT] Response data:", data)
 
       // Recargar sesión inmediatamente
+      console.log("[v0] [CLIENT] Recargando sesión...")
       await loadSession()
+      console.log("[v0] [CLIENT] ✅ Mensaje enviado y sesión recargada")
     } catch (error) {
-      console.error("Error:", error)
-      alert("Error al enviar mensaje")
+      console.error("[v0] [CLIENT] ❌ Error:", error)
+      alert("Error al enviar mensaje: " + (error instanceof Error ? error.message : "Error desconocido"))
     }
   }
 

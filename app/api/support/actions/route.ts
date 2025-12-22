@@ -222,32 +222,59 @@ async function handleClose(sessionId: string, note?: string) {
 
 async function handleMessage(sessionId: string, message: string) {
   try {
+    console.log("[v0] [MESSAGE] Iniciando para sessionId:", sessionId)
+    console.log("[v0] [MESSAGE] Mensaje recibido:", message)
+
     const session = await requireSupportAgent()
+    console.log("[v0] [MESSAGE] Usuario autenticado:", { userId: session.userId, tenantId: session.tenantId })
 
     if (!message || typeof message !== "string" || message.trim().length === 0) {
+      console.log("[v0] [MESSAGE] ERROR: Mensaje inválido")
       return NextResponse.json({ success: false, error: "Mensaje inválido" }, { status: 400 })
     }
 
     const supportSession = await getSupportSession(sessionId)
+    console.log("[v0] [MESSAGE] Sesión encontrada:", supportSession ? "SÍ" : "NO")
 
     if (!supportSession) {
+      console.log("[v0] [MESSAGE] ERROR: Sesión no encontrada")
       return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
     }
 
+    console.log(
+      "[v0] [MESSAGE] Verificando asignación - assignedTo:",
+      supportSession.assignedTo,
+      "vs userId:",
+      session.userId,
+    )
     if (supportSession.assignedTo !== session.userId) {
+      console.log("[v0] [MESSAGE] ERROR: No estás asignado a esta sesión")
       return NextResponse.json({ success: false, error: "No estás asignado a esta sesión" }, { status: 403 })
     }
 
+    console.log("[v0] [MESSAGE] Status de sesión:", supportSession.status)
     if (supportSession.status !== "in_progress") {
+      console.log("[v0] [MESSAGE] ERROR: Sesión no está activa")
       return NextResponse.json({ success: false, error: "Sesión no está activa" }, { status: 400 })
     }
 
+    console.log("[v0] [MESSAGE] Obteniendo config:", supportSession.configId)
     const config = await getWhatsAppConfigById(supportSession.configId)
+
     if (!config) {
+      console.log("[v0] [MESSAGE] ERROR: Configuración no encontrada")
       return NextResponse.json({ success: false, error: "Configuración no encontrada" }, { status: 404 })
     }
 
+    console.log("[v0] [MESSAGE] Config obtenido:", {
+      phoneNumberId: config.phoneNumberId,
+      hasAccessToken: !!config.accessToken,
+      destinationPhone: supportSession.phoneNumber,
+    })
+
+    console.log("[v0] [MESSAGE] Enviando mensaje a WhatsApp...")
     await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, supportSession.phoneNumber, message.trim())
+    console.log("[v0] [MESSAGE] ✅ Mensaje enviado a WhatsApp exitosamente")
 
     const supportMessage: HumanSupportMessage = {
       id: nanoid(),
@@ -258,14 +285,18 @@ async function handleMessage(sessionId: string, message: string) {
       agentId: session.userId,
     }
 
+    console.log("[v0] [MESSAGE] Guardando mensaje en Redis...")
     await saveSupportMessage(supportMessage)
+    console.log("[v0] [MESSAGE] ✅ Mensaje guardado en Redis")
 
+    console.log("[v0] [MESSAGE] ✅ Proceso completo exitoso")
     return NextResponse.json({
       success: true,
       message: "Mensaje enviado correctamente",
     })
   } catch (error: any) {
-    console.error("[MESSAGE] Error:", error)
+    console.error("[v0] [MESSAGE] ❌ Error:", error)
+    console.error("[v0] [MESSAGE] Stack:", error.stack)
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }
