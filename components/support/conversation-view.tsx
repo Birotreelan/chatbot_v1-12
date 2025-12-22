@@ -30,7 +30,11 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
   async function loadSession() {
     try {
-      const response = await fetch(`/api/support/session/${sessionId}`)
+      const response = await fetch(`/api/support/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "load", sessionId }),
+      })
       if (!response.ok) throw new Error("Error al cargar sesión")
       const data = await response.json()
       setSession(data.session)
@@ -44,10 +48,10 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
   async function handleSendMessage(message: string) {
     try {
-      const response = await fetch(`/api/support/session/${sessionId}`, {
+      const response = await fetch(`/api/support/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "message", message }),
+        body: JSON.stringify({ action: "message", sessionId, message }),
       })
 
       if (!response.ok) throw new Error("Error al enviar mensaje")
@@ -62,10 +66,10 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
   async function handleCloseSession() {
     try {
-      const response = await fetch(`/api/support/session/${sessionId}`, {
+      const response = await fetch(`/api/support/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "close" }),
+        body: JSON.stringify({ action: "close", sessionId }),
       })
 
       if (!response.ok) throw new Error("Error al cerrar sesión")

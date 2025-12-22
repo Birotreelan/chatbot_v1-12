@@ -1,10 +1,59 @@
 import { NextResponse } from "next/server"
 import { requireAuth, requireSupportAgent } from "@/lib/auth"
-import { getSupportSession, assignSessionToAgent, closeSession, saveSupportMessage } from "@/lib/human-support"
+import {
+  getSupportSession,
+  getSupportMessages,
+  assignSessionToAgent,
+  closeSession,
+  saveSupportMessage,
+} from "@/lib/human-support"
+import { getConversationMessages } from "@/lib/conversations"
 import { getWhatsAppConfigById } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { nanoid } from "nanoid"
 import type { HumanSupportMessage } from "@/lib/types"
+
+// GET: Obtener detalle de sesión
+export async function GET(request: Request) {
+  try {
+    console.log("[v0] [API SUPPORT ACTIONS GET] Iniciando")
+    const session = await requireAuth()
+    const { searchParams } = new URL(request.url)
+    const sessionId = searchParams.get("sessionId")
+
+    if (!sessionId) {
+      return NextResponse.json({ success: false, error: "Falta parámetro 'sessionId'" }, { status: 400 })
+    }
+
+    console.log("[v0] [API SUPPORT ACTIONS GET] sessionId:", sessionId)
+
+    const supportSession = await getSupportSession(sessionId)
+
+    if (!supportSession) {
+      return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
+    }
+
+    // Verificar permisos
+    if (session.role === "support_agent" && supportSession.tenantId !== session.tenantId) {
+      return NextResponse.json({ success: false, error: "No autorizado" }, { status: 403 })
+    }
+
+    const conversationHistory = await getConversationMessages(supportSession.configId, supportSession.phoneNumber)
+    const supportMessages = await getSupportMessages(sessionId)
+
+    console.log("[v0] [API SUPPORT ACTIONS GET] Sesión cargada exitosamente")
+
+    return NextResponse.json({
+      success: true,
+      session: supportSession,
+      conversationHistory,
+      supportMessages,
+    })
+  } catch (error: any) {
+    console.error("[API SUPPORT ACTIONS GET] Error:", error)
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+  }
+}
 
 // POST: Acciones sobre sesiones de soporte
 export async function POST(request: Request) {
