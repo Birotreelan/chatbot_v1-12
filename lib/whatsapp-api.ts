@@ -1,3 +1,42 @@
+/**
+ * Normaliza un número de teléfono al formato internacional de WhatsApp
+ * Ejemplo: "3413121395" -> "5493413121395"
+ *
+ * Reglas:
+ * - Si ya tiene el formato completo (empieza con 549), lo deja como está
+ * - Si empieza con 54 pero no tiene el 9 después, lo agrega
+ * - Si no tiene código de país, asume Argentina (54) y agrega el 9
+ */
+function normalizePhoneNumber(phone: string): string {
+  // Remover espacios, guiones y paréntesis
+  const cleaned = phone.replace(/[\s\-$$$$]/g, "")
+
+  console.log("[v0] [WHATSAPP_API] 📞 Normalizando número:", cleaned)
+
+  // Si ya tiene el formato completo (549XXXXXXXXXX)
+  if (cleaned.startsWith("549") && cleaned.length >= 12) {
+    console.log("[v0] [WHATSAPP_API] ✅ Número ya tiene formato completo:", cleaned)
+    return cleaned
+  }
+
+  // Si tiene código de país (54) pero no el 9
+  if (cleaned.startsWith("54") && !cleaned.startsWith("549")) {
+    const normalized = "549" + cleaned.substring(2)
+    console.log("[v0] [WHATSAPP_API] ✅ Número normalizado (agregado 9):", normalized)
+    return normalized
+  }
+
+  // Si no tiene código de país, agregar 549 (Argentina)
+  if (!cleaned.startsWith("54")) {
+    const normalized = "549" + cleaned
+    console.log("[v0] [WHATSAPP_API] ✅ Número normalizado (agregado 549):", normalized)
+    return normalized
+  }
+
+  console.log("[v0] [WHATSAPP_API] ⚠️ Usando número sin cambios:", cleaned)
+  return cleaned
+}
+
 export async function sendWhatsAppMessage(
   phoneNumberId: string,
   accessToken: string,
@@ -7,16 +46,18 @@ export async function sendWhatsAppMessage(
   try {
     console.log("[v0] [WHATSAPP_API] 📤 Preparando envío de mensaje")
     console.log("[v0] [WHATSAPP_API] phoneNumberId:", phoneNumberId)
-    console.log("[v0] [WHATSAPP_API] to:", to)
+    console.log("[v0] [WHATSAPP_API] to (original):", to)
     console.log("[v0] [WHATSAPP_API] message:", message)
     console.log("[v0] [WHATSAPP_API] accessToken length:", accessToken?.length || 0)
+
+    const normalizedPhone = normalizePhoneNumber(to)
 
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
     console.log("[v0] [WHATSAPP_API] URL:", url)
 
     const payload = {
       messaging_product: "whatsapp",
-      to: to,
+      to: normalizedPhone, // Usar el número normalizado
       type: "text",
       text: { body: message },
     }
@@ -57,6 +98,8 @@ export async function sendWhatsAppTemplate(
   wabaId?: string,
 ): Promise<any> {
   try {
+    const normalizedPhone = normalizePhoneNumber(to)
+
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
 
     let templateData = template
@@ -71,7 +114,7 @@ export async function sendWhatsAppTemplate(
 
     const payload = {
       messaging_product: "whatsapp",
-      to: to,
+      to: normalizedPhone, // Usar el número normalizado
       type: "template",
       template: templateData.template || templateData, // Support both formats
     }
