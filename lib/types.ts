@@ -22,6 +22,10 @@ export interface WhatsAppConfig {
 
   additionalAssistants?: AdditionalAssistant[]
 
+  businessHours?: DaySchedule[]
+  whatsappSupportHours?: DaySchedule[]
+  timezone?: string
+
   // Widget configuration
   widgetEnabled?: boolean
   widgetTitle?: string
@@ -236,4 +240,15 @@ export interface ConversationMessage {
   content: string
   timestamp: string
   from: "user" | "assistant"
+}
+
+export interface DaySchedule {
+  dayOfWeek: number // 0 = Domingo, 1 = Lunes, ... 6 = Sábado
+  enabled: boolean
+  periods: TimePeriod[]
+}
+
+export interface TimePeriod {
+  startTime: string // Formato "HH:MM"
+  endTime: string // Formato "HH:MM"
 }

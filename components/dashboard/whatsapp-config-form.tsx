@@ -17,6 +17,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 import type { WhatsAppConfig, AdditionalAssistant } from "@/lib/types"
 import { Plus, Trash2, Info } from "lucide-react"
+import { ScheduleConfigurator } from "./schedule-configurator"
 
 interface WhatsAppConfigFormProps {
   config?: WhatsAppConfig
@@ -41,7 +42,9 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     proxy: "",
     escalationPhoneNumber: "",
     additionalAssistants: [],
-    // Widget settings
+    businessHours: [],
+    whatsappSupportHours: [],
+    timezone: "America/Argentina/Buenos_Aires",
     widgetEnabled: true,
     widgetTitle: "Asistente Virtual",
     widgetPrimaryColor: "#0ea5e9",
@@ -261,6 +264,45 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Horarios de Atención al Público</CardTitle>
+              <CardDescription>
+                Configure los horarios en que la clínica está abierta para recibir pacientes
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="timezone">Zona Horaria</Label>
+                <Select
+                  value={formData.timezone || "America/Argentina/Buenos_Aires"}
+                  onValueChange={(value) => updateFormData("timezone", value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="America/Argentina/Buenos_Aires">Buenos Aires (GMT-3)</SelectItem>
+                    <SelectItem value="America/Montevideo">Montevideo (GMT-3)</SelectItem>
+                    <SelectItem value="America/Santiago">Santiago (GMT-3)</SelectItem>
+                    <SelectItem value="America/Sao_Paulo">São Paulo (GMT-3)</SelectItem>
+                    <SelectItem value="America/Lima">Lima (GMT-5)</SelectItem>
+                    <SelectItem value="America/Bogota">Bogotá (GMT-5)</SelectItem>
+                    <SelectItem value="America/Mexico_City">Ciudad de México (GMT-6)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Separator className="my-4" />
+
+              <ScheduleConfigurator
+                schedule={formData.businessHours || []}
+                onChange={(schedule) => updateFormData("businessHours", schedule)}
+                description="Configure los días y horarios de atención. Puede agregar múltiples períodos por día para pausas (ej: 8-12 y 16-20)."
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="whatsapp" className="space-y-4">
@@ -443,6 +485,30 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                   placeholder="https://tu-dominio.com/api/webhook"
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Horarios de Asistencia por WhatsApp</CardTitle>
+              <CardDescription>
+                Configure los horarios en que el personal puede responder consultas por WhatsApp
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Alert className="mb-4">
+                <Info className="h-4 w-4" />
+                <AlertDescription>
+                  Estos horarios pueden ser diferentes a los de atención al público. Por ejemplo, el personal puede
+                  responder WhatsApp antes o después del horario de atención presencial.
+                </AlertDescription>
+              </Alert>
+
+              <ScheduleConfigurator
+                schedule={formData.whatsappSupportHours || []}
+                onChange={(schedule) => updateFormData("whatsappSupportHours", schedule)}
+                description="Configure los días y horarios en que el personal puede atender consultas por WhatsApp."
+              />
             </CardContent>
           </Card>
         </TabsContent>
