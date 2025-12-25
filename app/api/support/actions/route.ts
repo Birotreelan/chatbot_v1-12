@@ -50,24 +50,27 @@ export async function GET(request: Request) {
         content: msg.content,
         timestamp: msg.timestamp,
       })),
-      // Mensajes de soporte humano
+      // Mensajes de soporte humano (agente únicamente)
       ...supportMessages,
     ]
 
-    // Ordenar por timestamp
-    allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    const uniqueMessages = Array.from(new Map(allMessages.map((msg) => [msg.id, msg])).values())
 
-    console.log("[v0] [API SUPPORT ACTIONS GET] Sesión cargada con", allMessages.length, "mensajes")
+    // Ordenar por timestamp
+    uniqueMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+
+    console.log("[v0] [API SUPPORT ACTIONS GET] Total de mensajes antes de deduplicar:", allMessages.length)
+    console.log("[v0] [API SUPPORT ACTIONS GET] Total de mensajes únicos:", uniqueMessages.length)
     console.log(
       "[v0] [API SUPPORT ACTIONS GET] Roles en mensajes:",
-      allMessages.map((m) => ({ role: m.role, content: m.content.substring(0, 30) })),
+      uniqueMessages.map((m) => ({ role: m.role, content: m.content.substring(0, 30) })),
     )
 
     return NextResponse.json({
       success: true,
       session: {
         ...supportSession,
-        messages: allMessages,
+        messages: uniqueMessages,
       },
     })
   } catch (error: any) {
