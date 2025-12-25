@@ -19,6 +19,13 @@ export function MessageList({ messages }: MessageListProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
+  useEffect(() => {
+    console.log(
+      "[v0] Messages received:",
+      messages.map((m) => ({ role: m.role, content: m.content.substring(0, 30) })),
+    )
+  }, [messages])
+
   if (messages.length === 0) {
     return <div className="text-center py-8 text-muted-foreground">No hay mensajes en esta conversación</div>
   }
@@ -29,6 +36,8 @@ export function MessageList({ messages }: MessageListProps) {
         const isUser = message.role === "user"
         const isAgent = message.role === "agent"
         const isAI = message.role === "assistant"
+
+        console.log("[v0] Rendering message:", { index, role: message.role, isUser, isAgent, isAI })
 
         const timeAgo = formatDistanceToNow(new Date(message.timestamp), {
           addSuffix: true,
