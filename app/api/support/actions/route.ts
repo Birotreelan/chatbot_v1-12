@@ -43,10 +43,10 @@ export async function GET(request: Request) {
 
     const allMessages: HumanSupportMessage[] = [
       // Mensajes de la conversación (usuario y asistente)
-      ...conversationHistory.map((msg) => ({
+      ...conversationHistory.map((msg: any) => ({
         id: msg.id,
         sessionId,
-        role: msg.from === "user" ? ("user" as const) : ("assistant" as const),
+        role: msg.role === "user" ? ("user" as const) : ("assistant" as const),
         content: msg.content,
         timestamp: msg.timestamp,
       })),
@@ -58,6 +58,10 @@ export async function GET(request: Request) {
     allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
 
     console.log("[v0] [API SUPPORT ACTIONS GET] Sesión cargada con", allMessages.length, "mensajes")
+    console.log(
+      "[v0] [API SUPPORT ACTIONS GET] Roles en mensajes:",
+      allMessages.map((m) => ({ role: m.role, content: m.content.substring(0, 30) })),
+    )
 
     return NextResponse.json({
       success: true,
