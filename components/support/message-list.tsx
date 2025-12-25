@@ -40,24 +40,37 @@ export function MessageList({ messages }: MessageListProps) {
             <div
               className={`max-w-[70%] rounded-lg p-3 ${
                 isUser
-                  ? "bg-muted text-foreground border border-border"
+                  ? "bg-white text-foreground border border-gray-200 shadow-sm"
                   : isAgent
-                    ? "bg-blue-600 text-white"
-                    : "bg-secondary text-secondary-foreground border border-border"
+                    ? "bg-blue-600 text-white shadow-md"
+                    : "bg-gray-100 text-foreground border border-gray-200 shadow-sm"
               }`}
             >
               <div className="flex items-center gap-2 mb-1">
-                {isUser && <User className="w-3 h-3" />}
-                {isAgent && <UserCheck className="w-3 h-3" />}
-                {isAI && <Bot className="w-3 h-3" />}
-                <Badge
-                  variant="outline"
-                  className={`text-xs ${isUser ? "bg-background" : isAgent ? "bg-blue-700" : ""}`}
-                >
-                  {isUser && "Paciente"}
-                  {isAgent && "Agente"}
-                  {isAI && "IA"}
-                </Badge>
+                {isUser && (
+                  <>
+                    <User className="w-4 h-4" />
+                    <Badge variant="outline" className="text-xs bg-white border-gray-300">
+                      Paciente
+                    </Badge>
+                  </>
+                )}
+                {isAgent && (
+                  <>
+                    <UserCheck className="w-4 h-4" />
+                    <Badge variant="outline" className="text-xs bg-blue-700 text-white border-blue-700">
+                      Agente
+                    </Badge>
+                  </>
+                )}
+                {isAI && (
+                  <>
+                    <Bot className="w-4 h-4" />
+                    <Badge variant="outline" className="text-xs bg-gray-200 border-gray-300">
+                      IA
+                    </Badge>
+                  </>
+                )}
                 <span className="text-xs opacity-70">{timeAgo}</span>
               </div>
               <p className="text-sm whitespace-pre-wrap">{message.content}</p>
