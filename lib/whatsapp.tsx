@@ -12,6 +12,7 @@ import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime } from "./appointment-stats"
 import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
 import type { HumanSupportMessage } from "./types"
+import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 
 // Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): string {
@@ -714,14 +715,14 @@ export async function processIndividualMessage(
       return
     }
 
-    // Preparar mensaje con parámetros iniciales
-    const fechaHora = getArgentinaDateTime()
+    const scheduleInfo = formatScheduleForSystemBlock(config)
+
     let messageToSend = `[SISTEMA]
 Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
+FechaHora: ${getArgentinaDateTime()}
 PrimerMensaje: ${threadResult.isNewThread}
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${scheduleInfo}
 [/SISTEMA]
 
 ${userMessage}`
@@ -730,11 +731,11 @@ ${userMessage}`
     if (threadResult.isResetThread) {
       messageToSend = `[SISTEMA]
 Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
+FechaHora: ${getArgentinaDateTime()}
 PrimerMensaje: true
 ThreadReseteado: true
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${scheduleInfo}
 [/SISTEMA]
 
 ${userMessage}`

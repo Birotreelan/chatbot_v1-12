@@ -11,6 +11,7 @@ import {
   validarDni,
 } from "./openai-tools"
 import { getThreadForUser, createThread } from "./thread-manager"
+import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -22,6 +23,7 @@ async function createSystemBlock(
   clienteId?: string,
   sedeId?: string,
   escalationPhone?: string,
+  config?: any, // Add config parameter to access schedule info
 ): Promise<string> {
   const fechaHora = getArgentinaDateTime()
 
@@ -32,6 +34,11 @@ CelularPaciente: No disponible (consulta web)`
 
   if (escalationPhone) {
     systemBlock += `\nNumeroDerivacion: ${escalationPhone}`
+  }
+
+  if (config) {
+    const scheduleInfo = formatScheduleForSystemBlock(config)
+    systemBlock += scheduleInfo
   }
 
   // Si tenemos clienteId y sedeId, obtener datos de sede
@@ -115,10 +122,11 @@ export async function processWebChatMessage({
     console.log(`[WEB-CHAT] 🔍 Thread ID validado: ${threadId} (tipo: ${typeof threadId})`)
 
     const systemBlock = await createSystemBlock(
-      config.displayName,
-      config.cliente_id,
-      effectiveSedeId,
-      config.escalationPhoneNumber,
+      config.nombre || "Clínica",
+      clienteId,
+      sedeId,
+      config.numero_derivacion,
+      config, // Pass the full config
     )
 
     console.log(`[WEB-CHAT] 📋 Bloque SISTEMA creado:`)

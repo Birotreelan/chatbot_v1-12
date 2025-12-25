@@ -23,6 +23,7 @@ import { getAssistantIdByFunction } from "./assistant-utils"
 import { logError } from "./logging" // Assuming logError is in './logging'
 import { incrementMetric } from "./metrics" // Assuming incrementMetric is in './metrics'
 import { createSupportSession } from "./human-support"
+import { formatScheduleForSystemBlock } from "@/lib/utils/schedule-formatter" // Import added
 
 // Re-export functions for compatibility
 export { obtenerTurnosDisponibles } from "./api-tools/api-functions"
@@ -420,8 +421,10 @@ async function handleAssistantSwitch(
     await updateThreadId(userPhoneNumber, config.id, newThread.id, newAssistantId)
     console.log(`[OPENAI-SWITCH] 💾 Thread y AssistantId actualizados en base de datos para usuario ${userPhoneNumber}`)
 
-    const { getArgentinaDateTime } = await import("@/lib/utils/date-utils")
+    const { getArgentinaDateTime } = await import("@/lib/utils/date-utils") // import moved here
     const fechaHora = getArgentinaDateTime()
+
+    const scheduleInfo = formatScheduleForSystemBlock(config)
 
     const systemBlock = `[SISTEMA]
 Nombre: ${config.displayName}
@@ -429,7 +432,7 @@ FechaHora: ${fechaHora}
 PrimerMensaje: true
 TipoMensaje: assistant_switch
 PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
-FuncionOrigen: ${functionName}
+FuncionOrigen: ${functionName}${scheduleInfo}
 [/SISTEMA]
 
 ${JSON.stringify(functionArgs, null, 2)}`
