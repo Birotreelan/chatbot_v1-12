@@ -1,53 +1,40 @@
 import type { DaySchedule, WhatsAppConfig } from "../types"
 
-const DAYS_ES: Record<string, string> = {
-  monday: "Lunes",
-  tuesday: "Martes",
-  wednesday: "Miércoles",
-  thursday: "Jueves",
-  friday: "Viernes",
-  saturday: "Sábado",
-  sunday: "Domingo",
+const DAYS_ES: Record<number, string> = {
+  0: "Domingo",
+  1: "Lunes",
+  2: "Martes",
+  3: "Miércoles",
+  4: "Jueves",
+  5: "Viernes",
+  6: "Sábado",
 }
 
 /**
- * Formatea un objeto de horarios semanales para incluir en el bloque [SISTEMA]
- * @param schedule - Objeto con los horarios de cada día de la semana
+ * Formatea un array de horarios semanales para incluir en el bloque [SISTEMA]
+ * @param schedule - Array con los horarios de cada día de la semana
  * @returns String formateado con los horarios o mensaje si está cerrado
  */
-export function formatScheduleForSystem(schedule?: Record<string, DaySchedule>): string {
-  if (!schedule) {
+export function formatScheduleForSystem(schedule?: DaySchedule[]): string {
+  if (!schedule || schedule.length === 0) {
     return "No configurado"
   }
 
   const lines: string[] = []
-  const daysOrder = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+  const daysOrder = [1, 2, 3, 4, 5, 6, 0] // Lunes a Domingo
 
-  for (const day of daysOrder) {
-    const daySchedule = schedule[day]
-    if (!daySchedule) continue
+  for (const dayNum of daysOrder) {
+    const daySchedule = schedule.find((s) => s.dayOfWeek === dayNum)
+    const dayName = DAYS_ES[dayNum]
 
-    const dayName = DAYS_ES[day]
-
-    if (!daySchedule.enabled) {
+    if (!daySchedule || !daySchedule.enabled) {
       lines.push(`${dayName}: Cerrado`)
       continue
     }
 
-    const periods: string[] = []
-
-    // Primer período
-    if (daySchedule.start && daySchedule.end) {
-      periods.push(`${daySchedule.start}-${daySchedule.end}`)
-    }
-
-    // Segundo período (si existe)
-    if (daySchedule.start2 && daySchedule.end2) {
-      periods.push(`${daySchedule.start2}-${daySchedule.end2}`)
-    }
-
-    if (periods.length > 0) {
-      lines.push(`${dayName}: ${periods.join(", ")}`)
+    if (daySchedule.periods && daySchedule.periods.length > 0) {
+      const periods = daySchedule.periods.map((period) => `${period.startTime}-${period.endTime}`).join(", ")
+      lines.push(`${dayName}: ${periods}`)
     } else {
       lines.push(`${dayName}: Cerrado`)
     }
@@ -58,15 +45,15 @@ export function formatScheduleForSystem(schedule?: Record<string, DaySchedule>):
 
 /**
  * Obtiene un resumen compacto de los horarios (para logs o notificaciones)
- * @param schedule - Objeto con los horarios de cada día de la semana
+ * @param schedule - Array con los horarios de cada día de la semana
  * @returns String compacto con los horarios
  */
-export function getScheduleSummary(schedule?: Record<string, DaySchedule>): string {
-  if (!schedule) {
+export function getScheduleSummary(schedule?: DaySchedule[]): string {
+  if (!schedule || schedule.length === 0) {
     return "No configurado"
   }
 
-  const activeDays = Object.entries(schedule).filter(([_, daySchedule]) => daySchedule?.enabled)
+  const activeDays = schedule.filter((s) => s.enabled && s.periods && s.periods.length > 0)
 
   if (activeDays.length === 0) {
     return "Cerrado todos los días"
@@ -81,19 +68,21 @@ export function getScheduleSummary(schedule?: Record<string, DaySchedule>): stri
  * @returns String formateado para incluir en el bloque SISTEMA
  */
 export function formatScheduleForSystemBlock(config: WhatsAppConfig): string {
-  let result = ""
+  const parts: string[] = []
 
-  // Agregar horarios de la clínica
-  if (config.businessHours) {
+  if (config.businessHours && config.businessHours.length > 0) {
     const businessHoursFormatted = formatScheduleForSystem(config.businessHours)
-    result += `\nHorarios Clinica:\n${businessHoursFormatted}`
+    parts.push(`\nHorarios Clinica:\n${businessHoursFormatted}`)
+  } else {
+    parts.push(`\nHorarios Clinica: No configurado`)
   }
 
-  // Agregar horarios de atención por WhatsApp
-  if (config.whatsappSupportHours) {
+  if (config.whatsappSupportHours && config.whatsappSupportHours.length > 0) {
     const supportHoursFormatted = formatScheduleForSystem(config.whatsappSupportHours)
-    result += `\nHorarios Atencion WhatsApp:\n${supportHoursFormatted}`
+    parts.push(`\nHorarios Atencion WhatsApp:\n${supportHoursFormatted}`)
+  } else {
+    parts.push(`\nHorarios Atencion WhatsApp: No configurado`)
   }
 
-  return result
+  return parts.join("")
 }
