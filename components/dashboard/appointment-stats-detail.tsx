@@ -138,7 +138,13 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-amber-600">{stats?.totalRescheduled || 0}</div>
-            <p className="text-xs text-muted-foreground">Solicitudes de reagendamiento</p>
+            <p className="text-xs text-muted-foreground">
+              Tasa Reagendamiento:{" "}
+              {stats?.totalCancelled && stats.totalCancelled > 0
+                ? (((stats?.totalRescheduled || 0) / stats.totalCancelled) * 100).toFixed(1)
+                : 0}
+              %
+            </p>
           </CardContent>
         </Card>
       </div>
