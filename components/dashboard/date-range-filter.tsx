@@ -106,7 +106,7 @@ export function DateRangeFilter({ onFilterChange }: DateRangeFilterProps) {
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar mode="single" selected={startDate} onSelect={setStartDate} initialFocus locale={es} />
+                <Calendar mode="single" selected={startDate} onSelect={setStartDate} locale={es} />
               </PopoverContent>
             </Popover>
           </div>
@@ -124,7 +124,7 @@ export function DateRangeFilter({ onFilterChange }: DateRangeFilterProps) {
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar mode="single" selected={endDate} onSelect={setEndDate} initialFocus locale={es} />
+                <Calendar mode="single" selected={endDate} onSelect={setEndDate} locale={es} />
               </PopoverContent>
             </Popover>
           </div>
