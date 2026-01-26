@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import type { WhatsAppConfig } from "@/lib/types"
 import { ConversationsList } from "./conversations-list"
 import { ConversationChat } from "./conversation-chat"
@@ -47,6 +47,10 @@ export function ConversationsView() {
       setLoading(false)
     }
   }
+
+  const handleFilteredContactsChange = useCallback((contacts: Contact[]) => {
+    setFilteredContacts(contacts)
+  }, [])
 
   async function handleExport() {
     if (!selectedConfig || filteredContacts.length === 0) {
@@ -148,7 +152,7 @@ export function ConversationsView() {
                 configId={selectedConfig.id}
                 selectedContact={selectedContact}
                 onSelectContact={setSelectedContact}
-                onFilteredContactsChange={setFilteredContacts}
+                onFilteredContactsChange={handleFilteredContactsChange}
               />
             </div>
             <div className="flex-1 bg-muted/20">
