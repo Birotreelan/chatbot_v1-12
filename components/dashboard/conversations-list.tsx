@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -37,6 +37,9 @@ export function ConversationsList({
   const [dateTo, setDateTo] = useState<string>(format(new Date(), "yyyy-MM-dd"))
   const [appliedDateFrom, setAppliedDateFrom] = useState<string>(format(new Date(), "yyyy-MM-dd"))
   const [appliedDateTo, setAppliedDateTo] = useState<string>(format(new Date(), "yyyy-MM-dd"))
+  
+  const onFilteredContactsChangeRef = useRef(onFilteredContactsChange)
+  onFilteredContactsChangeRef.current = onFilteredContactsChange
 
   useEffect(() => {
     loadContacts()
@@ -64,15 +67,18 @@ export function ConversationsList({
     setLoading(true)
   }
 
-  const filteredContacts = contacts.filter((contact) =>
-    contact.phoneNumber.toLowerCase().includes(phoneFilter.toLowerCase()),
+  const filteredContacts = useMemo(() => 
+    contacts.filter((contact) =>
+      contact.phoneNumber.toLowerCase().includes(phoneFilter.toLowerCase()),
+    ),
+    [contacts, phoneFilter]
   )
 
   useEffect(() => {
-    if (onFilteredContactsChange) {
-      onFilteredContactsChange(filteredContacts)
+    if (onFilteredContactsChangeRef.current) {
+      onFilteredContactsChangeRef.current(filteredContacts)
     }
-  }, [filteredContacts, onFilteredContactsChange])
+  }, [filteredContacts])
 
   if (loading) {
     return (
