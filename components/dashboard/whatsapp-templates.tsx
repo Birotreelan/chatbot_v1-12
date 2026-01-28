@@ -288,6 +288,7 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
             <CardDescription>WABA ID: {config.wabaId}</CardDescription>
           </div>
           <Button
+            type="button"
             variant="outline"
             size="sm"
             onClick={handleRefresh}
@@ -320,6 +321,7 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
         </div>
         <div className="flex items-center gap-2">
           <Button
+            type="button"
             variant="default"
             size="sm"
             onClick={() => setShowCreator(true)}
@@ -329,6 +331,7 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
             Crear Plantilla
           </Button>
           <Button
+            type="button"
             variant="outline"
             size="sm"
             onClick={handleRefresh}
@@ -365,6 +368,7 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
                   </div>
                   <div className="flex flex-col gap-2 ml-4">
                     <Button
+                      type="button"
                       variant="ghost"
                       size="sm"
                       onClick={() => copyTemplateToClipboard(template)}
@@ -374,6 +378,7 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
                       Copiar JSON
                     </Button>
                     <Button
+                      type="button"
                       variant="ghost"
                       size="sm"
                       onClick={() => copyTemplateForSending(template)}
@@ -384,6 +389,7 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
                     </Button>
                     {onSelectTemplate && template.status === "APPROVED" && (
                       <Button
+                        type="button"
                         variant="outline"
                         size="sm"
                         onClick={() => handleSelectTemplate(template)}
@@ -394,6 +400,7 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
                       </Button>
                     )}
                     <Button
+                      type="button"
                       variant="ghost"
                       size="sm"
                       onClick={() => setDeletingTemplate(template)}
