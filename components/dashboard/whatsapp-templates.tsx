@@ -7,8 +7,19 @@ import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Copy, RefreshCw, AlertCircle, CheckCircle, Clock, XCircle, Send } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Copy, RefreshCw, AlertCircle, CheckCircle, Clock, XCircle, Send, Plus, Trash2, Loader2 } from "lucide-react"
 import type { WhatsAppConfig } from "@/lib/types"
+import { WhatsAppTemplateCreator } from "./whatsapp-template-creator"
 
 interface TemplateComponent {
   type: string
@@ -45,6 +56,9 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showCreator, setShowCreator] = useState(false)
+  const [deletingTemplate, setDeletingTemplate] = useState<Template | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   useEffect(() => {
     fetchTemplates()
@@ -95,6 +109,45 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
     setRefreshing(true)
     await fetchTemplates()
     setRefreshing(false)
+  }
+
+  async function handleDeleteTemplate(template: Template) {
+    setIsDeleting(true)
+    try {
+      const response = await fetch(
+        `/api/whatsapp/templates/delete?wabaId=${config.wabaId}&configId=${config.id}&name=${template.name}`,
+        { method: "DELETE" }
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Error al eliminar la plantilla")
+      }
+
+      toast({
+        title: "Plantilla eliminada",
+        description: `La plantilla "${template.name}" se ha eliminado correctamente`,
+      })
+
+      // Refrescar lista
+      await fetchTemplates()
+    } catch (error) {
+      console.error("Error deleting template:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Error al eliminar la plantilla",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeleting(false)
+      setDeletingTemplate(null)
+    }
+  }
+
+  function handleTemplateCreated() {
+    setShowCreator(false)
+    fetchTemplates()
   }
 
   function getStatusIcon(status: string) {
@@ -264,16 +317,27 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
             {templates.length !== 1 ? "s" : ""} para WABA ID: {config.wabaId}
           </CardDescription>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-1"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          {refreshing ? "Actualizando..." : "Actualizar"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => setShowCreator(true)}
+            className="flex items-center gap-1"
+          >
+            <Plus className="h-4 w-4" />
+            Crear Plantilla
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-1"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            {refreshing ? "Actualizando..." : "Actualizar"}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {templates.length === 0 ? (
@@ -328,6 +392,15 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
                         Usar
                       </Button>
                     )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeletingTemplate(template)}
+                      className="flex items-center gap-1 text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Eliminar
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -335,6 +408,51 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
           </div>
         )}
       </CardContent>
+
+      {/* Modal de creacion */}
+      {showCreator && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm">
+          <div className="fixed inset-4 z-50 overflow-auto rounded-lg border bg-background shadow-lg">
+            <div className="p-6">
+              <WhatsAppTemplateCreator
+                config={config}
+                onTemplateCreated={handleTemplateCreated}
+                onCancel={() => setShowCreator(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dialogo de confirmacion de eliminacion */}
+      <AlertDialog open={!!deletingTemplate} onOpenChange={() => setDeletingTemplate(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar Plantilla</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta accion eliminara permanentemente la plantilla <strong>"{deletingTemplate?.name}"</strong> de tu
+              cuenta de WhatsApp Business. Esta accion no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingTemplate && handleDeleteTemplate(deletingTemplate)}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Eliminando...
+                </>
+              ) : (
+                "Eliminar"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }

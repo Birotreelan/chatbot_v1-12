@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast"
 import type { WhatsAppConfig, AdditionalAssistant } from "@/lib/types"
 import { Plus, Trash2, Info } from "lucide-react"
 import { ScheduleConfigurator } from "./schedule-configurator"
+import { WhatsAppTemplates } from "./whatsapp-templates"
 
 interface WhatsAppConfigFormProps {
   config?: WhatsAppConfig
@@ -511,6 +512,47 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               />
             </CardContent>
           </Card>
+
+          {/* Seccion de Plantillas - Solo mostrar si hay config guardada con wabaId */}
+          {config && config.wabaId && (
+            <WhatsAppTemplates config={config} />
+          )}
+
+          {/* Mensaje si no hay wabaId configurado */}
+          {config && !config.wabaId && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Plantillas de WhatsApp</CardTitle>
+                <CardDescription>Gestiona las plantillas de mensajes de tu cuenta de WhatsApp Business</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    Para gestionar plantillas, primero debes configurar el <strong>WABA ID</strong> en los campos de arriba y guardar la configuracion.
+                  </AlertDescription>
+                </Alert>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Mensaje si es una nueva configuracion */}
+          {!config && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Plantillas de WhatsApp</CardTitle>
+                <CardDescription>Gestiona las plantillas de mensajes de tu cuenta de WhatsApp Business</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    Guarda esta configuracion primero para poder gestionar las plantillas de WhatsApp.
+                  </AlertDescription>
+                </Alert>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="widget" className="space-y-4">
