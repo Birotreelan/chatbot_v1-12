@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { createPortal } from "react-dom"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
@@ -409,12 +410,18 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
         )}
       </CardContent>
 
-      {/* Modal de creacion */}
-      {showCreator && (
+      {/* Modal de creacion - usando portal para evitar que este dentro del formulario */}
+      {showCreator && typeof document !== 'undefined' && createPortal(
         <div 
           className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
         >
           <div 
             className="fixed inset-4 z-50 overflow-auto rounded-lg border bg-background shadow-lg"
@@ -428,7 +435,8 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
               />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Dialogo de confirmacion de eliminacion */}
