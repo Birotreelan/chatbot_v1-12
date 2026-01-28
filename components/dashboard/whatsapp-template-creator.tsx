@@ -397,65 +397,81 @@ export function WhatsAppTemplateCreator({ config, onTemplateCreated, onCancel }:
     }
   }
 
-  const handleSubmit = async () => {
-    if (!validateForm()) {
-      toast({
-        title: "Error de validacion",
-        description: "Por favor, corrige los errores en el formulario",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!config.wabaId) {
-      toast({
-        title: "Error",
-        description: "No se ha configurado un WABA ID para este numero",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsSubmitting(true)
-
-    try {
-      const payload = buildTemplatePayload()
-
-      const response = await fetch("/api/whatsapp/templates/create", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          wabaId: config.wabaId,
-          configId: config.id,
-          template: payload,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || data.details?.error?.message || "Error al crear la plantilla")
-      }
-
-      toast({
-        title: "Plantilla creada",
-        description: `La plantilla "${formData.name}" se ha enviado para revision. Estado: PENDING`,
-      })
-
-      onTemplateCreated()
-    } catch (error) {
-      console.error("Error creating template:", error)
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Error al crear la plantilla",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
+const handleSubmit = async (e?: React.MouseEvent) => {
+  console.log("[v0] handleSubmit called")
+  
+  // Prevent any form submission propagation
+  if (e) {
+    e.preventDefault()
+    e.stopPropagation()
   }
+  
+  console.log("[v0] Validating form...")
+  if (!validateForm()) {
+    console.log("[v0] Validation failed")
+    toast({
+      title: "Error de validacion",
+      description: "Por favor, corrige los errores en el formulario",
+      variant: "destructive",
+    })
+    return
+  }
+  
+  console.log("[v0] Checking wabaId:", config.wabaId)
+  if (!config.wabaId) {
+    toast({
+      title: "Error",
+      description: "No se ha configurado un WABA ID para este numero",
+      variant: "destructive",
+    })
+    return
+  }
+  
+  console.log("[v0] Starting submission...")
+  setIsSubmitting(true)
+  
+  try {
+    const payload = buildTemplatePayload()
+    console.log("[v0] Payload built:", JSON.stringify(payload, null, 2))
+    
+    const response = await fetch("/api/whatsapp/templates/create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        wabaId: config.wabaId,
+        configId: config.id,
+        template: payload,
+      }),
+    })
+    
+    console.log("[v0] Response status:", response.status)
+    const data = await response.json()
+    console.log("[v0] Response data:", data)
+    
+    if (!response.ok) {
+      throw new Error(data.error || data.details?.error?.message || "Error al crear la plantilla")
+    }
+    
+    toast({
+      title: "Plantilla creada",
+      description: `La plantilla "${formData.name}" se ha enviado para revision. Estado: PENDING`,
+    })
+    
+    onTemplateCreated()
+  } catch (error) {
+    console.error("[v0] Error creating template:", error)
+    toast({
+      title: "Error",
+      description: error instanceof Error ? error.message : "Error al crear la plantilla",
+      variant: "destructive",
+    })
+  } finally {
+    console.log("[v0] Submission finished")
+    setIsSubmitting(false)
+  }
+}
 
   // Vista previa
   const renderPreview = () => {
@@ -929,7 +945,7 @@ export function WhatsAppTemplateCreator({ config, onTemplateCreated, onCancel }:
           <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
             Cancelar
           </Button>
-          <Button type="button" onClick={handleSubmit} disabled={isSubmitting}>
+          <Button type="button" onClick={(e) => handleSubmit(e)} disabled={isSubmitting}>
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
