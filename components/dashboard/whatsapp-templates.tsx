@@ -411,9 +411,16 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
 
       {/* Modal de creacion */}
       {showCreator && (
-        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm">
-          <div className="fixed inset-4 z-50 overflow-auto rounded-lg border bg-background shadow-lg">
-            <div className="p-6">
+        <div 
+          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <div 
+            className="fixed inset-4 z-50 overflow-auto rounded-lg border bg-background shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6" onClick={(e) => e.stopPropagation()}>
               <WhatsAppTemplateCreator
                 config={config}
                 onTemplateCreated={handleTemplateCreated}
