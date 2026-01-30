@@ -8,6 +8,10 @@ import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,8 +22,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Copy, RefreshCw, AlertCircle, CheckCircle, Clock, XCircle, Send, Plus, Trash2, Loader2 } from "lucide-react"
-import type { WhatsAppConfig } from "@/lib/types"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Copy, RefreshCw, AlertCircle, CheckCircle, Clock, XCircle, Send, Plus, Trash2, Loader2, Globe, Download, Upload } from "lucide-react"
+import type { WhatsAppConfig, GlobalTemplate } from "@/lib/types"
 import { WhatsAppTemplateCreator } from "./whatsapp-template-creator"
 
 interface TemplateComponent {
@@ -60,6 +72,25 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
   const [showCreator, setShowCreator] = useState(false)
   const [deletingTemplate, setDeletingTemplate] = useState<Template | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Estados para plantillas globales
+  const [showSaveGlobalModal, setShowSaveGlobalModal] = useState(false)
+  const [templateToSaveGlobal, setTemplateToSaveGlobal] = useState<Template | null>(null)
+  const [globalDisplayName, setGlobalDisplayName] = useState("")
+  const [globalDescription, setGlobalDescription] = useState("")
+  const [isSavingGlobal, setIsSavingGlobal] = useState(false)
+
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [globalTemplates, setGlobalTemplates] = useState<GlobalTemplate[]>([])
+  const [loadingGlobalTemplates, setLoadingGlobalTemplates] = useState(false)
+  const [selectedGlobalTemplates, setSelectedGlobalTemplates] = useState<string[]>([])
+  const [isImporting, setIsImporting] = useState(false)
+  const [importResults, setImportResults] = useState<{
+    templateId: string
+    name: string
+    success: boolean
+    error?: string
+  }[] | null>(null)
 
   useEffect(() => {
     fetchTemplates()
@@ -149,6 +180,155 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
   function handleTemplateCreated() {
     setShowCreator(false)
     fetchTemplates()
+  }
+
+  // Funciones para guardar como plantilla global
+  function openSaveGlobalModal(template: Template) {
+    setTemplateToSaveGlobal(template)
+    setGlobalDisplayName(template.name)
+    setGlobalDescription("")
+    setShowSaveGlobalModal(true)
+  }
+
+  async function handleSaveAsGlobal() {
+    if (!templateToSaveGlobal) return
+
+    setIsSavingGlobal(true)
+    try {
+      const response = await fetch("/api/global-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: templateToSaveGlobal.name,
+          displayName: globalDisplayName || templateToSaveGlobal.name,
+          description: globalDescription,
+          language: templateToSaveGlobal.language,
+          category: templateToSaveGlobal.category,
+          components: templateToSaveGlobal.components,
+          sourceConfigId: config.id,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Error al guardar como plantilla global")
+      }
+
+      toast({
+        title: "Plantilla guardada",
+        description: `La plantilla "${globalDisplayName || templateToSaveGlobal.name}" se guardo como plantilla global`,
+      })
+
+      setShowSaveGlobalModal(false)
+      setTemplateToSaveGlobal(null)
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Error al guardar como plantilla global",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingGlobal(false)
+    }
+  }
+
+  // Funciones para importar plantillas globales
+  async function fetchGlobalTemplates() {
+    setLoadingGlobalTemplates(true)
+    try {
+      const response = await fetch("/api/global-templates")
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Error al obtener plantillas globales")
+      }
+
+      setGlobalTemplates(data.templates || [])
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Error al cargar plantillas globales",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingGlobalTemplates(false)
+    }
+  }
+
+  function openImportModal() {
+    setSelectedGlobalTemplates([])
+    setImportResults(null)
+    setShowImportModal(true)
+    fetchGlobalTemplates()
+  }
+
+  function toggleGlobalTemplateSelection(templateId: string) {
+    setSelectedGlobalTemplates((prev) =>
+      prev.includes(templateId)
+        ? prev.filter((id) => id !== templateId)
+        : [...prev, templateId]
+    )
+  }
+
+  function selectAllGlobalTemplates() {
+    if (selectedGlobalTemplates.length === globalTemplates.length) {
+      setSelectedGlobalTemplates([])
+    } else {
+      setSelectedGlobalTemplates(globalTemplates.map((t) => t.id))
+    }
+  }
+
+  async function handleImportGlobalTemplates() {
+    if (selectedGlobalTemplates.length === 0) {
+      toast({
+        title: "Selecciona plantillas",
+        description: "Debes seleccionar al menos una plantilla para importar",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsImporting(true)
+    setImportResults(null)
+
+    try {
+      const response = await fetch("/api/global-templates/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateIds: selectedGlobalTemplates,
+          wabaId: config.wabaId,
+          configId: config.id,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Error al importar plantillas")
+      }
+
+      setImportResults(data.results)
+
+      const successCount = data.results.filter((r: { success: boolean }) => r.success).length
+
+      toast({
+        title: "Importacion completada",
+        description: data.message || `Se importaron ${successCount} de ${selectedGlobalTemplates.length} plantillas`,
+      })
+
+      // Refrescar la lista de plantillas
+      await fetchTemplates()
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Error al importar plantillas",
+        variant: "destructive",
+      })
+    } finally {
+      setIsImporting(false)
+    }
   }
 
   function getStatusIcon(status: string) {
@@ -322,6 +502,16 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
         <div className="flex items-center gap-2">
           <Button
             type="button"
+            variant="outline"
+            size="sm"
+            onClick={openImportModal}
+            className="flex items-center gap-1"
+          >
+            <Download className="h-4 w-4" />
+            Importar Globales
+          </Button>
+          <Button
+            type="button"
             variant="default"
             size="sm"
             onClick={() => setShowCreator(true)}
@@ -403,6 +593,16 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
                       type="button"
                       variant="ghost"
                       size="sm"
+                      onClick={() => openSaveGlobalModal(template)}
+                      className="flex items-center gap-1 text-blue-600 hover:text-blue-700"
+                    >
+                      <Globe className="h-4 w-4" />
+                      Guardar Global
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setDeletingTemplate(template)}
                       className="flex items-center gap-1 text-destructive hover:text-destructive"
                     >
@@ -475,6 +675,220 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Modal para guardar como plantilla global */}
+      <Dialog open={showSaveGlobalModal} onOpenChange={setShowSaveGlobalModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5" />
+              Guardar como Plantilla Global
+            </DialogTitle>
+            <DialogDescription>
+              Esta plantilla quedara disponible para importar en cualquier otro cliente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="globalDisplayName">Nombre para mostrar</Label>
+              <Input
+                id="globalDisplayName"
+                value={globalDisplayName}
+                onChange={(e) => setGlobalDisplayName(e.target.value)}
+                placeholder="Ej: Confirmacion de turno"
+              />
+              <p className="text-xs text-muted-foreground">
+                Nombre interno: {templateToSaveGlobal?.name}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="globalDescription">Descripcion (opcional)</Label>
+              <Textarea
+                id="globalDescription"
+                value={globalDescription}
+                onChange={(e) => setGlobalDescription(e.target.value)}
+                placeholder="Describe el proposito de esta plantilla..."
+                rows={3}
+              />
+            </div>
+            <div className="bg-muted rounded-lg p-3">
+              <p className="text-sm font-medium mb-2">Vista previa:</p>
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p><strong>Idioma:</strong> {templateToSaveGlobal?.language}</p>
+                <p><strong>Categoria:</strong> {templateToSaveGlobal?.category}</p>
+                <p><strong>Componentes:</strong> {templateToSaveGlobal?.components.length}</p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveGlobalModal(false)}
+              disabled={isSavingGlobal}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveAsGlobal}
+              disabled={isSavingGlobal || !globalDisplayName.trim()}
+            >
+              {isSavingGlobal ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Guardar Global
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal para importar plantillas globales */}
+      <Dialog open={showImportModal} onOpenChange={setShowImportModal}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Download className="h-5 w-5" />
+              Importar Plantillas Globales
+            </DialogTitle>
+            <DialogDescription>
+              Selecciona las plantillas que deseas importar a este cliente.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-auto py-4">
+            {loadingGlobalTemplates ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-muted-foreground">Cargando plantillas...</span>
+              </div>
+            ) : globalTemplates.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Globe className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No hay plantillas globales disponibles.</p>
+                <p className="text-sm mt-2">Guarda una plantilla como global desde la lista de plantillas.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={selectAllGlobalTemplates}
+                    className="text-sm"
+                  >
+                    {selectedGlobalTemplates.length === globalTemplates.length
+                      ? "Deseleccionar todo"
+                      : "Seleccionar todo"}
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    {selectedGlobalTemplates.length} de {globalTemplates.length} seleccionadas
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {globalTemplates.map((template) => (
+                    <div
+                      key={template.id}
+                      className={`border rounded-lg p-4 cursor-pointer transition-colors ${
+                        selectedGlobalTemplates.includes(template.id)
+                          ? "border-primary bg-primary/5"
+                          : "hover:border-muted-foreground/50"
+                      }`}
+                      onClick={() => toggleGlobalTemplateSelection(template.id)}
+                    >
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          checked={selectedGlobalTemplates.includes(template.id)}
+                          onCheckedChange={() => toggleGlobalTemplateSelection(template.id)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h4 className="font-medium truncate">{template.displayName}</h4>
+                            <Badge variant="outline" className="text-xs">
+                              {template.language}
+                            </Badge>
+                            <Badge variant="secondary" className="text-xs">
+                              {template.category}
+                            </Badge>
+                          </div>
+                          {template.description && (
+                            <p className="text-sm text-muted-foreground mb-2">{template.description}</p>
+                          )}
+                          <p className="text-xs text-muted-foreground">
+                            Nombre interno: {template.name}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Resultados de la importacion */}
+                {importResults && (
+                  <div className="mt-4 border-t pt-4">
+                    <h4 className="font-medium mb-2">Resultados de la importacion:</h4>
+                    <div className="space-y-2">
+                      {importResults.map((result) => (
+                        <div
+                          key={result.templateId}
+                          className={`flex items-center gap-2 text-sm p-2 rounded ${
+                            result.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+                          }`}
+                        >
+                          {result.success ? (
+                            <CheckCircle className="h-4 w-4 flex-shrink-0" />
+                          ) : (
+                            <XCircle className="h-4 w-4 flex-shrink-0" />
+                          )}
+                          <span className="flex-1">{result.name}</span>
+                          {result.error && (
+                            <span className="text-xs">{result.error}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowImportModal(false)}
+              disabled={isImporting}
+            >
+              {importResults ? "Cerrar" : "Cancelar"}
+            </Button>
+            {!importResults && (
+              <Button
+                onClick={handleImportGlobalTemplates}
+                disabled={isImporting || selectedGlobalTemplates.length === 0}
+              >
+                {isImporting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Importando...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4 mr-2" />
+                    Importar ({selectedGlobalTemplates.length})
+                  </>
+                )}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }
