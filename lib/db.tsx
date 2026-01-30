@@ -1,5 +1,5 @@
 import { Redis } from "@upstash/redis"
-import type { WhatsAppConfig, ThreadInfo, SystemStats } from "./types"
+import type { WhatsAppConfig, ThreadInfo, SystemStats, GlobalTemplate } from "./types"
 import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "./utils"
 import { withLock } from "./distributed-lock"
@@ -972,4 +972,172 @@ export async function updateThreadId(
       `[DB] ✅ ThreadId actualizado en memoria: ${newThreadId}${assistantId ? ` con assistant: ${assistantId}` : ""}`,
     )
   }
+}
+
+// ==========================================
+// GLOBAL TEMPLATES - Plantillas Globales
+// ==========================================
+
+const GLOBAL_TEMPLATE_PREFIX = "global_template:"
+
+// Almacenamiento en memoria para plantillas globales
+const globalTemplateMemoryStorage = new Map<string, GlobalTemplate>()
+
+// Crear una plantilla global
+export async function createGlobalTemplate(template: Omit<GlobalTemplate, "id" | "createdAt" | "updatedAt">): Promise<GlobalTemplate> {
+  const id = nanoid()
+  const now = new Date().toISOString()
+
+  console.log(`[DB] 📝 Creando plantilla global con ID: ${id}`)
+
+  const newTemplate: GlobalTemplate = {
+    ...template,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  const redisClient = getRedisClient()
+
+  if (redisClient) {
+    await redisClient.set(`${GLOBAL_TEMPLATE_PREFIX}${id}`, JSON.stringify(newTemplate))
+    console.log(`[DB] ✅ Plantilla global ${id} guardada en Redis`)
+  } else {
+    globalTemplateMemoryStorage.set(id, newTemplate)
+    console.log(`[DB] ✅ Plantilla global ${id} guardada en memoria`)
+  }
+
+  return newTemplate
+}
+
+// Obtener una plantilla global por ID
+export async function getGlobalTemplate(id: string): Promise<GlobalTemplate | null> {
+  try {
+    console.log(`[DB] 🔍 Obteniendo plantilla global ${id}`)
+
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      const templateData = await redisClient.get(`${GLOBAL_TEMPLATE_PREFIX}${id}`)
+      if (!templateData) {
+        console.log(`[DB] ❌ Plantilla global ${id} no encontrada en Redis`)
+        return null
+      }
+      const template = safeJsonParse(templateData)
+      console.log(`[DB] ✅ Plantilla global ${id} obtenida de Redis`)
+      return template
+    } else {
+      const template = globalTemplateMemoryStorage.get(id) || null
+      console.log(`[DB] Plantilla global ${id} obtenida de memoria:`, template ? "encontrada" : "no encontrada")
+      return template
+    }
+  } catch (error) {
+    console.error(`[DB] ❌ Error al obtener plantilla global ${id}:`, error)
+    return null
+  }
+}
+
+// Obtener todas las plantillas globales
+export async function getAllGlobalTemplates(): Promise<GlobalTemplate[]> {
+  try {
+    console.log(`[DB] 📋 Obteniendo todas las plantillas globales`)
+
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      const keys = await scanRedisKeys(redisClient, `${GLOBAL_TEMPLATE_PREFIX}*`)
+      console.log(`[DB] 📊 Encontradas ${keys.length} plantillas globales en Redis`)
+
+      if (keys.length === 0) {
+        return []
+      }
+
+      const templates = await Promise.all(
+        keys.map(async (key) => {
+          const templateData = await redisClient.get(key)
+          return safeJsonParse(templateData)
+        }),
+      )
+
+      const validTemplates = templates.filter(Boolean) as GlobalTemplate[]
+      // Ordenar por fecha de creacion descendente
+      validTemplates.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      
+      console.log(`[DB] ✅ Total de plantillas globales válidas: ${validTemplates.length}`)
+      return validTemplates
+    } else {
+      const templates = Array.from(globalTemplateMemoryStorage.values())
+      templates.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      console.log(`[DB] 📊 Encontradas ${templates.length} plantillas globales en memoria`)
+      return templates
+    }
+  } catch (error) {
+    console.error(`[DB] ❌ Error al obtener plantillas globales:`, error)
+    return []
+  }
+}
+
+// Actualizar una plantilla global
+export async function updateGlobalTemplate(
+  id: string,
+  updates: Partial<Omit<GlobalTemplate, "id" | "createdAt">>,
+): Promise<GlobalTemplate | null> {
+  try {
+    console.log(`[DB] 🔄 Actualizando plantilla global ${id}`)
+
+    const template = await getGlobalTemplate(id)
+    if (!template) {
+      console.log(`[DB] ❌ Plantilla global ${id} no encontrada`)
+      return null
+    }
+
+    const updatedTemplate: GlobalTemplate = {
+      ...template,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    }
+
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      await redisClient.set(`${GLOBAL_TEMPLATE_PREFIX}${id}`, JSON.stringify(updatedTemplate))
+      console.log(`[DB] ✅ Plantilla global ${id} actualizada en Redis`)
+    } else {
+      globalTemplateMemoryStorage.set(id, updatedTemplate)
+      console.log(`[DB] ✅ Plantilla global ${id} actualizada en memoria`)
+    }
+
+    return updatedTemplate
+  } catch (error) {
+    console.error(`[DB] ❌ Error al actualizar plantilla global ${id}:`, error)
+    return null
+  }
+}
+
+// Eliminar una plantilla global
+export async function deleteGlobalTemplate(id: string): Promise<boolean> {
+  try {
+    console.log(`[DB] 🗑️ Eliminando plantilla global ${id}`)
+
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      await redisClient.del(`${GLOBAL_TEMPLATE_PREFIX}${id}`)
+      console.log(`[DB] ✅ Plantilla global ${id} eliminada de Redis`)
+    } else {
+      globalTemplateMemoryStorage.delete(id)
+      console.log(`[DB] ✅ Plantilla global ${id} eliminada de memoria`)
+    }
+
+    return true
+  } catch (error) {
+    console.error(`[DB] ❌ Error al eliminar plantilla global ${id}:`, error)
+    return false
+  }
+}
+
+// Verificar si existe una plantilla global con el mismo nombre
+export async function globalTemplateExistsByName(name: string): Promise<boolean> {
+  const templates = await getAllGlobalTemplates()
+  return templates.some((t) => t.name.toLowerCase() === name.toLowerCase())
 }

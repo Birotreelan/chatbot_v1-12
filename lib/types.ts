@@ -252,3 +252,45 @@ export interface TimePeriod {
   startTime: string // Formato "HH:MM"
   endTime: string // Formato "HH:MM"
 }
+
+// Plantillas Globales de WhatsApp
+export interface GlobalTemplateVariable {
+  index: number
+  example: string
+}
+
+export interface GlobalTemplateButton {
+  type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER" | "COPY_CODE" | "FLOW"
+  text: string
+  url?: string
+  phoneNumber?: string
+  example?: string[]
+  flowId?: string
+  flowAction?: string
+}
+
+export interface GlobalTemplateComponent {
+  type: "HEADER" | "BODY" | "FOOTER" | "BUTTONS"
+  format?: "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT"
+  text?: string
+  buttons?: GlobalTemplateButton[]
+  example?: {
+    header_text?: string[]
+    body_text?: string[][]
+    header_handle?: string[]
+  }
+}
+
+export interface GlobalTemplate {
+  id: string
+  name: string
+  displayName: string // Nombre amigable para mostrar en el dashboard
+  description?: string // Descripcion opcional
+  language: string
+  category: "UTILITY" | "MARKETING" | "AUTHENTICATION"
+  components: GlobalTemplateComponent[]
+  createdAt: string
+  updatedAt: string
+  createdBy?: string // ID del usuario que la creo
+  sourceConfigId?: string // ID de la config de donde se extrajo (si aplica)
+}
