@@ -8,6 +8,8 @@ interface QueuedMessage {
   phoneNumberId: string
   config: any
   timestamp: number
+  audioId?: string
+  audioMimeType?: string
 }
 
 const processingUsers = new Set<string>()
@@ -19,6 +21,8 @@ export async function enqueueUserMessage(
     messageType?: string
     phoneNumberId: string
     config: any
+    audioId?: string
+    audioMimeType?: string
   },
 ) {
   logger.debug("USER-QUEUE", `Encolando: ${userPhoneNumber}`)
@@ -32,6 +36,8 @@ export async function enqueueUserMessage(
       messageData.config,
       userPhoneNumber,
       messageData.messageType,
+      messageData.audioId,
+      messageData.audioMimeType,
     )
     return
   }
@@ -43,6 +49,8 @@ export async function enqueueUserMessage(
       phoneNumberId: messageData.phoneNumberId,
       config: JSON.parse(JSON.stringify(messageData.config)),
       timestamp: Date.now(),
+      audioId: messageData.audioId,
+      audioMimeType: messageData.audioMimeType,
     }
 
     const serializedMessage = JSON.stringify(queuedMessage)
@@ -62,6 +70,8 @@ export async function enqueueUserMessage(
       messageData.config,
       userPhoneNumber,
       messageData.messageType,
+      messageData.audioId,
+      messageData.audioMimeType,
     )
   }
 }
@@ -112,6 +122,8 @@ async function processUserQueue(userPhoneNumber: string) {
               rawMessage.config,
               userPhoneNumber,
               rawMessage.messageType || "text",
+              rawMessage.audioId,
+              rawMessage.audioMimeType,
             )
             processedCount++
             continue
@@ -136,16 +148,17 @@ async function processUserQueue(userPhoneNumber: string) {
           continue
         }
 
-        const unsupportedTypes = ["reaction", "sticker", "audio"]
+        const unsupportedTypes = ["reaction", "sticker"]
         const isUnsupportedType = unsupportedTypes.includes(queuedMessage.messageType || "")
+        const isAudioMessage = queuedMessage.messageType === "audio"
 
         if (!queuedMessage.phoneNumberId || !queuedMessage.config) {
           logger.warn("USER-QUEUE", "Estructura inválida: falta phoneNumberId o config")
           continue
         }
 
-        // Allow empty userMessage only for unsupported types
-        if (!queuedMessage.userMessage && !isUnsupportedType) {
+        // Allow empty userMessage for unsupported types and audio messages (audio will be transcribed)
+        if (!queuedMessage.userMessage && !isUnsupportedType && !isAudioMessage) {
           logger.warn("USER-QUEUE", "Estructura inválida: mensaje vacío y tipo no soportado")
           continue
         }
@@ -158,6 +171,8 @@ async function processUserQueue(userPhoneNumber: string) {
           queuedMessage.config,
           userPhoneNumber,
           queuedMessage.messageType || "text",
+          queuedMessage.audioId,
+          queuedMessage.audioMimeType,
         )
 
         processedCount++
