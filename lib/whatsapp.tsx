@@ -1,6 +1,7 @@
 import type { WhatsAppValue } from "@/lib/types"
 import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
+import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
 import { getAssistantResponse } from "@/lib/openai-tools"
 import { getArgentinaDateTime } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
@@ -15,21 +16,28 @@ import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 
 // Función para extraer el contenido del mensaje según su tipo
-function extractMessageContent(message: any): string {
+function extractMessageContent(message: any): { content: string; audioId?: string; audioMimeType?: string } {
   switch (message.type) {
     case "text":
-      return message.text?.body || ""
+      return { content: message.text?.body || "" }
     case "button":
-      return message.button?.text || message.button?.payload || ""
+      return { content: message.button?.text || message.button?.payload || "" }
     case "interactive":
       if (message.interactive?.type === "button_reply") {
-        return message.interactive.button_reply?.title || message.interactive.button_reply?.id || ""
+        return { content: message.interactive.button_reply?.title || message.interactive.button_reply?.id || "" }
       } else if (message.interactive?.type === "list_reply") {
-        return message.interactive.list_reply?.title || message.interactive.list_reply?.id || ""
+        return { content: message.interactive.list_reply?.title || message.interactive.list_reply?.id || "" }
       }
-      return ""
+      return { content: "" }
+    case "audio":
+      // For audio messages, return the audio ID for later transcription
+      return {
+        content: "",
+        audioId: message.audio?.id,
+        audioMimeType: message.audio?.mime_type || "audio/ogg",
+      }
     default:
-      return ""
+      return { content: "" }
   }
 }
 
@@ -94,10 +102,13 @@ export async function handleMessage(value: WhatsAppValue) {
     await markMessageAsProcessed(messageId)
 
     const userPhoneNumber = normalizePhoneNumber(message.from)
-    let userMessage = extractMessageContent(message)
+    const extractedContent = extractMessageContent(message)
+    let userMessage = extractedContent.content
     const originalMessage = userMessage
+    const audioId = extractedContent.audioId
+    const audioMimeType = extractedContent.audioMimeType
 
-    console.log(`[WHATSAPP] Procesando mensaje de ${userPhoneNumber}: "${userMessage}" (tipo: ${message.type})`)
+    console.log(`[WHATSAPP] Procesando mensaje de ${userPhoneNumber}: "${userMessage}" (tipo: ${message.type})${audioId ? ` [audioId: ${audioId}]` : ""}`)
 
     // Obtener la configuración de WhatsApp
     console.log(`[WHATSAPP] Buscando configuración para phone_number_id: ${value.metadata.phone_number_id}`)
@@ -607,6 +618,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       messageType: message.type,
       phoneNumberId: value.metadata.phone_number_id,
       config,
+      audioId,
+      audioMimeType,
     })
 
     console.log(`[WHATSAPP] Mensaje encolado exitosamente para usuario ${userPhoneNumber}`)
@@ -622,25 +635,51 @@ export async function processIndividualMessage(
   config: any,
   userPhoneNumber: string,
   messageType = "text",
+  audioId?: string,
+  audioMimeType?: string,
 ) {
   console.log(
-    `[WHATSAPP] Procesando mensaje individual para usuario ${userPhoneNumber}: "${userMessage}" (tipo: ${messageType})`,
+    `[WHATSAPP] Procesando mensaje individual para usuario ${userPhoneNumber}: "${userMessage}" (tipo: ${messageType})${audioId ? ` [audioId: ${audioId}]` : ""}`,
   )
 
   try {
-    const unsupportedMessageTypes: Record<string, string> = {
-      audio:
-        "Lo siento, soy un asistente de inteligencia artificial y no puedo escuchar el audio que has enviado. ¿Podrías enviar tu mensaje escrito?",
-    }
+    // Handle audio messages - transcribe using Whisper
+    if (messageType === "audio" && audioId) {
+      console.log(`[WHATSAPP] 🎤 Procesando mensaje de audio, iniciando transcripcion...`)
 
-    if (messageType && unsupportedMessageTypes[messageType]) {
-      const errorMessage = unsupportedMessageTypes[messageType]
-
-      console.log(`[WHATSAPP] Tipo de mensaje no soportado detectado: ${messageType}`)
-      console.log(`[WHATSAPP] Enviando respuesta automática sin OpenAI`)
-
-      // Save the automatic response to conversation
       try {
+        const transcription = await transcribeWhatsAppAudio(audioId, config.accessToken, audioMimeType)
+
+        if (transcription && transcription.trim()) {
+          console.log(`[WHATSAPP] 🎤 Audio transcrito exitosamente: "${transcription.substring(0, 100)}..."`)
+          // Use the transcription as the user message
+          userMessage = transcription
+          // Continue processing as a normal text message
+        } else {
+          console.log(`[WHATSAPP] 🎤 Transcripcion vacia, enviando mensaje de error`)
+          const errorMessage =
+            "Lo siento, no pude entender el audio que enviaste. ¿Podrías intentar nuevamente o enviar tu mensaje por escrito?"
+
+          await saveConversationMessage({
+            id: nanoid(),
+            role: "assistant",
+            content: errorMessage,
+            timestamp: new Date().toISOString(),
+            phoneNumber: userPhoneNumber,
+            configId: config.id,
+            messageType: "error",
+          })
+
+          await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+      } catch (transcriptionError) {
+        console.error(`[WHATSAPP] ❌ Error transcribiendo audio:`, transcriptionError)
+
+        const errorMessage =
+          "Lo siento, hubo un problema al procesar tu mensaje de voz. ¿Podrías intentar nuevamente o enviar tu mensaje por escrito?"
+
         await saveConversationMessage({
           id: nanoid(),
           role: "assistant",
@@ -650,23 +689,8 @@ export async function processIndividualMessage(
           configId: config.id,
           messageType: "error",
         })
-        console.log(`[WHATSAPP] 💾 Respuesta automática guardada en conversación`)
-      } catch (saveError) {
-        console.error(`[WHATSAPP] ❌ Error guardando respuesta automática:`, saveError)
-      }
 
-      // Send direct message to user
-      try {
         await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
-
-        // Update stats - message processed
-        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-
-        console.log(`[WHATSAPP] ✅ Respuesta automática enviada para tipo: ${messageType}`)
-        return // Exit early, don't process with OpenAI
-      } catch (sendError) {
-        console.error(`[WHATSAPP] ❌ Error al enviar respuesta automática:`, sendError)
-        // Update stats - error
         await updateWhatsAppStats(config.id, { errors: 1 })
         return
       }
