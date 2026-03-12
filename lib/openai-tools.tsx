@@ -146,6 +146,8 @@ export const openaiTools = {
         apellido: { type: "string", description: "Apellido del paciente" },
         telefono: { type: "string", description: "Teléfono del paciente" },
         email: { type: "string", description: "Email del paciente" },
+        obra_social_id: { type: "string", description: "ID de la obra social del paciente (Deudor_Id)" },
+        obra_social: { type: "string", description: "Nombre de la obra social del paciente (Deudor_Nombre)" },
       },
       required: ["agendaId", "dni", "nombre", "apellido", "telefono", "email"],
     },
@@ -540,6 +542,8 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
             apellido: args.apellido,
             telefono: args.telefono,
             email: args.email,
+            deudorId: args.obra_social_id,
+            deudorNombre: args.obra_social,
           }
           console.log(`[OPENAI-TOOLS] 🔍 pacienteDatos construido:`, JSON.stringify(pacienteDatos, null, 2))
           console.log(`[OPENAI-TOOLS] 🔍 Llamando reservarTurno con:`)
@@ -828,7 +832,7 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
       return JSON.stringify({
         exito: false,
         error: data.error,
-        mensaje: "Error al reservar el turno. Por favor, intenta nuevamente o contacta a la clínica.",
+        mensaje: "Error al reservar el turno. Por favor, intenta nuevamente o contacta a la cl��nica.",
       })
     }
 
