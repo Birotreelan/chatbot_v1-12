@@ -309,6 +309,7 @@ export async function reservarTurno(
     sexo?: string
     tipoDoc?: string
     deudorId?: string
+    deudorNombre?: string
     planId?: string
     nroAfiliado?: string
     turnoMotivo?: string
@@ -333,6 +334,7 @@ export async function reservarTurno(
   if (pacienteData.sexo) params.Paciente_Sexo = pacienteData.sexo
   if (pacienteData.tipoDoc) params.Paciente_Tipo_Doc = pacienteData.tipoDoc
   if (pacienteData.deudorId) params.Deudor_Id = pacienteData.deudorId
+  if (pacienteData.deudorNombre) params.Deudor_Nombre = pacienteData.deudorNombre
   if (pacienteData.planId) params.Plan_Id = pacienteData.planId
   if (pacienteData.nroAfiliado) params.Nro_Afiliado = pacienteData.nroAfiliado
   if (pacienteData.turnoMotivo) params.Turno_Motivo = pacienteData.turnoMotivo
