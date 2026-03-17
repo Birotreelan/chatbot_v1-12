@@ -6,7 +6,7 @@ import type { SessionData } from "./types"
 import { verifySupportUserPassword } from "./support-users"
 
 // Prefijo para las sesiones en Redis
-const SESSION_PREFIX = "session:"
+const SESSION_PREFIX = "session:" as const
 // Duración de la sesión en segundos (7 días)
 const SESSION_DURATION = 60 * 60 * 24 * 7
 
