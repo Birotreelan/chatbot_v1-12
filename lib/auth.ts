@@ -82,7 +82,8 @@ export async function createSession(user: SessionData): Promise<string> {
   }
 
   // Establecer la cookie de sesión
-  cookies().set("session_id", sessionId, {
+  const cookieStore = await cookies()
+  cookieStore.set("session_id", sessionId, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     maxAge: SESSION_DURATION,
@@ -93,7 +94,8 @@ export async function createSession(user: SessionData): Promise<string> {
 }
 
 export async function getSession(): Promise<SessionData | null> {
-  const sessionId = cookies().get("session_id")?.value
+  const cookieStore = await cookies()
+  const sessionId = cookieStore.get("session_id")?.value
   if (!sessionId) return null
 
   const redis = getRedisClient()
@@ -126,7 +128,7 @@ export async function getSession(): Promise<SessionData | null> {
           console.error("[Auth] Error parsing session data:", parseError)
           // Si no se puede parsear, eliminar la sesión corrupta
           await redis.del(`${SESSION_PREFIX}${sessionId}`)
-          cookies().delete("session_id")
+          cookieStore.delete("session_id")
           return null
         }
       }
@@ -143,13 +145,14 @@ export async function getSession(): Promise<SessionData | null> {
 
 // Cerrar sesión
 export async function logout(): Promise<void> {
-  const sessionId = cookies().get("session_id")?.value
+  const cookieStore = await cookies()
+  const sessionId = cookieStore.get("session_id")?.value
   if (sessionId) {
     const redis = getRedisClient()
     if (redis) {
       await redis.del(`${SESSION_PREFIX}${sessionId}`)
     }
-    cookies().delete("session_id")
+    cookieStore.delete("session_id")
   }
 }
 
