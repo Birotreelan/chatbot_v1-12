@@ -32,6 +32,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
   const [formData, setFormData] = useState<Partial<WhatsAppConfig>>({
     displayName: "",
     phoneNumberId: "",
+    whatsappNumber: "",
     wabaId: "",
     whatsappAssistantId: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
     widgetAssistantId: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
@@ -326,6 +327,21 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                   {errors.phoneNumberId && <p className="text-sm text-red-500">{errors.phoneNumberId}</p>}
                 </div>
 
+                <div className="space-y-2">
+                  <Label htmlFor="whatsappNumber">Número de WhatsApp</Label>
+                  <Input
+                    id="whatsappNumber"
+                    value={formData.whatsappNumber || ""}
+                    onChange={(e) => updateFormData("whatsappNumber", e.target.value)}
+                    placeholder="+54 9 11 1234-5678"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Número de teléfono de WhatsApp asociado a esta configuración
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="wabaId">WABA ID</Label>
                   <Input

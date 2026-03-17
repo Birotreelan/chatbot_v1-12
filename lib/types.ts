@@ -1,6 +1,7 @@
 export interface WhatsAppConfig {
   id: string
   phoneNumberId: string
+  whatsappNumber?: string
   wabaId: string
   displayName: string
   whatsappAssistantId: string
