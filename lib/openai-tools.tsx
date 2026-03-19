@@ -55,6 +55,8 @@ export const openaiTools = {
         especialidad: { type: "string", description: "Nombre especialidad (opcional)" },
         profesional_id: { type: "string", description: "ID profesional (opcional)" },
         sede_id: { type: "string", description: "ID de la sede donde buscar turnos (opcional)" },
+        Paciente_DNI: { type: "string", description: "DNI del paciente para filtrar turnos (opcional)" },
+        subespecialidad_id: { type: "string", description: "ID de la subespecialidad para filtrar turnos (opcional)" },
       },
       required: [], // Made all parameters optional since OpenAI might not pass rango_fechas
     },
@@ -507,6 +509,8 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
           args.especialidad,
           args.profesional_id,
           args.sede_id,
+          args.Paciente_DNI,
+          args.subespecialidad_id,
         )
 
       case "confirmar_turno":
@@ -1095,7 +1099,9 @@ export async function buscarTurnosDisponiblesHerramienta(
   profesional?: string,
   especialidad?: string,
   profesionalId?: string,
-  sedeId?: string, // Added sedeId parameter
+  sedeId?: string,
+  pacienteDNI?: string,
+  subespecialidadId?: string,
 ): Promise<string> {
   try {
     if (!rangoFechas) {
@@ -1109,12 +1115,10 @@ export async function buscarTurnosDisponiblesHerramienta(
       console.log(`[TOOLS] 📅 No se proporcionó rango de fechas, usando por defecto: ${rangoFechas}`)
     }
 
-    // Pass sedeId to the api function
     console.log(
-      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}, profesional_id=${profesionalId}, sede_id=${sedeId}`, // Log sedeId
+      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}, profesional_id=${profesionalId}, sede_id=${sedeId}, paciente_dni=${pacienteDNI}, subespecialidad_id=${subespecialidadId}`,
     )
 
-    // Pass sedeId to the api function
     const resultado = await buscarTurnosDisponibles(
       rangoFechas,
       profesional,
@@ -1122,6 +1126,8 @@ export async function buscarTurnosDisponiblesHerramienta(
       profesionalId,
       clienteId,
       sedeId,
+      pacienteDNI,
+      subespecialidadId,
     )
 
     if (resultado.exito && resultado.datos) {

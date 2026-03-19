@@ -261,6 +261,7 @@ export async function obtenerTurnos(
   pacienteDNI?: string,
   useCache = true,
   sedeId?: string,
+  subespecialidadId?: string,
 ): Promise<ApiResponse<any>> {
   const params: Record<string, any> = {
     Fecha_Desde: fechaDesde,
@@ -277,6 +278,10 @@ export async function obtenerTurnos(
 
   if (sedeId) {
     params.Sede_Id = sedeId
+  }
+
+  if (subespecialidadId) {
+    params.Subespecialidad_Id = subespecialidadId
   }
 
   const resultado = await fetchProxyApi<any>(clienteId, "get_turnos", params, useCache)
@@ -744,6 +749,8 @@ export async function buscarTurnosDisponibles(
   profesionalId?: string,
   clienteId?: string,
   sedeId?: string,
+  pacienteDNI?: string,
+  subespecialidadId?: string,
 ): Promise<ApiResponse<any>> {
   if (!clienteId) {
     return {
@@ -770,7 +777,7 @@ export async function buscarTurnosDisponibles(
 
   // Si tenemos el ID del profesional, usarlo directamente
   if (profesionalId) {
-    return obtenerTurnos(clienteId, fechaDesde, fechaHasta || fechaDesde, profesionalId, undefined, true, sedeId)
+    return obtenerTurnos(clienteId, fechaDesde, fechaHasta || fechaDesde, profesionalId, pacienteDNI, true, sedeId, subespecialidadId)
   }
 
   // Si tenemos el nombre del profesional o especialidad, primero buscar el profesional
@@ -807,14 +814,15 @@ export async function buscarTurnosDisponibles(
       fechaDesde,
       fechaHasta || fechaDesde,
       profesionalEncontrado.id,
-      undefined,
+      pacienteDNI,
       true,
       sedeId,
+      subespecialidadId,
     )
   }
 
   // Si no tenemos ni profesional ni especialidad, buscar todos los turnos disponibles
-  return obtenerTurnos(clienteId, fechaDesde, fechaHasta || fechaDesde, undefined, undefined, true, sedeId)
+  return obtenerTurnos(clienteId, fechaDesde, fechaHasta || fechaDesde, undefined, pacienteDNI, true, sedeId, subespecialidadId)
 }
 
 // Compatibilidad: procesar reserva de turno
