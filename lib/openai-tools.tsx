@@ -57,6 +57,7 @@ export const openaiTools = {
         sede_id: { type: "string", description: "ID de la sede donde buscar turnos (opcional)" },
         Paciente_DNI: { type: "string", description: "DNI del paciente para filtrar turnos (opcional)" },
         subespecialidad_id: { type: "string", description: "ID de la subespecialidad para filtrar turnos (opcional)" },
+        obra_social_id: { type: "string", description: "ID de la obra social del paciente para filtrar turnos (opcional)" },
       },
       required: [], // Made all parameters optional since OpenAI might not pass rango_fechas
     },
@@ -511,6 +512,7 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
           args.sede_id,
           args.Paciente_DNI,
           args.subespecialidad_id,
+          args.obra_social_id,
         )
 
       case "confirmar_turno":
@@ -1102,6 +1104,7 @@ export async function buscarTurnosDisponiblesHerramienta(
   sedeId?: string,
   pacienteDNI?: string,
   subespecialidadId?: string,
+  obraSocialId?: string,
 ): Promise<string> {
   try {
     if (!rangoFechas) {
@@ -1116,7 +1119,7 @@ export async function buscarTurnosDisponiblesHerramienta(
     }
 
     console.log(
-      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}, profesional_id=${profesionalId}, sede_id=${sedeId}, paciente_dni=${pacienteDNI}, subespecialidad_id=${subespecialidadId}`,
+      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}, profesional_id=${profesionalId}, sede_id=${sedeId}, paciente_dni=${pacienteDNI}, subespecialidad_id=${subespecialidadId}, obra_social_id=${obraSocialId}`,
     )
 
     const resultado = await buscarTurnosDisponibles(
@@ -1128,6 +1131,7 @@ export async function buscarTurnosDisponiblesHerramienta(
       sedeId,
       pacienteDNI,
       subespecialidadId,
+      obraSocialId,
     )
 
     if (resultado.exito && resultado.datos) {
@@ -1484,7 +1488,7 @@ async function getPhoneNumberFromThread(threadId: string, configId: string): Pro
       const keys = result[1]
       keysFound += keys.length
 
-      console.log(`[OPENAI] 📋 SCAN cursor=${cursor}, encontradas=${keys.length}`)
+      console.log(`[OPENAI] ���� SCAN cursor=${cursor}, encontradas=${keys.length}`)
 
       // Revisar cada clave encontrada
       for (const key of keys) {
