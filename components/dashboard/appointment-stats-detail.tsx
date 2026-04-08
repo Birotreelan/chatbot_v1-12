@@ -138,7 +138,11 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-amber-600">{stats?.totalRescheduled || 0}</div>
-            <p className="text-xs text-muted-foreground">Con cancelación previa (12h)</p>
+            <p className="text-xs text-muted-foreground">
+              Tasa: {stats?.totalCancelled && stats.totalCancelled > 0
+                ? (((stats?.totalRescheduled || 0) / stats.totalCancelled) * 100).toFixed(1)
+                : 0}%
+            </p>
           </CardContent>
         </Card>
 
@@ -149,7 +153,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-600">{stats?.totalNewAppointments || 0}</div>
-            <p className="text-xs text-muted-foreground">Sin cancelación previa (12h)</p>
+            <p className="text-xs text-muted-foreground">Agendados por el paciente</p>
           </CardContent>
         </Card>
       </div>
