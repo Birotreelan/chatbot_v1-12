@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import type { ClientAppointmentStats } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, Clock, TrendingUp, MessageCircle } from "lucide-react"
+import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, Clock, TrendingUp, MessageCircle, PlusCircle } from "lucide-react"
 import { DateRangeFilter } from "./date-range-filter"
 
 interface AppointmentStatsDetailProps {
@@ -97,7 +97,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Recordatorios Enviados</CardTitle>
@@ -138,13 +138,18 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-amber-600">{stats?.totalRescheduled || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              Tasa Reagendamiento:{" "}
-              {stats?.totalCancelled && stats.totalCancelled > 0
-                ? (((stats?.totalRescheduled || 0) / stats.totalCancelled) * 100).toFixed(1)
-                : 0}
-              %
-            </p>
+            <p className="text-xs text-muted-foreground">Con cancelación previa (12h)</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Turnos Nuevos</CardTitle>
+            <PlusCircle className="h-4 w-4 text-blue-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">{stats?.totalNewAppointments || 0}</div>
+            <p className="text-xs text-muted-foreground">Sin cancelación previa (12h)</p>
           </CardContent>
         </Card>
       </div>
