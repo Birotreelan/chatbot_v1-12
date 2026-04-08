@@ -125,6 +125,12 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
         await redis.hincrby(`${statsKey}:daily:rescheduled`, date, 1)
         console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalRescheduled`)
         break
+
+      case "user_initiated":
+        await redis.hincrby(statsKey, "totalUserInitiated", 1)
+        await redis.hincrby(`${statsKey}:daily:user_initiated`, date, 1)
+        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalUserInitiated - conversación iniciada por usuario`)
+        break
     }
 
     // Actualizar timestamp de última actualización
@@ -178,6 +184,7 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
     const cancelledByDay = (await redis.hgetall(`${statsKey}:daily:cancelled`)) as Record<string, number>
     const rescheduledByDay = (await redis.hgetall(`${statsKey}:daily:rescheduled`)) as Record<string, number>
     const templatesSentByDay = (await redis.hgetall(`${statsKey}:daily:templates`)) as Record<string, number>
+    const userInitiatedByDay = (await redis.hgetall(`${statsKey}:daily:user_initiated`)) as Record<string, number>
 
     // Calcular tiempos promedio
     const confirmedTimes = (await redis.lrange(`${statsKey}:response_times:confirmed`, 0, -1)) as number[]
@@ -204,10 +211,16 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
     const totalConfirmed = Number(totals.totalConfirmed) || 0
     const totalCancelled = Number(totals.totalCancelled) || 0
     const totalRescheduled = Number(totals.totalRescheduled) || 0
+    const totalUserInitiated = Number(totals.totalUserInitiated) || 0
 
     const confirmationRate = totalTemplatesSent > 0 ? (totalConfirmed / totalTemplatesSent) * 100 : 0
     const cancellationRate = totalTemplatesSent > 0 ? (totalCancelled / totalTemplatesSent) * 100 : 0
     const responseRate = totalTemplatesSent > 0 ? ((totalConfirmed + totalCancelled) / totalTemplatesSent) * 100 : 0
+    
+    // Calcular tasa de conversaciones user-initiated
+    // Se calcula sobre el total de respuestas (confirmadas + canceladas + user-initiated)
+    const totalResponses = totalConfirmed + totalCancelled + totalUserInitiated
+    const userInitiatedRate = totalResponses > 0 ? (totalUserInitiated / totalResponses) * 100 : 0
 
     const clientName = await getClientNameByClienteId(clienteId)
 
@@ -229,6 +242,10 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
       avgConfirmationTime: Math.round(avgConfirmationTime * 100) / 100,
       avgCancellationTime: Math.round(avgCancellationTime * 100) / 100,
       lastUpdated: totals.lastUpdated || new Date().toISOString(),
+      // Métricas de conversaciones user-initiated
+      totalUserInitiated,
+      userInitiatedByDay: userInitiatedByDay || {},
+      userInitiatedRate: Math.round(userInitiatedRate * 100) / 100,
     }
 
     console.log(`[APPOINTMENT_STATS] ✅ Estadísticas obtenidas exitosamente para cliente ${clienteId}`)
@@ -261,6 +278,7 @@ export async function getAppointmentStatsByClienteIdFiltered(
     const cancelledByDay = ((await redis.hgetall(`${statsKey}:daily:cancelled`)) as Record<string, number>) || {}
     const rescheduledByDay = ((await redis.hgetall(`${statsKey}:daily:rescheduled`)) as Record<string, number>) || {}
     const templatesSentByDay = ((await redis.hgetall(`${statsKey}:daily:templates`)) as Record<string, number>) || {}
+    const userInitiatedByDay = ((await redis.hgetall(`${statsKey}:daily:user_initiated`)) as Record<string, number>) || {}
 
     // Filtrar por fecha si se especifica
     const filterByDateRange = (data: Record<string, number>): Record<string, number> => {
@@ -281,17 +299,23 @@ export async function getAppointmentStatsByClienteIdFiltered(
     const filteredCancelled = filterByDateRange(cancelledByDay)
     const filteredRescheduled = filterByDateRange(rescheduledByDay)
     const filteredTemplates = filterByDateRange(templatesSentByDay)
+    const filteredUserInitiated = filterByDateRange(userInitiatedByDay)
 
     // Calcular totales filtrados
     const totalConfirmed = Object.values(filteredConfirmed).reduce((sum, val) => sum + Number(val), 0)
     const totalCancelled = Object.values(filteredCancelled).reduce((sum, val) => sum + Number(val), 0)
     const totalRescheduled = Object.values(filteredRescheduled).reduce((sum, val) => sum + Number(val), 0)
     const totalTemplatesSent = Object.values(filteredTemplates).reduce((sum, val) => sum + Number(val), 0)
+    const totalUserInitiated = Object.values(filteredUserInitiated).reduce((sum, val) => sum + Number(val), 0)
 
     // Calcular tasas de conversión
     const confirmationRate = totalTemplatesSent > 0 ? (totalConfirmed / totalTemplatesSent) * 100 : 0
     const cancellationRate = totalTemplatesSent > 0 ? (totalCancelled / totalTemplatesSent) * 100 : 0
     const responseRate = totalTemplatesSent > 0 ? ((totalConfirmed + totalCancelled) / totalTemplatesSent) * 100 : 0
+    
+    // Calcular tasa de conversaciones user-initiated
+    const totalResponses = totalConfirmed + totalCancelled + totalUserInitiated
+    const userInitiatedRate = totalResponses > 0 ? (totalUserInitiated / totalResponses) * 100 : 0
 
     let confirmedTimes: number[] = []
     let cancelledTimes: number[] = []
@@ -366,6 +390,10 @@ export async function getAppointmentStatsByClienteIdFiltered(
       avgConfirmationTime: Math.round(avgConfirmationTime * 100) / 100,
       avgCancellationTime: Math.round(avgCancellationTime * 100) / 100,
       lastUpdated: new Date().toISOString(),
+      // Métricas de conversaciones user-initiated
+      totalUserInitiated,
+      userInitiatedByDay: filteredUserInitiated,
+      userInitiatedRate: Math.round(userInitiatedRate * 100) / 100,
     }
 
     console.log(`[APPOINTMENT_STATS] ✅ Estadísticas filtradas obtenidas para cliente ${clienteId}`)
@@ -464,4 +492,76 @@ export async function getTemplateSentTime(clienteId: string, phoneNumber: string
     console.error("[APPOINTMENT_STATS] ❌ Error al obtener template sent time:", error)
     return null
   }
+}
+
+// Constante para la ventana de 24 horas en milisegundos
+const TEMPLATE_WINDOW_MS = 24 * 60 * 60 * 1000 // 24 horas
+
+/**
+ * Verifica si hay un template enviado dentro de las últimas 24 horas
+ * @returns true si hay un template activo (dentro de ventana), false si no hay o está fuera de ventana
+ */
+export async function isWithinTemplateWindow(clienteId: string, phoneNumber: string): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) {
+    console.log("[APPOINTMENT_STATS] ⚠️ Redis no disponible para isWithinTemplateWindow")
+    return false
+  }
+
+  try {
+    const templateSentAt = await getTemplateSentTime(clienteId, phoneNumber)
+    
+    if (!templateSentAt) {
+      console.log(`[APPOINTMENT_STATS] 📊 No hay template previo para ${phoneNumber} - conversación user-initiated`)
+      return false
+    }
+
+    const templateTime = new Date(templateSentAt).getTime()
+    const now = Date.now()
+    const timeDiff = now - templateTime
+
+    const isWithinWindow = timeDiff <= TEMPLATE_WINDOW_MS
+
+    console.log(`[APPOINTMENT_STATS] 📊 Verificando ventana de 24h:`)
+    console.log(`[APPOINTMENT_STATS] 📊 - Template enviado: ${templateSentAt}`)
+    console.log(`[APPOINTMENT_STATS] 📊 - Tiempo transcurrido: ${Math.round(timeDiff / 1000 / 60)} minutos`)
+    console.log(`[APPOINTMENT_STATS] 📊 - Dentro de ventana 24h: ${isWithinWindow}`)
+
+    return isWithinWindow
+  } catch (error) {
+    console.error("[APPOINTMENT_STATS] ❌ Error al verificar ventana de template:", error)
+    return false
+  }
+}
+
+/**
+ * Verifica si una conversación es user-initiated y la registra si corresponde
+ * Una conversación es user-initiated si:
+ * 1. No hay ningún template enviado previamente, O
+ * 2. El último template fue hace más de 24 horas
+ * 
+ * @returns true si es user-initiated (y fue registrado), false si está dentro de ventana de template
+ */
+export async function checkAndTrackUserInitiated(clienteId: string, phoneNumber: string): Promise<boolean> {
+  const isWithinWindow = await isWithinTemplateWindow(clienteId, phoneNumber)
+
+  if (!isWithinWindow) {
+    // Es una conversación user-initiated - registrar el evento
+    console.log(`[APPOINTMENT_STATS] 📊 Conversación USER-INITIATED detectada para ${phoneNumber}`)
+    
+    await trackAppointmentEvent({
+      clienteId,
+      phoneNumber,
+      eventType: "user_initiated",
+      timestamp: new Date().toISOString(),
+      metadata: {
+        reason: "no_template_or_outside_24h_window"
+      }
+    })
+
+    return true
+  }
+
+  console.log(`[APPOINTMENT_STATS] 📊 Conversación dentro de ventana de template para ${phoneNumber}`)
+  return false
 }

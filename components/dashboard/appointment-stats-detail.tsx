@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import type { ClientAppointmentStats } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, Clock, TrendingUp } from "lucide-react"
+import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, Clock, TrendingUp, MessageCircle } from "lucide-react"
 import { DateRangeFilter } from "./date-range-filter"
 
 interface AppointmentStatsDetailProps {
@@ -149,6 +149,40 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </Card>
       </div>
 
+      {/* Nueva sección: Conversaciones User-Initiated */}
+      <Card className="border-blue-200 bg-blue-50/50">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageCircle className="h-5 w-5 text-blue-600" />
+            Conversaciones Iniciadas por Pacientes
+          </CardTitle>
+          <CardDescription>
+            Conversaciones que no tienen un recordatorio previo o están fuera de la ventana de 24 horas. Estas generan costos adicionales en WhatsApp Business.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="text-center p-4 bg-white rounded-lg border">
+              <div className="text-3xl font-bold text-blue-600">{stats?.totalUserInitiated || 0}</div>
+              <div className="text-sm text-muted-foreground mt-1">Total conversaciones</div>
+            </div>
+            <div className="text-center p-4 bg-white rounded-lg border">
+              <div className="text-3xl font-bold text-blue-600">{stats?.userInitiatedRate?.toFixed(1) || 0}%</div>
+              <div className="text-sm text-muted-foreground mt-1">Tasa user-initiated</div>
+            </div>
+            <div className="text-center p-4 bg-white rounded-lg border">
+              <div className="text-3xl font-bold text-blue-600">
+                {((stats?.totalUserInitiated || 0) * 0.035).toFixed(2)} USD
+              </div>
+              <div className="text-sm text-muted-foreground mt-1">Costo estimado (aprox.)</div>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-4">
+            * El costo estimado se calcula usando la tarifa promedio de WhatsApp Business para conversaciones user-initiated (~$0.035 USD por conversación). El costo real puede variar según la región.
+          </p>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -229,7 +263,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </CardContent>
       </Card>
 
-      {(!stats || (stats.totalTemplatesSent === 0 && stats.totalConfirmed === 0)) && (
+      {(!stats || (stats.totalTemplatesSent === 0 && stats.totalConfirmed === 0 && stats.totalUserInitiated === 0)) && (
         <Card className="border-dashed">
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">Aún no hay datos de estadísticas para este cliente.</p>
@@ -241,6 +275,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
               <li>• Los pacientes confirmen sus turnos presionando el botón de confirmación</li>
               <li>• Los pacientes cancelen sus turnos presionando el botón de cancelación</li>
               <li>• Se reagenden turnos mediante la función de reserva (set_turno)</li>
+              <li>• Los pacientes inicien conversaciones sin un recordatorio previo (user-initiated)</li>
             </ul>
           </CardContent>
         </Card>

@@ -10,7 +10,7 @@ import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused } from "./conversations"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
-import { trackAppointmentEvent, getTemplateSentTime } from "./appointment-stats"
+import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated } from "./appointment-stats"
 import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
 import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
@@ -122,6 +122,15 @@ export async function handleMessage(value: WhatsAppValue) {
     }
 
     console.log(`[WHATSAPP] Configuración encontrada: ${config.displayName} (ID: ${config.id})`)
+
+    // Verificar si es una conversación user-initiated (sin template o fuera de ventana 24h)
+    // Solo verificar si hay cliente_id configurado para el tracking de estadísticas
+    if (config.cliente_id) {
+      const isUserInitiated = await checkAndTrackUserInitiated(config.cliente_id, userPhoneNumber)
+      if (isUserInitiated) {
+        console.log(`[WHATSAPP] 📊 Conversación USER-INITIATED registrada para ${userPhoneNumber}`)
+      }
+    }
 
     const activeSession = await getActiveSessionByPhone(config.id, userPhoneNumber)
 
