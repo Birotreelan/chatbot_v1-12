@@ -5,7 +5,7 @@ import { safelyAddMessageToThread } from "@/lib/thread-manager"
 import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "@/lib/utils"
-import { trackAppointmentEvent, trackTemplateSent, getTemplateSentTime } from "@/lib/appointment-stats"
+import { trackAppointmentEvent, trackTemplateSent, getTemplateSentTime, markPendingReschedule } from "@/lib/appointment-stats"
 import { extractAndFormatDate } from "@/lib/utils/date-utils"
 
 export async function POST(request: Request) {
@@ -156,6 +156,10 @@ async function handleButtonResponse(data: any) {
         timestamp: new Date().toISOString(),
         templateSentAt: templateSentAt || undefined,
       })
+      
+      // Marcar que hay una cancelación pendiente de reagendar (ventana de 12h)
+      await markPendingReschedule(config.id, userPhoneNumber)
+      console.log(`[PROXYLISTENER] 📊 Marcado pending reschedule para ${userPhoneNumber}`)
     } else if (buttonLower.includes("reprogramar") || buttonLower.includes("reagendar")) {
       responseData = {
         ...responseData,

@@ -10,7 +10,7 @@ import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused } from "./conversations"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
-import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated } from "./appointment-stats"
+import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule } from "./appointment-stats"
 import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
 import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
@@ -322,18 +322,22 @@ Timestamp: ${proxyResponse.timestamp}
 IMPORTANTE: Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno confirmado (fecha, hora, profesional, lugar).`
                 break
 
-              case "cancelacion_turno":
-                if (config.cliente_id) {
-                  await trackAppointmentEvent({
-                    clienteId: config.cliente_id,
-                    phoneNumber: userPhoneNumber,
-                    eventType: "cancelled",
-                    timestamp: new Date().toISOString(),
-                    templateSentAt: templateSentAt || undefined,
-                    metadata: { proxyResponse },
-                  })
-                  console.log(`[WHATSAPP] Evento de cancelación registrado para cliente ${config.cliente_id}`)
-                }
+      case "cancelacion_turno":
+        if (config.cliente_id) {
+          await trackAppointmentEvent({
+            clienteId: config.cliente_id,
+            phoneNumber: userPhoneNumber,
+            eventType: "cancelled",
+            timestamp: new Date().toISOString(),
+            templateSentAt: templateSentAt || undefined,
+            metadata: { proxyResponse },
+          })
+          console.log(`[WHATSAPP] Evento de cancelación registrado para cliente ${config.cliente_id}`)
+          
+          // Marcar que hay una cancelación pendiente de reagendar (ventana de 12h)
+          await markPendingReschedule(config.cliente_id, userPhoneNumber)
+          console.log(`[WHATSAPP] 📊 Marcado pending reschedule para ${userPhoneNumber}`)
+        }
 
                 userMessage = `El paciente canceló su turno presionando "${originalMessage}".
 
@@ -414,6 +418,9 @@ Responde de manera apropiada según la acción realizada.`
                 eventType = "confirmed"
               } else if (accionDetectada === "cancelacion") {
                 eventType = "cancelled"
+                // Marcar que hay una cancelación pendiente de reagendar (ventana de 12h)
+                await markPendingReschedule(config.cliente_id, userPhoneNumber)
+                console.log(`[WHATSAPP] 📊 Marcado pending reschedule para ${userPhoneNumber} desde botón`)
               } else {
                 eventType = "rescheduled"
               }
@@ -548,7 +555,7 @@ Explica que el turno ya expiró y que debe contactar a la clínica para reagenda
               break
 
             default:
-              // Error genérico
+              // Error gen��rico
               userMessage = `El paciente presionó "${originalMessage}" pero hubo un error en el procesamiento.
 
 [ERROR_PROCESAMIENTO_BOTON]

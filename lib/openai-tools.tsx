@@ -18,7 +18,7 @@ import type { AbortSignal } from "abort-controller"
 import { saveConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 import { getRedisClient } from "./redis"
-import { trackAppointmentEvent } from "./appointment-stats"
+import { trackAppointmentEvent, checkAndClearPendingReschedule } from "./appointment-stats"
 import { getAssistantIdByFunction } from "./assistant-utils"
 import { logError } from "./logging" // Assuming logError is in './logging'
 import { incrementMetric } from "./metrics" // Assuming incrementMetric is in './metrics'
@@ -851,22 +851,30 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
       })
     }
 
-    console.log(`[TOOLS] ✅ Turno reservado exitosamente, registrando estadística de reagendamiento`)
-    try {
-      await trackAppointmentEvent({
-        clienteId: clienteId,
-        phoneNumber: pacienteDatos.telefono || "unknown",
-        eventType: "rescheduled",
-        timestamp: new Date().toISOString(),
-        appointmentInfo: {
-          turnoId: turnoId,
-          paciente: pacienteDatos,
-        },
-      })
-      console.log(`[TOOLS] 📊 Estadística de reagendamiento registrada para cliente ${clienteId}`)
-    } catch (statsError) {
-      console.error(`[TOOLS] ⚠️ Error al registrar estadística de reagendamiento:`, statsError)
-      // No fallamos la reserva por error de estadísticas
+        console.log(`[TOOLS] ✅ Turno reservado exitosamente, registrando estadística`)
+        try {
+          // Verificar si hay una cancelación pendiente (dentro de las últimas 12h)
+          const phoneNumber = pacienteDatos.telefono || "unknown"
+          const isPendingReschedule = await checkAndClearPendingReschedule(clienteId, phoneNumber)
+          
+          // Si hay cancelación pendiente, es un reagendamiento real. Si no, es un turno nuevo.
+          const eventType = isPendingReschedule ? "rescheduled" : "new_appointment"
+          console.log(`[TOOLS] 📊 Tipo de evento detectado: ${eventType} (pending reschedule: ${isPendingReschedule})`)
+          
+          await trackAppointmentEvent({
+            clienteId: clienteId,
+            phoneNumber: phoneNumber,
+            eventType: eventType,
+            timestamp: new Date().toISOString(),
+            appointmentInfo: {
+              turnoId: turnoId,
+              paciente: pacienteDatos,
+            },
+          })
+          console.log(`[TOOLS] 📊 Estadística registrada para cliente ${clienteId}: ${eventType}`)
+        } catch (statsError) {
+          console.error(`[TOOLS] ⚠️ Error al registrar estadística:`, statsError)
+          // No fallamos la reserva por error de estadísticas
     }
 
     return JSON.stringify({

@@ -6,6 +6,10 @@ import { getAllWhatsAppConfigs } from "./db"
 const APPOINTMENT_EVENT_PREFIX = "appointment_event:"
 const APPOINTMENT_STATS_PREFIX = "appointment_stats:"
 const TEMPLATE_TRACKING_PREFIX = "template_tracking:"
+const PENDING_RESCHEDULE_PREFIX = "pending_reschedule:"
+
+// Ventana de tiempo para considerar un reagendamiento como válido (12 horas en segundos)
+const RESCHEDULE_WINDOW_SECONDS = 12 * 60 * 60 // 12 horas
 
 // Obtener cliente de Redis
 function getRedisClient() {
@@ -131,6 +135,12 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
         await redis.hincrby(`${statsKey}:daily:user_initiated`, date, 1)
         console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalUserInitiated - conversación iniciada por usuario`)
         break
+
+      case "new_appointment":
+        await redis.hincrby(statsKey, "totalNewAppointments", 1)
+        await redis.hincrby(`${statsKey}:daily:new_appointments`, date, 1)
+        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalNewAppointments - turno nuevo sin cancelación previa`)
+        break
     }
 
     // Actualizar timestamp de última actualización
@@ -185,6 +195,7 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
     const rescheduledByDay = (await redis.hgetall(`${statsKey}:daily:rescheduled`)) as Record<string, number>
     const templatesSentByDay = (await redis.hgetall(`${statsKey}:daily:templates`)) as Record<string, number>
     const userInitiatedByDay = (await redis.hgetall(`${statsKey}:daily:user_initiated`)) as Record<string, number>
+    const newAppointmentsByDay = (await redis.hgetall(`${statsKey}:daily:new_appointments`)) as Record<string, number>
 
     // Calcular tiempos promedio
     const confirmedTimes = (await redis.lrange(`${statsKey}:response_times:confirmed`, 0, -1)) as number[]
@@ -212,6 +223,7 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
     const totalCancelled = Number(totals.totalCancelled) || 0
     const totalRescheduled = Number(totals.totalRescheduled) || 0
     const totalUserInitiated = Number(totals.totalUserInitiated) || 0
+    const totalNewAppointments = Number(totals.totalNewAppointments) || 0
 
     const confirmationRate = totalTemplatesSent > 0 ? (totalConfirmed / totalTemplatesSent) * 100 : 0
     const cancellationRate = totalTemplatesSent > 0 ? (totalCancelled / totalTemplatesSent) * 100 : 0
@@ -246,6 +258,9 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
       totalUserInitiated,
       userInitiatedByDay: userInitiatedByDay || {},
       userInitiatedRate: Math.round(userInitiatedRate * 100) / 100,
+      // Métricas de turnos nuevos vs reagendamientos
+      totalNewAppointments,
+      newAppointmentsByDay: newAppointmentsByDay || {},
     }
 
     console.log(`[APPOINTMENT_STATS] ✅ Estadísticas obtenidas exitosamente para cliente ${clienteId}`)
@@ -279,6 +294,7 @@ export async function getAppointmentStatsByClienteIdFiltered(
     const rescheduledByDay = ((await redis.hgetall(`${statsKey}:daily:rescheduled`)) as Record<string, number>) || {}
     const templatesSentByDay = ((await redis.hgetall(`${statsKey}:daily:templates`)) as Record<string, number>) || {}
     const userInitiatedByDay = ((await redis.hgetall(`${statsKey}:daily:user_initiated`)) as Record<string, number>) || {}
+    const newAppointmentsByDay = ((await redis.hgetall(`${statsKey}:daily:new_appointments`)) as Record<string, number>) || {}
 
     // Filtrar por fecha si se especifica
     const filterByDateRange = (data: Record<string, number>): Record<string, number> => {
@@ -300,6 +316,7 @@ export async function getAppointmentStatsByClienteIdFiltered(
     const filteredRescheduled = filterByDateRange(rescheduledByDay)
     const filteredTemplates = filterByDateRange(templatesSentByDay)
     const filteredUserInitiated = filterByDateRange(userInitiatedByDay)
+    const filteredNewAppointments = filterByDateRange(newAppointmentsByDay)
 
     // Calcular totales filtrados
     const totalConfirmed = Object.values(filteredConfirmed).reduce((sum, val) => sum + Number(val), 0)
@@ -307,6 +324,7 @@ export async function getAppointmentStatsByClienteIdFiltered(
     const totalRescheduled = Object.values(filteredRescheduled).reduce((sum, val) => sum + Number(val), 0)
     const totalTemplatesSent = Object.values(filteredTemplates).reduce((sum, val) => sum + Number(val), 0)
     const totalUserInitiated = Object.values(filteredUserInitiated).reduce((sum, val) => sum + Number(val), 0)
+    const totalNewAppointments = Object.values(filteredNewAppointments).reduce((sum, val) => sum + Number(val), 0)
 
     // Calcular tasas de conversión
     const confirmationRate = totalTemplatesSent > 0 ? (totalConfirmed / totalTemplatesSent) * 100 : 0
@@ -394,6 +412,9 @@ export async function getAppointmentStatsByClienteIdFiltered(
       totalUserInitiated,
       userInitiatedByDay: filteredUserInitiated,
       userInitiatedRate: Math.round(userInitiatedRate * 100) / 100,
+      // Métricas de turnos nuevos vs reagendamientos
+      totalNewAppointments,
+      newAppointmentsByDay: filteredNewAppointments,
     }
 
     console.log(`[APPOINTMENT_STATS] ✅ Estadísticas filtradas obtenidas para cliente ${clienteId}`)
@@ -564,4 +585,62 @@ export async function checkAndTrackUserInitiated(clienteId: string, phoneNumber:
 
   console.log(`[APPOINTMENT_STATS] 📊 Conversación dentro de ventana de template para ${phoneNumber}`)
   return false
+}
+
+/**
+ * Marca que un usuario canceló un turno y está pendiente de reagendar
+ * Esta marca expira en 12 horas
+ */
+export async function markPendingReschedule(clienteId: string, phoneNumber: string): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) {
+    console.log("[APPOINTMENT_STATS] ⚠️ Redis no disponible para markPendingReschedule")
+    return
+  }
+
+  try {
+    const key = `${PENDING_RESCHEDULE_PREFIX}${clienteId}_${phoneNumber}`
+    const data = {
+      cancelledAt: new Date().toISOString(),
+      phoneNumber,
+      clienteId
+    }
+    
+    // Guardar por 12 horas
+    await redis.set(key, JSON.stringify(data), { ex: RESCHEDULE_WINDOW_SECONDS })
+    console.log(`[APPOINTMENT_STATS] 📊 Marcado pending reschedule para ${phoneNumber} (expira en 12h)`)
+  } catch (error) {
+    console.error("[APPOINTMENT_STATS] ❌ Error al marcar pending reschedule:", error)
+  }
+}
+
+/**
+ * Verifica si hay una cancelación pendiente de reagendar (dentro de 12 horas)
+ * Si existe, la elimina y retorna true
+ * Si no existe, retorna false
+ */
+export async function checkAndClearPendingReschedule(clienteId: string, phoneNumber: string): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) {
+    console.log("[APPOINTMENT_STATS] ⚠️ Redis no disponible para checkPendingReschedule")
+    return false
+  }
+
+  try {
+    const key = `${PENDING_RESCHEDULE_PREFIX}${clienteId}_${phoneNumber}`
+    const data = await redis.get(key)
+    
+    if (data) {
+      // Existe una cancelación pendiente - eliminar el flag
+      await redis.del(key)
+      console.log(`[APPOINTMENT_STATS] 📊 Cancelación pendiente encontrada y limpiada para ${phoneNumber} - es un REAGENDAMIENTO`)
+      return true
+    }
+    
+    console.log(`[APPOINTMENT_STATS] 📊 No hay cancelación pendiente para ${phoneNumber} - es un TURNO NUEVO`)
+    return false
+  } catch (error) {
+    console.error("[APPOINTMENT_STATS] ❌ Error al verificar pending reschedule:", error)
+    return false
+  }
 }
