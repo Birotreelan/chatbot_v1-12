@@ -161,7 +161,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             <div className="text-center p-4 bg-white rounded-lg border">
               <div className="text-3xl font-bold text-blue-600">{stats?.totalUserInitiated || 0}</div>
               <div className="text-sm text-muted-foreground mt-1">Total conversaciones</div>
@@ -170,16 +170,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
               <div className="text-3xl font-bold text-blue-600">{stats?.userInitiatedRate?.toFixed(1) || 0}%</div>
               <div className="text-sm text-muted-foreground mt-1">Tasa user-initiated</div>
             </div>
-            <div className="text-center p-4 bg-white rounded-lg border">
-              <div className="text-3xl font-bold text-blue-600">
-                {((stats?.totalUserInitiated || 0) * 0.035).toFixed(2)} USD
-              </div>
-              <div className="text-sm text-muted-foreground mt-1">Costo estimado (aprox.)</div>
-            </div>
           </div>
-          <p className="text-xs text-muted-foreground mt-4">
-            * El costo estimado se calcula usando la tarifa promedio de WhatsApp Business para conversaciones user-initiated (~$0.035 USD por conversación). El costo real puede variar según la región.
-          </p>
         </CardContent>
       </Card>
 
