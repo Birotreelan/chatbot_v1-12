@@ -1,6 +1,6 @@
 import { getRedisClient } from "@/lib/redis"
 
-export async function GET(request: Request) {
+export async function GET() {
   console.log("[RESET-API] Iniciando reset de estadísticas de conversaciones user-initiated...")
 
   const redis = getRedisClient()
@@ -12,48 +12,69 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Obtener todos los clientes (buscar keys con patrón appointment_stats:)
-    const statsKeys = (await redis.keys("appointment_stats:*")) as string[]
-    console.log(`[RESET-API] Se encontraron ${statsKeys.length} clientes en Redis`)
-
     let resetCount = 0
     let dailyDeleted = 0
     let activeConversationDeleted = 0
+    const errors: string[] = []
 
-    for (const key of statsKeys) {
-      const clienteId = key.replace("appointment_stats:", "")
-      console.log(`[RESET-API] Procesando cliente: ${clienteId}`)
-
-      // Resetear totalUserInitiated a 0
-      await redis.hset(key, { totalUserInitiated: 0 })
-      resetCount++
-      console.log(`[RESET-API] ✓ Resetado totalUserInitiated para ${clienteId}`)
-
-      // Eliminar datos diarios de user_initiated
-      const dailyKey = `${key}:daily:user_initiated`
-      const dailyDeletes = await redis.del(dailyKey)
-      if (dailyDeletes > 0) {
+    // 1. Eliminar todas las keys de datos diarios de user_initiated
+    const dailyUserInitiatedKeys = (await redis.keys("appointment_stats:*:daily:user_initiated")) as string[]
+    console.log(`[RESET-API] Keys diarias de user_initiated encontradas: ${dailyUserInitiatedKeys.length}`)
+    
+    for (const dailyKey of dailyUserInitiatedKeys) {
+      try {
+        await redis.del(dailyKey)
         dailyDeleted++
-        console.log(`[RESET-API] ✓ Eliminado ${dailyKey}`)
+        console.log(`[RESET-API] Eliminado ${dailyKey}`)
+      } catch (e) {
+        errors.push(`Error eliminando ${dailyKey}: ${e}`)
       }
     }
 
-    // Eliminar todas las marcas de conversaciones activas
+    // 2. Eliminar todas las marcas de conversaciones activas
     const activeConversationKeys = (await redis.keys("active_user_conversation:*")) as string[]
-    console.log(`[RESET-API] Se encontraron ${activeConversationKeys.length} conversaciones activas para eliminar`)
+    console.log(`[RESET-API] Conversaciones activas encontradas: ${activeConversationKeys.length}`)
 
     for (const key of activeConversationKeys) {
-      await redis.del(key)
-      activeConversationDeleted++
+      try {
+        await redis.del(key)
+        activeConversationDeleted++
+        console.log(`[RESET-API] Eliminado ${key}`)
+      } catch (e) {
+        errors.push(`Error eliminando ${key}: ${e}`)
+      }
+    }
+
+    // 3. Resetear totalUserInitiated en las keys principales de estadísticas
+    // Solo buscamos keys que NO contengan :daily: para obtener las principales
+    const allStatsKeys = (await redis.keys("appointment_stats:*")) as string[]
+    const mainStatsKeys = allStatsKeys.filter(key => !key.includes(":daily:"))
+    console.log(`[RESET-API] Keys principales de estadísticas: ${mainStatsKeys.length}`)
+
+    for (const key of mainStatsKeys) {
+      try {
+        // Usar HDEL para eliminar solo el campo totalUserInitiated sin tocar el resto
+        // HDEL es seguro incluso si el campo no existe (retorna 0 pero no falla)
+        const deletedFields = await redis.hdel(key, "totalUserInitiated")
+        
+        // Luego re-establecer el valor a 0
+        await redis.hset(key, { totalUserInitiated: 0 })
+        resetCount++
+        console.log(`[RESET-API] Resetado totalUserInitiated en ${key}`)
+      } catch (e) {
+        console.log(`[RESET-API] Error procesando ${key}: ${String(e)}`)
+        errors.push(`Error en ${key}: ${String(e)}`)
+      }
     }
 
     const summary = {
       success: true,
       message: "Reset completado exitosamente",
       resumen: {
-        clientesProccesados: resetCount,
-        datoDiariosEliminados: dailyDeleted,
+        contadoresReseteados: resetCount,
+        datosDiariosEliminados: dailyDeleted,
         conversacionesActivasEliminadas: activeConversationDeleted,
+        errores: errors.length > 0 ? errors : undefined,
       },
     }
 
@@ -61,6 +82,9 @@ export async function GET(request: Request) {
     console.log(`[RESET-API] Contadores (totalUserInitiated) resetados: ${resetCount}`)
     console.log(`[RESET-API] Datos diarios (daily:user_initiated) eliminados: ${dailyDeleted}`)
     console.log(`[RESET-API] Marcas de conversaciones activas eliminadas: ${activeConversationDeleted}`)
+    if (errors.length > 0) {
+      console.log(`[RESET-API] Errores encontrados: ${errors.length}`)
+    }
     console.log("[RESET-API] ===== RESET COMPLETADO =====\n")
 
     return Response.json(summary)
