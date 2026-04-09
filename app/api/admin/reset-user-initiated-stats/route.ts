@@ -12,30 +12,41 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Obtener todos los clientes (buscar keys con patrón appointment_stats:)
-    const statsKeys = (await redis.keys("appointment_stats:*")) as string[]
-    console.log(`[RESET-API] Se encontraron ${statsKeys.length} clientes en Redis`)
+    // Obtener todos los clientes (buscar keys con patrón appointment_stats:*)
+    const allStatsKeys = (await redis.keys("appointment_stats:*")) as string[]
+    console.log(`[RESET-API] Se encontraron ${allStatsKeys.length} keys totales en Redis`)
+
+    // Filtrar solo las keys principales (sin :daily: en el nombre)
+    // Las keys principales tienen formato: appointment_stats:clienteId
+    const mainStatsKeys = allStatsKeys.filter(key => !key.includes(":daily:"))
+    console.log(`[RESET-API] Keys principales de clientes: ${mainStatsKeys.length}`)
 
     let resetCount = 0
     let dailyDeleted = 0
     let activeConversationDeleted = 0
 
-    for (const key of statsKeys) {
+    for (const key of mainStatsKeys) {
       const clienteId = key.replace("appointment_stats:", "")
       console.log(`[RESET-API] Procesando cliente: ${clienteId}`)
 
-      // Resetear totalUserInitiated a 0
-      await redis.hset(key, { totalUserInitiated: 0 })
-      resetCount++
-      console.log(`[RESET-API] ✓ Resetado totalUserInitiated para ${clienteId}`)
-
-      // Eliminar datos diarios de user_initiated
-      const dailyKey = `${key}:daily:user_initiated`
-      const dailyDeletes = await redis.del(dailyKey)
-      if (dailyDeletes > 0) {
-        dailyDeleted++
-        console.log(`[RESET-API] ✓ Eliminado ${dailyKey}`)
+      // Resetear totalUserInitiated a 0 (solo en keys principales que son hashes)
+      try {
+        await redis.hset(key, { totalUserInitiated: 0 })
+        resetCount++
+        console.log(`[RESET-API] Resetado totalUserInitiated para ${clienteId}`)
+      } catch (hsetError) {
+        console.log(`[RESET-API] Key ${key} no es un hash, saltando...`)
       }
+    }
+
+    // Eliminar todas las keys de datos diarios de user_initiated
+    const dailyUserInitiatedKeys = allStatsKeys.filter(key => key.includes(":daily:user_initiated"))
+    console.log(`[RESET-API] Keys diarias de user_initiated a eliminar: ${dailyUserInitiatedKeys.length}`)
+    
+    for (const dailyKey of dailyUserInitiatedKeys) {
+      await redis.del(dailyKey)
+      dailyDeleted++
+      console.log(`[RESET-API] Eliminado ${dailyKey}`)
     }
 
     // Eliminar todas las marcas de conversaciones activas
