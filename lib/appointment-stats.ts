@@ -461,11 +461,6 @@ export async function trackTemplateSent(
     await redis.set(trackingKey, JSON.stringify(trackingData), { ex: 60 * 60 * 24 * 7 })
     console.log(`[APPOINTMENT_STATS] ✅ Template tracking guardado: ${trackingId}`)
 
-    // Limpiar cualquier conversación user-initiated activa ya que ahora hay un template
-    const activeConversationKey = `${ACTIVE_USER_CONVERSATION_PREFIX}${clienteId}_${phoneNumber}`
-    await redis.del(activeConversationKey)
-    console.log(`[APPOINTMENT_STATS] 📊 Conversación user-initiated activa limpiada (template enviado)`)
-
     await trackAppointmentEvent({
       clienteId,
       phoneNumber,
