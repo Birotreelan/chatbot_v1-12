@@ -110,7 +110,7 @@ export interface AppointmentEvent {
   id: string
   clienteId: string
   phoneNumber: string
-  eventType: "template_sent" | "confirmed" | "cancelled" | "rescheduled" | "user_initiated" | "new_appointment"
+  eventType: "template_sent" | "confirmed" | "cancelled" | "rescheduled" | "user_initiated" | "new_appointment" | "reschedule_started"
   timestamp: string
   templateSentAt?: string // Para calcular tiempo de respuesta
   appointmentInfo?: {
@@ -144,6 +144,11 @@ export interface ClientAppointmentStats extends AppointmentStats {
   // Métricas de turnos nuevos vs reagendamientos
   totalNewAppointments: number // Total de turnos nuevos (sin cancelación previa en 12hs)
   newAppointmentsByDay: Record<string, number> // Turnos nuevos por día
+  
+  // Métricas de inicio de proceso de reagendamiento
+  totalRescheduleStarted: number // Total de veces que se inició el proceso de reagendamiento
+  rescheduleStartedByDay: Record<string, number> // Inicios de reagendamiento por día
+  rescheduleConversionRate: number // % de reagendamientos completados vs iniciados
 }
 
 export interface AdditionalAssistant {

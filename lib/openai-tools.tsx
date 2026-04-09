@@ -18,7 +18,7 @@ import type { AbortSignal } from "abort-controller"
 import { saveConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 import { getRedisClient } from "./redis"
-import { trackAppointmentEvent, checkAndClearPendingReschedule } from "./appointment-stats"
+import { trackAppointmentEvent, checkAndClearPendingReschedule, trackRescheduleStarted } from "./appointment-stats"
 import { getAssistantIdByFunction } from "./assistant-utils"
 import { logError } from "./logging" // Assuming logError is in './logging'
 import { incrementMetric } from "./metrics" // Assuming incrementMetric is in './metrics'
@@ -401,6 +401,12 @@ async function handleAssistantSwitch(
     }
 
     console.log(`[OPENAI-SWITCH] ✅ Asistente encontrado: ${newAssistantId}`)
+
+    // Trackear inicio de proceso de reagendamiento si es route_to_reagendamiento
+    if (functionName === "route_to_reagendamiento") {
+      console.log(`[OPENAI-SWITCH] 📊 Trackeando inicio de proceso de reagendamiento para ${userPhoneNumber}`)
+      await trackRescheduleStarted(clienteId, userPhoneNumber)
+    }
 
     console.log(`[OPENAI-SWITCH] 🛑 Cancelando run original: ${oldRunId}`)
     const cancelled = await cancelRunAndWait(oldThreadId, oldRunId)
