@@ -1,4 +1,4 @@
-import { Redis } from "@upstash/redis";
+const { Redis } = require("@upstash/redis");
 
 async function resetUserInitiatedStats() {
   console.log("[RESET] Iniciando reset de estadísticas de conversaciones user-initiated...");
