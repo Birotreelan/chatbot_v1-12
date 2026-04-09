@@ -12,6 +12,7 @@ interface AppointmentStatsDetailProps {
   displayName: string
 }
 
+// Estadísticas de turnos - v7
 export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentStatsDetailProps) {
   const [stats, setStats] = useState<ClientAppointmentStats | null>(null)
   const [loading, setLoading] = useState(true)
