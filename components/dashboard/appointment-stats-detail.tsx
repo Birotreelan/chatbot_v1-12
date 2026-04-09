@@ -71,11 +71,6 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
     )
   }
 
-  // Calcular tasa de conversión de cancelados a reagendados
-  const rescheduledFromCancelledRate = stats?.totalCancelled && stats.totalCancelled > 0
-    ? ((stats?.totalRescheduled || 0) / stats.totalCancelled) * 100
-    : 0
-
   // Calcular tasa de conversión de conversaciones iniciadas a nuevos turnos
   const newAppointmentConversionRate = stats?.totalUserInitiated && stats.totalUserInitiated > 0
     ? ((stats?.totalNewAppointments || 0) / stats.totalUserInitiated) * 100
@@ -108,8 +103,8 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </Button>
       </div>
 
-      {/* Fila 1: Recordatorios Enviados y Confirmados */}
-      <div className="grid gap-4 md:grid-cols-2">
+      {/* Fila 1: Recordatorios - Enviados, Confirmados, Cancelados */}
+      <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Recordatorios Enviados</CardTitle>
@@ -133,28 +128,41 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
             </p>
           </CardContent>
         </Card>
+
+        <Card className="border-red-200 bg-red-50/30">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Recordatorios Cancelados</CardTitle>
+            <XCircle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-red-600">{stats?.totalCancelled || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Tasa de cancelación: <span className="font-semibold text-red-600">{stats?.cancellationRate?.toFixed(1) || 0}%</span>
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Fila 2: Cancelados y Reagendados */}
+      {/* Fila 2: Proceso de Reagendamiento */}
       <Card className="border-amber-200 bg-amber-50/30">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <XCircle className="h-5 w-5 text-red-500" />
-            Cancelaciones y Reagendamientos
+            <CalendarClock className="h-5 w-5 text-amber-500" />
+            Proceso de Reagendamiento
           </CardTitle>
           <CardDescription>
-            Seguimiento de cancelaciones y su conversión a nuevos turnos reagendados
+            Seguimiento del proceso de reagendamiento desde el inicio hasta la confirmación del nuevo turno
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-6 md:grid-cols-3">
-            {/* Cancelados */}
-            <div className="text-center p-4 bg-white rounded-lg border border-red-100">
-              <XCircle className="h-6 w-6 text-red-500 mx-auto mb-2" />
-              <div className="text-3xl font-bold text-red-600">{stats?.totalCancelled || 0}</div>
-              <div className="text-sm text-muted-foreground mt-1">Cancelados</div>
-              <div className="text-xs text-red-600 mt-1">
-                {stats?.cancellationRate?.toFixed(1) || 0}% del total
+            {/* Inicio de proceso */}
+            <div className="text-center p-4 bg-white rounded-lg border border-amber-100">
+              <CalendarClock className="h-6 w-6 text-amber-500 mx-auto mb-2" />
+              <div className="text-3xl font-bold text-amber-600">{stats?.totalRescheduleStarted || 0}</div>
+              <div className="text-sm text-muted-foreground mt-1">Inicio de proceso</div>
+              <div className="text-xs text-amber-600 mt-1">
+                Pacientes que iniciaron reagendamiento
               </div>
             </div>
 
@@ -163,19 +171,19 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
               <ArrowRight className="h-8 w-8 text-amber-500 hidden md:block" />
               <div className="text-center mt-2">
                 <div className="text-2xl font-bold text-amber-600">
-                  {rescheduledFromCancelledRate.toFixed(1)}%
+                  {stats?.rescheduleConversionRate?.toFixed(1) || 0}%
                 </div>
                 <div className="text-xs text-muted-foreground">Tasa de conversión</div>
               </div>
             </div>
 
-            {/* Reagendados */}
-            <div className="text-center p-4 bg-white rounded-lg border border-amber-100">
-              <CalendarClock className="h-6 w-6 text-amber-500 mx-auto mb-2" />
-              <div className="text-3xl font-bold text-amber-600">{stats?.totalRescheduled || 0}</div>
-              <div className="text-sm text-muted-foreground mt-1">Reagendados</div>
-              <div className="text-xs text-amber-600 mt-1">
-                Turnos recuperados
+            {/* Turnos reagendados */}
+            <div className="text-center p-4 bg-white rounded-lg border border-green-100">
+              <CheckCircle className="h-6 w-6 text-green-500 mx-auto mb-2" />
+              <div className="text-3xl font-bold text-green-600">{stats?.totalRescheduled || 0}</div>
+              <div className="text-sm text-muted-foreground mt-1">Turnos reagendados</div>
+              <div className="text-xs text-green-600 mt-1">
+                Reagendamientos completados
               </div>
             </div>
           </div>

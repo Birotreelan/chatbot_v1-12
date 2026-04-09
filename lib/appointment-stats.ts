@@ -145,6 +145,12 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
         await redis.hincrby(`${statsKey}:daily:new_appointments`, date, 1)
         console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalNewAppointments - turno nuevo sin cancelación previa`)
         break
+
+      case "reschedule_started":
+        await redis.hincrby(statsKey, "totalRescheduleStarted", 1)
+        await redis.hincrby(`${statsKey}:daily:reschedule_started`, date, 1)
+        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalRescheduleStarted - inicio de proceso de reagendamiento`)
+        break
     }
 
     // Actualizar timestamp de última actualización
@@ -200,6 +206,7 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
     const templatesSentByDay = (await redis.hgetall(`${statsKey}:daily:templates`)) as Record<string, number>
     const userInitiatedByDay = (await redis.hgetall(`${statsKey}:daily:user_initiated`)) as Record<string, number>
     const newAppointmentsByDay = (await redis.hgetall(`${statsKey}:daily:new_appointments`)) as Record<string, number>
+    const rescheduleStartedByDay = (await redis.hgetall(`${statsKey}:daily:reschedule_started`)) as Record<string, number>
 
     // Calcular tiempos promedio
     const confirmedTimes = (await redis.lrange(`${statsKey}:response_times:confirmed`, 0, -1)) as number[]
@@ -228,6 +235,7 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
     const totalRescheduled = Number(totals.totalRescheduled) || 0
     const totalUserInitiated = Number(totals.totalUserInitiated) || 0
     const totalNewAppointments = Number(totals.totalNewAppointments) || 0
+    const totalRescheduleStarted = Number(totals.totalRescheduleStarted) || 0
 
     const confirmationRate = totalTemplatesSent > 0 ? (totalConfirmed / totalTemplatesSent) * 100 : 0
     const cancellationRate = totalTemplatesSent > 0 ? (totalCancelled / totalTemplatesSent) * 100 : 0
@@ -237,6 +245,9 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
     // Se calcula sobre el total de respuestas (confirmadas + canceladas + user-initiated)
     const totalResponses = totalConfirmed + totalCancelled + totalUserInitiated
     const userInitiatedRate = totalResponses > 0 ? (totalUserInitiated / totalResponses) * 100 : 0
+    
+    // Calcular tasa de conversión de reagendamientos (completados vs iniciados)
+    const rescheduleConversionRate = totalRescheduleStarted > 0 ? (totalRescheduled / totalRescheduleStarted) * 100 : 0
 
     const clientName = await getClientNameByClienteId(clienteId)
 
@@ -265,6 +276,10 @@ export async function getAppointmentStatsByClienteId(clienteId: string): Promise
       // Métricas de turnos nuevos vs reagendamientos
       totalNewAppointments,
       newAppointmentsByDay: newAppointmentsByDay || {},
+      // Métricas de inicio de proceso de reagendamiento
+      totalRescheduleStarted,
+      rescheduleStartedByDay: rescheduleStartedByDay || {},
+      rescheduleConversionRate: Math.round(rescheduleConversionRate * 100) / 100,
     }
 
     console.log(`[APPOINTMENT_STATS] ✅ Estadísticas obtenidas exitosamente para cliente ${clienteId}`)
@@ -299,6 +314,7 @@ export async function getAppointmentStatsByClienteIdFiltered(
     const templatesSentByDay = ((await redis.hgetall(`${statsKey}:daily:templates`)) as Record<string, number>) || {}
     const userInitiatedByDay = ((await redis.hgetall(`${statsKey}:daily:user_initiated`)) as Record<string, number>) || {}
     const newAppointmentsByDay = ((await redis.hgetall(`${statsKey}:daily:new_appointments`)) as Record<string, number>) || {}
+    const rescheduleStartedByDay = ((await redis.hgetall(`${statsKey}:daily:reschedule_started`)) as Record<string, number>) || {}
 
     // Filtrar por fecha si se especifica
     const filterByDateRange = (data: Record<string, number>): Record<string, number> => {
@@ -321,6 +337,7 @@ export async function getAppointmentStatsByClienteIdFiltered(
     const filteredTemplates = filterByDateRange(templatesSentByDay)
     const filteredUserInitiated = filterByDateRange(userInitiatedByDay)
     const filteredNewAppointments = filterByDateRange(newAppointmentsByDay)
+    const filteredRescheduleStarted = filterByDateRange(rescheduleStartedByDay)
 
     // Calcular totales filtrados
     const totalConfirmed = Object.values(filteredConfirmed).reduce((sum, val) => sum + Number(val), 0)
@@ -329,6 +346,7 @@ export async function getAppointmentStatsByClienteIdFiltered(
     const totalTemplatesSent = Object.values(filteredTemplates).reduce((sum, val) => sum + Number(val), 0)
     const totalUserInitiated = Object.values(filteredUserInitiated).reduce((sum, val) => sum + Number(val), 0)
     const totalNewAppointments = Object.values(filteredNewAppointments).reduce((sum, val) => sum + Number(val), 0)
+    const totalRescheduleStarted = Object.values(filteredRescheduleStarted).reduce((sum, val) => sum + Number(val), 0)
 
     // Calcular tasas de conversión
     const confirmationRate = totalTemplatesSent > 0 ? (totalConfirmed / totalTemplatesSent) * 100 : 0
@@ -338,6 +356,9 @@ export async function getAppointmentStatsByClienteIdFiltered(
     // Calcular tasa de conversaciones user-initiated
     const totalResponses = totalConfirmed + totalCancelled + totalUserInitiated
     const userInitiatedRate = totalResponses > 0 ? (totalUserInitiated / totalResponses) * 100 : 0
+    
+    // Calcular tasa de conversión de reagendamientos (completados vs iniciados)
+    const rescheduleConversionRate = totalRescheduleStarted > 0 ? (totalRescheduled / totalRescheduleStarted) * 100 : 0
 
     let confirmedTimes: number[] = []
     let cancelledTimes: number[] = []
@@ -419,6 +440,10 @@ export async function getAppointmentStatsByClienteIdFiltered(
       // Métricas de turnos nuevos vs reagendamientos
       totalNewAppointments,
       newAppointmentsByDay: filteredNewAppointments,
+      // Métricas de inicio de proceso de reagendamiento
+      totalRescheduleStarted,
+      rescheduleStartedByDay: filteredRescheduleStarted,
+      rescheduleConversionRate: Math.round(rescheduleConversionRate * 100) / 100,
     }
 
     console.log(`[APPOINTMENT_STATS] ✅ Estadísticas filtradas obtenidas para cliente ${clienteId}`)
@@ -647,6 +672,19 @@ export async function markPendingReschedule(clienteId: string, phoneNumber: stri
   } catch (error) {
     console.error("[APPOINTMENT_STATS] ❌ Error al marcar pending reschedule:", error)
   }
+}
+
+/**
+ * Trackea el inicio del proceso de reagendamiento cuando se llama a route_to_reagendamiento
+ */
+export async function trackRescheduleStarted(clienteId: string, phoneNumber: string): Promise<void> {
+  await trackAppointmentEvent({
+    clienteId,
+    phoneNumber,
+    eventType: "reschedule_started",
+    timestamp: new Date().toISOString(),
+  })
+  console.log(`[APPOINTMENT_STATS] 📊 Trackeado inicio de proceso de reagendamiento para ${phoneNumber}`)
 }
 
 /**
