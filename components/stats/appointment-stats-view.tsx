@@ -131,8 +131,8 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
         </Alert>
       ) : (
         <>
-          {/* Fila 1: Recordatorios - Enviados, Confirmados, Cancelados */}
-          <div className="grid gap-4 md:grid-cols-3">
+          {/* Fila 1: Recordatorios - Enviados, Confirmados, Cancelados, Sin respuesta */}
+          <div className="grid gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Recordatorios Enviados</CardTitle>
@@ -166,6 +166,25 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
                 <div className="text-3xl font-bold text-red-600">{stats?.totalCancelled || 0}</div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Tasa de cancelación: <span className="font-semibold text-red-600">{stats?.cancellationRate?.toFixed(1) || 0}%</span>
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-gray-200 bg-gray-50/30">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Recordatorios sin respuesta</CardTitle>
+                <Clock className="h-4 w-4 text-gray-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-gray-600">
+                  {(stats?.totalTemplatesSent || 0) - (stats?.totalConfirmed || 0) - (stats?.totalCancelled || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Tasa sin respuesta: <span className="font-semibold text-gray-600">
+                    {stats?.totalTemplatesSent && stats.totalTemplatesSent > 0
+                      ? (((stats.totalTemplatesSent - stats.totalConfirmed - stats.totalCancelled) / stats.totalTemplatesSent) * 100).toFixed(1)
+                      : 0}%
+                  </span>
                 </p>
               </CardContent>
             </Card>
