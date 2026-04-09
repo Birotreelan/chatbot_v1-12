@@ -53,18 +53,17 @@ export async function GET() {
 
     for (const key of mainStatsKeys) {
       try {
-        // Verificar si la key tiene el campo totalUserInitiated antes de intentar resetearlo
-        const currentValue = await redis.hget(key, "totalUserInitiated")
-        if (currentValue !== null) {
-          await redis.hset(key, { totalUserInitiated: 0 })
-          resetCount++
-          console.log(`[RESET-API] Resetado totalUserInitiated en ${key} (valor anterior: ${currentValue})`)
-        } else {
-          console.log(`[RESET-API] Key ${key} no tiene totalUserInitiated, saltando...`)
-        }
+        // Usar HDEL para eliminar solo el campo totalUserInitiated sin tocar el resto
+        // HDEL es seguro incluso si el campo no existe (retorna 0 pero no falla)
+        const deletedFields = await redis.hdel(key, "totalUserInitiated")
+        
+        // Luego re-establecer el valor a 0
+        await redis.hset(key, { totalUserInitiated: 0 })
+        resetCount++
+        console.log(`[RESET-API] Resetado totalUserInitiated en ${key}`)
       } catch (e) {
-        console.log(`[RESET-API] Error procesando ${key}: ${e}`)
-        errors.push(`Error en ${key}: ${e}`)
+        console.log(`[RESET-API] Error procesando ${key}: ${String(e)}`)
+        errors.push(`Error en ${key}: ${String(e)}`)
       }
     }
 
