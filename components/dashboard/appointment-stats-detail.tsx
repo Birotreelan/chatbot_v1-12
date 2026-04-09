@@ -166,7 +166,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
             Conversaciones Iniciadas por Pacientes
           </CardTitle>
           <CardDescription>
-            Conversaciones que no tienen un recordatorio previo o están fuera de la ventana de 24 horas. Estas generan costos adicionales en WhatsApp Business.
+            Conversaciones que no tienen un recordatorio previo o están fuera de la ventana de 24 horas de conversaciones iniciadas por la clínica.
           </CardDescription>
         </CardHeader>
         <CardContent>
