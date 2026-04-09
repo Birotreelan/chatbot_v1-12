@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import type { ClientAppointmentStats } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, MessageCircle, PlusCircle, ArrowRight } from "lucide-react"
+import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, MessageCircle, PlusCircle, ArrowRight, Clock, TrendingUp } from "lucide-react"
 import { DateRangeFilter } from "./date-range-filter"
 
 interface AppointmentStatsDetailProps {
@@ -79,6 +79,15 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
   const newAppointmentConversionRate = stats?.totalUserInitiated && stats.totalUserInitiated > 0
     ? ((stats?.totalNewAppointments || 0) / stats.totalUserInitiated) * 100
     : 0
+
+  const formatTime = (minutes: number) => {
+    if (minutes < 60) {
+      return `${Math.round(minutes)} min`
+    }
+    const hours = Math.floor(minutes / 60)
+    const mins = Math.round(minutes % 60)
+    return `${hours}h ${mins}m`
+  }
 
   return (
     <div className="space-y-6">
@@ -223,6 +232,88 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
               <div className="text-xs text-green-600 mt-1">
                 Agendados exitosamente
               </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tiempos de respuesta */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tiempo Promedio de Respuesta</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats?.avgResponseTime ? formatTime(stats.avgResponseTime) : "—"}</div>
+            <p className="text-xs text-muted-foreground">Desde envío de recordatorio hasta respuesta</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tiempo hasta Confirmación</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats?.avgConfirmationTime ? formatTime(stats.avgConfirmationTime) : "—"}
+            </div>
+            <p className="text-xs text-muted-foreground">Promedio de respuesta para confirmar</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tiempo hasta Cancelación</CardTitle>
+            <XCircle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats?.avgCancellationTime ? formatTime(stats.avgCancellationTime) : "—"}
+            </div>
+            <p className="text-xs text-muted-foreground">Promedio de respuesta para cancelar</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tasa de Respuesta General */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Tasa de Respuesta General
+          </CardTitle>
+          <CardDescription>
+            Porcentaje de pacientes que respondieron al recordatorio (confirmando o cancelando)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-4">
+            <div className="text-4xl font-bold">{stats?.responseRate?.toFixed(1) || 0}%</div>
+            <div className="flex-1">
+              <div className="h-4 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-500"
+                  style={{ width: `${Math.min(stats?.responseRate || 0, 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+            <div className="text-center p-2 bg-green-50 rounded-lg">
+              <div className="font-semibold text-green-700">{stats?.confirmationRate?.toFixed(1) || 0}%</div>
+              <div className="text-green-600">Confirmaciones</div>
+            </div>
+            <div className="text-center p-2 bg-red-50 rounded-lg">
+              <div className="font-semibold text-red-700">{stats?.cancellationRate?.toFixed(1) || 0}%</div>
+              <div className="text-red-600">Cancelaciones</div>
+            </div>
+            <div className="text-center p-2 bg-muted rounded-lg">
+              <div className="font-semibold text-muted-foreground">
+                {(100 - (stats?.responseRate || 0)).toFixed(1)}%
+              </div>
+              <div className="text-muted-foreground">Sin respuesta</div>
             </div>
           </div>
         </CardContent>
