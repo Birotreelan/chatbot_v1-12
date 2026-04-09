@@ -7,9 +7,13 @@ const APPOINTMENT_EVENT_PREFIX = "appointment_event:"
 const APPOINTMENT_STATS_PREFIX = "appointment_stats:"
 const TEMPLATE_TRACKING_PREFIX = "template_tracking:"
 const PENDING_RESCHEDULE_PREFIX = "pending_reschedule:"
+const ACTIVE_USER_CONVERSATION_PREFIX = "active_user_conversation:"
 
 // Ventana de tiempo para considerar un reagendamiento como válido (12 horas en segundos)
 const RESCHEDULE_WINDOW_SECONDS = 12 * 60 * 60 // 12 horas
+
+// Ventana de tiempo para conversaciones user-initiated (24 horas en segundos)
+const USER_CONVERSATION_WINDOW_SECONDS = 24 * 60 * 60 // 24 horas
 
 // Obtener cliente de Redis
 function getRedisClient() {
@@ -561,14 +565,33 @@ export async function isWithinTemplateWindow(clienteId: string, phoneNumber: str
  * 1. No hay ningún template enviado previamente, O
  * 2. El último template fue hace más de 24 horas
  * 
+ * IMPORTANTE: Solo registra UNA conversación por cada período de 24h de inactividad.
+ * Si ya se registró una conversación user-initiated activa, no registra otra hasta que expire.
+ * 
  * @returns true si es user-initiated (y fue registrado), false si está dentro de ventana de template
  */
 export async function checkAndTrackUserInitiated(clienteId: string, phoneNumber: string): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) {
+    console.log("[APPOINTMENT_STATS] ⚠️ Redis no disponible para checkAndTrackUserInitiated")
+    return false
+  }
+
+  // Verificar si está dentro de ventana de template
   const isWithinWindow = await isWithinTemplateWindow(clienteId, phoneNumber)
 
   if (!isWithinWindow) {
-    // Es una conversación user-initiated - registrar el evento
-    console.log(`[APPOINTMENT_STATS] 📊 Conversación USER-INITIATED detectada para ${phoneNumber}`)
+    // Verificar si ya hay una conversación user-initiated activa (últimas 24h)
+    const activeConversationKey = `${ACTIVE_USER_CONVERSATION_PREFIX}${clienteId}_${phoneNumber}`
+    const existingConversation = await redis.get(activeConversationKey)
+    
+    if (existingConversation) {
+      console.log(`[APPOINTMENT_STATS] 📊 Ya existe conversación user-initiated activa para ${phoneNumber} - no se registra duplicado`)
+      return true // Es user-initiated pero ya está contado
+    }
+
+    // Es una conversación user-initiated NUEVA - registrar el evento
+    console.log(`[APPOINTMENT_STATS] 📊 Nueva conversación USER-INITIATED detectada para ${phoneNumber}`)
     
     await trackAppointmentEvent({
       clienteId,
@@ -579,6 +602,18 @@ export async function checkAndTrackUserInitiated(clienteId: string, phoneNumber:
         reason: "no_template_or_outside_24h_window"
       }
     })
+
+    // Marcar que hay una conversación user-initiated activa (expira en 24h)
+    await redis.set(
+      activeConversationKey, 
+      JSON.stringify({
+        startedAt: new Date().toISOString(),
+        phoneNumber,
+        clienteId
+      }), 
+      { ex: USER_CONVERSATION_WINDOW_SECONDS }
+    )
+    console.log(`[APPOINTMENT_STATS] 📊 Conversación user-initiated marcada como activa (expira en 24h)`)
 
     return true
   }
