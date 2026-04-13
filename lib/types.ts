@@ -4,6 +4,7 @@ export interface WhatsAppConfig {
   whatsappNumber?: string
   wabaId: string
   displayName: string
+  alias?: string
   whatsappAssistantId: string
   widgetAssistantId: string
   active: boolean

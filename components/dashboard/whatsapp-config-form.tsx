@@ -31,6 +31,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
   const { toast } = useToast()
   const [formData, setFormData] = useState<Partial<WhatsAppConfig>>({
     displayName: "",
+    alias: "",
     phoneNumberId: "",
     whatsappNumber: "",
     wabaId: "",
@@ -227,6 +228,21 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                   {errors.displayName && <p className="text-sm text-red-500">{errors.displayName}</p>}
                 </div>
 
+                <div className="space-y-2">
+                  <Label htmlFor="alias">Alias</Label>
+                  <Input
+                    id="alias"
+                    value={formData.alias || ""}
+                    onChange={(e) => updateFormData("alias", e.target.value)}
+                    placeholder="Ej: Clínica Central (uso interno)"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Nombre interno para identificar al cliente en el dashboard
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="cliente_id">Cliente ID *</Label>
                   <Input
