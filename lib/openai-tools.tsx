@@ -238,6 +238,32 @@ export const openaiTools = {
       required: ["query"],
     },
   },
+  route_to_pacienteNuevo_SinCualquierMedico: {
+    description: "Enruta la conversación al asistente especializado para pacientes nuevos sin médico específico asignado.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "La consulta original del usuario que requiere el cambio de asistente.",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  route_to_pacienteExistente_SinCualquierMedico: {
+    description: "Enruta la conversación al asistente especializado para pacientes existentes sin médico específico asignado.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "La consulta original del usuario que requiere el cambio de asistente.",
+        },
+      },
+      required: ["query"],
+    },
+  },
   // </CHANGE> Adding request_human_support tool
   request_human_support: {
     description:
@@ -579,6 +605,8 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
       // Ejecutar herramientas de routing
       case "route_to_reservas_assistant":
       case "route_to_turnos_assistant":
+      case "route_to_pacienteNuevo_SinCualquierMedico":
+      case "route_to_pacienteExistente_SinCualquierMedico":
         console.log(`[OPENAI-TOOLS] 🔀 Iniciando switch de asistente para: ${toolName}`)
         // Retornar el resultado del switch de asistente directamente
         // The following arguments are not needed for the initial call to executeOpenAITool,
