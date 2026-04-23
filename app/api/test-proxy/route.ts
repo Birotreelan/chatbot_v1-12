@@ -6,7 +6,7 @@ export async function POST(request: Request) {
     const { proxyUrl, clienteId, action, params } = await request.json()
 
     // Usar la URL hardcodeada si no se proporciona
-    const actualProxyUrl = proxyUrl || "https://treelan.net/managment/proxy_service/"
+    const actualProxyUrl = proxyUrl || "https://api.santiagovulliez.com/proxy_turnos.php"
 
     // Verificar parámetros requeridos
     if (!clienteId || !action) {

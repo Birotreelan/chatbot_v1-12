@@ -14,7 +14,7 @@ export async function GET(request: Request) {
 
   try {
     // Usar la URL hardcodeada
-    const proxy = "https://treelan.net/managment/proxy_service/"
+    const proxy = "https://api.santiagovulliez.com/proxy_turnos.php"
 
     console.log(`Probando búsqueda de turnos disponibles:
     - Rango de fechas: ${rangoFechas}
