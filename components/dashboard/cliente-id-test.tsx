@@ -41,7 +41,7 @@ export function ClienteIdTest({ config }: ClienteIdTestProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          proxyUrl: "https://treelan.net/managment/proxy_service/",
+          proxyUrl: "https://api.santiagovulliez.com/proxy_turnos.php",
           clienteId: clienteId,
           action: "get_paciente",
           params: { dni: "27158093" }, // Un DNI de ejemplo

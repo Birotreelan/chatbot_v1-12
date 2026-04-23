@@ -56,7 +56,7 @@ export function ProxyTestTool({ config }: ProxyTestToolProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          proxyUrl: "https://treelan.net/managment/proxy_service/",
+          proxyUrl: "https://api.santiagovulliez.com/proxy_turnos.php",
           clienteId: config.cliente_id,
           action,
           params: parsedParams,
