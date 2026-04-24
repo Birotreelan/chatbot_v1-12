@@ -9,7 +9,7 @@
  */
 function normalizePhoneNumber(phone: string): string {
   // Remover espacios, guiones, paréntesis y el signo +
-  const cleaned = phone.replace(/[\s\-$$$$+]/g, "")
+  const cleaned = phone.replace(/[\s\-()+]/g, "")
 
   console.log("[v0] [WHATSAPP_API] 📞 Normalizando número:", cleaned)
 
