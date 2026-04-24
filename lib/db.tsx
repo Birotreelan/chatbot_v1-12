@@ -233,6 +233,28 @@ export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | nu
   }
 }
 
+// Obtener una configuración por ID de número de teléfono - SIEMPRE FRESCA (sin cachear)
+export async function getWhatsAppConfigByPhoneIdFresh(phoneNumberId: string): Promise<WhatsAppConfig | null> {
+  try {
+    console.log(`[DB] 🔄 Obteniendo configuración FRESCA para teléfono: ${phoneNumberId}`)
+    
+    // Forzar lectura de todas las configuraciones (sin usar cache de Redis)
+    const allConfigs = await getAllWhatsAppConfigs()
+    const config = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
+    
+    if (config) {
+      console.log(`[DB] ✅ Configuración FRESCA encontrada: ${config.displayName}`)
+    } else {
+      console.log(`[DB] ❌ Configuración FRESCA no encontrada para: ${phoneNumberId}`)
+    }
+    
+    return config || null
+  } catch (error) {
+    console.error(`[DB] ❌ ERROR al obtener configuración fresca:`, error)
+    return null
+  }
+}
+
 // Obtener una configuración por ID de número de teléfono
 export async function getWhatsAppConfigByPhoneId(phoneNumberId: string): Promise<WhatsAppConfig | null> {
   const redisClient = getRedisClient()

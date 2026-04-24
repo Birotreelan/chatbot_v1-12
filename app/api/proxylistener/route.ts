@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getWhatsAppConfigByPhoneId, getAllWhatsAppConfigs, getThreadForUser } from "@/lib/db"
+import { getWhatsAppConfigByPhoneIdFresh, getAllWhatsAppConfigs, getThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp-api"
 import { safelyAddMessageToThread } from "@/lib/thread-manager"
 import { saveConversationMessage } from "@/lib/conversations"
@@ -66,8 +66,8 @@ async function handleButtonResponse(data: any) {
     console.log("[PROXYLISTENER] Respuesta del botón:", buttonResponse)
     console.log("[PROXYLISTENER] Tipo de mensaje:", message.type)
 
-    // Buscar configuración
-    const config = await getWhatsAppConfigByPhoneId(Phone_Number_Id)
+    // Buscar configuración (siempre fresca, sin cachear)
+    const config = await getWhatsAppConfigByPhoneIdFresh(Phone_Number_Id)
     if (!config) {
       return NextResponse.json(
         { success: false, error: `No se encontró configuración para Phone_Number_Id: ${Phone_Number_Id}` },
@@ -413,11 +413,11 @@ async function handleTemplateSend(data: any) {
 
     const messageType = Type || "text"
 
-    // Buscar configuración de WhatsApp
+    // Buscar configuración de WhatsApp (siempre fresca, sin cachear)
     let config = null
 
     if (Phone_Number_Id) {
-      config = await getWhatsAppConfigByPhoneId(Phone_Number_Id)
+      config = await getWhatsAppConfigByPhoneIdFresh(Phone_Number_Id)
     }
 
     if (!config) {
