@@ -440,6 +440,7 @@ async function handleTemplateSend(data: any) {
       active: config.active,
       hasToken: !!config.accessToken,
     })
+    console.log("[PROXYLISTENER] AccessToken desde config (Redis):", config.accessToken)
 
     if (!config.active) {
       return NextResponse.json(
