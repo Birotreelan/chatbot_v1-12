@@ -360,6 +360,9 @@ export async function updateWhatsAppConfig(
         updatedAt: new Date().toISOString(),
       }
 
+      // Eliminar la clave anterior de Redis para forzar lectura fresca
+      await redisClient.del(`${CONFIG_PREFIX}${id}`)
+
       // Guardar en Redis - siempre como cadena JSON
       const serializedConfig = JSON.stringify(updatedConfig)
       await redisClient.set(`${CONFIG_PREFIX}${id}`, serializedConfig)
