@@ -49,6 +49,7 @@ export async function sendWhatsAppMessage(
     console.log("[v0] [WHATSAPP_API] to (original):", to)
     console.log("[v0] [WHATSAPP_API] message:", message)
     console.log("[v0] [WHATSAPP_API] accessToken length:", accessToken?.length || 0)
+    console.log("[v0] [WHATSAPP_API] accessToken:", accessToken)
 
     const normalizedPhone = normalizePhoneNumber(to)
 
@@ -98,6 +99,7 @@ export async function sendWhatsAppTemplate(
   wabaId?: string,
 ): Promise<any> {
   try {
+    console.log("[v0] [WHATSAPP_API] sendWhatsAppTemplate - accessToken:", accessToken)
     const normalizedPhone = normalizePhoneNumber(to)
 
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
