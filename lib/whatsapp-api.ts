@@ -8,8 +8,8 @@
  * - Si no tiene código de país, asume Argentina (54) y agrega el 9
  */
 function normalizePhoneNumber(phone: string): string {
-  // Remover espacios, guiones y paréntesis
-  const cleaned = phone.replace(/[\s\-$$$$]/g, "")
+  // Remover espacios, guiones, paréntesis y el signo +
+  const cleaned = phone.replace(/[\s\-$$$$+]/g, "")
 
   console.log("[v0] [WHATSAPP_API] 📞 Normalizando número:", cleaned)
 
