@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppConfigByPhoneId, getAllWhatsAppConfigs, getThreadForUser } from "@/lib/db"
-import { sendWhatsAppMessage, sendWhatsAppTemplate, checkWhatsAppHealth } from "@/lib/whatsapp-api"
+import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp-api"
 import { safelyAddMessageToThread } from "@/lib/thread-manager"
 import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
@@ -448,43 +448,8 @@ async function handleTemplateSend(data: any) {
       )
     }
 
-    try {
-      console.log("[PROXYLISTENER] Verificando health status antes de enviar mensaje...")
-      const healthData = await checkWhatsAppHealth(config.phoneNumberId, config.accessToken)
-
-      console.log("[PROXYLISTENER] Health status:", healthData.status)
-
-      if (healthData.status === "BLOCKED") {
-        const errorMessage =
-          healthData.errors && healthData.errors.length > 0
-            ? healthData.errors[0].errorDescription
-            : "La cuenta de WhatsApp está bloqueada"
-
-        console.error("[PROXYLISTENER] ❌ Cuenta bloqueada. No se puede enviar mensaje.")
-        console.error("[PROXYLISTENER] Errores:", JSON.stringify(healthData.errors, null, 2))
-
-        return NextResponse.json(
-          {
-            success: false,
-            error: "ACCOUNT_BLOCKED",
-            message: errorMessage,
-            healthStatus: healthData.status,
-            errors: healthData.errors,
-            possibleSolution:
-              healthData.errors && healthData.errors.length > 0 ? healthData.errors[0].possibleSolution : undefined,
-          },
-          { status: 403 },
-        )
-      }
-
-      if (healthData.status === "LIMITED") {
-        console.warn("[PROXYLISTENER] ⚠️ Cuenta con capacidad limitada")
-      }
-    } catch (healthError) {
-      console.error("[PROXYLISTENER] Error al verificar health status:", healthError)
-      // Continue with message sending even if health check fails
-      // This prevents blocking legitimate messages due to API issues
-    }
+    // NOTA: Se eliminó la verificación de health status antes de enviar mensajes
+    // El mensaje se intenta enviar directamente y los errores se capturan en el proceso de envío
 
     // NUNCA usar lastUserPhoneNumber como fallback
     const destinationPhone = Phone.startsWith("+") ? Phone : `+${Phone}`
