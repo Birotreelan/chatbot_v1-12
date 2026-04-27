@@ -11,24 +11,28 @@ if (!UPSTASH_URL || !UPSTASH_TOKEN) {
 const DAYS_TO_KEEP = 30;
 const CUTOFF_TIMESTAMP = Date.now() - DAYS_TO_KEEP * 24 * 60 * 60 * 1000;
 
-async function redisCommand(command) {
-  const url = `${UPSTASH_URL}/${command}`;
+async function redisCommand(commandArray) {
+  const url = `${UPSTASH_URL}/exec`;
   
   try {
     const response = await fetch(url, {
-      method: "GET",
+      method: "POST",
       headers: {
-        Authorization: `Bearer ${UPSTASH_TOKEN}`,
+        "Authorization": `Bearer ${UPSTASH_TOKEN}`,
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify([commandArray]),
     });
 
     if (!response.ok) {
-      throw new Error(`Redis command failed: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`Redis command failed: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    return data[0];
   } catch (error) {
-    console.error(`Error executing command: ${command}`, error.message);
+    console.error(`Error executing command:`, error.message);
     throw error;
   }
 }
@@ -40,8 +44,12 @@ async function cleanup() {
   try {
     // Obtener todas las claves
     console.log("[INFO] Obteniendo todas las claves de conversaciones...");
-    const keysResult = await redisCommand("KEYS/conversation:*");
-    const keys = keysResult.result || [];
+    const keys = await redisCommand(["KEYS", "conversation:*"]);
+    
+    if (!Array.isArray(keys)) {
+      console.error("[ERROR] KEYS command did not return an array");
+      process.exit(1);
+    }
     
     console.log(`[INFO] Total de claves encontradas: ${keys.length}`);
 
@@ -52,20 +60,18 @@ async function cleanup() {
     // Procesar cada conversación
     for (const conversationKey of keys) {
       try {
-        // Obtener el rango de la conversación para verificar si está vacía o vieja
-        const llenResult = await redisCommand(`LLEN/${conversationKey}`);
-        const messageCount = llenResult.result || 0;
+        // Obtener el número de mensajes
+        const messageCount = await redisCommand(["LLEN", conversationKey]);
 
-        if (messageCount === 0) {
+        if (!messageCount || messageCount === 0) {
           // Eliminar clave vacía
-          await redisCommand(`DEL/${conversationKey}`);
+          await redisCommand(["DEL", conversationKey]);
           deletedConversations++;
           continue;
         }
 
         // Obtener el primer mensaje para obtener la fecha
-        const firstMessageResult = await redisCommand(`LINDEX/${conversationKey}/0`);
-        const firstMessageStr = firstMessageResult.result;
+        const firstMessageStr = await redisCommand(["LINDEX", conversationKey, "0"]);
 
         if (!firstMessageStr) {
           continue;
@@ -73,11 +79,11 @@ async function cleanup() {
 
         try {
           const firstMessage = JSON.parse(firstMessageStr);
-          const messageTimestamp = firstMessage.timestamp || 0;
+          const messageTimestamp = firstMessage.timestamp ? new Date(firstMessage.timestamp).getTime() : 0;
 
           if (messageTimestamp < CUTOFF_TIMESTAMP) {
             // Eliminar conversación antigua
-            await redisCommand(`DEL/${conversationKey}`);
+            await redisCommand(["DEL", conversationKey]);
             deletedConversations++;
             deletedMessages += messageCount;
 
@@ -85,13 +91,17 @@ async function cleanup() {
             const phoneNumber = conversationKey.replace("conversation:", "");
             
             // Eliminar contacto asociado
-            await redisCommand(`DEL/contact:${phoneNumber}`);
+            await redisCommand(["DEL", `contact:${phoneNumber}`]);
             deletedContacts++;
 
             console.log(`[DELETED] Conversación ${phoneNumber}: ${messageCount} mensajes eliminados (fecha: ${new Date(messageTimestamp).toISOString()})`);
           }
         } catch (parseError) {
           console.warn(`[WARN] No se pudo parsear mensaje de ${conversationKey}`);
+          // Si no se puede parsear, es probablemente vieja, eliminar de todas formas
+          await redisCommand(["DEL", conversationKey]);
+          deletedConversations++;
+          deletedMessages += messageCount;
         }
       } catch (keyError) {
         console.warn(`[WARN] Error procesando clave ${conversationKey}:`, keyError.message);
