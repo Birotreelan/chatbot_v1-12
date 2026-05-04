@@ -17,6 +17,11 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "whatsapp123"
 // Obtener el cliente de Redis
 function getRedisClient() {
   try {
+    console.log("[v0] Redis ENV check:", {
+      hasUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+      urlPrefix: process.env.UPSTASH_REDIS_REST_URL?.substring(0, 30),
+      hasToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+    })
     return Redis.fromEnv()
   } catch (error) {
     console.warn("Upstash Redis no está disponible:", error)
