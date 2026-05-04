@@ -2165,78 +2165,27 @@ export async function processRunWithCorrectFlow(
               const finished = await waitForCancellingRunToFinish(threadId, activeRuns.runId)
 
               if (!finished) {
-                // Si después de 30 segundos sigue en cancelling, crear nuevo thread
-                console.log(`[OPENAI] 🔄 Run atascado en cancelling, creando nuevo thread...`)
-                const newThreadResult = await createNewThreadForStuckRun(threadId, phoneNumberId)
-
-                if (newThreadResult.success && newThreadResult.newThreadId) {
-                  console.log(`[OPENAI] ✅ Nuevo thread creado: ${newThreadResult.newThreadId}`)
-
-                  // Crear run en el nuevo thread
-                  console.log(`[OPENAI] 🔄 Creando run en nuevo thread...`)
-                  const newRun = await openai.beta.threads.runs.create(newThreadResult.newThreadId, {
-                    assistant_id: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
-                  })
-                  console.log(`[OPENAI] 🔄 Nuevo run creado: ${newRun.id}`)
-
-                  console.log(`[v0] 🔄 Llamada recursiva con:`, {
-                    threadId: newThreadResult.newThreadId,
-                    runId: newRun.id,
-                    accessToken: accessToken ? `${accessToken.substring(0, 10)}...` : "undefined",
-                    phoneNumberId,
-                  })
-
-                  return processRunWithCorrectFlow(
-                    openai,
-                    newThreadResult.newThreadId,
-                    newRun.id,
-                    accessToken,
-                    phoneNumberId,
-                    clienteId,
-                    newThreadResult.userPhone, // Pass user phone number
-                    retryCount + 1,
-                  )
-                } else {
-                  throw new Error("No se pudo crear nuevo thread después de run atascado")
+                // Si después de 30 segundos sigue en cancelling, NO crear nuevo thread
+                // En su lugar, devolver mensaje de error manteniendo el contexto
+                console.log(`[OPENAI] ⚠️ Run atascado en cancelling, solicitando reintento al usuario...`)
+                
+                return {
+                  success: false,
+                  response: "Disculpá, hubo un problema procesando tu respuesta. ¿Podrías enviarla nuevamente?",
+                  error: "Run stuck in cancelling state - requesting user retry",
                 }
               }
             } else {
               // Para otros estados activos (queued, in_progress), intentar normal cancel
               const cancelled = await cancelRunAndWait(threadId, activeRuns.runId)
               if (!cancelled) {
-                console.error(`[OPENAI] ❌ No se pudo cancelar el run activo, intentando crear nuevo thread...`)
-
-                // Fallback: crear nuevo thread
-                const newThreadResult = await createNewThreadForStuckRun(threadId, phoneNumberId)
-
-                if (newThreadResult.success && newThreadResult.newThreadId) {
-                  console.log(`[OPENAI] ✅ Nuevo thread creado como fallback: ${newThreadResult.newThreadId}`)
-
-                  const newRun = await openai.beta.threads.runs.create(newThreadResult.newThreadId, {
-                    assistant_id: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
-                  })
-                  console.log(`[OPENAI] 🔄 Nuevo run creado: ${newRun.id}`)
-
-                  // Log recursive call parameters fallback with:
-                  console.log(`[v0] 🔄 Llamada recursiva fallback con:`, {
-                    threadId: newThreadResult.newThreadId,
-                    runId: newRun.id,
-                    accessToken: accessToken ? `${accessToken.substring(0, 10)}...` : "undefined",
-                    phoneNumberId,
-                  })
-
-                  return processRunWithCorrectFlow(
-                    openai,
-                    newThreadResult.newThreadId,
-                    newRun.id,
-                    accessToken,
-                    phoneNumberId,
-                    clienteId,
-                    newThreadResult.userPhone, // Pass user phone number
-                    retryCount + 1,
-                  )
-                } else {
-                  throw new Error(`No se pudo cancelar el run activo ni crear nuevo thread: ${activeRuns.runId}`)
+                // NO crear nuevo thread - devolver mensaje de error manteniendo el contexto
+                console.log(`[OPENAI] ⚠️ No se pudo cancelar el run activo, solicitando reintento al usuario...`)
+                
+                return {
+                  success: false,
+                  response: "Disculpá, hubo un problema procesando tu respuesta. ¿Podrías enviarla nuevamente?",
+                  error: `Could not cancel active run ${activeRuns.runId} - requesting user retry`,
                 }
               }
             }
