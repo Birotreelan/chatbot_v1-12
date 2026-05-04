@@ -11,10 +11,18 @@ const SUPPORT_USERS_BY_TENANT = "support_users:tenant:"
 
 // Función para obtener el cliente de Redis
 function getRedisClient() {
+  console.log("[v0] support-users getRedisClient - ENV check:", {
+    hasUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+    urlValue: process.env.UPSTASH_REDIS_REST_URL?.substring(0, 50) + "...",
+    hasToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+    tokenLength: process.env.UPSTASH_REDIS_REST_TOKEN?.length,
+  })
   try {
-    return Redis.fromEnv()
+    const client = Redis.fromEnv()
+    console.log("[v0] Redis client creado exitosamente")
+    return client
   } catch (error) {
-    console.warn("[Support Users] Upstash Redis no está disponible:", error)
+    console.error("[v0] Error creando Redis client:", error)
     return null
   }
 }
@@ -89,10 +97,16 @@ export async function getSupportUser(userId: string): Promise<SupportUser | null
 
 // Obtener un usuario por username
 export async function getSupportUserByUsername(username: string): Promise<SupportUser | null> {
+  console.log("[v0] getSupportUserByUsername - username:", username)
   const redis = getRedisClient()
-  if (!redis) return null
+  if (!redis) {
+    console.log("[v0] getSupportUserByUsername - redis es null!")
+    return null
+  }
 
+  console.log("[v0] Ejecutando redis.get para key:", `${SUPPORT_USER_USERNAME_INDEX}${username}`)
   const userId = await redis.get<string>(`${SUPPORT_USER_USERNAME_INDEX}${username}`)
+  console.log("[v0] redis.get resultado userId:", userId)
   if (!userId) return null
 
   return getSupportUser(userId)
@@ -200,11 +214,22 @@ export async function deleteSupportUser(userId: string): Promise<boolean> {
 
 // Verificar contraseña
 export async function verifySupportUserPassword(username: string, password: string): Promise<SupportUser | null> {
-  const user = await getSupportUserByUsername(username)
-  if (!user || !user.active) return null
+  console.log("[v0] verifySupportUserPassword - buscando usuario:", username)
+  try {
+    const user = await getSupportUserByUsername(username)
+    console.log("[v0] getSupportUserByUsername resultado:", user ? "encontrado" : "null")
+    if (!user || !user.active) {
+      console.log("[v0] Usuario no encontrado o inactivo")
+      return null
+    }
 
-  const isValid = await bcrypt.compare(password, user.passwordHash)
-  if (!isValid) return null
+    const isValid = await bcrypt.compare(password, user.passwordHash)
+    console.log("[v0] Verificación de contraseña:", isValid ? "válida" : "inválida")
+    if (!isValid) return null
 
-  return user
+    return user
+  } catch (error) {
+    console.error("[v0] Error en verifySupportUserPassword:", error)
+    throw error
+  }
 }
