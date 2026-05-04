@@ -2171,7 +2171,7 @@ export async function processRunWithCorrectFlow(
                 
                 return {
                   success: false,
-                  response: "Disculpá, hubo un problema procesando tu respuesta. ¿Podrías enviarla nuevamente?",
+                  response: "Lo siento, hubo un problema técnico procesando tu respuesta. ¿Podrías enviar nuevamente tu última respuesta?",
                   error: "Run stuck in cancelling state - requesting user retry",
                 }
               }
@@ -2184,7 +2184,7 @@ export async function processRunWithCorrectFlow(
                 
                 return {
                   success: false,
-                  response: "Disculpá, hubo un problema procesando tu respuesta. ¿Podrías enviarla nuevamente?",
+                  response: "Lo siento, hubo un problema técnico procesando tu respuesta. ¿Podrías enviar nuevamente tu última respuesta?",
                   error: `Could not cancel active run ${activeRuns.runId} - requesting user retry`,
                 }
               }
