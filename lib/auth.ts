@@ -17,6 +17,11 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "whatsapp123"
 // Obtener el cliente de Redis
 function getRedisClient() {
   try {
+    console.log("[v0] Redis ENV check:", {
+      hasUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+      urlPrefix: process.env.UPSTASH_REDIS_REST_URL?.substring(0, 30),
+      hasToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+    })
     return Redis.fromEnv()
   } catch (error) {
     console.warn("Upstash Redis no está disponible:", error)
@@ -28,8 +33,12 @@ export async function verifyCredentials(
   username: string,
   password: string,
 ): Promise<{ success: boolean; user?: SessionData; error?: string }> {
+  console.log("[v0] verifyCredentials llamado con username:", username)
+  
   // 1. Verificar si es el super admin
+  console.log("[v0] Verificando super admin - ADMIN_USERNAME:", ADMIN_USERNAME)
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    console.log("[v0] Login exitoso como super_admin")
     return {
       success: true,
       user: {
@@ -43,8 +52,11 @@ export async function verifyCredentials(
   }
 
   // 2. Buscar en usuarios de soporte
+  console.log("[v0] No es super admin, buscando en usuarios de soporte...")
   try {
+    console.log("[v0] Llamando verifySupportUserPassword...")
     const supportUser = await verifySupportUserPassword(username, password)
+    console.log("[v0] Resultado verifySupportUserPassword:", supportUser ? "usuario encontrado" : "null")
 
     if (!supportUser) {
       return {
@@ -64,7 +76,7 @@ export async function verifyCredentials(
       },
     }
   } catch (error) {
-    console.error("[Auth] Error verificando credenciales:", error)
+    console.error("[v0] Error en verifyCredentials:", error)
     return {
       success: false,
       error: "Error al procesar la solicitud",
