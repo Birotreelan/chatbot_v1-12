@@ -223,6 +223,32 @@ export async function handleMessage(value: WhatsAppValue) {
         `[WHATSAPP] Detectada respuesta de botón: ${message.button.text} (payload: ${message.button.payload})`,
       )
 
+      // Detectar si es un botón de cancelación
+      const buttonText = (message.button.text || "").toLowerCase()
+      const buttonPayload = (message.button.payload || "").toLowerCase()
+      const isCancellationButton = buttonText.includes("cancelar") || buttonPayload.includes("cancel")
+
+      // Si es cancelación, NO enviar al proxy - pasar directamente al chatbot
+      if (isCancellationButton) {
+        console.log(`[WHATSAPP] Botón de CANCELACIÓN detectado - pasando al chatbot sin ejecutar en proxy`)
+        
+        // Crear mensaje para el chatbot con la solicitud de cancelación
+        userMessage = `El paciente presionó el botón "${originalMessage}" solicitando cancelar su turno.
+
+[SOLICITUD_CANCELACION]
+Accion: El paciente ha presionado el botón de cancelación
+Boton_Texto: ${message.button.text}
+Boton_Payload: ${message.button.payload}
+Timestamp: ${new Date().toISOString()}
+[/SOLICITUD_CANCELACION]
+
+IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno. Pregunta al paciente si está seguro de querer cancelar, mostrando los detalles del turno.`
+        
+        // Continuar con el flujo normal del chatbot (no hacer nada más aquí)
+      } else {
+        // Para confirmación y reprogramación, mantener el flujo actual al proxy
+        console.log(`[WHATSAPP] Botón de CONFIRMACIÓN/REPROGRAMACIÓN detectado - enviando al proxy`)
+        
       let proxyResponse = null
       try {
         const proxyPayload = {
@@ -555,7 +581,7 @@ Explica que el turno ya expiró y que debe contactar a la clínica para reagenda
               break
 
             default:
-              // Error gen��rico
+              // Error genérico
               userMessage = `El paciente presionó "${originalMessage}" pero hubo un error en el procesamiento.
 
 [ERROR_PROCESAMIENTO_BOTON]
@@ -568,6 +594,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
         }
       }
+      } // Cierre del else (flujo proxy para confirmación/reprogramación)
     }
 
     // Comandos especiales
