@@ -1,6 +1,7 @@
 import OpenAI from "openai"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { getWhatsAppConfigByPhoneId, updateThreadId } from "@/lib/db"
+import { safelyAddMessageToThread } from "./thread-manager"
 import {
   obtenerTurnosDisponibles,
   confirmarTurno,
@@ -1832,7 +1833,8 @@ export async function getAssistantResponse(
 
     console.log(`[OPENAI] ⚙️ Config: ${config.displayName} | Cliente: ${config.cliente_id}`)
 
-    const messageResponse = await openai.beta.threads.messages.create(threadId, {
+    // Usar safelyAddMessageToThread para verificar y esperar a que se completen los runs activos
+    const messageResponse = await safelyAddMessageToThread(threadId, {
       role: "user",
       content: message,
     })

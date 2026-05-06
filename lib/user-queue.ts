@@ -12,7 +12,50 @@ interface QueuedMessage {
   audioMimeType?: string
 }
 
-const processingUsers = new Set<string>()
+// Redis keys for distributed processing state
+const PROCESSING_KEY_PREFIX = "processing_user:"
+
+async function isUserProcessing(userPhoneNumber: string): Promise<boolean> {
+  const redisClient = getRedisClient()
+  if (!redisClient) {
+    return false
+  }
+  try {
+    const key = `${PROCESSING_KEY_PREFIX}${userPhoneNumber}`
+    const result = await redisClient.get(key)
+    return result !== null
+  } catch (error) {
+    logger.error("USER-QUEUE", `Error checking if user is processing: ${userPhoneNumber}`, error)
+    return false
+  }
+}
+
+async function setUserProcessing(userPhoneNumber: string): Promise<void> {
+  const redisClient = getRedisClient()
+  if (!redisClient) {
+    return
+  }
+  try {
+    const key = `${PROCESSING_KEY_PREFIX}${userPhoneNumber}`
+    // Set with 5-minute expiration (in case the process crashes)
+    await redisClient.setex(key, 300, "1")
+  } catch (error) {
+    logger.error("USER-QUEUE", `Error setting user as processing: ${userPhoneNumber}`, error)
+  }
+}
+
+async function clearUserProcessing(userPhoneNumber: string): Promise<void> {
+  const redisClient = getRedisClient()
+  if (!redisClient) {
+    return
+  }
+  try {
+    const key = `${PROCESSING_KEY_PREFIX}${userPhoneNumber}`
+    await redisClient.del(key)
+  } catch (error) {
+    logger.error("USER-QUEUE", `Error clearing user processing: ${userPhoneNumber}`, error)
+  }
+}
 
 export async function enqueueUserMessage(
   userPhoneNumber: string,
@@ -77,7 +120,8 @@ export async function enqueueUserMessage(
 }
 
 async function processUserQueue(userPhoneNumber: string) {
-  if (processingUsers.has(userPhoneNumber)) {
+  const isProcessing = await isUserProcessing(userPhoneNumber)
+  if (isProcessing) {
     logger.debug("USER-QUEUE", `Ya procesando: ${userPhoneNumber}`)
     return
   }
@@ -88,7 +132,7 @@ async function processUserQueue(userPhoneNumber: string) {
     return
   }
 
-  processingUsers.add(userPhoneNumber)
+  await setUserProcessing(userPhoneNumber)
 
   try {
     logger.info("USER-QUEUE", `Procesando cola: ${userPhoneNumber}`)
@@ -187,7 +231,7 @@ async function processUserQueue(userPhoneNumber: string) {
   } catch (error) {
     logger.error("USER-QUEUE", `Error en cola: ${userPhoneNumber}`, error)
   } finally {
-    processingUsers.delete(userPhoneNumber)
+    await clearUserProcessing(userPhoneNumber)
   }
 }
 
@@ -203,7 +247,7 @@ export async function getUserQueueStatus(userPhoneNumber: string) {
   try {
     const queueKey = `user_queue:${userPhoneNumber}`
     const queueLength = await redisClient.llen(queueKey)
-    const isProcessing = processingUsers.has(userPhoneNumber)
+    const isProcessing = await isUserProcessing(userPhoneNumber)
 
     return {
       queueLength,
