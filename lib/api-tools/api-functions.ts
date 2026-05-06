@@ -1,7 +1,7 @@
 import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse, SedeResponse } from "./types"
 import { getClinicApiConfig } from "./types"
 import { getRedisClient } from "../redis"
-import { TIMEOUTS, fetchWithTimeout } from "../config/timeouts"
+import { TIMEOUTS, fetchWithTimeout, fetchWithRetry } from "../config/timeouts"
 
 // Obtener la URL del proxy desde las variables de entorno
 function getProxyUrl(): string {
@@ -588,14 +588,19 @@ export async function confirmarTurno(
 
     console.log("[API] 📤 Enviando request:", requestBody)
 
-    const response = await fetch(config.baseUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...config.headers,
+    const response = await fetchWithRetry(
+      config.baseUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...config.headers,
+        },
+        body: JSON.stringify(requestBody),
       },
-      body: JSON.stringify(requestBody),
-    })
+      TIMEOUTS.PROXY_TIMEOUT,
+      { maxRetries: 3, initialDelayMs: 8000 },
+    )
 
     if (!response.ok) {
       console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
@@ -648,14 +653,19 @@ export async function cancelarTurno(
 
     console.log("[API] 📤 Enviando request de cancelación:", requestBody)
 
-    const response = await fetch(config.baseUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...config.headers,
+    const response = await fetchWithRetry(
+      config.baseUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...config.headers,
+        },
+        body: JSON.stringify(requestBody),
       },
-      body: JSON.stringify(requestBody),
-    })
+      TIMEOUTS.PROXY_TIMEOUT,
+      { maxRetries: 3, initialDelayMs: 8000 },
+    )
 
     if (!response.ok) {
       console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
