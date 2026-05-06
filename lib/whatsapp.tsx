@@ -537,6 +537,24 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
             }
           }
 
+          // Tratar ALREADY_CONFIRMED como éxito aunque venga con success: false
+          if (errorType === "ALREADY_CONFIRMED") {
+            console.log(`[WHATSAPP] ✅ ALREADY_CONFIRMED detectado - tratando como éxito`)
+
+            if (config.cliente_id) {
+              const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+              await trackAppointmentEvent({
+                clienteId: config.cliente_id,
+                phoneNumber: userPhoneNumber,
+                eventType: "confirmed",
+                timestamp: new Date().toISOString(),
+                templateSentAt: templateSentAt || undefined,
+                metadata: { proxyResponse },
+              })
+              console.log(`[WHATSAPP] Evento de confirmación registrado (ya estaba confirmado) para cliente ${config.cliente_id}`)
+            }
+          }
+
           switch (errorType) {
             case "CANNOT_CANCEL":
               userMessage = `El paciente intentó cancelar su turno presionando "${userAction}" pero no es posible.
@@ -578,6 +596,33 @@ Solucion_Sugerida: Contactar directamente con la clínica para reagendar
 [/ERROR_ESTADO_TURNO]
 
 Explica que el turno ya expiró y que debe contactar a la clínica para reagendar.`
+              break
+
+            case "ALREADY_CONFIRMED":
+              // Tratar como éxito - el turno ya estaba confirmado
+              if (config.cliente_id) {
+                await trackAppointmentEvent({
+                  clienteId: config.cliente_id,
+                  phoneNumber: userPhoneNumber,
+                  eventType: "confirmed",
+                  timestamp: new Date().toISOString(),
+                  templateSentAt: templateSentAt || undefined,
+                  metadata: { proxyResponse },
+                })
+                console.log(`[WHATSAPP] Evento de confirmación registrado (ya estaba confirmado) para cliente ${config.cliente_id}`)
+              }
+
+              userMessage = `El paciente presionó "${originalMessage}" para confirmar su turno.
+
+[CONFIRMACION_TURNO_EXITOSA]
+Accion: Confirmación de turno
+Estado: ALREADY_CONFIRMED
+Mensaje: El turno ya estaba confirmado previamente
+Instrucciones: El turno ya se encuentra confirmado en el sistema
+Timestamp: ${new Date().toISOString()}
+[/CONFIRMACION_TURNO_EXITOSA]
+
+IMPORTANTE: Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno confirmado (fecha, hora, profesional, lugar). Informa al paciente que su turno ya estaba confirmado en el sistema.`
               break
 
             default:
