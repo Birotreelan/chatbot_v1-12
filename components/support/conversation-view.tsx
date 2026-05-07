@@ -9,6 +9,7 @@ import { MessageInput } from "./message-input"
 import { CloseSessionDialog } from "./close-session-dialog"
 import type { HumanSupportSession, HumanSupportMessage } from "@/lib/types"
 import { ArrowLeft } from "lucide-react"
+import { PatientInfoPanel } from "./patient-info-panel"
 
 interface ExtendedSession extends HumanSupportSession {
   messages: HumanSupportMessage[]
@@ -134,27 +135,37 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
             <p className="text-muted-foreground mt-1">{session.reason}</p>
           </div>
           <Button variant="destructive" onClick={() => setShowCloseDialog(true)}>
-            Cerrar Atención
+            Cerrar Atencion
           </Button>
         </div>
       </div>
 
-      {/* Conversación */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Historial de Conversación</CardTitle>
-          <CardDescription>Todos los mensajes de esta conversación, incluyendo los del asistente de IA</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-6">
-            {/* Lista de mensajes */}
-            <MessageList messages={session.messages} />
+      {/* Layout de dos columnas: Panel Paciente | Conversación */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Panel de información del paciente */}
+        <div className="lg:col-span-1 order-2 lg:order-1">
+          <PatientInfoPanel sessionId={sessionId} />
+        </div>
 
-            {/* Input para responder */}
-            <MessageInput onSend={handleSendMessage} />
-          </div>
-        </CardContent>
-      </Card>
+        {/* Conversación */}
+        <div className="lg:col-span-2 order-1 lg:order-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Historial de Conversacion</CardTitle>
+              <CardDescription>Todos los mensajes de esta conversacion, incluyendo los del asistente de IA</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {/* Lista de mensajes */}
+                <MessageList messages={session.messages} />
+
+                {/* Input para responder */}
+                <MessageInput onSend={handleSendMessage} />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       {/* Dialog para cerrar */}
       <CloseSessionDialog open={showCloseDialog} onOpenChange={setShowCloseDialog} onConfirm={handleCloseSession} />

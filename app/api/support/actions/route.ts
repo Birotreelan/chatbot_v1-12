@@ -157,6 +157,19 @@ async function handleAssign(sessionId: string) {
 
     if (!assigned) {
       console.log("[v0] [ASSIGN] ERROR: No se pudo asignar")
+      // Verificar si alguien más tomó la sesión (race condition)
+      const currentSession = await getSupportSession(sessionId)
+      if (currentSession && currentSession.status === "in_progress") {
+        console.log("[v0] [ASSIGN] RACE CONDITION: Otro agente tomó la sesión")
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: "Otro agente tomó esta conversación. Se actualizará la lista automáticamente.",
+            reason: "race_condition"
+          }, 
+          { status: 409 }
+        )
+      }
       return NextResponse.json({ success: false, error: "No se pudo asignar la sesión" }, { status: 500 })
     }
 
