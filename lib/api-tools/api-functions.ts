@@ -563,7 +563,7 @@ export async function obtenerTurnosDisponibles(
   }
 }
 
-// Función para confirmar turno
+// Función para confirmar turno con reintentos para respuestas inválidas
 export async function confirmarTurno(
   clienteId: string,
   turnoData: {
@@ -574,59 +574,136 @@ export async function confirmarTurno(
     }
   },
 ): Promise<ApiResponse<any>> {
-  try {
-    console.log(`[API] 🎯 Confirmando turno:`, turnoData)
+  const MAX_RETRIES = 4
+  const RETRY_DELAYS = [0, 5000, 10000, 15000] // Espera progresiva entre reintentos
+  
+  const config = getClinicApiConfig()
+  const requestBody = {
+    Cliente_Id: clienteId,
+    Action: "confirmar_turno",
+    fecha: turnoData.fecha,
+    paciente_datos: turnoData.paciente_datos,
+  }
 
-    const config = getClinicApiConfig()
+  console.log(`[API] 🎯 Confirmando turno:`, turnoData)
+  console.log("[API] 📤 Enviando request:", requestBody)
 
-    const requestBody = {
-      Cliente_Id: clienteId,
-      Action: "confirmar_turno",
-      fecha: turnoData.fecha,
-      paciente_datos: turnoData.paciente_datos,
-    }
+  let lastError: Error | null = null
 
-    console.log("[API] 📤 Enviando request:", requestBody)
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // Esperar antes del reintento (excepto el primer intento)
+      if (attempt > 1) {
+        const delay = RETRY_DELAYS[attempt - 1] || 15000
+        console.log(`[API] ⏳ Esperando ${delay}ms antes del reintento ${attempt}/${MAX_RETRIES}...`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
 
-    const response = await fetchWithRetry(
-      config.baseUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...config.headers,
+      console.log(`[API] 🔄 Intento ${attempt}/${MAX_RETRIES} de confirmación de turno`)
+
+      const response = await fetchWithRetry(
+        config.baseUrl,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...config.headers,
+          },
+          body: JSON.stringify(requestBody),
         },
-        body: JSON.stringify(requestBody),
-      },
-      TIMEOUTS.PROXY_TIMEOUT,
-      { maxRetries: 3, initialDelayMs: 8000 },
-    )
+        TIMEOUTS.PROXY_TIMEOUT,
+        { maxRetries: 2, initialDelayMs: 3000 }, // Reintentos internos para errores de red
+      )
 
-    if (!response.ok) {
-      console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
-      return {
-        exito: false,
-        error: `Error HTTP ${response.status}`,
-        mensaje: "No se pudo confirmar el turno. Por favor, intente nuevamente o comuníquese con la clínica.",
+      if (!response.ok) {
+        console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
+        // Los errores HTTP 5xx son transitorios, reintentar
+        if (response.status >= 500 && attempt < MAX_RETRIES) {
+          console.log(`[API] 🔄 Error de servidor ${response.status}, reintentando...`)
+          lastError = new Error(`Error HTTP ${response.status}`)
+          continue
+        }
+        return {
+          exito: false,
+          error: `Error HTTP ${response.status}`,
+          mensaje: "No se pudo confirmar el turno. Por favor, intente nuevamente o comuníquese con la clínica.",
+        }
+      }
+
+      // Obtener el texto de la respuesta primero para validar
+      const responseText = await response.text()
+      
+      // Verificar si la respuesta parece ser HTML (error del servidor)
+      if (responseText.trim().startsWith('<') || responseText.includes('<br />') || responseText.includes('<html')) {
+        console.error(`[API] ⚠️ Servidor respondió con HTML en lugar de JSON (intento ${attempt}/${MAX_RETRIES})`)
+        console.error(`[API] 📄 Respuesta HTML: ${responseText.substring(0, 200)}...`)
+        
+        if (attempt < MAX_RETRIES) {
+          console.log(`[API] 🔄 Servidor temporalmente no disponible, reintentando...`)
+          lastError = new Error("Servidor respondió con HTML en lugar de JSON")
+          continue
+        }
+        
+        return {
+          exito: false,
+          error: "El servidor está temporalmente no disponible",
+          mensaje: "No se pudo confirmar el turno en este momento. Por favor, intente nuevamente en unos segundos.",
+        }
+      }
+
+      // Intentar parsear como JSON
+      let data
+      try {
+        data = JSON.parse(responseText)
+      } catch (parseError) {
+        console.error(`[API] ⚠️ Error parseando JSON (intento ${attempt}/${MAX_RETRIES}):`, parseError)
+        console.error(`[API] 📄 Respuesta recibida: ${responseText.substring(0, 200)}...`)
+        
+        if (attempt < MAX_RETRIES) {
+          console.log(`[API] 🔄 Respuesta inválida, reintentando...`)
+          lastError = parseError as Error
+          continue
+        }
+        
+        return {
+          exito: false,
+          error: "Respuesta inválida del servidor",
+          mensaje: "No se pudo confirmar el turno. Por favor, intente nuevamente en unos segundos.",
+        }
+      }
+
+      console.log("[API] 📥 Respuesta recibida:", data)
+      
+      // Si llegamos aquí, la respuesta fue exitosa
+      if (attempt > 1) {
+        console.log(`[API] ✅ Confirmación exitosa en el intento ${attempt}`)
+      }
+
+      // Retornar la respuesta directamente (nuevo formato de API)
+      return data
+      
+    } catch (error) {
+      console.error(`[API] ❌ Error en intento ${attempt}/${MAX_RETRIES}:`, error)
+      lastError = error as Error
+      
+      // Si no es el último intento, continuar con el siguiente
+      if (attempt < MAX_RETRIES) {
+        console.log(`[API] 🔄 Reintentando después del error...`)
+        continue
       }
     }
+  }
 
-    const data = await response.json()
-    console.log("[API] 📥 Respuesta recibida:", data)
-
-    // Retornar la respuesta directamente (nuevo formato de API)
-    return data
-  } catch (error) {
-    console.error("[API] ❌ Error al confirmar turno:", error)
-    return {
-      exito: false,
-      error: error instanceof Error ? error.message : "Error desconocido",
-      mensaje: "Ocurrió un error al confirmar el turno. Por favor, intente nuevamente.",
-    }
+  // Si llegamos aquí, todos los reintentos fallaron
+  console.error(`[API] ❌ Todos los ${MAX_RETRIES} intentos de confirmación fallaron`)
+  return {
+    exito: false,
+    error: lastError?.message || "Error desconocido",
+    mensaje: "Ocurrió un error al confirmar el turno. Por favor, intente nuevamente.",
   }
 }
 
-// Función para cancelar turno
+// Función para cancelar turno con reintentos para respuestas inválidas
 export async function cancelarTurno(
   clienteId: string,
   turnoData: {
@@ -638,56 +715,133 @@ export async function cancelarTurno(
     }
   },
 ): Promise<any> {
-  try {
-    console.log(`[API] ❌ Cancelando turno:`, turnoData)
+  const MAX_RETRIES = 4
+  const RETRY_DELAYS = [0, 5000, 10000, 15000] // Espera progresiva entre reintentos
+  
+  const config = getClinicApiConfig()
+  const requestBody = {
+    Cliente_Id: clienteId,
+    Action: "cancelar_turno",
+    fecha: turnoData.fecha,
+    motivo: turnoData.motivo,
+    paciente_datos: turnoData.paciente_datos,
+  }
 
-    const config = getClinicApiConfig()
+  console.log(`[API] ❌ Cancelando turno:`, turnoData)
+  console.log("[API] 📤 Enviando request de cancelación:", requestBody)
 
-    const requestBody = {
-      Cliente_Id: clienteId,
-      Action: "cancelar_turno",
-      fecha: turnoData.fecha,
-      motivo: turnoData.motivo,
-      paciente_datos: turnoData.paciente_datos,
-    }
+  let lastError: Error | null = null
 
-    console.log("[API] 📤 Enviando request de cancelación:", requestBody)
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // Esperar antes del reintento (excepto el primer intento)
+      if (attempt > 1) {
+        const delay = RETRY_DELAYS[attempt - 1] || 15000
+        console.log(`[API] ⏳ Esperando ${delay}ms antes del reintento ${attempt}/${MAX_RETRIES}...`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
 
-    const response = await fetchWithRetry(
-      config.baseUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...config.headers,
+      console.log(`[API] 🔄 Intento ${attempt}/${MAX_RETRIES} de cancelación de turno`)
+
+      const response = await fetchWithRetry(
+        config.baseUrl,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...config.headers,
+          },
+          body: JSON.stringify(requestBody),
         },
-        body: JSON.stringify(requestBody),
-      },
-      TIMEOUTS.PROXY_TIMEOUT,
-      { maxRetries: 3, initialDelayMs: 8000 },
-    )
+        TIMEOUTS.PROXY_TIMEOUT,
+        { maxRetries: 2, initialDelayMs: 3000 }, // Reintentos internos para errores de red
+      )
 
-    if (!response.ok) {
-      console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
-      return {
-        success: false,
-        error: `Error HTTP ${response.status}`,
-        mensaje: "No se pudo cancelar el turno. Por favor, intente nuevamente o comuníquese con la clínica.",
+      if (!response.ok) {
+        console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
+        // Los errores HTTP 5xx son transitorios, reintentar
+        if (response.status >= 500 && attempt < MAX_RETRIES) {
+          console.log(`[API] 🔄 Error de servidor ${response.status}, reintentando...`)
+          lastError = new Error(`Error HTTP ${response.status}`)
+          continue
+        }
+        return {
+          success: false,
+          error: `Error HTTP ${response.status}`,
+          mensaje: "No se pudo cancelar el turno. Por favor, intente nuevamente o comuníquese con la clínica.",
+        }
+      }
+
+      // Obtener el texto de la respuesta primero para validar
+      const responseText = await response.text()
+      
+      // Verificar si la respuesta parece ser HTML (error del servidor)
+      if (responseText.trim().startsWith('<') || responseText.includes('<br />') || responseText.includes('<html')) {
+        console.error(`[API] ⚠️ Servidor respondió con HTML en lugar de JSON (intento ${attempt}/${MAX_RETRIES})`)
+        console.error(`[API] 📄 Respuesta HTML: ${responseText.substring(0, 200)}...`)
+        
+        if (attempt < MAX_RETRIES) {
+          console.log(`[API] 🔄 Servidor temporalmente no disponible, reintentando...`)
+          lastError = new Error("Servidor respondió con HTML en lugar de JSON")
+          continue
+        }
+        
+        return {
+          success: false,
+          error: "El servidor está temporalmente no disponible",
+          mensaje: "No se pudo cancelar el turno en este momento. Por favor, intente nuevamente en unos segundos.",
+        }
+      }
+
+      // Intentar parsear como JSON
+      let data
+      try {
+        data = JSON.parse(responseText)
+      } catch (parseError) {
+        console.error(`[API] ⚠️ Error parseando JSON (intento ${attempt}/${MAX_RETRIES}):`, parseError)
+        console.error(`[API] 📄 Respuesta recibida: ${responseText.substring(0, 200)}...`)
+        
+        if (attempt < MAX_RETRIES) {
+          console.log(`[API] 🔄 Respuesta inválida, reintentando...`)
+          lastError = parseError as Error
+          continue
+        }
+        
+        return {
+          success: false,
+          error: "Respuesta inválida del servidor",
+          mensaje: "No se pudo cancelar el turno. Por favor, intente nuevamente en unos segundos.",
+        }
+      }
+
+      console.log("[API] 📥 Respuesta de cancelación recibida:", data)
+      
+      // Si llegamos aquí, la respuesta fue exitosa
+      if (attempt > 1) {
+        console.log(`[API] ✅ Cancelación exitosa en el intento ${attempt}`)
+      }
+
+      // Retornar la respuesta directamente (nuevo formato de API)
+      return data
+      
+    } catch (error) {
+      console.error(`[API] ❌ Error en intento ${attempt}/${MAX_RETRIES}:`, error)
+      lastError = error as Error
+      
+      // Si no es el último intento, continuar con el siguiente
+      if (attempt < MAX_RETRIES) {
+        console.log(`[API] 🔄 Reintentando después del error...`)
+        continue
       }
     }
+  }
 
-    const data = await response.json()
-    console.log("[API] 📥 Respuesta de cancelación recibida:", data)
-
-    // Retornar la respuesta directamente (nuevo formato de API)
-    return data
-  } catch (error) {
-    console.error("[API] ❌ Error al cancelar turno:", error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Error desconocido",
-      mensaje: "Ocurrió un error al cancelar el turno. Por favor, intente nuevamente.",
-    }
+  // Si llegamos aquí, todos los reintentos fallaron
+  console.error(`[API] ❌ Todos los ${MAX_RETRIES} intentos de cancelación fallaron`)
+  return {
+    success: false,
+    error: lastError?.message || "Error desconocido",
+    mensaje: "Ocurrió un error al cancelar el turno. Por favor, intente nuevamente.",
   }
 }
 
