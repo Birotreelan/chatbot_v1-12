@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server"
 import { requireSupportAgent } from "@/lib/auth"
 import { getSupportSession } from "@/lib/human-support"
-import { buscarPaciente } from "@/lib/api-tools/api-functions"
+
+const PROXY_URL = "https://proxy.santiagovulliez.com/proxy_service/"
 
 export async function GET(request: Request) {
   try {
-    // Verificar autenticación
+    // Verificar autenticacion
     const session = await requireSupportAgent()
     if (!session) {
       return NextResponse.json({ success: false, error: "No autorizado" }, { status: 401 })
@@ -19,15 +20,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "sessionId requerido" }, { status: 400 })
     }
 
-    // Obtener la sesión de soporte para extraer el teléfono y tenantId
+    // Obtener la sesion de soporte para extraer el telefono y tenantId
     const supportSession = await getSupportSession(sessionId)
     if (!supportSession) {
-      return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
+      return NextResponse.json({ success: false, error: "Sesion no encontrada" }, { status: 404 })
     }
 
-    // Verificar que el agente tiene permiso para ver esta sesión
+    // Verificar que el agente tiene permiso para ver esta sesion
     if (session.tenantId && session.tenantId !== supportSession.tenantId) {
-      return NextResponse.json({ success: false, error: "Sin permiso para esta sesión" }, { status: 403 })
+      return NextResponse.json({ success: false, error: "Sin permiso para esta sesion" }, { status: 403 })
     }
 
     const phoneNumber = supportSession.phoneNumber
@@ -42,24 +43,63 @@ export async function GET(request: Request) {
       })
     }
 
-    // Normalizar el número de teléfono para la búsqueda
+    // Normalizar el numero de telefono para la busqueda
     // Remover el prefijo "549" de WhatsApp si existe y formatear
-    let telefonoNormalizado = phoneNumber.replace(/\D/g, "") // Remover no-dígitos
+    let telefonoNormalizado = phoneNumber.replace(/\D/g, "") // Remover no-digitos
     
-    // Si empieza con 549 (código Argentina WhatsApp), intentar extraer el número local
+    // Si empieza con 549 (codigo Argentina WhatsApp), intentar extraer el numero local
     if (telefonoNormalizado.startsWith("549")) {
       telefonoNormalizado = telefonoNormalizado.substring(3) // Remover "549"
     } else if (telefonoNormalizado.startsWith("54")) {
       telefonoNormalizado = telefonoNormalizado.substring(2) // Remover "54"
     }
 
-    console.log(`[SUPPORT_PATIENT] Buscando paciente con teléfono: ${telefonoNormalizado} (original: ${phoneNumber}) para cliente: ${clienteId}`)
+    console.log(`[SUPPORT_PATIENT] Buscando paciente con telefono: ${telefonoNormalizado} (original: ${phoneNumber}) para cliente: ${clienteId}`)
 
-    // Buscar paciente por teléfono
-    const resultado = await buscarPaciente(clienteId, { telefono: telefonoNormalizado }, false)
+    // Llamar al proxy para obtener datos del paciente
+    const proxyResponse = await fetch(PROXY_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        Cliente_Id: clienteId,
+        Action: "get_paciente",
+        telefono: telefonoNormalizado,
+      }),
+    })
 
-    if (!resultado.exito || !resultado.datos) {
-      console.log(`[SUPPORT_PATIENT] Paciente no encontrado para teléfono: ${telefonoNormalizado}`)
+    if (!proxyResponse.ok) {
+      console.error(`[SUPPORT_PATIENT] Error del proxy: ${proxyResponse.status} ${proxyResponse.statusText}`)
+      return NextResponse.json({
+        success: true,
+        patient: null,
+        isNewPatient: true,
+        phoneNumber: phoneNumber,
+        message: "Error al consultar datos del paciente",
+      })
+    }
+
+    const resultado = await proxyResponse.json()
+    console.log(`[SUPPORT_PATIENT] Respuesta del proxy:`, JSON.stringify(resultado, null, 2))
+
+    // Verificar si se encontro el paciente
+    // La respuesta puede variar, verificamos diferentes estructuras posibles
+    const paciente = resultado.paciente || resultado.datos || resultado.data || resultado
+    const turnosProximos = resultado.turnos_proximos || resultado.turnosProximos || resultado.turnos || []
+    const esPrimeraVez = resultado.es_primera_vez ?? resultado.esPrimeraVez ?? null
+
+    // Si no hay datos significativos del paciente, es paciente nuevo
+    const tieneDatasPaciente = paciente && (
+      paciente.nombre || 
+      paciente.nombre_completo || 
+      paciente.dni || 
+      paciente.documento ||
+      paciente.id
+    )
+
+    if (!tieneDatasPaciente) {
+      console.log(`[SUPPORT_PATIENT] Paciente no encontrado para telefono: ${telefonoNormalizado}`)
       return NextResponse.json({
         success: true,
         patient: null,
@@ -68,14 +108,14 @@ export async function GET(request: Request) {
       })
     }
 
-    console.log(`[SUPPORT_PATIENT] Paciente encontrado:`, resultado.datos)
+    console.log(`[SUPPORT_PATIENT] Paciente encontrado:`, paciente)
 
     // Formatear la respuesta
     return NextResponse.json({
       success: true,
-      patient: resultado.datos,
-      upcomingAppointments: resultado.turnosProximos || [],
-      isNewPatient: resultado.esPrimeraVez ?? false,
+      patient: paciente,
+      upcomingAppointments: turnosProximos,
+      isNewPatient: esPrimeraVez ?? false,
       phoneNumber: phoneNumber,
     })
   } catch (error) {
