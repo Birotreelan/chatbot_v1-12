@@ -152,36 +152,62 @@ export async function getAgentActiveSessions(agentId: string): Promise<HumanSupp
   return sessions
 }
 
-// Asignar sesión a un agente
+// Asignar sesión a un agente (con bloqueo atómico para evitar race conditions)
 export async function assignSessionToAgent(sessionId: string, agentId: string): Promise<boolean> {
   const redis = getRedisClient()
   if (!redis) return false
 
-  const session = await getSupportSession(sessionId)
-  if (!session || session.status !== "pending") {
+  // Crear clave de lock única para esta sesión
+  const lockKey = `human_support:lock:${sessionId}`
+  const lockValue = `${agentId}:${Date.now()}`
+  const lockTTL = 30 // segundos
+
+  // Intentar adquirir el lock de forma atómica (solo si no existe)
+  const lockAcquired = await redis.set(lockKey, lockValue, {
+    NX: true, // Only set if not exists
+    EX: lockTTL, // Expiración automática en caso de error
+  })
+
+  // Si no pudimos adquirir el lock, otro agente está procesando esta sesión
+  if (!lockAcquired) {
+    console.log(`[HUMAN_SUPPORT] ⚠️ No se pudo adquirir lock para sesión ${sessionId} - ya está siendo procesada`)
     return false
   }
 
-  const now = new Date().toISOString()
+  try {
+    // Obtener sesión dentro del lock para verificar estado actual
+    const session = await getSupportSession(sessionId)
 
-  // Actualizar sesión
-  session.status = "in_progress"
-  session.assignedTo = agentId
-  session.assignedAt = now
+    // Verificar que la sesión existe y sigue pendiente
+    if (!session || session.status !== "pending") {
+      console.log(`[HUMAN_SUPPORT] ⚠️ Sesión ${sessionId} no está disponible (estado: ${session?.status})`)
+      return false
+    }
 
-  const sessionKey = `${SUPPORT_SESSION_PREFIX}${sessionId}`
-  await redis.set(sessionKey, JSON.stringify(session))
+    const now = new Date().toISOString()
 
-  // Remover de pendientes
-  await redis.zrem(SUPPORT_PENDING_SET, sessionId)
+    // Actualizar sesión
+    session.status = "in_progress"
+    session.assignedTo = agentId
+    session.assignedAt = now
 
-  // Agregar a sesiones activas del agente
-  const agentSessionsKey = `${SUPPORT_AGENT_SESSIONS_PREFIX}${agentId}:active`
-  await redis.sadd(agentSessionsKey, sessionId)
+    const sessionKey = `${SUPPORT_SESSION_PREFIX}${sessionId}`
+    await redis.set(sessionKey, JSON.stringify(session))
 
-  console.log(`[HUMAN_SUPPORT] ✅ Sesión ${sessionId} asignada a agente ${agentId}`)
+    // Remover de pendientes
+    await redis.zrem(SUPPORT_PENDING_SET, sessionId)
 
-  return true
+    // Agregar a sesiones activas del agente
+    const agentSessionsKey = `${SUPPORT_AGENT_SESSIONS_PREFIX}${agentId}:active`
+    await redis.sadd(agentSessionsKey, sessionId)
+
+    console.log(`[HUMAN_SUPPORT] ✅ Sesión ${sessionId} asignada a agente ${agentId}`)
+
+    return true
+  } finally {
+    // Liberar el lock siempre, incluso si hay error
+    await redis.del(lockKey)
+  }
 }
 
 // Cerrar sesión y devolver a IA
