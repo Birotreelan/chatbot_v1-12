@@ -85,17 +85,22 @@ export async function GET(request: Request) {
 
     // Verificar si se encontro el paciente
     // La respuesta puede variar, verificamos diferentes estructuras posibles
-    const paciente = resultado.paciente || resultado.datos || resultado.data || resultado
+    const pacienteRaw = resultado.paciente || resultado.datos || resultado.data || resultado
     const turnosProximos = resultado.turnos_proximos || resultado.turnosProximos || resultado.turnos || []
     const esPrimeraVez = resultado.es_primera_vez ?? resultado.esPrimeraVez ?? null
 
     // Si no hay datos significativos del paciente, es paciente nuevo
-    const tieneDatasPaciente = paciente && (
-      paciente.nombre || 
-      paciente.nombre_completo || 
-      paciente.dni || 
-      paciente.documento ||
-      paciente.id
+    // Verificamos campos en diferentes formatos (mayusculas/minusculas)
+    const tieneDatasPaciente = pacienteRaw && (
+      pacienteRaw.nombre || 
+      pacienteRaw.Nombres ||
+      pacienteRaw.nombre_completo || 
+      pacienteRaw.Nombre_Completo ||
+      pacienteRaw.dni || 
+      pacienteRaw.Nrodoc ||
+      pacienteRaw.documento ||
+      pacienteRaw.id ||
+      pacienteRaw.Id
     )
 
     if (!tieneDatasPaciente) {
@@ -106,6 +111,22 @@ export async function GET(request: Request) {
         isNewPatient: true,
         phoneNumber: phoneNumber,
       })
+    }
+
+    // Normalizar los campos del paciente a un formato consistente
+    const paciente = {
+      id: pacienteRaw.Id || pacienteRaw.id,
+      nombre: pacienteRaw.Nombres || pacienteRaw.nombre,
+      apellido: pacienteRaw.Apellido || pacienteRaw.apellido,
+      nombre_completo: pacienteRaw.Nombre_Completo || pacienteRaw.nombre_completo || 
+        `${pacienteRaw.Nombres || pacienteRaw.nombre || ''} ${pacienteRaw.Apellido || pacienteRaw.apellido || ''}`.trim(),
+      dni: pacienteRaw.Nrodoc || pacienteRaw.dni || pacienteRaw.documento,
+      telefono: pacienteRaw.Celular || pacienteRaw.celular || pacienteRaw.telefono || phoneNumber,
+      email: pacienteRaw.Mail || pacienteRaw.mail || pacienteRaw.email,
+      fecha_nacimiento: pacienteRaw.Fecha_Nac || pacienteRaw.fecha_nacimiento,
+      obra_social: pacienteRaw.Deudor_Nombre || pacienteRaw.obra_social,
+      plan: pacienteRaw.Plan_Nombre || pacienteRaw.plan,
+      nro_afiliado: pacienteRaw.Nro_Afiliado_Ppal || pacienteRaw.nro_afiliado,
     }
 
     console.log(`[SUPPORT_PATIENT] Paciente encontrado:`, paciente)
