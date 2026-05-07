@@ -81,7 +81,7 @@ const RETRYABLE_ERROR_CODES = [
   "UND_ERR_CONNECT_TIMEOUT",
 ]
 
-const RETRYABLE_ERROR_MESSAGES = ["fetch failed", "network error", "socket hang up", "connection refused"]
+const RETRYABLE_ERROR_MESSAGES = ["fetch failed", "network error", "socket hang up", "connection refused", "not valid json", "unexpected token"]
 
 function isRetryableError(error: any): boolean {
   // Verificar código de error
