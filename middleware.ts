@@ -4,6 +4,20 @@ import type { NextRequest } from "next/server"
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
+  // Manejar OPTIONS requests (CORS preflight)
+  if (request.method === "OPTIONS") {
+    const origin = request.headers.get("origin")
+    if (origin) {
+      const response = new NextResponse(null, { status: 204 })
+      response.headers.set("Access-Control-Allow-Origin", origin)
+      response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+      response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+      response.headers.set("Access-Control-Allow-Credentials", "true")
+      response.headers.set("Vary", "Origin")
+      return response
+    }
+  }
+
   // Log extensivo para rutas del widget
   if (pathname.startsWith("/widget") || pathname.includes("widget")) {
     console.log("[MIDDLEWARE] 🚀 === PETICIÓN WIDGET ===")
@@ -40,8 +54,21 @@ export function middleware(request: NextRequest) {
   // Permitir embebido en iframe para el panel de soporte y login
   if (pathname.startsWith("/support") || pathname.startsWith("/login") || pathname.startsWith("/api/support")) {
     const response = NextResponse.next()
+    
+    // Headers para iframe embebido
     response.headers.set("X-Frame-Options", "ALLOWALL")
     response.headers.set("Content-Security-Policy", "frame-ancestors *")
+    
+    // Headers CORS para permitir requests desde iframes de cross-origin
+    const origin = request.headers.get("origin")
+    if (origin) {
+      response.headers.set("Access-Control-Allow-Origin", origin)
+      response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+      response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+      response.headers.set("Access-Control-Allow-Credentials", "true")
+      response.headers.set("Vary", "Origin")
+    }
+    
     return response
   }
 

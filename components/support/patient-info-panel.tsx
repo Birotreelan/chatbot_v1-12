@@ -60,7 +60,9 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
 
     try {
       setLoading(true)
-      const response = await fetch(`/api/support/patient?sessionId=${sessionId}`)
+      const response = await fetch(`/api/support/patient?sessionId=${sessionId}`, {
+        credentials: "include",
+      })
       
       if (!response.ok) {
         throw new Error("Error al cargar datos del paciente")

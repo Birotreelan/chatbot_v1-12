@@ -37,6 +37,7 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
     try {
       const response = await fetch(`/api/support/actions?sessionId=${sessionId}`, {
         method: "GET",
+        credentials: "include",
       })
       if (!response.ok) throw new Error("Error al cargar sesión")
       const data = await response.json()
@@ -61,6 +62,7 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
       const response = await fetch(`/api/support/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ action: "message", sessionId, message }),
       })
 
@@ -91,6 +93,7 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
       const response = await fetch(`/api/support/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ action: "close", sessionId }),
       })
 
