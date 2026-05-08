@@ -18,7 +18,9 @@ export function SupportDashboard() {
 
   async function loadSessions() {
     try {
-      const response = await fetch("/api/support/sessions")
+      const response = await fetch("/api/support/sessions", {
+        credentials: "include",
+      })
       if (!response.ok) throw new Error("Error al cargar sesiones")
       const data = await response.json()
       setSessions(Array.isArray(data.sessions) ? data.sessions : [])

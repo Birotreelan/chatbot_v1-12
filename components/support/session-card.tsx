@@ -36,6 +36,7 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           action: "assign",
           sessionId: session.id,
