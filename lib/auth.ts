@@ -94,10 +94,12 @@ export async function createSession(user: SessionData): Promise<string> {
   }
 
   // Establecer la cookie de sesión
+  // SameSite=None + Secure es necesario para que funcione dentro de iframes de terceros
   const cookieStore = await cookies()
   cookieStore.set("session_id", sessionId, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: true,
+    sameSite: "none",
     maxAge: SESSION_DURATION,
     path: "/",
   })
