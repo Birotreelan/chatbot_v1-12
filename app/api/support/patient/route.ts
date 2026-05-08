@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireSupportAgent } from "@/lib/auth"
+import { requireSupportAgentForApi } from "@/lib/auth"
 import { getSupportSession } from "@/lib/human-support"
 
 const PROXY_URL = "https://proxy.santiagovulliez.com/proxy_service/"
@@ -7,9 +7,9 @@ const PROXY_URL = "https://proxy.santiagovulliez.com/proxy_service/"
 export async function GET(request: Request) {
   try {
     // Verificar autenticacion
-    const session = await requireSupportAgent()
+    const { session, error } = await requireSupportAgentForApi()
     if (!session) {
-      return NextResponse.json({ success: false, error: "No autorizado" }, { status: 401 })
+      return NextResponse.json({ success: false, error: error || "No autorizado" }, { status: 401 })
     }
 
     // Obtener sessionId del query string

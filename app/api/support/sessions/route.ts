@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { getSessionForApi } from "@/lib/auth"
 import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
 
 export async function GET(request: Request) {
   try {
-    const session = await requireAuth()
+    const session = await getSessionForApi()
+    
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "No autenticado", sessions: [] },
+        { status: 401 }
+      )
+    }
 
     // Obtener sesiones pendientes filtradas por tenant
     const pendingSessions = await getPendingSessions(session.tenantId)
