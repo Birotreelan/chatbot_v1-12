@@ -37,6 +37,14 @@ export function middleware(request: NextRequest) {
     return response
   }
 
+  // Permitir embebido en iframe para el panel de soporte y login
+  if (pathname.startsWith("/support") || pathname.startsWith("/login") || pathname.startsWith("/api/support")) {
+    const response = NextResponse.next()
+    response.headers.set("X-Frame-Options", "ALLOWALL")
+    response.headers.set("Content-Security-Policy", "frame-ancestors *")
+    return response
+  }
+
   return NextResponse.next()
 }
 
