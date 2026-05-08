@@ -131,11 +131,22 @@ export async function GET(request: Request) {
 
     console.log(`[SUPPORT_PATIENT] Paciente encontrado:`, paciente)
 
+    // Normalizar turnos proximos
+    const turnosNormalizados = turnosProximos.map((turno: any) => ({
+      id: turno.Id || turno.id,
+      fecha: turno.Fecha || turno.fecha,
+      hora: (turno.Hora || turno.hora || "").substring(0, 5), // "09:00:00" -> "09:00"
+      profesional: turno.Profesional_Nombre || turno.profesional || turno.profesional_nombre,
+      sede: turno.Centro_Nombre || turno.sede || turno.centro_nombre,
+      motivo: turno.Motivo_Nombre || turno.motivo || turno.motivo_nombre,
+      estado: turno.Estado || turno.estado,
+    }))
+
     // Formatear la respuesta
     return NextResponse.json({
       success: true,
       patient: paciente,
-      upcomingAppointments: turnosProximos,
+      upcomingAppointments: turnosNormalizados,
       isNewPatient: esPrimeraVez ?? false,
       phoneNumber: phoneNumber,
     })

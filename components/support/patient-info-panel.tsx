@@ -29,14 +29,13 @@ interface PatientData {
 }
 
 interface Appointment {
+  id?: string
   fecha?: string
   hora?: string
   profesional?: string
-  especialidad?: string
-  lugar?: string
   sede?: string
+  motivo?: string
   estado?: string
-  [key: string]: any
 }
 
 interface PatientInfoPanelProps {
@@ -259,13 +258,13 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {appointments.map((apt, index) => (
                 <div
-                  key={index}
+                  key={apt.id || index}
                   className="p-2 bg-muted/50 rounded-md text-sm space-y-1"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="font-medium">{formatAppointmentDate(apt)}</span>
                     {apt.hora && (
-                      <span className="flex items-center gap-1 text-muted-foreground">
+                      <span className="flex items-center gap-1 text-muted-foreground shrink-0">
                         <Clock className="h-3 w-3" />
                         {apt.hora}
                       </span>
@@ -274,14 +273,19 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
                   {apt.profesional && (
                     <p className="text-muted-foreground">{apt.profesional}</p>
                   )}
-                  {apt.especialidad && (
-                    <p className="text-xs text-muted-foreground">{apt.especialidad}</p>
+                  {apt.motivo && (
+                    <p className="text-xs text-muted-foreground">{apt.motivo}</p>
                   )}
-                  {(apt.lugar || apt.sede) && (
+                  {apt.sede && (
                     <p className="text-xs text-muted-foreground flex items-center gap-1">
                       <MapPin className="h-3 w-3" />
-                      {apt.lugar || apt.sede}
+                      {apt.sede}
                     </p>
+                  )}
+                  {apt.estado && (
+                    <Badge variant="outline" className="text-xs py-0 h-5">
+                      {apt.estado}
+                    </Badge>
                   )}
                 </div>
               ))}
