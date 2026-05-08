@@ -178,6 +178,31 @@ export async function requireAuth(): Promise<SessionData> {
   return session
 }
 
+// Version para API routes - no hace redirect, retorna null si no hay sesion
+export async function getSessionForApi(): Promise<SessionData | null> {
+  return await getSession()
+}
+
+// Versiones para API routes que retornan { session, error } en lugar de hacer redirect
+export async function requireAuthForApi(): Promise<{ session: SessionData | null; error?: string }> {
+  const session = await getSession()
+  if (!session) {
+    return { session: null, error: "No autenticado" }
+  }
+  return { session }
+}
+
+export async function requireSupportAgentForApi(): Promise<{ session: SessionData | null; error?: string }> {
+  const session = await getSession()
+  if (!session) {
+    return { session: null, error: "No autenticado" }
+  }
+  if (session.role !== "support_agent") {
+    return { session: null, error: "No autorizado - se requiere rol de agente de soporte" }
+  }
+  return { session }
+}
+
 export async function requireSuperAdmin(): Promise<SessionData> {
   const session = await getSession()
   if (!session) {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireAuth, requireSupportAgent } from "@/lib/auth"
+import { requireAuthForApi, requireSupportAgentForApi } from "@/lib/auth"
 import {
   getSupportSession,
   getSupportMessages,
@@ -17,7 +17,12 @@ import type { HumanSupportMessage } from "@/lib/types"
 export async function GET(request: Request) {
   try {
     console.log("[v0] [API SUPPORT ACTIONS GET] Iniciando")
-    const session = await requireAuth()
+    const { session, error } = await requireAuthForApi()
+    
+    if (!session) {
+      return NextResponse.json({ success: false, error: error || "No autenticado" }, { status: 401 })
+    }
+    
     const { searchParams } = new URL(request.url)
     const sessionId = searchParams.get("sessionId")
 
@@ -127,7 +132,12 @@ async function handleAssign(sessionId: string) {
   console.log("[v0] [ASSIGN] Iniciando para sessionId:", sessionId)
 
   try {
-    const session = await requireSupportAgent()
+    const { session, error } = await requireSupportAgentForApi()
+    
+    if (!session) {
+      return NextResponse.json({ success: false, error: error || "No autenticado" }, { status: 401 })
+    }
+    
     console.log("[v0] [ASSIGN] Usuario autenticado:", { userId: session.userId, tenantId: session.tenantId })
 
     const supportSession = await getSupportSession(sessionId)
@@ -202,7 +212,12 @@ async function handleAssign(sessionId: string) {
 
 async function handleClose(sessionId: string, note?: string) {
   try {
-    const session = await requireAuth()
+    const { session, error } = await requireAuthForApi()
+    
+    if (!session) {
+      return NextResponse.json({ success: false, error: error || "No autenticado" }, { status: 401 })
+    }
+    
     const supportSession = await getSupportSession(sessionId)
 
     if (!supportSession) {
@@ -245,7 +260,12 @@ async function handleMessage(sessionId: string, message: string) {
     console.log("[v0] [MESSAGE] Iniciando para sessionId:", sessionId)
     console.log("[v0] [MESSAGE] Mensaje recibido:", message)
 
-    const session = await requireSupportAgent()
+    const { session, error } = await requireSupportAgentForApi()
+    
+    if (!session) {
+      return NextResponse.json({ success: false, error: error || "No autenticado" }, { status: 401 })
+    }
+    
     console.log("[v0] [MESSAGE] Usuario autenticado:", { userId: session.userId, tenantId: session.tenantId })
 
     if (!message || typeof message !== "string" || message.trim().length === 0) {
