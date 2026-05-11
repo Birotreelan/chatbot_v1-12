@@ -960,6 +960,63 @@ export async function getSystemStatsFiltered(startDate?: string, endDate?: strin
   return stats
 }
 
+// Función para limpiar el assistantId de un thread (volver al asistente principal)
+export async function clearThreadAssistantId(
+  phoneNumber: string,
+  whatsappConfigId: string,
+): Promise<boolean> {
+  const normalizedPhone = normalizePhoneNumber(phoneNumber)
+  const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
+  const redisClient = getRedisClient()
+
+  console.log(`[DB] 🔄 Limpiando assistantId para ${normalizedPhone} con config ${whatsappConfigId}`)
+
+  try {
+    if (redisClient) {
+      const threadData = await redisClient.get(key)
+      const threadInfo = safeJsonParse(threadData, key)
+
+      if (threadInfo) {
+        // Verificar si tiene un assistantId para limpiar
+        if (threadInfo.assistantId) {
+          console.log(`[DB] 🤖 Limpiando assistantId: ${threadInfo.assistantId}`)
+          
+          const updatedThreadInfo = {
+            ...threadInfo,
+            assistantId: undefined, // Limpiar el assistantId
+            lastMessageAt: new Date().toISOString(),
+          }
+
+          await redisClient.set(key, JSON.stringify(updatedThreadInfo))
+          console.log(`[DB] ✅ AssistantId limpiado exitosamente para ${normalizedPhone}`)
+          return true
+        } else {
+          console.log(`[DB] ℹ️ Thread no tenía assistantId personalizado`)
+          return false
+        }
+      } else {
+        console.log(`[DB] ⚠️ No se encontró thread para limpiar`)
+        return false
+      }
+    } else {
+      // Fallback a memoria
+      const threadInfo = memoryStorage.threads.get(key)
+      if (threadInfo && threadInfo.assistantId) {
+        console.log(`[DB] 🤖 Limpiando assistantId en memoria: ${threadInfo.assistantId}`)
+        threadInfo.assistantId = undefined
+        threadInfo.lastMessageAt = new Date().toISOString()
+        memoryStorage.threads.set(key, threadInfo)
+        console.log(`[DB] ✅ AssistantId limpiado exitosamente en memoria`)
+        return true
+      }
+      return false
+    }
+  } catch (error) {
+    console.error(`[DB] ❌ Error al limpiar assistantId:`, error)
+    return false
+  }
+}
+
 export async function updateThreadId(
   phoneNumber: string,
   whatsappConfigId: string,
