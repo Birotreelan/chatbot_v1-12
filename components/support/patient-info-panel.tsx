@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { User, Phone, Mail, CreditCard, Calendar, Clock, MapPin, UserPlus, AlertCircle } from "lucide-react"
+import { User, Phone, Mail, CreditCard, Calendar, Clock, MapPin, UserPlus, AlertCircle, ExternalLink } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 interface PatientData {
   // Campos comunes que puede retornar la API
@@ -24,6 +25,7 @@ interface PatientData {
   obra_social?: string
   plan?: string
   nro_afiliado?: string
+  url_paciente?: string
   // Campos adicionales que pueden venir
   [key: string]: any
 }
@@ -36,6 +38,7 @@ interface Appointment {
   sede?: string
   motivo?: string
   estado?: string
+  url_agenda?: string
 }
 
 interface PatientInfoPanelProps {
@@ -203,9 +206,24 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
   return (
     <Card className="h-full">
       <CardHeader className="pb-3">
-        <CardTitle className="text-lg flex items-center gap-2">
-          <User className="h-5 w-5" />
-          Datos del Paciente
+        <CardTitle className="text-lg flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            Datos del Paciente
+          </span>
+          {patient.url_paciente && (
+            <Button
+              variant="outline"
+              size="sm"
+              asChild
+              className="h-7 text-xs"
+            >
+              <a href={patient.url_paciente} target="_blank" rel="noopener noreferrer">
+                Ver HC
+                <ExternalLink className="h-3 w-3 ml-1" />
+              </a>
+            </Button>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -284,11 +302,26 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
                       {apt.sede}
                     </p>
                   )}
-                  {apt.estado && (
-                    <Badge variant="outline" className="text-xs py-0 h-5">
-                      {apt.estado}
-                    </Badge>
-                  )}
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    {apt.estado && (
+                      <Badge variant="outline" className="text-xs py-0 h-5">
+                        {apt.estado}
+                      </Badge>
+                    )}
+                    {apt.url_agenda && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        asChild
+                        className="h-6 text-xs px-2"
+                      >
+                        <a href={apt.url_agenda} target="_blank" rel="noopener noreferrer">
+                          Ver Agenda
+                          <ExternalLink className="h-3 w-3 ml-1" />
+                        </a>
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
