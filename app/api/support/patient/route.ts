@@ -56,7 +56,7 @@ export async function GET(request: Request) {
 
     console.log(`[SUPPORT_PATIENT] Buscando paciente con telefono: ${telefonoNormalizado} (original: ${phoneNumber}) para cliente: ${clienteId}`)
 
-    // Llamar al proxy para obtener datos del paciente
+    // Llamar al proxy para obtener datos del paciente (usando get_paciente_interfaz)
     const proxyResponse = await fetch(PROXY_URL, {
       method: "POST",
       headers: {
@@ -64,7 +64,7 @@ export async function GET(request: Request) {
       },
       body: JSON.stringify({
         Cliente_Id: clienteId,
-        Action: "get_paciente",
+        Action: "get_paciente_interfaz",
         telefono: telefonoNormalizado,
       }),
     })
@@ -127,6 +127,7 @@ export async function GET(request: Request) {
       obra_social: pacienteRaw.Deudor_Nombre || pacienteRaw.obra_social,
       plan: pacienteRaw.Plan_Nombre || pacienteRaw.plan,
       nro_afiliado: pacienteRaw.Nro_Afiliado_Ppal || pacienteRaw.nro_afiliado,
+      url_paciente: pacienteRaw.url_paciente || null,
     }
 
     console.log(`[SUPPORT_PATIENT] Paciente encontrado:`, paciente)
@@ -140,6 +141,7 @@ export async function GET(request: Request) {
       sede: turno.Centro_Nombre || turno.sede || turno.centro_nombre,
       motivo: turno.Motivo_Nombre || turno.motivo || turno.motivo_nombre,
       estado: turno.Estado || turno.estado,
+      url_agenda: turno.url_agenda || null,
     }))
 
     // Formatear la respuesta
