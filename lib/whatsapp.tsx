@@ -1,5 +1,5 @@
 import type { WhatsAppValue } from "@/lib/types"
-import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser } from "@/lib/db"
+import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
 import { getAssistantResponse } from "@/lib/openai-tools"
@@ -227,6 +227,17 @@ export async function handleMessage(value: WhatsAppValue) {
       const buttonText = (message.button.text || "").toLowerCase()
       const buttonPayload = (message.button.payload || "").toLowerCase()
       const isCancellationButton = buttonText.includes("cancelar") || buttonPayload.includes("cancel")
+      
+      // IMPORTANTE: Limpiar el assistantId del thread para volver al asistente principal
+      // Esto es necesario porque las respuestas de botón vienen de templates externos (recordatorios)
+      // y no deben ser procesadas por asistentes especializados (ej: agendamiento)
+      console.log(`[WHATSAPP] 🔄 Limpiando assistantId del thread para volver al asistente principal...`)
+      const cleared = await clearThreadAssistantId(userPhoneNumber, config.id)
+      if (cleared) {
+        console.log(`[WHATSAPP] ✅ AssistantId limpiado - se usará el asistente principal`)
+      } else {
+        console.log(`[WHATSAPP] ℹ️ No había assistantId personalizado para limpiar`)
+      }
 
       // Si es cancelación, NO enviar al proxy - pasar directamente al chatbot
       if (isCancellationButton) {
