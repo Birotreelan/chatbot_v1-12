@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getAppointmentStatsByClienteId, getAppointmentStatsByClienteIdFiltered } from "@/lib/appointment-stats"
+import { getAppointmentStatsByClienteIdFiltered } from "@/lib/appointment-stats"
 import { getConfigByClienteId } from "@/lib/db"
 
 // Función para formatear tiempo en formato legible
@@ -24,10 +24,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
     const fechaInicio = searchParams.get("fechaInicio") || searchParams.get("startDate")
     const fechaFin = searchParams.get("fechaFin") || searchParams.get("endDate")
 
-    console.log(`[STATS_API] Solicitando estadísticas para cliente_id: ${cliente_id}`)
-    if (fechaInicio || fechaFin) {
-      console.log(`[STATS_API] Filtro de fechas: ${fechaInicio || "sin inicio"} - ${fechaFin || "sin fin"}`)
+    // Ambos parámetros de fecha son obligatorios
+    if (!fechaInicio || !fechaFin) {
+      return NextResponse.json(
+        {
+          exito: false,
+          error: "Los parámetros fechaInicio y fechaFin son obligatorios.",
+          ejemplo: "/api/stats/{cliente_id}?fechaInicio=2025-11-01&fechaFin=2025-11-30",
+        },
+        { status: 400 }
+      )
     }
+
+    console.log(`[STATS_API] Solicitando estadísticas para cliente_id: ${cliente_id}, fechas: ${fechaInicio} - ${fechaFin}`)
 
     // Verificar que el cliente existe
     const config = await getConfigByClienteId(cliente_id)
@@ -39,17 +48,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
 
     console.log(`[STATS_API] Cliente encontrado: ${config.displayName} (ID: ${config.id})`)
 
-    // Obtener estadísticas usando el cliente_id (con o sin filtro de fechas)
-    let stats = fechaInicio || fechaFin
-      ? await getAppointmentStatsByClienteIdFiltered(cliente_id, fechaInicio || undefined, fechaFin || undefined)
-      : await getAppointmentStatsByClienteId(cliente_id)
+    // Obtener estadísticas usando el cliente_id filtradas por fechas
+    let stats = await getAppointmentStatsByClienteIdFiltered(cliente_id, fechaInicio, fechaFin)
 
     // Fallback: buscar con config.id para datos históricos que fueron guardados con ese ID
     if (!stats && config.id !== cliente_id) {
       console.log(`[STATS_API] No hay estadísticas con cliente_id, intentando con config.id: ${config.id}`)
-      stats = fechaInicio || fechaFin
-        ? await getAppointmentStatsByClienteIdFiltered(config.id, fechaInicio || undefined, fechaFin || undefined)
-        : await getAppointmentStatsByClienteId(config.id)
+      stats = await getAppointmentStatsByClienteIdFiltered(config.id, fechaInicio, fechaFin)
       
       // Si encontramos stats con config.id, normalizar el clienteId al cliente_id correcto
       if (stats) {
