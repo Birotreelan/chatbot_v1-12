@@ -51,6 +51,22 @@ export function middleware(request: NextRequest) {
     return response
   }
 
+  // Permitir embebido en iframe para estadísticas de citas (consumo externo)
+  if (pathname.startsWith("/stats") || pathname.startsWith("/api/stats")) {
+    const response = NextResponse.next()
+    
+    // Headers para iframe embebido
+    response.headers.set("X-Frame-Options", "ALLOWALL")
+    response.headers.set("Content-Security-Policy", "frame-ancestors *")
+    
+    // Headers CORS para permitir requests desde cualquier origen
+    response.headers.set("Access-Control-Allow-Origin", "*")
+    response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type")
+    
+    return response
+  }
+
   // Permitir embebido en iframe para el panel de soporte y login
   if (pathname.startsWith("/support") || pathname.startsWith("/login") || pathname.startsWith("/api/support")) {
     const response = NextResponse.next()

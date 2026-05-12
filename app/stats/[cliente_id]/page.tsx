@@ -22,7 +22,23 @@ export default async function ClientStatsPage({
 
   console.log(`[STATS_PAGE] Cliente encontrado: ${config.displayName}`)
 
-  const initialStats = await getAppointmentStatsByClienteId(cliente_id)
+  // Obtener estadísticas usando el cliente_id
+  let initialStats = await getAppointmentStatsByClienteId(cliente_id)
+
+  // Fallback: buscar con config.id para datos históricos que fueron guardados con ese ID
+  if (!initialStats && config.id !== cliente_id) {
+    console.log(`[STATS_PAGE] No hay estadísticas con cliente_id, intentando con config.id: ${config.id}`)
+    initialStats = await getAppointmentStatsByClienteId(config.id)
+    
+    // Si encontramos stats con config.id, normalizar el clienteId al cliente_id correcto
+    if (initialStats) {
+      console.log(`[STATS_PAGE] Estadísticas encontradas con config.id, normalizando a cliente_id`)
+      initialStats = {
+        ...initialStats,
+        clienteId: cliente_id,
+      }
+    }
+  }
 
   return (
     <div className="min-h-screen bg-background">

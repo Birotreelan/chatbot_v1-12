@@ -18,8 +18,23 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
 
     console.log(`[STATS_API] Cliente encontrado: ${config.displayName} (ID: ${config.id})`)
 
-    // Obtener estadísticas usando el ID de configuración
-    const stats = await getAppointmentStatsByClienteId(config.id)
+    // Obtener estadísticas usando el cliente_id
+    let stats = await getAppointmentStatsByClienteId(cliente_id)
+
+    // Fallback: buscar con config.id para datos históricos que fueron guardados con ese ID
+    if (!stats && config.id !== cliente_id) {
+      console.log(`[STATS_API] No hay estadísticas con cliente_id, intentando con config.id: ${config.id}`)
+      stats = await getAppointmentStatsByClienteId(config.id)
+      
+      // Si encontramos stats con config.id, normalizar el clienteId al cliente_id correcto
+      if (stats) {
+        console.log(`[STATS_API] Estadísticas encontradas con config.id, normalizando a cliente_id`)
+        stats = {
+          ...stats,
+          clienteId: cliente_id,
+        }
+      }
+    }
 
     if (!stats) {
       console.log(`[STATS_API] No hay estadísticas disponibles para cliente ${cliente_id}`)
@@ -27,7 +42,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
       return NextResponse.json({
         success: true,
         data: {
-          clienteId: config.id,
+          clienteId: cliente_id,
           clientName: config.displayName,
           totalConfirmed: 0,
           totalCancelled: 0,
