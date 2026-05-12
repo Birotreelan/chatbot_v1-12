@@ -18,8 +18,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
 
     console.log(`[STATS_API] Cliente encontrado: ${config.displayName} (ID: ${config.id})`)
 
-    // Obtener estadísticas usando el ID de configuración
-    const stats = await getAppointmentStatsByClienteId(config.id)
+    // Obtener estadísticas usando el cliente_id (no el config.id)
+    const stats = await getAppointmentStatsByClienteId(cliente_id)
 
     if (!stats) {
       console.log(`[STATS_API] No hay estadísticas disponibles para cliente ${cliente_id}`)
