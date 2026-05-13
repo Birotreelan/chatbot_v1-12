@@ -3,6 +3,13 @@ import type { NextRequest } from "next/server"
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const fullUrl = request.url
+  
+  // Log para TODAS las requests que pasan por el middleware
+  console.log("[MIDDLEWARE] ========== REQUEST ==========")
+  console.log("[MIDDLEWARE] Pathname:", pathname)
+  console.log("[MIDDLEWARE] Full URL:", fullUrl)
+  console.log("[MIDDLEWARE] Search params:", request.nextUrl.searchParams.toString())
 
   // Manejar OPTIONS requests (CORS preflight)
   if (request.method === "OPTIONS") {
@@ -71,10 +78,16 @@ export function middleware(request: NextRequest) {
   if (pathname.startsWith("/support") || pathname.startsWith("/login") || pathname.startsWith("/api/support")) {
     // SSO: Si viene un sso_token, redirigir a /api/auth/sso ANTES de verificar autenticación
     const ssoToken = request.nextUrl.searchParams.get("sso_token")
-    if (ssoToken && pathname.startsWith("/support")) {
-      console.log("[MIDDLEWARE] SSO: Token detectado, redirigiendo a /api/auth/sso")
+    console.log("[MIDDLEWARE] Support/Login route - pathname:", pathname)
+    console.log("[MIDDLEWARE] Support/Login route - sso_token presente:", !!ssoToken)
+    
+    if (ssoToken) {
+      console.log("[MIDDLEWARE] SSO: Token detectado en URL")
+      console.log("[MIDDLEWARE] SSO: Token (primeros 50 chars):", ssoToken.substring(0, 50) + "...")
+      console.log("[MIDDLEWARE] SSO: Redirigiendo a /api/auth/sso")
       const ssoUrl = new URL("/api/auth/sso", request.url)
       ssoUrl.searchParams.set("sso_token", ssoToken)
+      console.log("[MIDDLEWARE] SSO: URL de redirección:", ssoUrl.toString())
       return NextResponse.redirect(ssoUrl)
     }
 

@@ -107,6 +107,35 @@ export async function createSession(user: SessionData): Promise<string> {
   return sessionId
 }
 
+/**
+ * Crea una sesión sin establecer la cookie (para usar en API routes con redirect)
+ * Retorna el sessionId para que el caller pueda establecer la cookie manualmente
+ */
+export async function createSessionWithoutCookie(user: SessionData): Promise<string> {
+  const sessionId = nanoid()
+  const redis = getRedisClient()
+
+  if (redis) {
+    // Guardar la sesión completa en Redis con expiración
+    await redis.set(`${SESSION_PREFIX}${sessionId}`, JSON.stringify(user), { ex: SESSION_DURATION })
+    console.log("[Auth] Sesión creada en Redis:", sessionId)
+  }
+
+  return sessionId
+}
+
+/**
+ * Constantes de sesión exportadas para uso en API routes
+ */
+export const SESSION_COOKIE_NAME = "session_id"
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: true,
+  sameSite: "none" as const,
+  maxAge: SESSION_DURATION,
+  path: "/",
+}
+
 export async function getSession(): Promise<SessionData | null> {
   const cookieStore = await cookies()
   const sessionId = cookieStore.get("session_id")?.value
