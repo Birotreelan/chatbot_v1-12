@@ -13,6 +13,16 @@ export interface SSOTokenPayload {
 export interface SSOValidationResult {
   valid: boolean;
   error?: string;
+  errorCode?: 'TOKEN_INVALID' | 'FORMAT_INVALID' | 'DECODE_FAILED' | 'TOKEN_INCOMPLETE' | 'TOKEN_EXPIRED' | 'FINGERPRINT_MISMATCH' | 'SIGNATURE_INVALID' | 'CLIENT_INVALID' | 'SERVER_ERROR';
+  details?: {
+    fingerprintReceived?: string;
+    fingerprintCalculated?: string;
+    clientIp?: string;
+    userAgent?: string;
+    expiredAt?: string;
+    expiredAgoSeconds?: number;
+    clienteId?: string;
+  };
   payload?: SSOTokenPayload;
 }
 
@@ -115,13 +125,13 @@ export async function validateSSOToken(
   // Validar formato básico del token
   if (!ssoToken || typeof ssoToken !== 'string') {
     console.log('[SSO] FALLO: Token inválido o vacío');
-    return { valid: false, error: 'Token inválido' };
+    return { valid: false, error: 'Token inválido', errorCode: 'TOKEN_INVALID' };
   }
 
   const parts = ssoToken.split('.');
   if (parts.length !== 2) {
     console.log('[SSO] FALLO: Formato incorrecto. Se esperaban 2 partes, se recibieron:', parts.length);
-    return { valid: false, error: 'Formato de token incorrecto' };
+    return { valid: false, error: 'Formato de token incorrecto', errorCode: 'FORMAT_INVALID' };
   }
 
   const [payloadBase64, signature] = parts;
@@ -132,7 +142,7 @@ export async function validateSSOToken(
   const payload = decodePayload(payloadBase64);
   if (!payload) {
     console.log('[SSO] FALLO: No se pudo decodificar el payload');
-    return { valid: false, error: 'No se pudo decodificar el payload' };
+    return { valid: false, error: 'No se pudo decodificar el payload', errorCode: 'DECODE_FAILED' };
   }
   console.log('[SSO] Payload decodificado:', JSON.stringify(payload, null, 2));
 
@@ -143,7 +153,7 @@ export async function validateSSOToken(
       tiene_exp: !!payload.exp,
       tiene_fingerprint: !!payload.fingerprint
     });
-    return { valid: false, error: 'Token incompleto' };
+    return { valid: false, error: 'Token incompleto', errorCode: 'TOKEN_INCOMPLETE' };
   }
 
   // Validar expiración
@@ -157,8 +167,17 @@ export async function validateSSOToken(
   console.log('[SSO]   - Diferencia (segundos):', (expMs - now) / 1000);
   
   if (isTokenExpired(payload.exp)) {
-    console.log('[SSO] FALLO EXPIRACIÓN: Token expirado hace', (now - expMs) / 1000, 'segundos');
-    return { valid: false, error: 'Token expirado' };
+    const expiredAgoSeconds = (now - expMs) / 1000;
+    console.log('[SSO] FALLO EXPIRACIÓN: Token expirado hace', expiredAgoSeconds, 'segundos');
+    return { 
+      valid: false, 
+      error: 'Token expirado', 
+      errorCode: 'TOKEN_EXPIRED',
+      details: {
+        expiredAt: new Date(expMs).toISOString(),
+        expiredAgoSeconds: Math.round(expiredAgoSeconds)
+      }
+    };
   }
   console.log('[SSO] OK: Token no expirado');
 
@@ -177,7 +196,17 @@ export async function validateSSOToken(
     console.log('[SSO]   - Recibido:', payload.fingerprint);
     console.log('[SSO]   - Calculado:', fingerprintResult.computed);
     console.log('[SSO]   - Input usado: IP="' + clientIp + '" + UA="' + userAgent + '"');
-    return { valid: false, error: 'Fingerprint no válido' };
+    return { 
+      valid: false, 
+      error: 'Fingerprint no válido', 
+      errorCode: 'FINGERPRINT_MISMATCH',
+      details: {
+        fingerprintReceived: payload.fingerprint,
+        fingerprintCalculated: fingerprintResult.computed,
+        clientIp: clientIp,
+        userAgent: userAgent
+      }
+    };
   }
   console.log('[SSO] OK: Fingerprint válido');
 
@@ -185,14 +214,14 @@ export async function validateSSOToken(
   const secret = process.env.TREELAN_BOT_SECRET;
   if (!secret) {
     console.log('[SSO] FALLO: TREELAN_BOT_SECRET no está configurado');
-    return { valid: false, error: 'Configuración de servidor incompleta' };
+    return { valid: false, error: 'Configuración de servidor incompleta', errorCode: 'SERVER_ERROR' };
   }
   console.log('[SSO] Verificando firma con secret (primeros 4 chars):', secret.substring(0, 4) + '***');
 
   if (!verifySignature(payloadBase64, signature, secret)) {
     console.log('[SSO] FALLO FIRMA: La firma no coincide');
     console.log('[SSO]   - Signature recibida:', signature);
-    return { valid: false, error: 'Firma de token no válida' };
+    return { valid: false, error: 'Firma de token no válida', errorCode: 'SIGNATURE_INVALID' };
   }
   console.log('[SSO] OK: Firma válida');
 
@@ -201,7 +230,14 @@ export async function validateSSOToken(
   const clienteExists = await isClienteActive(payload.cliente_id);
   if (!clienteExists) {
     console.log('[SSO] FALLO CLIENTE: Cliente no existe o está inactivo:', payload.cliente_id);
-    return { valid: false, error: 'Cliente no existe o está inactivo' };
+    return { 
+      valid: false, 
+      error: 'Cliente no existe o está inactivo', 
+      errorCode: 'CLIENT_INVALID',
+      details: {
+        clienteId: payload.cliente_id
+      }
+    };
   }
   console.log('[SSO] OK: Cliente activo');
 
