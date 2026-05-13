@@ -93,9 +93,20 @@ export function middleware(request: NextRequest) {
       return NextResponse.redirect(ssoUrl)
     }
 
-    // Si viene _sid, dejar pasar al layout para que establezca la cookie server-side
-    if (sidParam) {
-      console.log("[MIDDLEWARE] SSO: _sid detectado, dejando pasar al layout")
+    // Si viene _sid, establecer la cookie y redirigir a /support limpio
+    if (sidParam && pathname.startsWith("/support")) {
+      console.log("[MIDDLEWARE] SSO: _sid detectado, estableciendo cookie y redirigiendo")
+      const cleanUrl = new URL("/support", request.url)
+      const response = NextResponse.redirect(cleanUrl)
+      response.cookies.set("session_id", sidParam, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        maxAge: 60 * 60 * 24, // 24 horas
+        path: "/",
+      })
+      console.log("[MIDDLEWARE] SSO: Cookie session_id establecida:", sidParam)
+      return response
     }
 
     const response = NextResponse.next()
