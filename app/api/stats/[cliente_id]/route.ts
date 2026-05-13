@@ -66,12 +66,30 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
       }
     }
 
-    // Calcular métricas adicionales
+    // Obtener mensajes_pagados desde el endpoint externo
+    let mensajesPagados = 0
+    try {
+      const externalResponse = await fetch(
+        `https://proxy.santiagovulliez.com/proxy_service/wpp_consumos.php?cliente_id=${encodeURIComponent(cliente_id)}&fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
+      )
+      
+      if (externalResponse.ok) {
+        const externalData = await externalResponse.json()
+        mensajesPagados = externalData.mensajes_pagados || 0
+        console.log(`[STATS_API] mensajes_pagados obtenidos: ${mensajesPagados}`)
+      } else {
+        console.warn(`[STATS_API] Error al obtener mensajes_pagados: ${externalResponse.status}`)
+      }
+    } catch (error) {
+      console.warn("[STATS_API] Error al conectar con el endpoint externo de mensajes_pagados:", error)
+    }
+
+    // Calcular métricas adicionales usando mensajes_pagados en lugar de totalTemplatesSent
     const totalSinRespuesta = stats 
-      ? stats.totalTemplatesSent - stats.totalConfirmed - stats.totalCancelled
+      ? mensajesPagados - stats.totalConfirmed - stats.totalCancelled
       : 0
-    const tasaSinRespuesta = stats && stats.totalTemplatesSent > 0 
-      ? Math.round(((totalSinRespuesta) / stats.totalTemplatesSent) * 10000) / 100
+    const tasaSinRespuesta = mensajesPagados > 0 
+      ? Math.round(((totalSinRespuesta) / mensajesPagados) * 10000) / 100
       : 0
     
     // Tasa de intento de reagendamiento (respecto a cancelados)
@@ -79,10 +97,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
       ? Math.round((stats.totalRescheduleStarted / stats.totalCancelled) * 10000) / 100
       : 0
 
-    // Total de interacciones
-    const totalInteracciones = stats
-      ? stats.totalTemplatesSent + stats.totalRescheduleStarted + stats.totalUserInitiated
-      : 0
+    // Total de interacciones usando mensajes_pagados
+    const totalInteracciones = mensajesPagados + (stats?.totalRescheduleStarted || 0) + (stats?.totalUserInitiated || 0)
 
     // Respuesta en español con los mismos nombres del panel
     const respuestaEnEspanol = {
@@ -98,7 +114,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
         
         // Recordatorios
         recordatorios: {
-          enviados: stats?.totalTemplatesSent || 0,
+          enviados: mensajesPagados,
           confirmados: stats?.totalConfirmed || 0,
           cancelados: stats?.totalCancelled || 0,
           sinRespuesta: totalSinRespuesta,
@@ -125,7 +141,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
         // Consumo Totalizado
         consumoTotalizado: {
           totalInteracciones: totalInteracciones,
-          recordatoriosEnviados: stats?.totalTemplatesSent || 0,
+          recordatoriosEnviados: mensajesPagados,
           iniciosReagendamiento: stats?.totalRescheduleStarted || 0,
           conversacionesPorPacientes: stats?.totalUserInitiated || 0,
         },
