@@ -44,7 +44,11 @@ export async function GET(request: NextRequest) {
     if (!validationResult.valid || !validationResult.payload) {
       console.warn('[SSO API] Validación fallida:', validationResult.error);
       return NextResponse.json(
-        { error: validationResult.error || 'Token no válido' },
+        { 
+          error: validationResult.error || 'Token no válido',
+          errorCode: validationResult.errorCode,
+          details: validationResult.details
+        },
         { status: 401 }
       );
     }
