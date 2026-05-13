@@ -69,6 +69,15 @@ export function middleware(request: NextRequest) {
 
   // Permitir embebido en iframe para el panel de soporte y login
   if (pathname.startsWith("/support") || pathname.startsWith("/login") || pathname.startsWith("/api/support")) {
+    // SSO: Si viene un sso_token, redirigir a /api/auth/sso ANTES de verificar autenticación
+    const ssoToken = request.nextUrl.searchParams.get("sso_token")
+    if (ssoToken && pathname.startsWith("/support")) {
+      console.log("[MIDDLEWARE] SSO: Token detectado, redirigiendo a /api/auth/sso")
+      const ssoUrl = new URL("/api/auth/sso", request.url)
+      ssoUrl.searchParams.set("sso_token", ssoToken)
+      return NextResponse.redirect(ssoUrl)
+    }
+
     const response = NextResponse.next()
     
     // Headers para iframe embebido
