@@ -12,17 +12,47 @@ interface AppointmentStatsDetailProps {
   displayName: string
 }
 
-// Estadísticas de turnos - v7
+// Estadísticas de turnos - v8
 export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentStatsDetailProps) {
   const [stats, setStats] = useState<ClientAppointmentStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [mensajesPagados, setMensajesPagados] = useState<number>(0)
+  const [loadingMensajes, setLoadingMensajes] = useState(true)
   const todayUTC = new Date()
   const today = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), todayUTC.getUTCDate()))
     .toISOString()
     .split("T")[0]
   const [startDate, setStartDate] = useState<string | null>(today)
   const [endDate, setEndDate] = useState<string | null>(today)
+
+  // Fetch mensajes_pagados from the external endpoint
+  const loadMensajesPagados = useCallback(async () => {
+    if (!clienteId || !startDate || !endDate) {
+      setMensajesPagados(0)
+      setLoadingMensajes(false)
+      return
+    }
+
+    setLoadingMensajes(true)
+    try {
+      const url = `https://proxy.santiagovulliez.com/proxy_service/wpp_consumos.php?cliente_id=${encodeURIComponent(clienteId)}&fecha_inicio=${startDate}&fecha_fin=${endDate}`
+      const response = await fetch(url)
+      
+      if (response.ok) {
+        const data = await response.json()
+        setMensajesPagados(data.mensajes_pagados || 0)
+      } else {
+        console.error("[APPOINTMENT_STATS] Error fetching mensajes_pagados:", response.status)
+        setMensajesPagados(0)
+      }
+    } catch (error) {
+      console.error("[APPOINTMENT_STATS] Error fetching mensajes_pagados:", error)
+      setMensajesPagados(0)
+    } finally {
+      setLoadingMensajes(false)
+    }
+  }, [clienteId, startDate, endDate])
 
   const loadStats = useCallback(async () => {
     try {
@@ -47,11 +77,13 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
   useEffect(() => {
     setLoading(true)
     loadStats()
-  }, [clienteId, loadStats])
+    loadMensajesPagados()
+  }, [clienteId, loadStats, loadMensajesPagados])
 
   const handleRefresh = () => {
     setRefreshing(true)
     loadStats()
+    loadMensajesPagados()
   }
 
   const handleFilterChange = (newStartDate: string | null, newEndDate: string | null) => {
@@ -111,8 +143,14 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
             <Send className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{stats?.totalTemplatesSent || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">Total de plantillas enviadas</p>
+            <div className="text-3xl font-bold">
+              {loadingMensajes ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                mensajesPagados
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Total de mensajes pagados</p>
           </CardContent>
         </Card>
 
@@ -149,12 +187,12 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-gray-600">
-              {(stats?.totalTemplatesSent || 0) - (stats?.totalConfirmed || 0) - (stats?.totalCancelled || 0)}
+              {Math.max(0, mensajesPagados - (stats?.totalConfirmed || 0) - (stats?.totalCancelled || 0))}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Tasa sin respuesta: <span className="font-semibold text-gray-600">
-                {stats?.totalTemplatesSent && stats.totalTemplatesSent > 0
-                  ? (((stats.totalTemplatesSent - stats.totalConfirmed - stats.totalCancelled) / stats.totalTemplatesSent) * 100).toFixed(1)
+                {mensajesPagados > 0
+                  ? (((mensajesPagados - (stats?.totalConfirmed || 0) - (stats?.totalCancelled || 0)) / mensajesPagados) * 100).toFixed(1)
                   : 0}%
               </span>
             </p>
@@ -292,12 +330,12 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         <CardContent>
           <div className="text-center p-6 bg-white rounded-lg border border-purple-100">
             <div className="text-5xl font-bold text-purple-600">
-              {(stats?.totalTemplatesSent || 0) + (stats?.totalRescheduleStarted || 0) + (stats?.totalUserInitiated || 0)}
+              {mensajesPagados + (stats?.totalRescheduleStarted || 0) + (stats?.totalUserInitiated || 0)}
             </div>
             <div className="text-sm text-muted-foreground mt-2">Total de interacciones</div>
             <div className="mt-4 grid grid-cols-3 gap-4 text-xs">
               <div className="text-center p-2 bg-muted/50 rounded">
-                <div className="font-semibold">{stats?.totalTemplatesSent || 0}</div>
+                <div className="font-semibold">{mensajesPagados}</div>
                 <div className="text-muted-foreground">Recordatorios enviados</div>
               </div>
               <div className="text-center p-2 bg-muted/50 rounded">
@@ -395,7 +433,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </CardContent>
       </Card>
 
-      {(!stats || (stats.totalTemplatesSent === 0 && stats.totalConfirmed === 0 && stats.totalUserInitiated === 0)) && (
+      {(!stats || (mensajesPagados === 0 && stats.totalConfirmed === 0 && stats.totalUserInitiated === 0)) && (
         <Card className="border-dashed">
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">Aún no hay datos de estadísticas para este cliente.</p>
