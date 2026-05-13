@@ -40,20 +40,30 @@ function decodePayload(payloadBase64: string): SSOTokenPayload | null {
 
 /**
  * Valida la firma HMAC-SHA256 del token
+ * El secreto derivado es: sha256(TREELAN_BOT_SECRET + cliente_id)
  */
 function verifySignature(
   payloadBase64: string,
   signature: string,
-  secret: string
+  secret: string,
+  clienteId: string
 ): boolean {
   try {
+    // Derivar secreto: sha256(TREELAN_BOT_SECRET + cliente_id)
     const derivedSecret = createHash('sha256')
-      .update(secret)
+      .update(secret + clienteId)
       .digest('hex');
+
+    console.log('[SSO]   - Derivando secreto con: secret + cliente_id');
+    console.log('[SSO]   - Cliente ID usado:', clienteId);
+    console.log('[SSO]   - Secreto derivado (primeros 16 chars):', derivedSecret.substring(0, 16) + '...');
 
     const expectedSignature = createHmac('sha256', derivedSecret)
       .update(payloadBase64)
       .digest('hex');
+
+    console.log('[SSO]   - Firma esperada:', expectedSignature);
+    console.log('[SSO]   - Firma recibida:', signature);
 
     // Comparación timing-safe para evitar ataques de timing
     return timingSafeEqual(
@@ -61,6 +71,7 @@ function verifySignature(
       Buffer.from(signature)
     );
   } catch (error) {
+    console.log('[SSO]   - Error en verificación de firma:', error);
     return false;
   }
 }
@@ -218,7 +229,7 @@ export async function validateSSOToken(
   }
   console.log('[SSO] Verificando firma con secret (primeros 4 chars):', secret.substring(0, 4) + '***');
 
-  if (!verifySignature(payloadBase64, signature, secret)) {
+  if (!verifySignature(payloadBase64, signature, secret, payload.cliente_id)) {
     console.log('[SSO] FALLO FIRMA: La firma no coincide');
     console.log('[SSO]   - Signature recibida:', signature);
     return { valid: false, error: 'Firma de token no válida', errorCode: 'SIGNATURE_INVALID' };
