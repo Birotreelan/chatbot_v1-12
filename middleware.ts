@@ -78,22 +78,24 @@ export function middleware(request: NextRequest) {
   if (pathname.startsWith("/support") || pathname.startsWith("/login") || pathname.startsWith("/api/support")) {
     // SSO: Si viene un sso_token, redirigir a /api/auth/sso ANTES de verificar autenticación
     const ssoToken = request.nextUrl.searchParams.get("sso_token")
-    const sessionCookie = request.cookies.get("session_id")
+    // _sid: sessionId pasado por URL desde /api/auth/sso (workaround cookies Safari en iframe)
+    const sidParam = request.nextUrl.searchParams.get("_sid")
     
     console.log("[MIDDLEWARE] Support/Login route - pathname:", pathname)
     console.log("[MIDDLEWARE] Support/Login route - sso_token presente:", !!ssoToken)
-    console.log("[MIDDLEWARE] Support/Login route - session_id cookie presente:", !!sessionCookie)
-    console.log("[MIDDLEWARE] Support/Login route - session_id value:", sessionCookie?.value || "NO COOKIE")
-    console.log("[MIDDLEWARE] Support/Login route - todas las cookies:", JSON.stringify(request.cookies.getAll()))
+    console.log("[MIDDLEWARE] Support/Login route - _sid presente:", !!sidParam)
+    console.log("[MIDDLEWARE] Support/Login route - cookies:", JSON.stringify(request.cookies.getAll()))
     
     if (ssoToken) {
-      console.log("[MIDDLEWARE] SSO: Token detectado en URL")
-      console.log("[MIDDLEWARE] SSO: Token (primeros 50 chars):", ssoToken.substring(0, 50) + "...")
-      console.log("[MIDDLEWARE] SSO: Redirigiendo a /api/auth/sso")
+      console.log("[MIDDLEWARE] SSO: Token detectado, redirigiendo a /api/auth/sso")
       const ssoUrl = new URL("/api/auth/sso", request.url)
       ssoUrl.searchParams.set("sso_token", ssoToken)
-      console.log("[MIDDLEWARE] SSO: URL de redirección:", ssoUrl.toString())
       return NextResponse.redirect(ssoUrl)
+    }
+
+    // Si viene _sid, dejar pasar al layout para que establezca la cookie server-side
+    if (sidParam) {
+      console.log("[MIDDLEWARE] SSO: _sid detectado, dejando pasar al layout")
     }
 
     const response = NextResponse.next()

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateSSOToken } from '@/lib/sso';
-import { createSessionWithoutCookie, SESSION_COOKIE_NAME, SESSION_COOKIE_OPTIONS } from '@/lib/auth';
+import { createSessionWithoutCookie } from '@/lib/auth';
 import { nanoid } from 'nanoid';
 import type { SessionData } from '@/lib/types';
 
@@ -70,19 +70,15 @@ export async function GET(request: NextRequest) {
     const sessionId = await createSessionWithoutCookie(sessionData);
     console.log('[SSO API] Sesión creada en Redis con ID:', sessionId);
 
-    // Redirigir a /support sin el token en la URL
+    // Redirigir a /support pasando el sessionId por URL para evitar el bloqueo
+    // de cookies de terceros en Safari cuando se usa dentro de un iframe.
+    // El layout de /support leerá este parámetro server-side, establecerá la cookie
+    // y redirigirá limpiando la URL.
     const redirectUrl = new URL('/support', request.url);
+    redirectUrl.searchParams.set('_sid', sessionId);
     console.log('[SSO API] Redirigiendo a:', redirectUrl.toString());
-    
-    // Crear response de redirect con la cookie de sesión
+
     const response = NextResponse.redirect(redirectUrl, { status: 302 });
-    
-    // Establecer la cookie de sesión en el response
-    response.cookies.set(SESSION_COOKIE_NAME, sessionId, SESSION_COOKIE_OPTIONS);
-    console.log('[SSO API] Cookie de sesión establecida:', SESSION_COOKIE_NAME);
-    console.log('[SSO API] Cookie options:', JSON.stringify(SESSION_COOKIE_OPTIONS));
-    console.log('[SSO API] Response headers Set-Cookie:', response.headers.get('Set-Cookie'));
-    
     return response;
   } catch (error) {
     console.error('[SSO API] Error crítico:', error);
