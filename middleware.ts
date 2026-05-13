@@ -78,8 +78,13 @@ export function middleware(request: NextRequest) {
   if (pathname.startsWith("/support") || pathname.startsWith("/login") || pathname.startsWith("/api/support")) {
     // SSO: Si viene un sso_token, redirigir a /api/auth/sso ANTES de verificar autenticación
     const ssoToken = request.nextUrl.searchParams.get("sso_token")
+    const sessionCookie = request.cookies.get("session_id")
+    
     console.log("[MIDDLEWARE] Support/Login route - pathname:", pathname)
     console.log("[MIDDLEWARE] Support/Login route - sso_token presente:", !!ssoToken)
+    console.log("[MIDDLEWARE] Support/Login route - session_id cookie presente:", !!sessionCookie)
+    console.log("[MIDDLEWARE] Support/Login route - session_id value:", sessionCookie?.value || "NO COOKIE")
+    console.log("[MIDDLEWARE] Support/Login route - todas las cookies:", JSON.stringify(request.cookies.getAll()))
     
     if (ssoToken) {
       console.log("[MIDDLEWARE] SSO: Token detectado en URL")
