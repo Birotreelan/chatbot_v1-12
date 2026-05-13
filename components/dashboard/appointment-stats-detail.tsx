@@ -26,7 +26,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
   const [startDate, setStartDate] = useState<string | null>(today)
   const [endDate, setEndDate] = useState<string | null>(today)
 
-  // Fetch mensajes_pagados from the external endpoint
+  // Fetch mensajes_pagados from the API route
   const loadMensajesPagados = useCallback(async () => {
     if (!clienteId || !startDate || !endDate) {
       setMensajesPagados(0)
@@ -36,7 +36,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
 
     setLoadingMensajes(true)
     try {
-      const url = `https://proxy.santiagovulliez.com/proxy_service/wpp_consumos.php?cliente_id=${encodeURIComponent(clienteId)}&fecha_inicio=${startDate}&fecha_fin=${endDate}`
+      const url = `/api/appointment-stats/mensajes-pagados?cliente_id=${encodeURIComponent(clienteId)}&fecha_inicio=${startDate}&fecha_fin=${endDate}`
       const response = await fetch(url)
       
       if (response.ok) {
