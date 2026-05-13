@@ -80,6 +80,8 @@ export async function GET(request: NextRequest) {
     // Establecer la cookie de sesión en el response
     response.cookies.set(SESSION_COOKIE_NAME, sessionId, SESSION_COOKIE_OPTIONS);
     console.log('[SSO API] Cookie de sesión establecida:', SESSION_COOKIE_NAME);
+    console.log('[SSO API] Cookie options:', JSON.stringify(SESSION_COOKIE_OPTIONS));
+    console.log('[SSO API] Response headers Set-Cookie:', response.headers.get('Set-Cookie'));
     
     return response;
   } catch (error) {
