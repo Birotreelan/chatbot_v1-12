@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { useSession } from "./session-provider"
 import type { HumanSupportSession } from "@/lib/types"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
@@ -17,6 +18,7 @@ interface SessionCardProps {
 export function SessionCard({ session, onUpdate }: SessionCardProps) {
   const router = useRouter()
   const [assigning, setAssigning] = useState(false)
+  const { getAuthHeaders, sessionId: ssoSessionId } = useSession()
 
   const priorityColors = {
     low: "bg-blue-500",
@@ -29,13 +31,20 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
     setAssigning(true)
 
     try {
-      const url = `/api/support/actions`
+      // Construir URL con _sid para Safari fallback
+      let url = `/api/support/actions`
+      if (ssoSessionId) {
+        url += `?_sid=${encodeURIComponent(ssoSessionId)}`
+      }
       console.log("[v0] [CLIENT] URL de asignación:", url)
       console.log("[v0] [CLIENT] Haciendo fetch con método POST")
 
       const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
         credentials: "include",
         body: JSON.stringify({
           action: "assign",
@@ -67,7 +76,12 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
       await onUpdate()
 
       console.log("[v0] [CLIENT] Redirigiendo a la conversación...")
-      router.push(`/support/${session.id}`)
+      // Incluir _sid en la URL para Safari fallback
+      let redirectUrl = `/support/${session.id}`
+      if (ssoSessionId) {
+        redirectUrl += `?_sid=${encodeURIComponent(ssoSessionId)}`
+      }
+      router.push(redirectUrl)
     } catch (error) {
       console.error("[v0] [CLIENT] Error en handleAssign:", error)
       alert("Error al asignar la conversación: " + (error instanceof Error ? error.message : "Error desconocido"))
@@ -78,7 +92,12 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
   }
 
   function handleView() {
-    router.push(`/support/${session.id}`)
+    // Incluir _sid en la URL para Safari fallback
+    let redirectUrl = `/support/${session.id}`
+    if (ssoSessionId) {
+      redirectUrl += `?_sid=${encodeURIComponent(ssoSessionId)}`
+    }
+    router.push(redirectUrl)
   }
 
   const timeAgo = formatDistanceToNow(new Date(session.requestedAt), {

@@ -93,19 +93,57 @@ export function middleware(request: NextRequest) {
       return NextResponse.redirect(ssoUrl)
     }
 
-    // Si viene _sid, establecer la cookie y redirigir a /support limpio
-    if (sidParam && pathname.startsWith("/support")) {
-      console.log("[MIDDLEWARE] SSO: _sid detectado, estableciendo cookie y redirigiendo")
-      const cleanUrl = new URL("/support", request.url)
-      const response = NextResponse.redirect(cleanUrl)
+    // Si viene _sid, pasar el session ID como header para que getSession lo pueda leer
+    // También intentamos establecer la cookie (funciona en Chrome/Firefox, no en Safari)
+    if (sidParam && (pathname.startsWith("/support") || pathname.startsWith("/api/support"))) {
+      console.log("[MIDDLEWARE] SSO: _sid detectado, pasando como header x-session-id")
+      
+      // Verificar si ya existe la cookie session_id
+      const existingCookie = request.cookies.get("session_id")?.value
+      console.log("[MIDDLEWARE] SSO: Cookie existente:", existingCookie || "ninguna")
+      
+      // Si ya tiene la cookie correcta, redirigir a URL limpia
+      if (existingCookie === sidParam) {
+        console.log("[MIDDLEWARE] SSO: Cookie ya existe con el valor correcto, redirigiendo a URL limpia")
+        const cleanUrl = new URL("/support", request.url)
+        return NextResponse.redirect(cleanUrl)
+      }
+      
+      // Crear nuevos headers con el session ID agregado
+      const newHeaders = new Headers(request.headers)
+      newHeaders.set("x-session-id", sidParam)
+      
+      // Crear response que pasa el _sid como header al siguiente handler
+      const response = NextResponse.next({
+        request: {
+          headers: newHeaders,
+        },
+      })
+      
+      // También intentar establecer la cookie (funciona en navegadores que lo permiten)
       response.cookies.set("session_id", sidParam, {
         httpOnly: true,
         secure: true,
         sameSite: "none",
-        maxAge: 60 * 60 * 24, // 24 horas
+        maxAge: 60 * 60 * 24 * 7, // 7 días
         path: "/",
       })
-      console.log("[MIDDLEWARE] SSO: Cookie session_id establecida:", sidParam)
+      
+      // Headers para iframe
+      response.headers.set("X-Frame-Options", "ALLOWALL")
+      response.headers.set("Content-Security-Policy", "frame-ancestors *")
+      
+      // Headers CORS
+      const origin = request.headers.get("origin")
+      if (origin) {
+        response.headers.set("Access-Control-Allow-Origin", origin)
+        response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Session-Id")
+        response.headers.set("Access-Control-Allow-Credentials", "true")
+        response.headers.set("Vary", "Origin")
+      }
+      
+      console.log("[MIDDLEWARE] SSO: Cookie y header establecidos para _sid:", sidParam)
       return response
     }
 

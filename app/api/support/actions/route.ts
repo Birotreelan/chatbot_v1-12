@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { requireAuthForApi, requireSupportAgentForApi } from "@/lib/auth"
+import { requireAuthFromRequest, requireSupportAgentFromRequest, getSessionFromRequest } from "@/lib/auth"
+import type { SessionData } from "@/lib/types"
 import {
   getSupportSession,
   getSupportMessages,
@@ -17,7 +18,7 @@ import type { HumanSupportMessage } from "@/lib/types"
 export async function GET(request: Request) {
   try {
     console.log("[v0] [API SUPPORT ACTIONS GET] Iniciando")
-    const { session, error } = await requireAuthForApi()
+    const { session, error } = await requireAuthFromRequest(request)
     
     if (!session) {
       return NextResponse.json({ success: false, error: error || "No autenticado" }, { status: 401 })
@@ -89,6 +90,12 @@ export async function POST(request: Request) {
   try {
     console.log("[v0] [API SUPPORT ACTIONS] Iniciando")
 
+    // Obtener sesión ANTES de consumir el body (para Safari support)
+    const userSession = await getSessionFromRequest(request)
+    if (!userSession) {
+      return NextResponse.json({ success: false, error: "No autenticado" }, { status: 401 })
+    }
+
     const body = await request.json()
     const { action, sessionId, message, note } = body
 
@@ -104,13 +111,13 @@ export async function POST(request: Request) {
 
     switch (action) {
       case "assign":
-        return await handleAssign(sessionId)
+        return await handleAssign(sessionId, userSession)
 
       case "close":
-        return await handleClose(sessionId, note)
+        return await handleClose(sessionId, userSession, note)
 
       case "message":
-        return await handleMessage(sessionId, message)
+        return await handleMessage(sessionId, userSession, message)
 
       default:
         return NextResponse.json({ success: false, error: `Acción no válida: ${action}` }, { status: 400 })
@@ -128,14 +135,13 @@ export async function POST(request: Request) {
   }
 }
 
-async function handleAssign(sessionId: string) {
+async function handleAssign(sessionId: string, session: SessionData) {
   console.log("[v0] [ASSIGN] Iniciando para sessionId:", sessionId)
 
   try {
-    const { session, error } = await requireSupportAgentForApi()
-    
-    if (!session) {
-      return NextResponse.json({ success: false, error: error || "No autenticado" }, { status: 401 })
+    // Verificar que es un agente de soporte
+    if (session.role !== "support_agent") {
+      return NextResponse.json({ success: false, error: "Se requiere rol de agente de soporte" }, { status: 403 })
     }
     
     console.log("[v0] [ASSIGN] Usuario autenticado:", { userId: session.userId, tenantId: session.tenantId })
@@ -210,14 +216,8 @@ async function handleAssign(sessionId: string) {
   }
 }
 
-async function handleClose(sessionId: string, note?: string) {
+async function handleClose(sessionId: string, session: SessionData, note?: string) {
   try {
-    const { session, error } = await requireAuthForApi()
-    
-    if (!session) {
-      return NextResponse.json({ success: false, error: error || "No autenticado" }, { status: 401 })
-    }
-    
     const supportSession = await getSupportSession(sessionId)
 
     if (!supportSession) {
@@ -255,15 +255,14 @@ async function handleClose(sessionId: string, note?: string) {
   }
 }
 
-async function handleMessage(sessionId: string, message: string) {
+async function handleMessage(sessionId: string, session: SessionData, message: string) {
   try {
     console.log("[v0] [MESSAGE] Iniciando para sessionId:", sessionId)
     console.log("[v0] [MESSAGE] Mensaje recibido:", message)
 
-    const { session, error } = await requireSupportAgentForApi()
-    
-    if (!session) {
-      return NextResponse.json({ success: false, error: error || "No autenticado" }, { status: 401 })
+    // Verificar que es un agente de soporte
+    if (session.role !== "support_agent") {
+      return NextResponse.json({ success: false, error: "Se requiere rol de agente de soporte" }, { status: 403 })
     }
     
     console.log("[v0] [MESSAGE] Usuario autenticado:", { userId: session.userId, tenantId: session.tenantId })

@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server"
-import { getSessionForApi } from "@/lib/auth"
+import { getSessionForApi, getSessionFromRequest } from "@/lib/auth"
 import { getPendingSessions, getAgentActiveSessions, getActiveSessionsByTenant } from "@/lib/human-support"
 
 export async function GET(request: Request) {
   try {
-    const session = await getSessionForApi()
+    // Intentar obtener sesión de múltiples formas (cookie, header, query param)
+    // para soportar Safari donde las cookies no funcionan en iframes
+    const session = await getSessionFromRequest(request)
     
     console.log("[API Sessions] Sesión obtenida:", session ? {
       userId: session.userId,
