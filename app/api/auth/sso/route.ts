@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     const validationResult = await validateSSOToken(ssoToken, clientIp, userAgent);
     console.log('[SSO API] Resultado validación:', validationResult.valid ? 'ÉXITO' : 'FALLO - ' + validationResult.error);
 
-    if (!validationResult.valid || !validationResult.payload) {
+    if (!validationResult.valid || !validationResult.payload || !validationResult.clientConfig) {
       console.warn('[SSO API] Validación fallida:', validationResult.error);
       return NextResponse.json(
         { 
@@ -54,15 +54,20 @@ export async function GET(request: NextRequest) {
     }
 
     const { cliente_id, email, name } = validationResult.payload;
+    const { id: configId, displayName: configDisplayName } = validationResult.clientConfig;
+    
     console.log('[SSO API] Datos extraídos del token:', { cliente_id, email, name });
+    console.log('[SSO API] Datos de la configuración:', { configId, configDisplayName });
 
     // Crear sesión con los datos del token SSO
+    // IMPORTANTE: usamos configId como tenantId porque las sesiones de soporte
+    // se filtran por este ID (el ID interno de la config, no el cliente_id)
     const sessionData: SessionData = {
       userId: `sso_${cliente_id}_${nanoid(8)}`,
       username: email || `cliente_${cliente_id}`,
       role: 'support_agent',
-      tenantId: cliente_id,
-      displayName: name || email || `Cliente ${cliente_id}`,
+      tenantId: configId,  // Usar configId, no cliente_id
+      displayName: name || email || configDisplayName,  // Usar displayName de la config si no viene en el token
     };
     console.log('[SSO API] Creando sesión con datos:', sessionData);
 
