@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSessionForApi, getSessionFromRequest } from "@/lib/auth"
-import { getPendingSessions, getAgentActiveSessions, getActiveSessionsByTenant } from "@/lib/human-support"
+import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
 
 export async function GET(request: Request) {
   try {
@@ -12,7 +12,8 @@ export async function GET(request: Request) {
       userId: session.userId,
       tenantId: session.tenantId,
       role: session.role,
-      displayName: session.displayName
+      displayName: session.displayName,
+      ssoUsuarioId: session.ssoUsuarioId
     } : "NO HAY SESIÓN")
     
     if (!session) {
@@ -22,25 +23,18 @@ export async function GET(request: Request) {
       )
     }
 
-    // Obtener sesiones pendientes filtradas por tenant
+    // Obtener sesiones pendientes filtradas por tenant (visibles para TODOS los usuarios del tenant)
     console.log("[API Sessions] Buscando sesiones pendientes para tenantId:", session.tenantId)
     const pendingSessions = await getPendingSessions(session.tenantId)
     console.log("[API Sessions] Sesiones pendientes encontradas:", pendingSessions.length)
 
-    // Obtener sesiones activas
+    // Obtener sesiones activas SOLO del usuario actual (no de todo el tenant)
+    // Esto es clave para el sistema multiusuario: cada usuario solo ve SUS conversaciones activas
     let activeSessions: any[] = []
     if (session.role === "support_agent") {
-      // Primero intentar obtener las sesiones activas del agente específico
+      // Obtener las sesiones activas asignadas a ESTE usuario específico
       activeSessions = await getAgentActiveSessions(session.userId)
-      console.log("[API Sessions] Sesiones activas del agente (por userId):", activeSessions.length)
-      
-      // Si no hay sesiones activas por userId (típico en SSO donde el userId cambia),
-      // buscar todas las sesiones activas del tenant
-      if (activeSessions.length === 0 && session.tenantId) {
-        console.log("[API Sessions] Buscando sesiones activas por tenantId (fallback para SSO)")
-        activeSessions = await getActiveSessionsByTenant(session.tenantId)
-        console.log("[API Sessions] Sesiones activas del tenant:", activeSessions.length)
-      }
+      console.log("[API Sessions] Sesiones activas del agente (userId:", session.userId, "):", activeSessions.length)
     }
 
     const allSessions = [...pendingSessions, ...activeSessions]
@@ -51,6 +45,11 @@ export async function GET(request: Request) {
       sessions: allSessions,
       pending: pendingSessions,
       active: activeSessions,
+      userInfo: {
+        userId: session.userId,
+        displayName: session.displayName,
+        ssoUsuarioId: session.ssoUsuarioId
+      }
     })
   } catch (error: any) {
     console.error("[API Sessions] Error obteniendo sesiones:", error)

@@ -177,6 +177,8 @@ export interface SessionData {
   role: "super_admin" | "support_agent"
   tenantId: string | null
   displayName: string
+  // Para SSO multiusuario: identificador único del usuario dentro del tenant
+  ssoUsuarioId?: string
 }
 
 export interface HumanSupportSession {

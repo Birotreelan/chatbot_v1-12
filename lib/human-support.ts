@@ -153,8 +153,12 @@ export async function getAgentActiveSessions(agentId: string): Promise<HumanSupp
   const redis = getRedisClient()
   if (!redis) return []
 
+  console.log("[HUMAN_SUPPORT] getAgentActiveSessions llamado con agentId:", agentId)
+
   const agentSessionsKey = `${SUPPORT_AGENT_SESSIONS_PREFIX}${agentId}:active`
   const sessionIds = await redis.smembers(agentSessionsKey)
+
+  console.log("[HUMAN_SUPPORT] Session IDs del agente:", sessionIds)
 
   if (!sessionIds || sessionIds.length === 0) return []
 
@@ -167,49 +171,7 @@ export async function getAgentActiveSessions(agentId: string): Promise<HumanSupp
     }
   }
 
-  return sessions
-}
-
-// Obtener TODAS las sesiones activas (in_progress) de un tenant
-// Esto es útil para SSO donde el userId cambia en cada sesión
-export async function getActiveSessionsByTenant(tenantId: string): Promise<HumanSupportSession[]> {
-  const redis = getRedisClient()
-  if (!redis) return []
-
-  console.log("[HUMAN_SUPPORT] getActiveSessionsByTenant llamado con tenantId:", tenantId)
-
-  // Buscar todas las claves de sesiones de soporte
-  const pattern = `${SUPPORT_SESSION_PREFIX}*`
-  const keys = await redis.keys(pattern)
-  
-  console.log("[HUMAN_SUPPORT] Claves de sesiones encontradas:", keys.length)
-
-  if (!keys || keys.length === 0) return []
-
-  const sessions: HumanSupportSession[] = []
-
-  for (const key of keys) {
-    const sessionData = await redis.get(key as string)
-    if (sessionData) {
-      try {
-        const session = typeof sessionData === "string" ? JSON.parse(sessionData) : sessionData
-        // Filtrar por tenant y estado in_progress
-        if (session.status === "in_progress" && session.tenantId === tenantId) {
-          console.log("[HUMAN_SUPPORT] Sesión activa encontrada:", {
-            id: session.id,
-            tenantId: session.tenantId,
-            status: session.status,
-            assignedTo: session.assignedTo
-          })
-          sessions.push(session)
-        }
-      } catch (e) {
-        console.error("[HUMAN_SUPPORT] Error parseando sesión:", e)
-      }
-    }
-  }
-
-  console.log("[HUMAN_SUPPORT] Total sesiones activas del tenant:", sessions.length)
+  console.log("[HUMAN_SUPPORT] Sesiones activas encontradas:", sessions.length)
   return sessions
 }
 

@@ -3,6 +3,9 @@ import { getConfigByClienteId } from './db';
 
 export interface SSOTokenPayload {
   cliente_id: string;
+  usuario_id?: string;  // ID único del usuario dentro del cliente
+  apellido?: string;    // Apellido del usuario
+  nombre?: string;      // Nombre del usuario
   exp: number;
   iat: number;
   fingerprint: string;
