@@ -24,6 +24,12 @@ export interface SSOValidationResult {
     clienteId?: string;
   };
   payload?: SSOTokenPayload;
+  // Configuración del cliente encontrada - contiene el configId (id interno) y displayName
+  clientConfig?: {
+    id: string;  // Este es el configId (nanoid) que se usa como tenantId en las sesiones
+    displayName: string;
+    cliente_id: string;
+  };
 }
 
 /**
@@ -108,15 +114,21 @@ function isTokenExpired(expirationTime: number): boolean {
 }
 
 /**
- * Valida que el cliente exista y esté activo
+ * Obtiene la configuración del cliente y valida que exista y esté activo
+ * Retorna la config con id, displayName y cliente_id si existe
  */
-async function isClienteActive(clienteId: string): Promise<boolean> {
+async function getClienteConfig(clienteId: string): Promise<{ id: string; displayName: string; cliente_id: string } | null> {
   try {
     const config = await getConfigByClienteId(clienteId);
-    return config !== null;
+    if (!config) return null;
+    return {
+      id: config.id,  // Este es el configId (nanoid) usado como tenantId
+      displayName: config.displayName,
+      cliente_id: config.cliente_id,
+    };
   } catch (error) {
-    console.error('[SSO] Error validating cliente:', error);
-    return false;
+    console.error('[SSO] Error getting cliente config:', error);
+    return null;
   }
 }
 
@@ -238,8 +250,8 @@ export async function validateSSOToken(
 
   // Validar que el cliente exista y esté activo
   console.log('[SSO] Verificando cliente_id:', payload.cliente_id);
-  const clienteExists = await isClienteActive(payload.cliente_id);
-  if (!clienteExists) {
+  const clientConfig = await getClienteConfig(payload.cliente_id);
+  if (!clientConfig) {
     console.log('[SSO] FALLO CLIENTE: Cliente no existe o está inactivo:', payload.cliente_id);
     return { 
       valid: false, 
@@ -251,7 +263,9 @@ export async function validateSSOToken(
     };
   }
   console.log('[SSO] OK: Cliente activo');
+  console.log('[SSO]   - configId (tenantId):', clientConfig.id);
+  console.log('[SSO]   - displayName:', clientConfig.displayName);
 
   console.log('[SSO] ========== VALIDACIÓN EXITOSA ==========');
-  return { valid: true, payload };
+  return { valid: true, payload, clientConfig };
 }
