@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server"
-import { requireSupportAgentForApi } from "@/lib/auth"
+import { requireSupportAgentFromRequest } from "@/lib/auth"
 import { getSupportSession } from "@/lib/human-support"
 
 const PROXY_URL = "https://proxy.santiagovulliez.com/proxy_service/"
 
 export async function GET(request: Request) {
   try {
-    // Verificar autenticacion
-    const { session, error } = await requireSupportAgentForApi()
+    // Verificar autenticacion (con soporte para Safari/iframe)
+    const { session, error } = await requireSupportAgentFromRequest(request)
     if (!session) {
       return NextResponse.json({ success: false, error: error || "No autorizado" }, { status: 401 })
     }

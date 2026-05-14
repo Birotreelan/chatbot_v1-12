@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { requireAuth, requireSupportAgent } from "@/lib/auth"
+import { getSessionFromRequest } from "@/lib/auth"
+import type { SessionData } from "@/lib/types"
 import {
   getSupportSession,
   getSupportMessages,
@@ -17,7 +18,11 @@ import type { HumanSupportMessage } from "@/lib/types"
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     console.log("[v0] [API SESSION GET] Iniciando")
-    const session = await requireAuth()
+    const session = await getSessionFromRequest(request)
+    if (!session) {
+      return NextResponse.json({ success: false, error: "No autenticado" }, { status: 401 })
+    }
+    
     const { id: sessionId } = await params
 
     const supportSession = await getSupportSession(sessionId)
@@ -54,6 +59,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     console.log("[v0] [API SESSION POST] URL:", request.url)
     console.log("[v0] [API SESSION POST] Método:", request.method)
 
+    // Obtener sesión ANTES de consumir el body (para Safari support)
+    const userSession = await getSessionFromRequest(request)
+    if (!userSession) {
+      return NextResponse.json({ success: false, error: "No autenticado" }, { status: 401 })
+    }
+
     const body = await request.json()
     const { action } = body
 
@@ -67,15 +78,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     switch (action) {
       case "assign":
         console.log("[v0] [API SESSION POST] Ejecutando assign para:", sessionId)
-        return await handleAssign(sessionId)
+        return await handleAssign(sessionId, userSession)
 
       case "close":
         console.log("[v0] [API SESSION POST] Ejecutando close")
-        return await handleClose(sessionId, body.note)
+        return await handleClose(sessionId, userSession, body.note)
 
       case "message":
         console.log("[v0] [API SESSION POST] Ejecutando message")
-        return await handleMessage(sessionId, body.message)
+        return await handleMessage(sessionId, userSession, body.message)
 
       default:
         console.log("[v0] [API SESSION POST] ERROR: Acción no válida:", action)
@@ -95,11 +106,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 }
 
-async function handleAssign(sessionId: string) {
+async function handleAssign(sessionId: string, session: SessionData) {
   console.log("[v0] [ASSIGN] Iniciando para sessionId:", sessionId)
 
   try {
-    const session = await requireSupportAgent()
+    // Verificar que es un agente de soporte
+    if (session.role !== "support_agent") {
+      return NextResponse.json({ success: false, error: "Se requiere rol de agente de soporte" }, { status: 403 })
+    }
+    
     console.log("[v0] [ASSIGN] Usuario autenticado:", { userId: session.userId, tenantId: session.tenantId })
 
     const supportSession = await getSupportSession(sessionId)
@@ -159,9 +174,8 @@ async function handleAssign(sessionId: string) {
   }
 }
 
-async function handleClose(sessionId: string, note?: string) {
+async function handleClose(sessionId: string, session: SessionData, note?: string) {
   try {
-    const session = await requireAuth()
     const supportSession = await getSupportSession(sessionId)
 
     if (!supportSession) {
@@ -199,9 +213,12 @@ async function handleClose(sessionId: string, note?: string) {
   }
 }
 
-async function handleMessage(sessionId: string, message: string) {
+async function handleMessage(sessionId: string, session: SessionData, message: string) {
   try {
-    const session = await requireSupportAgent()
+    // Verificar que es un agente de soporte
+    if (session.role !== "support_agent") {
+      return NextResponse.json({ success: false, error: "Se requiere rol de agente de soporte" }, { status: 403 })
+    }
 
     if (!message || typeof message !== "string" || message.trim().length === 0) {
       return NextResponse.json({ success: false, error: "Mensaje inválido" }, { status: 400 })

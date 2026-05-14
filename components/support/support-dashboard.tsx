@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react"
 import { SessionsList } from "./sessions-list"
+import { useSession } from "./session-provider"
 import type { HumanSupportSession } from "@/lib/types"
 
 export function SupportDashboard() {
   const [sessions, setSessions] = useState<HumanSupportSession[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { getAuthHeaders, sessionId } = useSession()
 
   useEffect(() => {
     loadSessions()
@@ -18,8 +20,17 @@ export function SupportDashboard() {
 
   async function loadSessions() {
     try {
-      const response = await fetch("/api/support/sessions", {
+      // Construir URL con _sid para Safari fallback
+      let url = "/api/support/sessions"
+      if (sessionId) {
+        url += `?_sid=${encodeURIComponent(sessionId)}`
+      }
+      
+      const response = await fetch(url, {
         credentials: "include",
+        headers: {
+          ...getAuthHeaders(),
+        },
       })
       if (!response.ok) throw new Error("Error al cargar sesiones")
       const data = await response.json()

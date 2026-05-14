@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { MessageList } from "./message-list"
 import { MessageInput } from "./message-input"
 import { CloseSessionDialog } from "./close-session-dialog"
+import { useSession } from "./session-provider"
 import type { HumanSupportSession, HumanSupportMessage } from "@/lib/types"
 import { ArrowLeft } from "lucide-react"
 import { PatientInfoPanel } from "./patient-info-panel"
@@ -25,6 +26,7 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCloseDialog, setShowCloseDialog] = useState(false)
+  const { getAuthHeaders, sessionId: ssoSessionId } = useSession()
 
   useEffect(() => {
     loadSession()
@@ -35,9 +37,18 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
   async function loadSession() {
     try {
-      const response = await fetch(`/api/support/actions?sessionId=${sessionId}`, {
+      // Construir URL con _sid para Safari fallback
+      let url = `/api/support/actions?sessionId=${sessionId}`
+      if (ssoSessionId) {
+        url += `&_sid=${encodeURIComponent(ssoSessionId)}`
+      }
+      
+      const response = await fetch(url, {
         method: "GET",
         credentials: "include",
+        headers: {
+          ...getAuthHeaders(),
+        },
       })
       if (!response.ok) throw new Error("Error al cargar sesión")
       const data = await response.json()
@@ -59,9 +70,18 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
       console.log("[v0] [CLIENT] Enviando mensaje:", message)
       console.log("[v0] [CLIENT] SessionId:", sessionId)
 
-      const response = await fetch(`/api/support/actions`, {
+      // Construir URL con _sid para Safari fallback
+      let url = `/api/support/actions`
+      if (ssoSessionId) {
+        url += `?_sid=${encodeURIComponent(ssoSessionId)}`
+      }
+
+      const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
         credentials: "include",
         body: JSON.stringify({ action: "message", sessionId, message }),
       })
@@ -81,30 +101,52 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
       // Recargar sesión inmediatamente
       console.log("[v0] [CLIENT] Recargando sesión...")
       await loadSession()
-      console.log("[v0] [CLIENT] ✅ Mensaje enviado y sesión recargada")
+      console.log("[v0] [CLIENT] Mensaje enviado y sesión recargada")
     } catch (error) {
-      console.error("[v0] [CLIENT] ❌ Error:", error)
+      console.error("[v0] [CLIENT] Error:", error)
       alert("Error al enviar mensaje: " + (error instanceof Error ? error.message : "Error desconocido"))
     }
   }
 
   async function handleCloseSession() {
     try {
-      const response = await fetch(`/api/support/actions`, {
+      // Construir URL con _sid para Safari fallback
+      let url = `/api/support/actions`
+      if (ssoSessionId) {
+        url += `?_sid=${encodeURIComponent(ssoSessionId)}`
+      }
+
+      const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
         credentials: "include",
         body: JSON.stringify({ action: "close", sessionId }),
       })
 
       if (!response.ok) throw new Error("Error al cerrar sesión")
 
-      // Volver al dashboard
-      router.push("/support")
+      // Volver al dashboard (incluir _sid para Safari fallback)
+      let redirectUrl = "/support"
+      if (ssoSessionId) {
+        redirectUrl += `?_sid=${encodeURIComponent(ssoSessionId)}`
+      }
+      router.push(redirectUrl)
     } catch (error) {
       console.error("Error:", error)
       alert("Error al cerrar sesión")
     }
+  }
+
+  // Función para volver al panel con _sid
+  const handleBackToPanel = () => {
+    let redirectUrl = "/support"
+    if (ssoSessionId) {
+      redirectUrl += `?_sid=${encodeURIComponent(ssoSessionId)}`
+    }
+    router.push(redirectUrl)
   }
 
   if (loading) {
@@ -127,7 +169,7 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
     <div>
       {/* Header */}
       <div className="mb-6">
-        <Button variant="ghost" onClick={() => router.push("/support")} className="mb-4">
+        <Button variant="ghost" onClick={handleBackToPanel} className="mb-4">
           <ArrowLeft className="w-4 h-4 mr-2" />
           Volver al Panel
         </Button>

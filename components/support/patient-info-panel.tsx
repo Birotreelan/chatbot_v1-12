@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { User, Phone, Mail, CreditCard, Calendar, Clock, MapPin, UserPlus, AlertCircle, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useSession } from "./session-provider"
 
 interface PatientData {
   // Campos comunes que puede retornar la API
@@ -53,6 +54,7 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
   const [isNewPatient, setIsNewPatient] = useState(false)
   const [phoneNumber, setPhoneNumber] = useState<string | null>(null)
   const [lastFetch, setLastFetch] = useState<number>(0)
+  const { getAuthHeaders, sessionId: ssoSessionId } = useSession()
 
   const fetchPatientData = useCallback(async () => {
     // Cache de 2 minutos para evitar llamadas innecesarias
@@ -63,8 +65,18 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
 
     try {
       setLoading(true)
-      const response = await fetch(`/api/support/patient?sessionId=${sessionId}`, {
+      
+      // Construir URL con _sid para Safari fallback
+      let url = `/api/support/patient?sessionId=${sessionId}`
+      if (ssoSessionId) {
+        url += `&_sid=${encodeURIComponent(ssoSessionId)}`
+      }
+      
+      const response = await fetch(url, {
         credentials: "include",
+        headers: {
+          ...getAuthHeaders(),
+        },
       })
       
       if (!response.ok) {

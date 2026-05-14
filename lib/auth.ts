@@ -1,4 +1,4 @@
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { Redis } from "@upstash/redis"
 import { nanoid } from "nanoid"
@@ -138,7 +138,17 @@ export const SESSION_COOKIE_OPTIONS = {
 
 export async function getSession(): Promise<SessionData | null> {
   const cookieStore = await cookies()
-  const sessionId = cookieStore.get("session_id")?.value
+  let sessionId = cookieStore.get("session_id")?.value
+  
+  // Fallback para Safari: leer session ID desde header (establecido por middleware desde _sid)
+  if (!sessionId) {
+    const headerStore = await headers()
+    sessionId = headerStore.get("x-session-id") || undefined
+    if (sessionId) {
+      console.log("[Auth] Session ID obtenido desde header x-session-id (Safari fallback)")
+    }
+  }
+  
   if (!sessionId) return null
 
   const redis = getRedisClient()
@@ -212,6 +222,77 @@ export async function getSessionForApi(): Promise<SessionData | null> {
   return await getSession()
 }
 
+/**
+ * Obtiene la sesión desde un Request object.
+ * Intenta múltiples fuentes para soportar Safari en iframes donde las cookies no funcionan:
+ * 1. Cookie session_id (funciona en Chrome/Firefox)
+ * 2. Header X-Session-Id (enviado por el cliente en fetch)
+ * 3. Query param _sid (pasado en la URL)
+ */
+export async function getSessionFromRequest(request: Request): Promise<SessionData | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+
+  let sessionId: string | null = null
+  
+  // 1. Intentar obtener de la cookie (método estándar)
+  const cookieHeader = request.headers.get("cookie")
+  if (cookieHeader) {
+    const cookies = cookieHeader.split(";").map(c => c.trim())
+    for (const cookie of cookies) {
+      if (cookie.startsWith("session_id=")) {
+        sessionId = cookie.substring("session_id=".length)
+        console.log("[Auth] Session ID obtenido de cookie:", sessionId?.substring(0, 8) + "...")
+        break
+      }
+    }
+  }
+  
+  // 2. Si no hay cookie, intentar desde el header X-Session-Id (Safari fallback)
+  if (!sessionId) {
+    sessionId = request.headers.get("x-session-id")
+    if (sessionId) {
+      console.log("[Auth] Session ID obtenido de header X-Session-Id (Safari fallback):", sessionId.substring(0, 8) + "...")
+    }
+  }
+  
+  // 3. Si no hay header, intentar desde query param _sid (Safari fallback)
+  if (!sessionId) {
+    const url = new URL(request.url)
+    sessionId = url.searchParams.get("_sid")
+    if (sessionId) {
+      console.log("[Auth] Session ID obtenido de query param _sid (Safari fallback):", sessionId.substring(0, 8) + "...")
+    }
+  }
+  
+  if (!sessionId) {
+    console.log("[Auth] No se encontró session ID en ninguna fuente")
+    return null
+  }
+
+  try {
+    const sessionData = await redis.get(`${SESSION_PREFIX}${sessionId}`)
+    if (!sessionData) {
+      console.log("[Auth] Session ID válido pero no encontrado en Redis:", sessionId.substring(0, 8) + "...")
+      return null
+    }
+
+    if (typeof sessionData === "string") {
+      try {
+        return JSON.parse(sessionData)
+      } catch (parseError) {
+        console.error("[Auth] Error parsing session data:", parseError)
+        return null
+      }
+    }
+
+    return sessionData as SessionData
+  } catch (error) {
+    console.error("[Auth] Error getting session from Redis:", error)
+    return null
+  }
+}
+
 // Versiones para API routes que retornan { session, error } en lugar de hacer redirect
 export async function requireAuthForApi(): Promise<{ session: SessionData | null; error?: string }> {
   const session = await getSession()
@@ -221,8 +302,33 @@ export async function requireAuthForApi(): Promise<{ session: SessionData | null
   return { session }
 }
 
+/**
+ * Versión de requireAuthForApi que lee desde Request (para Safari/iframe support)
+ */
+export async function requireAuthFromRequest(request: Request): Promise<{ session: SessionData | null; error?: string }> {
+  const session = await getSessionFromRequest(request)
+  if (!session) {
+    return { session: null, error: "No autenticado" }
+  }
+  return { session }
+}
+
 export async function requireSupportAgentForApi(): Promise<{ session: SessionData | null; error?: string }> {
   const session = await getSession()
+  if (!session) {
+    return { session: null, error: "No autenticado" }
+  }
+  if (session.role !== "support_agent") {
+    return { session: null, error: "No autorizado - se requiere rol de agente de soporte" }
+  }
+  return { session }
+}
+
+/**
+ * Versión de requireSupportAgentForApi que lee desde Request (para Safari/iframe support)
+ */
+export async function requireSupportAgentFromRequest(request: Request): Promise<{ session: SessionData | null; error?: string }> {
+  const session = await getSessionFromRequest(request)
   if (!session) {
     return { session: null, error: "No autenticado" }
   }
