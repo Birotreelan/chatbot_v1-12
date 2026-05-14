@@ -5,10 +5,17 @@ import { SessionsList } from "./sessions-list"
 import { useSession } from "./session-provider"
 import type { HumanSupportSession } from "@/lib/types"
 
+interface UserInfo {
+  userId: string
+  displayName: string
+  ssoUsuarioId?: string
+}
+
 export function SupportDashboard() {
   const [sessions, setSessions] = useState<HumanSupportSession[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null)
   const { getAuthHeaders, sessionId } = useSession()
 
   useEffect(() => {
@@ -35,6 +42,12 @@ export function SupportDashboard() {
       if (!response.ok) throw new Error("Error al cargar sesiones")
       const data = await response.json()
       setSessions(Array.isArray(data.sessions) ? data.sessions : [])
+      
+      // Guardar info del usuario si viene en la respuesta
+      if (data.userInfo) {
+        setUserInfo(data.userInfo)
+      }
+      
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido")
@@ -66,8 +79,11 @@ export function SupportDashboard() {
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">Panel de Atención al Cliente</h1>
-        <p className="text-muted-foreground mt-2">Gestiona las conversaciones que requieren atención humana</p>
+        <h1 className="text-3xl font-bold">Panel de Atencion al Cliente</h1>
+        <p className="text-muted-foreground mt-2">
+          Gestiona las conversaciones que requieren atencion humana
+          {userInfo && <span className="ml-2 text-sm">| Usuario: <strong>{userInfo.displayName}</strong></span>}
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -75,7 +91,7 @@ export function SupportDashboard() {
         <div>
           <div className="mb-4">
             <h2 className="text-xl font-semibold">Conversaciones Pendientes ({pendingSessions.length})</h2>
-            <p className="text-sm text-muted-foreground">Conversaciones esperando ser atendidas</p>
+            <p className="text-sm text-muted-foreground">Conversaciones esperando ser atendidas (visibles para todos los agentes)</p>
           </div>
           <SessionsList
             sessions={pendingSessions}
@@ -88,7 +104,7 @@ export function SupportDashboard() {
         <div>
           <div className="mb-4">
             <h2 className="text-xl font-semibold">Mis Conversaciones Activas ({activeSessions.length})</h2>
-            <p className="text-sm text-muted-foreground">Conversaciones que estás atendiendo actualmente</p>
+            <p className="text-sm text-muted-foreground">Conversaciones que TU estas atendiendo actualmente</p>
           </div>
           <SessionsList
             sessions={activeSessions}

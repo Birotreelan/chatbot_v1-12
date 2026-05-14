@@ -53,21 +53,30 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { cliente_id, email, name } = validationResult.payload;
+    const { cliente_id, email, name, usuario_id, nombre, apellido } = validationResult.payload;
     const { id: configId, displayName: configDisplayName } = validationResult.clientConfig;
     
-    console.log('[SSO API] Datos extraídos del token:', { cliente_id, email, name });
+    console.log('[SSO API] Datos extraídos del token:', { cliente_id, email, name, usuario_id, nombre, apellido });
     console.log('[SSO API] Datos de la configuración:', { configId, configDisplayName });
+
+    // Construir nombre de usuario para mostrar
+    // Prioridad: nombre + apellido del token > name del token > email > displayName de la config
+    const userDisplayName = (nombre && apellido) 
+      ? `${nombre} ${apellido}` 
+      : (name || email || configDisplayName);
 
     // Crear sesión con los datos del token SSO
     // IMPORTANTE: usamos cliente_id como tenantId para ser consistente con el login tradicional
-    // Los usuarios creados manualmente tienen tenantId = cliente_id, no configId
+    // Para SSO multiusuario: usamos usuario_id si viene en el token para identificar al usuario único
+    const ssoUsuarioId = usuario_id || `sso_${cliente_id}_${nanoid(8)}`;
+    
     const sessionData: SessionData = {
-      userId: `sso_${cliente_id}_${nanoid(8)}`,
-      username: email || `cliente_${cliente_id}`,
+      userId: `sso_${cliente_id}_${ssoUsuarioId}`,  // Combina cliente + usuario para un ID único global
+      username: email || `usuario_${ssoUsuarioId}`,
       role: 'support_agent',
       tenantId: cliente_id,  // Usar cliente_id para consistencia con login tradicional
-      displayName: name || email || configDisplayName,  // Usar displayName de la config si no viene en el token
+      displayName: userDisplayName,
+      ssoUsuarioId: ssoUsuarioId,  // Guardar el usuario_id original para filtrar conversaciones
     };
     console.log('[SSO API] Creando sesión con datos:', sessionData);
 
