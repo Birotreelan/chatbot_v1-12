@@ -137,6 +137,7 @@ export async function POST(request: Request) {
 
 async function handleAssign(sessionId: string, session: SessionData) {
   console.log("[v0] [ASSIGN] Iniciando para sessionId:", sessionId)
+  console.log("[v0] [ASSIGN] Usuario SSO - ID:", session.ssoUsuarioId, "Display:", session.displayName)
 
   try {
     // Verificar que es un agente de soporte
@@ -144,7 +145,12 @@ async function handleAssign(sessionId: string, session: SessionData) {
       return NextResponse.json({ success: false, error: "Se requiere rol de agente de soporte" }, { status: 403 })
     }
     
-    console.log("[v0] [ASSIGN] Usuario autenticado:", { userId: session.userId, tenantId: session.tenantId })
+    console.log("[v0] [ASSIGN] Usuario autenticado:", { 
+      userId: session.userId, 
+      tenantId: session.tenantId,
+      ssoUsuarioId: session.ssoUsuarioId,
+      displayName: session.displayName
+    })
 
     const supportSession = await getSupportSession(sessionId)
     console.log("[v0] [ASSIGN] Sesión encontrada:", supportSession ? "SÍ" : "NO")
@@ -167,16 +173,23 @@ async function handleAssign(sessionId: string, session: SessionData) {
       return NextResponse.json({ success: false, error: "Sesión no disponible para asignar" }, { status: 400 })
     }
 
-    console.log("[v0] [ASSIGN] Llamando a assignSessionToAgent...")
+    console.log("[v0] [ASSIGN] ✓ Asignando sesión al agente:", {
+      sessionId,
+      agentUserId: session.userId,
+      agentSsoId: session.ssoUsuarioId,
+      agentName: session.displayName
+    })
+    
     const assigned = await assignSessionToAgent(sessionId, session.userId)
-    console.log("[v0] [ASSIGN] Resultado de asignación:", assigned)
+    console.log("[v0] [ASSIGN] Resultado de asignación:", assigned ? "✓ ÉXITO" : "✗ FALLÓ")
 
     if (!assigned) {
       console.log("[v0] [ASSIGN] ERROR: No se pudo asignar")
       // Verificar si alguien más tomó la sesión (race condition)
       const currentSession = await getSupportSession(sessionId)
       if (currentSession && currentSession.status === "in_progress") {
-        console.log("[v0] [ASSIGN] RACE CONDITION: Otro agente tomó la sesión")
+        console.log("[v0] [ASSIGN] ⚠️ RACE CONDITION: Otro agente tomó la sesión")
+        console.log("[v0] [ASSIGN] Sesión ahora asignada a:", currentSession.assignedTo)
         return NextResponse.json(
           { 
             success: false, 
