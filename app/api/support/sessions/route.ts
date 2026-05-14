@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSessionForApi } from "@/lib/auth"
-import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
+import { getPendingSessions, getAgentActiveSessions, getActiveSessionsByTenant } from "@/lib/human-support"
 
 export async function GET(request: Request) {
   try {
@@ -25,11 +25,20 @@ export async function GET(request: Request) {
     const pendingSessions = await getPendingSessions(session.tenantId)
     console.log("[API Sessions] Sesiones pendientes encontradas:", pendingSessions.length)
 
-    // Si es agente de soporte, también obtener sus sesiones activas
+    // Obtener sesiones activas
     let activeSessions: any[] = []
     if (session.role === "support_agent") {
+      // Primero intentar obtener las sesiones activas del agente específico
       activeSessions = await getAgentActiveSessions(session.userId)
-      console.log("[API Sessions] Sesiones activas del agente:", activeSessions.length)
+      console.log("[API Sessions] Sesiones activas del agente (por userId):", activeSessions.length)
+      
+      // Si no hay sesiones activas por userId (típico en SSO donde el userId cambia),
+      // buscar todas las sesiones activas del tenant
+      if (activeSessions.length === 0 && session.tenantId) {
+        console.log("[API Sessions] Buscando sesiones activas por tenantId (fallback para SSO)")
+        activeSessions = await getActiveSessionsByTenant(session.tenantId)
+        console.log("[API Sessions] Sesiones activas del tenant:", activeSessions.length)
+      }
     }
 
     const allSessions = [...pendingSessions, ...activeSessions]
