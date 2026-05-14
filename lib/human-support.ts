@@ -110,23 +110,41 @@ export async function getPendingSessions(tenantId: string | null = null): Promis
   const redis = getRedisClient()
   if (!redis) return []
 
+  console.log("[HUMAN_SUPPORT] getPendingSessions llamado con tenantId:", tenantId)
+
   // Obtener todos los sessionIds pendientes (ordenados por timestamp)
   const sessionIds = await redis.zrange(SUPPORT_PENDING_SET, 0, -1)
 
-  if (!sessionIds || sessionIds.length === 0) return []
+  console.log("[HUMAN_SUPPORT] SessionIds pendientes en Redis:", sessionIds)
+
+  if (!sessionIds || sessionIds.length === 0) {
+    console.log("[HUMAN_SUPPORT] No hay sesiones pendientes en Redis")
+    return []
+  }
 
   const sessions: HumanSupportSession[] = []
 
   for (const sessionId of sessionIds) {
     const session = await getSupportSession(sessionId as string)
     if (session) {
+      console.log("[HUMAN_SUPPORT] Sesión encontrada:", {
+        id: session.id,
+        tenantId: session.tenantId,
+        configId: session.configId,
+        status: session.status,
+        phoneNumber: session.phoneNumber
+      })
       // Filtrar por tenant si no es super admin
       if (tenantId === null || session.tenantId === tenantId) {
+        console.log("[HUMAN_SUPPORT] Sesión INCLUIDA (tenantId coincide o es null)")
         sessions.push(session)
+      } else {
+        console.log("[HUMAN_SUPPORT] Sesión EXCLUIDA - tenantId no coincide:", session.tenantId, "vs", tenantId)
       }
     }
   }
 
+  console.log("[HUMAN_SUPPORT] Total sesiones filtradas:", sessions.length)
   return sessions
 }
 
