@@ -60,13 +60,13 @@ export async function GET(request: NextRequest) {
     console.log('[SSO API] Datos de la configuración:', { configId, configDisplayName });
 
     // Crear sesión con los datos del token SSO
-    // IMPORTANTE: usamos configId como tenantId porque las sesiones de soporte
-    // se filtran por este ID (el ID interno de la config, no el cliente_id)
+    // IMPORTANTE: usamos cliente_id como tenantId para ser consistente con el login tradicional
+    // Los usuarios creados manualmente tienen tenantId = cliente_id, no configId
     const sessionData: SessionData = {
       userId: `sso_${cliente_id}_${nanoid(8)}`,
       username: email || `cliente_${cliente_id}`,
       role: 'support_agent',
-      tenantId: configId,  // Usar configId, no cliente_id
+      tenantId: cliente_id,  // Usar cliente_id para consistencia con login tradicional
       displayName: name || email || configDisplayName,  // Usar displayName de la config si no viene en el token
     };
     console.log('[SSO API] Creando sesión con datos:', sessionData);
