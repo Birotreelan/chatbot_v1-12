@@ -265,12 +265,22 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{formatAppointmentDate(apt)}</span>
-                  {apt.hora && (
-                    <span className="text-muted-foreground flex items-center gap-0.5">
-                      <Clock className="h-2.5 w-2.5" />
-                      {apt.hora}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {apt.hora && (
+                      <span className="text-muted-foreground flex items-center gap-0.5">
+                        <Clock className="h-2.5 w-2.5" />
+                        {apt.hora}
+                      </span>
+                    )}
+                    {apt.url_agenda && (
+                      <Button variant="ghost" size="sm" asChild className="h-5 text-xs px-1.5 ml-1">
+                        <a href={apt.url_agenda} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="h-2.5 w-2.5 mr-0.5" />
+                          Agenda
+                        </a>
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 {apt.profesional && (
                   <p className="text-muted-foreground truncate">{apt.profesional}</p>
