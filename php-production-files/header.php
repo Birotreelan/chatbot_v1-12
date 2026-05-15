@@ -485,7 +485,7 @@ require_once('unblok_pages.php');
 // ═══════════════════════════════════════════════════════════════════════════════
 // WIDGET DE NOTIFICACIONES - Panel de Atencion al Paciente
 // ═══════════════════════════════════════════════════════════════════════════════
-$vercel_bot_url = 'https://chatbot-v1-12.vercel.app';
+$vercel_bot_url = 'https://treelan-bot.vercel.app';
 $bot_base_secret = '3x0nTh31sland';
 
 // Obtener cliente_id
