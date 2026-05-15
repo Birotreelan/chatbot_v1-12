@@ -58,6 +58,20 @@ export function middleware(request: NextRequest) {
     return response
   }
 
+  // Aplicar CORS para las APIs de notificaciones del widget embebible
+  if (pathname.startsWith("/api/notifications")) {
+    const response = NextResponse.next()
+
+    // Headers CORS completos para permitir requests desde cualquier origen
+    response.headers.set("Access-Control-Allow-Origin", "*")
+    response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    response.headers.set("Access-Control-Allow-Credentials", "false")
+
+    console.log("[MIDDLEWARE] ✅ Headers CORS aplicados para notificaciones:", pathname)
+    return response
+  }
+
   // Permitir embebido en iframe para estadísticas de citas (consumo externo)
   if (pathname.startsWith("/stats") || pathname.startsWith("/api/stats")) {
     const response = NextResponse.next()
