@@ -31,18 +31,21 @@ export function SupportNav() {
         <div className="flex items-center gap-2">
           <Headphones className="h-4 w-4" />
           <Link href={supportUrl} className="font-semibold text-sm">
-            Atencion al Cliente
+            Atencion al Paciente
           </Link>
         </div>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          onClick={handleLogout}
-          className="h-7 text-xs text-primary-foreground hover:bg-primary-foreground/10"
-        >
-          <LogOut className="h-3 w-3 mr-1" />
-          Cerrar Sesion
-        </Button>
+        {/* Solo mostrar botón de cerrar sesión si NO es login por SSO */}
+        {!effectiveSid && (
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleLogout}
+            className="h-7 text-xs text-primary-foreground hover:bg-primary-foreground/10"
+          >
+            <LogOut className="h-3 w-3 mr-1" />
+            Cerrar Sesion
+          </Button>
+        )}
       </div>
     </header>
   )

@@ -82,7 +82,7 @@ export function SupportDashboard() {
       {/* Header compacto */}
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h1 className="text-lg font-semibold text-foreground">Panel de Atencion al Cliente</h1>
+          <h1 className="text-lg font-semibold text-foreground">Panel de Atencion al Paciente</h1>
           <p className="text-xs text-muted-foreground">
             Gestiona las conversaciones que requieren atencion humana
           </p>
