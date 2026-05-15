@@ -56,6 +56,9 @@
 						<div id="notification-widget-container" style="float:right; height:16px; padding:24px 8px 0px 0px;"></div>
 						<!-- Script del Widget - Se carga aquí para asegurar que el contenedor exista -->
 						<script>
+						  console.log("[DEBUG-PHP] Cargando configuracion del widget...");
+						  console.log("[DEBUG-PHP] sso_token_widget definido:", typeof '<?PHP echo $sso_token_widget; ?>' !== 'undefined');
+						  console.log("[DEBUG-PHP] vercel_bot_url:", '<?PHP echo $vercel_bot_url; ?>');
 						  window.NotificationWidgetConfig = {
 						    ssoToken: '<?PHP echo $sso_token_widget; ?>',
 						    baseUrl: '<?PHP echo $vercel_bot_url; ?>',
@@ -65,8 +68,9 @@
 						    theme: 'light',
 						    showTooltip: true
 						  };
+						  console.log("[DEBUG-PHP] NotificationWidgetConfig:", window.NotificationWidgetConfig);
 						</script>
-						<script src="<?PHP echo $vercel_bot_url; ?>/notification-widget-loader.js"></script>
+						<script src="<?PHP echo $vercel_bot_url; ?>/notification-widget-loader.js?v=<?PHP echo time(); ?>" onerror="console.error('[DEBUG-PHP] ERROR: No se pudo cargar notification-widget-loader.js')" onload="console.log('[DEBUG-PHP] notification-widget-loader.js cargado correctamente')"></script>
 						
 						<!-- Backup  -->
 						<div id="ntf_bk" onClick="getNtf( this.id )" style="float:right; height:16px; padding:31px 0px 0px 0px; cursor:pointer;" class="txt_user_12">
