@@ -121,7 +121,7 @@
         to { opacity: 1; transform: scale(1); }
       }
 
-      #notification-widget-container {
+      #notification-widget-container.nw-fixed {
         position: fixed;
         z-index: 99999;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -141,6 +141,39 @@
         align-items: center;
         justify-content: center;
         transition: all 0.2s ease;
+        padding: 0;
+        margin: 0;
+      }
+      
+      /* Modo inline/manual - más pequeño para headers */
+      #notification-widget-button.nw-inline {
+        width: 32px;
+        height: 32px;
+        box-shadow: none;
+        border: none;
+        background: transparent;
+      }
+      
+      #notification-widget-button.nw-inline svg {
+        width: 20px;
+        height: 20px;
+      }
+      
+      #notification-widget-button.nw-inline #notification-widget-badge {
+        top: -6px;
+        right: -6px;
+        min-width: 16px;
+        height: 16px;
+        font-size: 10px;
+        padding: 0 4px;
+      }
+      
+      #notification-widget-button.nw-inline #notification-widget-status {
+        width: 8px;
+        height: 8px;
+        bottom: 0px;
+        right: 0px;
+        border-width: 1px;
       }
 
       #notification-widget-button:hover {
@@ -245,51 +278,95 @@
 
   // Crear el widget
   function createWidget() {
-    const containerId = "notification-widget-container"
-    if (document.getElementById(containerId)) {
-      console.log("[NOTIFICATION-WIDGET] Widget ya existe")
-      return document.getElementById(containerId)
+    const customContainerId = config.containerId
+    const defaultContainerId = "notification-widget-container"
+    let isManualPosition = config.position === "manual"
+    
+    let container = null
+    
+    // Modo manual: usar contenedor existente proporcionado por el usuario
+    if (isManualPosition && customContainerId) {
+      container = document.getElementById(customContainerId)
+      if (container) {
+        console.log("[NOTIFICATION-WIDGET] Usando contenedor existente:", customContainerId)
+        // Verificar si ya tiene el boton renderizado
+        if (container.querySelector("#notification-widget-button")) {
+          console.log("[NOTIFICATION-WIDGET] Widget ya renderizado en contenedor")
+          return container
+        }
+        // Limpiar contenedor y renderizar widget
+        container.innerHTML = ""
+      } else {
+        console.error("[NOTIFICATION-WIDGET] No se encontró contenedor con id:", customContainerId)
+        console.log("[NOTIFICATION-WIDGET] Creando contenedor flotante como fallback")
+        isManualPosition = false
+      }
+    }
+    
+    // Modo fijo: crear contenedor con position fixed
+    if (!container) {
+      // Verificar si ya existe
+      if (document.getElementById(defaultContainerId)) {
+        const existing = document.getElementById(defaultContainerId)
+        if (existing.querySelector("#notification-widget-button")) {
+          console.log("[NOTIFICATION-WIDGET] Widget ya existe")
+          return existing
+        }
+      }
+      
+      container = document.createElement("div")
+      container.id = defaultContainerId
+      container.classList.add("nw-fixed")
+
+      // Posicionamiento fijo
+      const positions = {
+        "top-right": "top: 20px; right: 20px;",
+        "top-left": "top: 20px; left: 20px;",
+        "bottom-right": "bottom: 20px; right: 20px;",
+        "bottom-left": "bottom: 20px; left: 20px;"
+      }
+      container.style.cssText = positions[config.position] || positions["top-right"]
+      document.body.appendChild(container)
     }
 
-    const container = document.createElement("div")
-    container.id = containerId
-
-    // Posicionamiento
-    const positions = {
-      "top-right": "top: 20px; right: 20px;",
-      "top-left": "top: 20px; left: 20px;",
-      "bottom-right": "bottom: 20px; right: 20px;",
-      "bottom-left": "bottom: 20px; left: 20px;"
-    }
-    container.style.cssText = positions[config.position] || positions["top-right"]
-
-    container.innerHTML = `
-      <button id="notification-widget-button" type="button" aria-label="Notificaciones de atención al paciente">
+    // Renderizar el boton del widget
+    const inlineClass = isManualPosition ? "nw-inline" : ""
+    const buttonHTML = `
+      <button id="notification-widget-button" class="${inlineClass}" type="button" aria-label="Notificaciones de atención al paciente">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
         </svg>
         <span id="notification-widget-badge" class="hidden">0</span>
         <span id="notification-widget-status" title="Desconectado"></span>
+        ${config.showTooltip !== false ? `
         <div id="notification-widget-tooltip">
           <div>Pendientes: <strong id="tooltip-pending">0</strong></div>
           <div>Mis activas: <strong id="tooltip-active">0</strong></div>
         </div>
+        ` : ''}
       </button>
     `
-
-    document.body.appendChild(container)
+    
+    container.innerHTML = buttonHTML
 
     // Event listener para click
     const button = container.querySelector("#notification-widget-button")
     button.addEventListener("click", handleWidgetClick)
 
-    console.log("[NOTIFICATION-WIDGET] Widget creado en posición:", config.position)
+    console.log("[NOTIFICATION-WIDGET] Widget creado en posición:", config.position, isManualPosition ? "(contenedor manual)" : "(fijo)")
     return container
   }
 
   // Manejar click en el widget
   function handleWidgetClick() {
     console.log("[NOTIFICATION-WIDGET] Click detectado")
+
+    // Si hay panelUrl configurada (sin iframe), redirigir a esa página
+    if (config.panelUrl) {
+      console.log("[NOTIFICATION-WIDGET] Redirigiendo a:", config.panelUrl)
+      window.location.href = config.panelUrl
+      return
+    }
 
     // Buscar el iframe del panel
     const iframe = document.querySelector(config.panelIframeSelector)
