@@ -3,12 +3,12 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useSession } from "./session-provider"
 import type { HumanSupportSession } from "@/lib/types"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
+import { Phone, Clock, ArrowRight, MessageSquare } from "lucide-react"
 
 interface SessionCardProps {
   session: HumanSupportSession
@@ -20,10 +20,10 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
   const [assigning, setAssigning] = useState(false)
   const { getAuthHeaders, sessionId: ssoSessionId } = useSession()
 
-  const priorityColors = {
-    low: "bg-blue-500",
-    medium: "bg-yellow-500",
-    high: "bg-red-500",
+  const priorityConfig = {
+    low: { color: "bg-blue-100 text-blue-700 border-blue-200", label: "Baja" },
+    medium: { color: "bg-amber-100 text-amber-700 border-amber-200", label: "Media" },
+    high: { color: "bg-red-100 text-red-700 border-red-200", label: "Alta" },
   }
 
   async function handleAssign() {
@@ -105,38 +105,62 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
     locale: es,
   })
 
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <CardTitle className="text-lg">{session.phoneNumber}</CardTitle>
-            <CardDescription className="mt-1">{session.reason}</CardDescription>
-          </div>
-          <div className="flex gap-2 items-center">
-            <Badge variant="outline" className={priorityColors[session.priority]}>
-              {session.priority === "low" && "Baja"}
-              {session.priority === "medium" && "Media"}
-              {session.priority === "high" && "Alta"}
-            </Badge>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          <div className="text-sm text-muted-foreground">Solicitado {timeAgo}</div>
+  const isPending = session.status === "pending"
 
-          {session.status === "pending" ? (
-            <Button onClick={handleAssign} disabled={assigning} className="w-full">
-              {assigning ? "Asignando..." : "Tomar Conversación"}
-            </Button>
-          ) : (
-            <Button onClick={handleView} variant="outline" className="w-full bg-transparent">
-              Ver Conversación
-            </Button>
-          )}
+  return (
+    <div className={`
+      bg-card border rounded-lg p-3 
+      ${isPending ? 'hover:border-primary/50 hover:shadow-sm' : 'border-green-200 bg-green-50/30'}
+      transition-all duration-150
+    `}>
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="font-medium text-sm truncate">{session.phoneNumber}</span>
         </div>
-      </CardContent>
-    </Card>
+        <Badge 
+          variant="outline" 
+          className={`text-xs px-1.5 py-0 h-5 shrink-0 ${priorityConfig[session.priority].color}`}
+        >
+          {priorityConfig[session.priority].label}
+        </Badge>
+      </div>
+
+      {/* Reason */}
+      <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+        {session.reason}
+      </p>
+
+      {/* Footer row */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Clock className="h-3 w-3" />
+          <span>{timeAgo}</span>
+        </div>
+
+        {isPending ? (
+          <Button 
+            onClick={handleAssign} 
+            disabled={assigning} 
+            size="sm"
+            className="h-7 text-xs px-3"
+          >
+            {assigning ? "..." : "Tomar"}
+            {!assigning && <ArrowRight className="h-3 w-3 ml-1" />}
+          </Button>
+        ) : (
+          <Button 
+            onClick={handleView} 
+            variant="outline" 
+            size="sm"
+            className="h-7 text-xs px-3 border-green-300 text-green-700 hover:bg-green-100"
+          >
+            <MessageSquare className="h-3 w-3 mr-1" />
+            Ver
+          </Button>
+        )}
+      </div>
+    </div>
   )
 }

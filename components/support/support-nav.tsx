@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { logout } from "@/app/actions"
 import { useSession } from "./session-provider"
+import { LogOut, Headphones } from "lucide-react"
 
 export function SupportNav() {
   const router = useRouter()
@@ -25,23 +26,23 @@ export function SupportNav() {
   const supportUrl = effectiveSid ? `/support?_sid=${encodeURIComponent(effectiveSid)}` : "/support"
 
   return (
-    <header className="bg-background border-b">
-      <div className="container mx-auto flex h-16 items-center justify-between">
-        <div className="flex items-center gap-6">
-          <Link href={supportUrl} className="font-bold text-xl">
-            Atención al Cliente
+    <header className="bg-primary text-primary-foreground shadow-sm">
+      <div className="container mx-auto flex h-11 items-center justify-between px-4">
+        <div className="flex items-center gap-2">
+          <Headphones className="h-4 w-4" />
+          <Link href={supportUrl} className="font-semibold text-sm">
+            Atencion al Cliente
           </Link>
-          <nav className="hidden md:flex gap-6">
-            <Link href={supportUrl} className="text-foreground/60 hover:text-foreground">
-              Conversaciones
-            </Link>
-          </nav>
         </div>
-        <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={handleLogout}>
-            Cerrar Sesión
-          </Button>
-        </div>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          onClick={handleLogout}
+          className="h-7 text-xs text-primary-foreground hover:bg-primary-foreground/10"
+        >
+          <LogOut className="h-3 w-3 mr-1" />
+          Cerrar Sesion
+        </Button>
       </div>
     </header>
   )

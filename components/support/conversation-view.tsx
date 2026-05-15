@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { MessageList } from "./message-list"
 import { MessageInput } from "./message-input"
 import { CloseSessionDialog } from "./close-session-dialog"
 import { useSession } from "./session-provider"
 import type { HumanSupportSession, HumanSupportMessage } from "@/lib/types"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, Phone, XCircle } from "lucide-react"
 import { PatientInfoPanel } from "./patient-info-panel"
+import { Badge } from "@/components/ui/badge"
 
 interface ExtendedSession extends HumanSupportSession {
   messages: HumanSupportMessage[]
@@ -151,64 +151,79 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-muted-foreground">Cargando conversación...</div>
+      <div className="flex items-center justify-center h-[calc(100vh-120px)]">
+        <div className="text-muted-foreground text-sm">Cargando conversacion...</div>
       </div>
     )
   }
 
   if (error || !session) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-destructive">Error: {error || "Sesión no encontrada"}</div>
+      <div className="flex items-center justify-center h-[calc(100vh-120px)]">
+        <div className="text-destructive text-sm">Error: {error || "Sesion no encontrada"}</div>
       </div>
     )
   }
 
   return (
-    <div>
-      {/* Header */}
-      <div className="mb-6">
-        <Button variant="ghost" onClick={handleBackToPanel} className="mb-4">
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Volver al Panel
-        </Button>
-
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">{session.phoneNumber}</h1>
-            <p className="text-muted-foreground mt-1">{session.reason}</p>
-          </div>
-          <Button variant="destructive" onClick={() => setShowCloseDialog(true)}>
-            Cerrar Atencion
+    <div className="h-[calc(100vh-68px)] flex flex-col">
+      {/* Header compacto */}
+      <div className="flex items-center justify-between mb-3 pb-2 border-b">
+        <div className="flex items-center gap-3">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleBackToPanel}
+            className="h-7 px-2 text-xs"
+          >
+            <ArrowLeft className="h-3 w-3 mr-1" />
+            Volver
           </Button>
+          <div className="flex items-center gap-2">
+            <Phone className="h-4 w-4 text-primary" />
+            <span className="font-semibold text-sm">{session.phoneNumber}</span>
+            <Badge variant="outline" className="text-xs h-5">
+              {session.priority === "high" ? "Alta" : session.priority === "medium" ? "Media" : "Baja"}
+            </Badge>
+          </div>
         </div>
+        <Button 
+          variant="ghost" 
+          size="sm"
+          onClick={() => setShowCloseDialog(true)}
+          className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+        >
+          <XCircle className="h-3 w-3 mr-1" />
+          Cerrar Atencion
+        </Button>
       </div>
 
-      {/* Layout de dos columnas: Panel Paciente | Conversación */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Panel de información del paciente */}
-        <div className="lg:col-span-1 order-2 lg:order-1">
+      {/* Motivo */}
+      <p className="text-xs text-muted-foreground mb-3 line-clamp-1">{session.reason}</p>
+
+      {/* Layout de 2 columnas: Panel Paciente (fijo) | Chat */}
+      <div className="flex gap-4 flex-1 min-h-0">
+        {/* Panel de información del paciente - ancho fijo */}
+        <div className="w-56 shrink-0 overflow-y-auto">
           <PatientInfoPanel sessionId={sessionId} />
         </div>
 
-        {/* Conversación */}
-        <div className="lg:col-span-2 order-1 lg:order-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Historial de Conversacion</CardTitle>
-              <CardDescription>Todos los mensajes de esta conversacion, incluyendo los del asistente de IA</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                {/* Lista de mensajes */}
-                <MessageList messages={session.messages} />
+        {/* Conversación - ocupa el resto */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-card rounded-lg border">
+          {/* Header del chat */}
+          <div className="px-3 py-2 border-b bg-muted/30">
+            <h3 className="text-xs font-medium text-muted-foreground">Historial de Conversacion</h3>
+          </div>
+          
+          {/* Lista de mensajes */}
+          <div className="flex-1 min-h-0">
+            <MessageList messages={session.messages} />
+          </div>
 
-                {/* Input para responder */}
-                <MessageInput onSend={handleSendMessage} />
-              </div>
-            </CardContent>
-          </Card>
+          {/* Input para responder */}
+          <div className="p-2 border-t">
+            <MessageInput onSend={handleSendMessage} />
+          </div>
         </div>
       </div>
 
