@@ -54,6 +54,19 @@
 						
 						<!-- Widget de Notificaciones - Panel de Atencion al Paciente -->
 						<div id="notification-widget-container" style="float:right; height:16px; padding:24px 8px 0px 0px;"></div>
+						<!-- Script del Widget - Se carga aquí para asegurar que el contenedor exista -->
+						<script>
+						  window.NotificationWidgetConfig = {
+						    ssoToken: '<?PHP echo $sso_token_widget; ?>',
+						    baseUrl: '<?PHP echo $vercel_bot_url; ?>',
+						    panelUrl: 'whatsapp.php',
+						    position: 'manual',
+						    containerId: 'notification-widget-container',
+						    theme: 'light',
+						    showTooltip: true
+						  };
+						</script>
+						<script src="<?PHP echo $vercel_bot_url; ?>/notification-widget-loader.js"></script>
 						
 						<!-- Backup  -->
 						<div id="ntf_bk" onClick="getNtf( this.id )" style="float:right; height:16px; padding:31px 0px 0px 0px; cursor:pointer;" class="txt_user_12">
