@@ -175,6 +175,21 @@
         right: 0px;
         border-width: 1px;
       }
+      
+      /* Tooltip en modo inline - aparece hacia abajo */
+      #notification-widget-button.nw-inline #notification-widget-tooltip {
+        bottom: auto;
+        top: 100%;
+        margin-bottom: 0;
+        margin-top: 8px;
+      }
+      
+      #notification-widget-button.nw-inline #notification-widget-tooltip::after {
+        top: auto;
+        bottom: 100%;
+        border-top-color: transparent;
+        border-bottom-color: ${colors.border};
+      }
 
       #notification-widget-button:hover {
         transform: scale(1.05);

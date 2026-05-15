@@ -47,18 +47,18 @@
 					<!-- Nombre de Usuario -->
 					<div  class="txt_user_12" style="float:right; height:16px; padding:40px 5px 0px 0px; color:#7B9BBB;"><?PHP echo  $user_name ?> de <?PHP echo  $user_sede ?></div>
 					
-					<!-- Notificaciones  onClick="getNtf( this.id )" -->
-					<div id="ntf_a"   style="float:right; height:16px; padding:31px 5px 0px 0px; cursor:pointer;" class="txt_user_12">
-						<img src="images/header/Notificacion.png" border="0" style="" />
-					</div>
-					
-					<!-- Widget de Notificaciones del Panel de Atencion al Paciente -->
-					<div id="notification-widget-container" style="float:right; height:16px; padding:26px 8px 0px 0px; cursor:pointer;" class="txt_user_12"></div>
-					
-					<!-- Backup  -->
-					<div id="ntf_bk" onClick="getNtf( this.id )" style="float:right; height:16px; padding:31px 0px 0px 0px; cursor:pointer;" class="txt_user_12">
-						<img src="images/header/Bk.png"  border="0" style="" />
-					</div>
+						<!-- Notificaciones  onClick="getNtf( this.id )" -->
+						<div id="ntf_a"   style="float:right; height:16px; padding:31px 5px 0px 0px; cursor:pointer;" class="txt_user_12">
+							<img src="images/header/Notificacion.png" border="0" style="" />
+						</div>
+						
+						<!-- Widget de Notificaciones - Panel de Atencion al Paciente -->
+						<div id="notification-widget-container" style="float:right; height:16px; padding:24px 8px 0px 0px;"></div>
+						
+						<!-- Backup  -->
+						<div id="ntf_bk" onClick="getNtf( this.id )" style="float:right; height:16px; padding:31px 0px 0px 0px; cursor:pointer;" class="txt_user_12">
+							<img src="images/header/Bk.png"  border="0" style="" />
+						</div>
 					
 					
 <div class="outerNtf">
@@ -218,6 +218,7 @@
 			
 		}
 	
+		
 
 		var top = p.top + inc;
 		
@@ -549,33 +550,67 @@
 					var obj = response.leyenda[i];
 					$j.each( obj, function( key, value ) 
 					{
-						switch( key )
+						if(key == 'label')
 						{
-							case 'color':
-								color = value;
-								break;
-							case 'data':
-								valor = value;
-								break;
-							case 'label':
-								leyenda = value;
-								break;
+								elemento = value;
+						}
+						if(key == 'color')
+						{
+							color = value;
+						}
+						if(key == 'data')
+						{
+							valor = value;
 						}
 					});
-					elemento = '<div style="float:left; width:10px; clear:none; height:10px;  margin-top:12px; border:1px solid #808080; margin-right:5px; background:'+color+';"></div><div style="float:left; clear:none;  text-align:left; width:95%;   margin-top:10px; ">'+leyenda+': '+valor+'Gb</div>';
-					$j('#leyenda_space_disk').append( elemento );
+					leyenda += '<span style="float:left; clear:both; font-size:11px; font-family: Arial, Helvetica, sans-serif; padding-top:2px; padding-left:0px;"><span style="float:left; text-align:left;"><span style="color:#94BF10;">&#8226;</span> '+elemento+': </span><span style="float:left; font-weight:bold; color:'+color+';">&nbsp;'+valor+' gb</span></span>';
 				}
+				$j('#leyenda_space_disk').html(leyenda);
+				
+			
+				
+				$j('#BK_Online_Status').html( get_status_bk(  response.bk_status.BK_Online_Status ) );
+				$j('#BK_Online_Fecha').html( response.bk_status.BK_Online_Fecha );
+				
+				$j('#BK_Local_Status').html( get_status_bk( response.bk_status.BK_Local_Status ) );
+				$j('#BK_Local_Fecha').html( response.bk_status.BK_Local_Fecha );
+				
+				
 			}
 		});
 	}
 	
-	/*
-	 *  Funciones relativas al perfil
-	 */
-	function loadPerfil(){
+	/*Funcion devuelve tipo de status de backup */
+	function get_status_bk( dato )
+	{
+		var status = '';
+		switch( dato )
+		{
+			case '0':
+				status = '<span style="color:#D44F44;">No encuentra archivo.</span>';
+				break;
+			case '1':
+				status = '<span style="color:#D44F44;">Backup desactualizado.</span>';
+				break;
+			case '2':
+				status = '<span style="color:#D44F44;">Error al copiar archivo.</span>';
+				break;
+			case '3':
+				status = '<span style="color:#1BA05F;">Realizado satisfactoriamente.</span>';
+				break;
+			case '4':
+				status = '<span style="color:#D44F44;">Servicio no activo.</span>';
+				break;
+		}
+		return status;
+	}
+	
+	/* Funcion de carga de datos de perfil */
+	function loadPerfil()
+	{
 		
 		var parametros = {
-				"acc": 'get_perfil'
+				"acc": 'l_per'
 		}
 			
 		$j.ajax({
@@ -586,81 +621,96 @@
 			beforeSend: function () {
 					  //$('#graph_pie').html('');
 			},
-			success:  function (response) 
+			success:  function (data) 
 			{
-				$j("#P_User").val( response.User );
-				$j("#P_Apellido").val( response.Apellido );
-				$j("#P_Nombres").val( response.Nombres );
-				$j("#P_Occupation").val( response.Occupation );
-				$j("#P_Direccion").val( response.Direccion );
-				$j("#P_Celular").val( response.Celular );
-				$j("#P_E_Mail").val( response.E_Mail );
-				$j("#P_Sede_Select").html( response.Sede_Select );
+				
+				$j('#P_User').val( data.User );
+			//	$j('#P_Pass').val( data.Pass );
+				$j('#P_Sede_Select').html( data.Sede_Options );
+				$j('#P_Nombres').val( data.Nombres );
+				$j('#P_Apellido').val( data.Apellido );
+				$j('#P_Occupation').val( data.Occupation );
+				$j('#P_Direccion').val( data.Direccion );
+				$j('#P_Celular').val( data.Celular );
+				$j('#P_E_Mail').val( data.E_Mail );
+				
 			}
 		});
 	}
 	
-	/* */
-	function savePerfil(){
+	/* Funcion guardar  datos de perfil */
+	function savePerfil(  )
+	{		
 		
-		var formulario = $j("#form_p").serialize();
+		var data =  $j('#form_p').serialize();
+	
 		
 		$j.ajax({
-			data:  formulario,
-			url:   'header_session_get.php',
+			url		 : 'header_session_get.php',
 			type: 'POST',
+					
+			data	 : data,
 			dataType : 'json',
-			beforeSend: function () {
-					  //$('#graph_pie').html('');
-			},
-			success:  function (response) 
-			{
-				if( response.saved == 1)
-				{
-					alert('Los datos del perfil fueron actualizados.');
-				}else{
-					alert('Error al guardar los datos del perfil.');
-				}
+			cache: false, 
+			success: function(data){
+				
+				
+				parent.location.href = '?session_off=1&idu=<?PHP echo $data_user_in[0]; ?>';
 			}
 		});
+	
 	}
 	
-	function chgnPicture(picture){
-		
-		
-		var formData = new FormData($j('#form_f_perfil')[0]);
+	/* Funcion para guardar nueva imagen */
+	function savePicture()
+	{
+		var form = $j('#form_f_perfil');
+		var data_form = new FormData();
+	
+		$j.each( form.find('input[type="file"]'), function( i, tag) {
+			$j.each( $j(tag)[0].files , function( i , file) 
+			{
+					
+				data_form.append( tag.name, file );
+			});
+		});
+		data_form.append( 'acc', 's_f_per' );
 		
 		$j.ajax({
-		    url: 'header_session_get.php?acc=chgn_pic',
-		    type: 'POST',
-		    data: formData,
-		    async: true,
-		    success: function (data) {
-				$j('#p_foto_edit').attr('src', data);
-				$j('#p_foto').attr('src', data);
-				$j('#p_foto_header').attr('src', data);
-				$j('#p_root').val( data );
-		    },
-		    cache: false,
-		    contentType: false,
-		    processData: false
+			url		 : 'header_session_get.php',
+			data	 : data_form,
+			type : 'POST',
+			dataType : 'json',
+			processData: false,
+			contentType: false,
+			success: function( data ){
+				
+			
+				if( data != 'null' )
+				{
+					document.getElementById("p_foto_edit").src = data ;
+					document.getElementById("p_foto_header").src= data ;
+					document.getElementById("p_root").value = data ;
+				}
+				
+				
+				
+			}
 		});
 	
 	}
-	
-	function savePicture(){
-		gnrNtf('perfil');
+	/* Funcion de carga de  nueva imagen */
+	function chgnPicture( e )
+	{
+		
 	}
-	
-	/* 
-	 * Cerar menu de sesion 
-	 */
-	$j(document).click(function(e) {
-		// Check if click was triggered on or within .outerNtf
-		if( $j(e.target).closest(".outerNtf").length > 0 || $j(e.target).closest("#perfil").length > 0 || $j(e.target).closest("#ntf_bk").length > 0) {
-			return false;
+	// Oculta ventana de perfil
+	$j(document).mouseup(function(e){
+		var nft = $j(".outerNtf");
+
+		// Verifica sin 
+		if(!nft.is(e.target) && nft.has(e.target).length === 0){
+			nft.hide();
 		}
-		// Otherwise
-		$j('.outerNtf').slideUp();
-	});
-</script>
+});
+</script>					
