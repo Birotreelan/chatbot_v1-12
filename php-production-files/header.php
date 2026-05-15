@@ -517,19 +517,6 @@ $sso_token_widget = $payload_widget . '.' . $signature_widget;
 // ═══════════════════════════════════════════════════════════════════════════════
 		
 	?>
-<!-- Widget de Notificaciones - Panel de Atencion al Paciente -->
-<script>
-  window.NotificationWidgetConfig = {
-    ssoToken: '<?PHP echo $sso_token_widget; ?>',
-    baseUrl: '<?PHP echo $vercel_bot_url; ?>',
-    panelUrl: 'whatsapp.php',
-    position: 'manual',
-    containerId: 'notification-widget-container',
-    theme: 'light',
-    showTooltip: true
-  };
-</script>
-<script src="<?PHP echo $vercel_bot_url; ?>/notification-widget-loader.js"></script>
 
 	<div id="block-under-window-j"></div>
 	<table align="center" height="75" width="1054" border="0" cellpadding="0" cellspacing="0" style="background-image:url(images/header/fdo_gral.jpg); background-repeat:no-repeat">
