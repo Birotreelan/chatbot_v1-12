@@ -54,7 +54,7 @@
 						
 						<!-- Widget de Notificaciones - Panel de Atencion al Paciente -->
 						<div id="notification-widget-container" style="float:right; height:16px; padding:24px 8px 0px 0px;"></div>
-						<!-- Script del Widget - Se carga aquí para asegurar que el contenedor exista -->
+						<!-- Script del Widget -->
 						<script>
 						  window.NotificationWidgetConfig = {
 						    ssoToken: '<?PHP echo $sso_token_widget; ?>',
