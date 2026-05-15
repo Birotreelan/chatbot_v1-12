@@ -481,59 +481,56 @@ require_once('unblok_pages.php');
 		$user_name =  $data_user_in[3].', '. $data_user_in[2];
 		$user_name = ( strlen (  $user_name  )  > 25 ) ? '<span title="'.$user_name.'">'.substr( $user_name , 0, 25).'...</span>' :   $user_name ; // nombre usuario
 		$user_sede = ( strlen (  $data_user_in[5]  )  > 10 )  ? '<span title="'.$data_user_in[5].'">'.substr( $data_user_in[5] , 0, 10).'...</span>' :   $data_user_in[5] ;  // nombre de sede
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WIDGET DE NOTIFICACIONES - Panel de Atencion al Paciente
+// ═══════════════════════════════════════════════════════════════════════════════
+$vercel_bot_url = 'https://chatbot-v1-12.vercel.app';
+$bot_base_secret = '3x0nTh31sland';
+
+// Obtener cliente_id
+$result_widget = mysql_query("SELECT Id FROM Cliente_Datos LIMIT 1");
+$row_widget = mysql_fetch_assoc($result_widget);
+$cliente_id_widget = $row_widget['Id'];
+
+// Generar secreto derivado
+$secret_widget = hash('sha256', $bot_base_secret . $cliente_id_widget);
+
+// Generar token SSO para el widget
+$ip_widget = $_SERVER['REMOTE_ADDR'];
+$user_agent_widget = $_SERVER['HTTP_USER_AGENT'];
+$fingerprint_widget = hash('sha256', $ip_widget . $user_agent_widget);
+
+$payload_widget = base64_encode(json_encode([
+    'cliente_id'  => $cliente_id_widget,
+    'usuario_id'  => $data_user_in[0],
+    'apellido'    => $data_user_in[2],
+    'nombre'      => $data_user_in[3],
+    'fingerprint' => $fingerprint_widget,
+    'iat'         => time(),
+    'exp'         => time() + 86400,
+    'nonce'       => bin2hex(openssl_random_pseudo_bytes(8))
+]));
+
+$signature_widget = hash_hmac('sha256', $payload_widget, $secret_widget);
+$sso_token_widget = $payload_widget . '.' . $signature_widget;
+// ═══════════════════════════════════════════════════════════════════════════════
 		
-		
-		// ═══════════════════════════════════════════════════════════════════════════════
-		// WIDGET DE NOTIFICACIONES - Panel de Atencion al Paciente
-		// ═══════════════════════════════════════════════════════════════════════════════
-		$vercel_bot_url  = 'https://treelan-bot.vercel.app';
-		$bot_base_secret = '3x0nTh31sland';
-
-		// Obtener cliente_id
-		$result_widget = mysql_query("SELECT Id FROM Cliente_Datos LIMIT 1");
-		$row_widget = mysql_fetch_assoc($result_widget);
-		$cliente_id_widget = $row_widget['Id'];
-
-		// Generar secreto derivado
-		$secret_widget = hash('sha256', $bot_base_secret . $cliente_id_widget);
-
-		// Generar token SSO para el widget
-		$ip_widget          = $_SERVER['REMOTE_ADDR'];
-		$user_agent_widget  = $_SERVER['HTTP_USER_AGENT'];
-		$fingerprint_widget = hash('sha256', $ip_widget . $user_agent_widget);
-
-		$payload_widget = base64_encode(json_encode([
-			'cliente_id'  => $cliente_id_widget,
-			'usuario_id'  => $data_user_in[0],
-			'apellido'    => $data_user_in[2],
-			'nombre'      => $data_user_in[3],
-			'fingerprint' => $fingerprint_widget,
-			'iat'         => time(),
-			'exp'         => time() + 86400, // 24 horas para el widget
-			'nonce'       => bin2hex(openssl_random_pseudo_bytes(8))
-		]));
-
-		$signature_widget = hash_hmac('sha256', $payload_widget, $secret_widget);
-		$sso_token_widget = $payload_widget . '.' . $signature_widget;
-		// ═══════════════════════════════════════════════════════════════════════════════
 	?>
-	
-	<!-- Widget de Notificaciones - Panel de Atencion al Paciente -->
-	<script>
-		window.NotificationWidgetConfig = {
-			ssoToken: '<?PHP echo $sso_token_widget; ?>',
-			baseUrl: '<?PHP echo $vercel_bot_url; ?>',
-			panelIframeSelector: null,
-			panelUrl: 'whatsapp.php',
-			position: 'manual',
-			theme: 'light',
-			containerId: 'notification-widget-container',
-			showTooltip: true,
-			tooltipText: 'Panel de Atencion al Paciente'
-		};
-	</script>
-	<script src="<?PHP echo $vercel_bot_url; ?>/notification-widget-loader.js"></script>
-	
+<!-- Widget de Notificaciones - Panel de Atencion al Paciente -->
+<script>
+  window.NotificationWidgetConfig = {
+    ssoToken: '<?PHP echo $sso_token_widget; ?>',
+    baseUrl: '<?PHP echo $vercel_bot_url; ?>',
+    panelUrl: 'whatsapp.php',
+    position: 'manual',
+    containerId: 'notification-widget-container',
+    theme: 'light',
+    showTooltip: true
+  };
+</script>
+<script src="<?PHP echo $vercel_bot_url; ?>/notification-widget-loader.js"></script>
+
 	<div id="block-under-window-j"></div>
 	<table align="center" height="75" width="1054" border="0" cellpadding="0" cellspacing="0" style="background-image:url(images/header/fdo_gral.jpg); background-repeat:no-repeat">
 		<tr>
@@ -581,39 +578,81 @@ require_once('unblok_pages.php');
 							}else{
 								$boton_help_link=  "<a style=\"float:rigth; width:auto;height:20px;\"></a>";
 							}
-							echo "<li><a accesskey=\"$Sub_Proceso_Acceskey\" href=\"$Sub_Proceso_Link\" class=\"menu\">$Sub_Proceso_Nombre  $boton_help_link</a></li>";
+							echo "<li >
+										<div style=\"width:10em; float:left; clear:none;\">
+											<a href=\"$Sub_Proceso_Link\" accesskey=\"$Sub_Proceso_Acceskey\"  class=\"menu_pal\" >$Sub_Proceso_Nombre</a>	
+										</div>
+										<div style=\"width:1.5em; height:20px; float:left; clear:none;\">
+											$boton_help_link									
+										</div>											
+										</li>";
+							//echo "&nbsp;&nbsp;&nbsp;$Sub_Proceso[Nombre] - $Sub_Proceso[Link] <br>";
 							$s++;
 						}
+						echo"</ul></li>";
+						//Incremento de subproceso;
 						
-						echo "</ul></li>";
 					}
 				}
-				echo "</ul>";
+				echo '
+					<li>
+						<a href="treelan_help.php" class="menu_pal">Ayuda</a>
+						<ul>
+							<li>
+								<div style="width:10em; float:left; clear:none;">
+									<a href="treelan_help.php?h=1" accesskey="" class="menu_pal">Tutorial de Treelan</a>	
+								</div>
+                            </li>
+						</ul>
+					</li>
+				';
+				echo"</ul>";
+			?>
+			</td>
+		</tr>
+		<tr>
+			<td width="900"  valign="top">
+			<?PHP 
+				$Usuario_Id="$data_user_in[0]";
+				$Proceso_Id="$Proceso_Padre";
+				$PER = "SELECT tls_sub_procesos.Id, tls_sub_procesos.Nombre, tls_sub_procesos.Proceso_Id, tls_sub_procesos.ImageRootSubMenu, tls_sub_procesos.Link FROM tls_sub_procesos, tls_permisos WHERE tls_permisos.Usuario_Id='$Usuario_Id' AND tls_permisos.Proceso_Id='$Proceso_Id' AND tls_sub_procesos.Id=tls_permisos.Sub_Proceso_Id ORDER BY tls_sub_procesos.Orden";
+				$PERrs = mysql_query($PER) or die(mysql_error());
+				$Total_Permisos = mysql_num_rows($PERrs);
+				if ($Total_Permisos > 0){	
+					echo "<table width=\"100%\"  height=\"46\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" background=\"images/bot_icon/bot_icon_fdo.jpg\"><tr>";
+					while (list($Sub_Proceso_Id,$Sub_Proceso_Nombre,$Proceso_Id,$Sub_Proceso_ImageRoot,$Sub_Proceso_Link) = mysql_fetch_row($PERrs)){
+						echo "<td width=\"48\" height=\"46\" align=\"center\" valign=\"middle\"><a href=\"$Sub_Proceso_Link\" ><img src=\"$Sub_Proceso_ImageRoot\" alt=\"$Sub_Proceso_Nombre\" title=\"$Sub_Proceso_Nombre\" name=\"Image11\" width=\"32\" style=\"margin-top:auto;\" border=\"0\" id=\"Image11\" /></a></td>
+							<td width=\"2\" valign=\"top\" background=\"images/bot_icon/bot_icon_separador.jpg\"></td>";
+					}
+					echo "<td width=\"450\" align=\"right\" valign=\"top\"><img src=\"images/bot_icon/bot_icon_der.jpg\" width=\"8\" height=\"46\" /></td></tr></table>";
+				}
 			?>
 			</td>
 		</tr>
 	</table>
+	<div id="block-under-window"></div>	
+	
+	
+	<div id="tips"></div>
+	
+	
+	<!-- WINDOW CHAT -->
+	<!-- END WINDOW CHAT -->
+	<!-- WINDOW CHAT -->
+	<!-- <div id="listaChat" class="listaChat">
+			<a href="javascript:void(0)" onclick="toggleChatLista('listaChat');">
+				<div class="listaChatHead">
+					<div class="listaChatTitle">Contactos Chat</div>
+					<div class="listaChatOptions">
+						<a href="javascript:void(0)" onclick="toggleChatLista('listaChat');">-</a>
+					</div>
+				</div>
+			</a>
+			<div class="listaChatContent" style="opacity: 1; margin:0px; padding:0px; float:left; clear:none;">
+					<input type="text" id="search_contactos"  placeholder="Buscar Contactos..." style="width:100%; border:0px; color:#BCBCBC; font-size:12; text-indent:3px; padding-top:5px; padding-bottom:5px;" />
 
-
-<div class="outerCuenta" >
-	<table border="0" cellpadding="0" cellspacing="0" width="440" style="position:relative;">
-		<tr>
-			<td colspan="2" style="background-image:url(images/grales/ntf/fdo_top.png); background-repeat:repeat-x;  height:37px;" >
-				<table border="0" cellpadding="0" cellspacing="0" width="100%">
-					<tr>
-						<td width="360" style="padding-left:15px; font-family:Arial, Helvetica, Sans Serif; color:#d8deea; text-shadow: 1px 1px 1px #000;">Cuenta Treelan</td>
-						<td  width="70" style=" padding-right:10px; text-align:right;">
-							<span onclick="closeWindowJ('.outerCuenta','#cuenta_treelan'); "><img id="loading" src="images/grales/ntf/cerrar_window.png" border="0" style="cursor:pointer;"/></span>
-						</td>
-					</tr>
-				</table>
-			</td>
-		</tr>
-		<tr>
-			<td colspan="2"  height="160" style="padding:10px;">
-				<div id="cuenta_treelan" style="float:left; width:100%"></div>
-			</td>
-		</tr>
-	</table>
-</div>
-<div id="tips"></div>
+			</div>
+			<div id="listaChatContent" class="listaChatContent"></div>		
+	</div> -->
+	
+ 
