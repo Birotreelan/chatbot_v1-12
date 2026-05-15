@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { User, Phone, Mail, CreditCard, Calendar, Clock, MapPin, UserPlus, AlertCircle, ExternalLink } from "lucide-react"
@@ -136,7 +135,6 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
       try {
         const date = new Date(appointment.fecha)
         return date.toLocaleDateString("es-AR", {
-          weekday: "short",
           day: "numeric",
           month: "short",
         })
@@ -144,212 +142,160 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
         return appointment.fecha
       }
     }
-    return "Fecha no disponible"
+    return "N/D"
   }
 
   if (loading) {
     return (
-      <Card className="h-full">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <User className="h-5 w-5" />
-            Datos del Paciente
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Skeleton className="h-6 w-3/4" />
-          <Skeleton className="h-4 w-1/2" />
-          <Skeleton className="h-4 w-2/3" />
-          <Skeleton className="h-4 w-1/2" />
-          <div className="pt-4">
-            <Skeleton className="h-5 w-1/3 mb-2" />
-            <Skeleton className="h-16 w-full" />
-          </div>
-        </CardContent>
-      </Card>
+      <div className="bg-card border rounded-lg p-3 h-full">
+        <div className="flex items-center gap-2 mb-3">
+          <User className="h-4 w-4 text-muted-foreground" />
+          <span className="text-xs font-medium">Paciente</span>
+        </div>
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-3 w-1/2" />
+          <Skeleton className="h-3 w-2/3" />
+        </div>
+      </div>
     )
   }
 
   if (error) {
     return (
-      <Card className="h-full border-destructive/50">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2 text-destructive">
-            <AlertCircle className="h-5 w-5" />
-            Error
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">{error}</p>
-        </CardContent>
-      </Card>
+      <div className="bg-card border border-destructive/30 rounded-lg p-3 h-full">
+        <div className="flex items-center gap-2 text-destructive mb-2">
+          <AlertCircle className="h-4 w-4" />
+          <span className="text-xs font-medium">Error</span>
+        </div>
+        <p className="text-xs text-muted-foreground">{error}</p>
+      </div>
     )
   }
 
   if (isNewPatient || !patient) {
     return (
-      <Card className="h-full border-blue-200 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/20">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <UserPlus className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            Paciente Nuevo
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-            Sin registro previo
-          </Badge>
-          
-          {phoneNumber && (
-            <div className="flex items-center gap-2 text-sm">
-              <Phone className="h-4 w-4 text-muted-foreground" />
-              <span>{phoneNumber}</span>
-            </div>
-          )}
-          
-          <p className="text-sm text-muted-foreground">
-            Este paciente no tiene registros en el sistema. Es la primera vez que se comunica o su numero no esta asociado a ningun paciente.
-          </p>
-        </CardContent>
-      </Card>
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 h-full">
+        <div className="flex items-center gap-2 mb-2">
+          <UserPlus className="h-4 w-4 text-blue-600" />
+          <span className="text-xs font-medium text-blue-800">Paciente Nuevo</span>
+        </div>
+        <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700 mb-2">
+          Sin registro
+        </Badge>
+        {phoneNumber && (
+          <div className="flex items-center gap-1.5 text-xs text-blue-700">
+            <Phone className="h-3 w-3" />
+            <span>{phoneNumber}</span>
+          </div>
+        )}
+        <p className="text-xs text-blue-600/80 mt-2">
+          Primera vez que se comunica
+        </p>
+      </div>
     )
   }
 
   return (
-    <Card className="h-full">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-lg flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <User className="h-5 w-5" />
-            Datos del Paciente
-          </span>
-          {patient.url_paciente && (
-            <Button
-              variant="outline"
-              size="sm"
-              asChild
-              className="h-7 text-xs"
-            >
-              <a href={patient.url_paciente} target="_blank" rel="noopener noreferrer">
-                Ver HC
-                <ExternalLink className="h-3 w-3 ml-1" />
-              </a>
-            </Button>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Nombre */}
-        {getFullName() && (
-          <div>
-            <h3 className="font-semibold text-lg">{getFullName()}</h3>
-          </div>
+    <div className="bg-card border rounded-lg p-3 h-full overflow-y-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5">
+          <User className="h-4 w-4 text-primary" />
+          <span className="text-xs font-medium">Paciente</span>
+        </div>
+        {patient.url_paciente && (
+          <Button variant="ghost" size="sm" asChild className="h-6 text-xs px-2">
+            <a href={patient.url_paciente} target="_blank" rel="noopener noreferrer">
+              HC <ExternalLink className="h-3 w-3 ml-1" />
+            </a>
+          </Button>
         )}
+      </div>
 
-        {/* Documento */}
+      {/* Nombre */}
+      {getFullName() && (
+        <h3 className="font-semibold text-sm mb-2 leading-tight">{getFullName()}</h3>
+      )}
+
+      {/* Info básica */}
+      <div className="space-y-1.5 text-xs">
         {getDocumento() && (
-          <div className="flex items-center gap-2 text-sm">
-            <CreditCard className="h-4 w-4 text-muted-foreground" />
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <CreditCard className="h-3 w-3" />
             <span>DNI: {getDocumento()}</span>
           </div>
         )}
 
-        {/* Teléfono */}
         {getTelefono() && (
-          <div className="flex items-center gap-2 text-sm">
-            <Phone className="h-4 w-4 text-muted-foreground" />
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Phone className="h-3 w-3" />
             <span>{getTelefono()}</span>
           </div>
         )}
 
-        {/* Email */}
         {getEmail() && (
-          <div className="flex items-center gap-2 text-sm">
-            <Mail className="h-4 w-4 text-muted-foreground" />
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Mail className="h-3 w-3" />
             <span className="truncate">{getEmail()}</span>
           </div>
         )}
 
         {/* Obra Social */}
         {patient.obra_social && (
-          <div className="pt-2">
-            <Badge variant="outline" className="text-xs">
-              {patient.obra_social}
-              {patient.plan && ` - ${patient.plan}`}
-            </Badge>
-          </div>
+          <Badge variant="outline" className="text-xs mt-2">
+            {patient.obra_social}
+            {patient.plan && ` - ${patient.plan}`}
+          </Badge>
         )}
+      </div>
 
-        {/* Turnos Próximos */}
-        {appointments.length > 0 && (
-          <div className="pt-4 border-t">
-            <h4 className="font-medium text-sm mb-3 flex items-center gap-2">
-              <Calendar className="h-4 w-4" />
-              Turnos Proximos ({appointments.length})
-            </h4>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {appointments.map((apt, index) => (
-                <div
-                  key={apt.id || index}
-                  className="p-2 bg-muted/50 rounded-md text-sm space-y-1"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{formatAppointmentDate(apt)}</span>
-                    {apt.hora && (
-                      <span className="flex items-center gap-1 text-muted-foreground shrink-0">
-                        <Clock className="h-3 w-3" />
-                        {apt.hora}
-                      </span>
-                    )}
-                  </div>
-                  {apt.profesional && (
-                    <p className="text-muted-foreground">{apt.profesional}</p>
+      {/* Turnos Próximos */}
+      {appointments.length > 0 && (
+        <div className="mt-3 pt-2 border-t">
+          <h4 className="text-xs font-medium mb-2 flex items-center gap-1">
+            <Calendar className="h-3 w-3" />
+            Turnos ({appointments.length})
+          </h4>
+          <div className="space-y-1.5 max-h-28 overflow-y-auto">
+            {appointments.slice(0, 3).map((apt, index) => (
+              <div
+                key={apt.id || index}
+                className="p-1.5 bg-muted/50 rounded text-xs"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{formatAppointmentDate(apt)}</span>
+                  {apt.hora && (
+                    <span className="text-muted-foreground flex items-center gap-0.5">
+                      <Clock className="h-2.5 w-2.5" />
+                      {apt.hora}
+                    </span>
                   )}
-                  {apt.motivo && (
-                    <p className="text-xs text-muted-foreground">{apt.motivo}</p>
-                  )}
-                  {apt.sede && (
-                    <p className="text-xs text-muted-foreground flex items-center gap-1">
-                      <MapPin className="h-3 w-3" />
-                      {apt.sede}
-                    </p>
-                  )}
-                  <div className="flex items-center justify-between gap-2 pt-1">
-                    {apt.estado && (
-                      <Badge variant="outline" className="text-xs py-0 h-5">
-                        {apt.estado}
-                      </Badge>
-                    )}
-                    {apt.url_agenda && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        asChild
-                        className="h-6 text-xs px-2"
-                      >
-                        <a href={apt.url_agenda} target="_blank" rel="noopener noreferrer">
-                          Ver Agenda
-                          <ExternalLink className="h-3 w-3 ml-1" />
-                        </a>
-                      </Button>
-                    )}
-                  </div>
                 </div>
-              ))}
-            </div>
+                {apt.profesional && (
+                  <p className="text-muted-foreground truncate">{apt.profesional}</p>
+                )}
+                {apt.sede && (
+                  <p className="text-muted-foreground/70 flex items-center gap-0.5 truncate">
+                    <MapPin className="h-2.5 w-2.5" />
+                    {apt.sede}
+                  </p>
+                )}
+              </div>
+            ))}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Sin turnos */}
-        {appointments.length === 0 && (
-          <div className="pt-4 border-t">
-            <p className="text-sm text-muted-foreground flex items-center gap-2">
-              <Calendar className="h-4 w-4" />
-              Sin turnos proximos
-            </p>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      {/* Sin turnos */}
+      {appointments.length === 0 && (
+        <div className="mt-3 pt-2 border-t">
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <Calendar className="h-3 w-3" />
+            Sin turnos proximos
+          </p>
+        </div>
+      )}
+    </div>
   )
 }

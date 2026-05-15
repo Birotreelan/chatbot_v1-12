@@ -42,11 +42,16 @@ export function MessageInput({ onSend }: MessageInputProps) {
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Escribe tu respuesta al usuario..."
-        className="min-h-[80px]"
+        placeholder="Escribe tu respuesta..."
+        className="min-h-[48px] max-h-[80px] text-xs resize-none"
         disabled={sending}
       />
-      <Button onClick={handleSend} disabled={!message.trim() || sending} size="icon" className="h-[80px] w-12">
+      <Button 
+        onClick={handleSend} 
+        disabled={!message.trim() || sending} 
+        size="icon" 
+        className="h-12 w-10 shrink-0"
+      >
         <Send className="w-4 h-4" />
       </Button>
     </div>

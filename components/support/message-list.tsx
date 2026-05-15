@@ -19,25 +19,20 @@ export function MessageList({ messages }: MessageListProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  useEffect(() => {
-    console.log(
-      "[v0] Messages received:",
-      messages.map((m) => ({ role: m.role, content: m.content.substring(0, 30) })),
-    )
-  }, [messages])
-
   if (messages.length === 0) {
-    return <div className="text-center py-8 text-muted-foreground">No hay mensajes en esta conversación</div>
+    return (
+      <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+        No hay mensajes en esta conversacion
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-4 max-h-[500px] overflow-y-auto p-4 bg-muted/30 rounded-lg">
+    <div className="h-full overflow-y-auto p-3 space-y-2 bg-muted/20">
       {messages.map((message, index) => {
         const isUser = message.role === "user"
         const isAgent = message.role === "agent"
         const isAI = message.role === "assistant"
-
-        console.log("[v0] Rendering message:", { index, role: message.role, isUser, isAgent, isAI })
 
         const timeAgo = formatDistanceToNow(new Date(message.timestamp), {
           addSuffix: true,
@@ -47,42 +42,42 @@ export function MessageList({ messages }: MessageListProps) {
         return (
           <div key={index} className={`flex ${isUser ? "justify-start" : "justify-end"}`}>
             <div
-              className={`max-w-[70%] rounded-lg p-3 ${
+              className={`max-w-[75%] rounded-lg px-2.5 py-2 ${
                 isUser
-                  ? "bg-white text-foreground border border-gray-200 shadow-sm"
+                  ? "bg-white text-foreground border shadow-sm"
                   : isAgent
-                    ? "bg-blue-600 text-white shadow-md"
-                    : "bg-gray-100 text-foreground border border-gray-200 shadow-sm"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-muted text-foreground border"
               }`}
             >
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-1.5 mb-1">
                 {isUser && (
                   <>
-                    <User className="w-4 h-4" />
-                    <Badge variant="outline" className="text-xs bg-white border-gray-300">
+                    <User className="w-3 h-3" />
+                    <Badge variant="outline" className="text-xs px-1 py-0 h-4 bg-white">
                       Paciente
                     </Badge>
                   </>
                 )}
                 {isAgent && (
                   <>
-                    <UserCheck className="w-4 h-4" />
-                    <Badge variant="outline" className="text-xs bg-blue-700 text-white border-blue-700">
+                    <UserCheck className="w-3 h-3" />
+                    <Badge variant="outline" className="text-xs px-1 py-0 h-4 bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30">
                       Agente
                     </Badge>
                   </>
                 )}
                 {isAI && (
                   <>
-                    <Bot className="w-4 h-4" />
-                    <Badge variant="outline" className="text-xs bg-gray-200 border-gray-300">
+                    <Bot className="w-3 h-3" />
+                    <Badge variant="outline" className="text-xs px-1 py-0 h-4">
                       IA
                     </Badge>
                   </>
                 )}
-                <span className="text-xs opacity-70">{timeAgo}</span>
+                <span className="text-xs opacity-60">{timeAgo}</span>
               </div>
-              <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+              <p className="text-xs leading-relaxed whitespace-pre-wrap">{message.content}</p>
             </div>
           </div>
         )
