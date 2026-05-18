@@ -6,8 +6,8 @@ const CONVERSATION_CONTACT_PREFIX = "conversation_contact:"
 const CONVERSATION_CONTACTS_SET_PREFIX = "conversation_contacts:"
 const CONVERSATION_PAUSED_PREFIX = "conversation_paused:"
 
-// Duración de almacenamiento: 15 días en segundos
-const CONVERSATION_TTL = 15 * 24 * 60 * 60 // 15 días
+// Duración de almacenamiento: 7 días en segundos (reducido de 15 para optimizar bandwidth)
+const CONVERSATION_TTL = 7 * 24 * 60 * 60 // 7 días
 
 const contactsCache = new Map<string, { contacts: ConversationContact[]; timestamp: number }>()
 const CACHE_TTL = 30000 // 30 segundos de caché
@@ -128,74 +128,78 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
   }
 }
 
-// Obtener todos los mensajes de una conversación
-export async function getConversationMessages(configId: string, phoneNumber: string): Promise<ConversationMessage[]> {
+// Obtener mensajes de una conversación con paginación para optimizar bandwidth
+export async function getConversationMessages(
+  configId: string, 
+  phoneNumber: string,
+  limit: number = 50,
+  offset: number = 0
+): Promise<{ messages: ConversationMessage[]; total: number; hasMore: boolean }> {
   try {
     const redisClient = getRedisClient()
     if (!redisClient) {
       console.warn("[CONVERSATIONS] Redis no disponible")
-      return []
+      return { messages: [], total: 0, hasMore: false }
     }
 
     const conversationKey = `${CONVERSATION_PREFIX}${configId}:${phoneNumber}`
 
-    console.log(`[CONVERSATIONS] 📖 Obteniendo mensajes:`)
-    console.log(`[CONVERSATIONS]   - configId: ${configId}`)
-    console.log(`[CONVERSATIONS]   - phoneNumber: ${phoneNumber}`)
-    console.log(`[CONVERSATIONS]   - conversationKey: ${conversationKey}`)
+    console.log(`[CONVERSATIONS] Obteniendo mensajes: ${configId}:${phoneNumber} (limit: ${limit}, offset: ${offset})`)
 
-    const messages = await redisClient.lrange(conversationKey, 0, -1)
-
-    console.log(`[CONVERSATIONS] 📊 Mensajes en Redis: ${messages.length}`)
-
-    if (messages.length > 0) {
-      console.log(`[CONVERSATIONS] 📝 Primer mensaje raw:`, messages[0])
-      console.log(`[CONVERSATIONS] 📝 Tipo del primer mensaje:`, typeof messages[0])
-      console.log(`[CONVERSATIONS] 📝 Último mensaje raw:`, messages[messages.length - 1])
+    // Obtener el total de mensajes primero (operacion ligera)
+    const total = await redisClient.llen(conversationKey)
+    
+    // Calcular indices para paginacion (mensajes mas recientes primero)
+    // Redis LRANGE es 0-indexed, queremos los ultimos mensajes
+    const start = Math.max(0, total - offset - limit)
+    const end = total - offset - 1
+    
+    // Si el offset es mayor que el total, no hay mas mensajes
+    if (offset >= total) {
+      return { messages: [], total, hasMore: false }
     }
+
+    const messages = await redisClient.lrange(conversationKey, start, end)
+
+    console.log(`[CONVERSATIONS] Mensajes obtenidos: ${messages.length} de ${total} total`)
 
     const parsedMessages = messages
       .map((msg, index) => {
         try {
           let parsed: any
 
-          // Verificar si ya es un objeto o si es un string que necesita parsing
           if (typeof msg === "string") {
-            console.log(`[CONVERSATIONS] 📄 Mensaje ${index + 1}: parseando string JSON`)
             parsed = JSON.parse(msg)
           } else if (typeof msg === "object" && msg !== null) {
-            console.log(`[CONVERSATIONS] 📄 Mensaje ${index + 1}: ya es un objeto, usando directamente`)
             parsed = msg
           } else {
-            console.log(`[CONVERSATIONS] ⚠️ Mensaje ${index + 1}: tipo inesperado ${typeof msg}`)
             return null
           }
-
-          console.log(`[CONVERSATIONS] 📄 Mensaje ${index + 1}/${messages.length}:`, {
-            role: parsed.role,
-            phoneNumber: parsed.phoneNumber,
-            timestamp: parsed.timestamp,
-            contentLength: parsed.content?.length || 0,
-          })
 
           return {
             ...parsed,
             timestamp: ensureValidTimestamp(parsed.timestamp),
           }
         } catch (parseError) {
-          console.error(`[CONVERSATIONS] ❌ Error parseando mensaje ${index}:`, parseError)
+          console.error(`[CONVERSATIONS] Error parseando mensaje ${index}:`, parseError)
           return null
         }
       })
       .filter(Boolean)
 
-    console.log(`[CONVERSATIONS] ✅ Mensajes parseados: ${parsedMessages.length}`)
+    const hasMore = offset + parsedMessages.length < total
 
-    return parsedMessages
+    return { messages: parsedMessages, total, hasMore }
   } catch (error) {
-    console.error("[CONVERSATIONS] ❌ Error obteniendo mensajes:", error)
-    return []
+    console.error("[CONVERSATIONS] Error obteniendo mensajes:", error)
+    return { messages: [], total: 0, hasMore: false }
   }
+}
+
+// Funcion de compatibilidad para obtener todos los mensajes (usar con cuidado - alto bandwidth)
+export async function getAllConversationMessages(configId: string, phoneNumber: string): Promise<ConversationMessage[]> {
+  const result = await getConversationMessages(configId, phoneNumber, 10000, 0)
+  return result.messages
 }
 
 // Obtener todos los contactos de un cliente

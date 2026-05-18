@@ -8,7 +8,7 @@ import {
   closeSession,
   saveSupportMessage,
 } from "@/lib/human-support"
-import { getConversationMessages } from "@/lib/conversations"
+import { getConversationMessages, getAllConversationMessages } from "@/lib/conversations"
 import { getWhatsAppConfigById } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { nanoid } from "nanoid"
@@ -36,7 +36,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ success: false, error: "No autorizado" }, { status: 403 })
     }
 
-    const conversationHistory = await getConversationMessages(supportSession.configId, supportSession.phoneNumber)
+    // Obtener historial con paginacion (ultimos 100 mensajes para soporte)
+    const { messages: conversationHistory } = await getConversationMessages(supportSession.configId, supportSession.phoneNumber, 100, 0)
     const supportMessages = await getSupportMessages(sessionId)
 
     return NextResponse.json({
