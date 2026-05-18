@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getConversationMessages } from "@/lib/conversations"
+import { getAllConversationMessages } from "@/lib/conversations"
 
 export async function GET(request: Request) {
   try {
@@ -25,7 +25,8 @@ export async function GET(request: Request) {
 
     const allMessages = []
     for (const phoneNumber of phoneNumbers) {
-      const messages = await getConversationMessages(configId, phoneNumber)
+      // Export usa getAllConversationMessages para obtener todo el historial
+      const messages = await getAllConversationMessages(configId, phoneNumber)
       allMessages.push(...messages)
     }
 

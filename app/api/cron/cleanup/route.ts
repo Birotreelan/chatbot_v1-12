@@ -2,6 +2,12 @@ import { NextResponse } from "next/server"
 import { Redis } from "@upstash/redis"
 import { incrementMetric, logError } from "@/lib/monitoring"
 
+// Prefijos de conversaciones (deben coincidir con lib/conversations.ts)
+const CONVERSATION_PREFIX = "conversation:"
+const CONVERSATION_CONTACT_PREFIX = "conversation_contact:"
+const CONVERSATION_CONTACTS_SET_PREFIX = "conversation_contacts:"
+const CONVERSATION_PAUSED_PREFIX = "conversation_paused:"
+
 async function scanKeys(redis: Redis, pattern: string, maxKeys = 1000): Promise<string[]> {
   const keys: string[] = []
   let cursor = 0
@@ -33,10 +39,12 @@ export async function GET(req: Request) {
     const threadDays = Number(process.env.CLEANUP_THREAD_DAYS || 30)
     const metricsDays = Number(process.env.CLEANUP_LOGS_DAYS || 30)
     const cacheDays = Number(process.env.CLEANUP_CACHE_HOURS || 24) / 24 // Convertir horas a días
+    const conversationDays = Number(process.env.CLEANUP_CONVERSATION_DAYS || 7) // Conversaciones: 7 días por defecto
 
     const THREAD_CUTOFF = now - threadDays * 24 * 60 * 60 * 1000
     const METRICS_CUTOFF = now - metricsDays * 24 * 60 * 60 * 1000
     const CACHE_CUTOFF = now - cacheDays * 24 * 60 * 60 * 1000
+    const CONVERSATION_CUTOFF = now - conversationDays * 24 * 60 * 60 * 1000
 
     // Limitar el número de elementos a procesar en cada categoría para evitar timeouts
     const MAX_ITEMS_PER_CATEGORY = 1000
@@ -139,12 +147,141 @@ export async function GET(req: Request) {
       }
     }
 
+    // 5. Limpiar conversaciones antiguas (NUEVO - Mayor impacto en bandwidth)
+    console.log("[CLEANUP] Iniciando limpieza de conversaciones...")
+    const conversationKeys = await scanKeys(redis, `${CONVERSATION_PREFIX}*`, MAX_ITEMS_PER_CATEGORY)
+    let conversationsDeleted = 0
+    let conversationMessagesDeleted = 0
+
+    for (const key of conversationKeys) {
+      try {
+        // Obtener el ultimo mensaje para verificar la fecha
+        const lastMessage = await redis.lindex(key, -1)
+        
+        if (lastMessage) {
+          let messageData: any = null
+          
+          if (typeof lastMessage === "string") {
+            try {
+              messageData = JSON.parse(lastMessage)
+            } catch {
+              // Si no se puede parsear, eliminar la conversacion
+              const msgCount = await redis.llen(key)
+              await redis.del(key)
+              conversationsDeleted++
+              conversationMessagesDeleted += msgCount
+              continue
+            }
+          } else if (typeof lastMessage === "object") {
+            messageData = lastMessage
+          }
+
+          if (messageData && messageData.timestamp) {
+            const messageTime = new Date(messageData.timestamp).getTime()
+            
+            if (!isNaN(messageTime) && messageTime < CONVERSATION_CUTOFF) {
+              const msgCount = await redis.llen(key)
+              await redis.del(key)
+              conversationsDeleted++
+              conversationMessagesDeleted += msgCount
+            }
+          }
+        } else {
+          // Lista vacia, eliminar
+          await redis.del(key)
+          conversationsDeleted++
+        }
+      } catch (e) {
+        console.error(`[CLEANUP] Error procesando conversacion ${key}:`, e)
+      }
+    }
+
+    // 6. Limpiar contactos de conversaciones antiguas
+    const contactKeys = await scanKeys(redis, `${CONVERSATION_CONTACT_PREFIX}*`, MAX_ITEMS_PER_CATEGORY)
+    let contactsDeleted = 0
+
+    for (const key of contactKeys) {
+      try {
+        const contactData = await redis.get(key)
+        
+        if (contactData) {
+          let contact: any = null
+          
+          if (typeof contactData === "string") {
+            try {
+              contact = JSON.parse(contactData)
+            } catch {
+              await redis.del(key)
+              contactsDeleted++
+              continue
+            }
+          } else if (typeof contactData === "object") {
+            contact = contactData
+          }
+
+          if (contact && contact.lastMessageAt) {
+            const contactTime = new Date(contact.lastMessageAt).getTime()
+            
+            if (!isNaN(contactTime) && contactTime < CONVERSATION_CUTOFF) {
+              await redis.del(key)
+              contactsDeleted++
+              
+              // Tambien remover del set de contactos
+              if (contact.configId && contact.phoneNumber) {
+                const setKey = `${CONVERSATION_CONTACTS_SET_PREFIX}${contact.configId}`
+                await redis.srem(setKey, contact.phoneNumber)
+              }
+            }
+          }
+        } else {
+          await redis.del(key)
+          contactsDeleted++
+        }
+      } catch (e) {
+        console.error(`[CLEANUP] Error procesando contacto ${key}:`, e)
+      }
+    }
+
+    // 7. Limpiar flags de conversaciones pausadas huerfanas
+    const pausedKeys = await scanKeys(redis, `${CONVERSATION_PAUSED_PREFIX}*`, MAX_ITEMS_PER_CATEGORY)
+    let pausedFlagsDeleted = 0
+
+    for (const key of pausedKeys) {
+      try {
+        // Extraer configId y phoneNumber del key
+        const parts = key.replace(CONVERSATION_PAUSED_PREFIX, "").split(":")
+        if (parts.length >= 2) {
+          const configId = parts[0]
+          const phoneNumber = parts.slice(1).join(":")
+          
+          // Verificar si la conversacion aun existe
+          const conversationKey = `${CONVERSATION_PREFIX}${configId}:${phoneNumber}`
+          const exists = await redis.exists(conversationKey)
+          
+          if (!exists) {
+            await redis.del(key)
+            pausedFlagsDeleted++
+          }
+        }
+      } catch (e) {
+        console.error(`[CLEANUP] Error procesando flag pausado ${key}:`, e)
+      }
+    }
+
+    console.log(`[CLEANUP] Conversaciones eliminadas: ${conversationsDeleted} (${conversationMessagesDeleted} mensajes)`)
+    console.log(`[CLEANUP] Contactos eliminados: ${contactsDeleted}`)
+    console.log(`[CLEANUP] Flags pausados huerfanos eliminados: ${pausedFlagsDeleted}`)
+
     // Registrar la limpieza
     await incrementMetric("cleanup_threads_deleted", threadsDeleted)
     await incrementMetric("cleanup_threads_converted", threadsConverted)
     await incrementMetric("cleanup_metrics_deleted", metricsCleanedUp)
     await incrementMetric("cleanup_cache_deleted", cacheEntriesDeleted)
     await incrementMetric("cleanup_ratelimit_deleted", rateLimitEntriesDeleted)
+    await incrementMetric("cleanup_conversations_deleted", conversationsDeleted)
+    await incrementMetric("cleanup_conversation_messages_deleted", conversationMessagesDeleted)
+    await incrementMetric("cleanup_contacts_deleted", contactsDeleted)
+    await incrementMetric("cleanup_paused_flags_deleted", pausedFlagsDeleted)
 
     return NextResponse.json({
       success: true,
@@ -153,11 +290,18 @@ export async function GET(req: Request) {
       metricsCleanedUp,
       cacheEntriesDeleted,
       rateLimitEntriesDeleted,
+      conversationsDeleted,
+      conversationMessagesDeleted,
+      contactsDeleted,
+      pausedFlagsDeleted,
       keysScanned: {
         threads: threadKeys.length,
         metrics: metricKeys.length,
         cache: cacheKeys.length,
         rateLimit: rateLimitKeys.length,
+        conversations: conversationKeys.length,
+        contacts: contactKeys.length,
+        pausedFlags: pausedKeys.length,
       },
       timestamp: new Date().toISOString(),
     })
