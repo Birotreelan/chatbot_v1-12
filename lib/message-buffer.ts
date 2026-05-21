@@ -14,7 +14,7 @@ interface BufferedMessage {
 // Buffer storage for rapid messages - store in Redis with debounce logic
 const BUFFER_KEY_PREFIX = "msg_buffer:"
 const BUFFER_TIMER_PREFIX = "msg_buffer_timer:"
-const BUFFER_DEBOUNCE_MS = 2500 // 2.5 seconds to aggregate messages
+const BUFFER_DEBOUNCE_MS = 4000 // 4 seconds to aggregate messages
 
 export async function addMessageToBuffer(
   userPhoneNumber: string,
