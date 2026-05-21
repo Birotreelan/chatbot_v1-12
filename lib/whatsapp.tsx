@@ -14,6 +14,7 @@ import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated,
 import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
 import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
+import { addMessageToBuffer, flushMessageBuffer } from "./message-buffer"
 
 // Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): { content: string; audioId?: string; audioMimeType?: string } {
@@ -74,6 +75,182 @@ async function markMessageAsProcessed(messageId: string): Promise<void> {
     console.log(`[WHATSAPP] Mensaje ${messageId} marcado como procesado`)
   } catch (error) {
     console.error("[WHATSAPP] Error marcando mensaje como procesado:", error)
+  }
+}
+
+// Nueva función para procesar múltiples mensajes agregados del buffer
+export async function processBufferedMessages(
+  userPhoneNumber: string,
+  config: any,
+  value: WhatsAppValue,
+  bufferedMessages: any[],
+) {
+  console.log(
+    `[WHATSAPP] 📦 Procesando buffer de ${bufferedMessages.length} mensajes agregados para ${userPhoneNumber}`,
+  )
+
+  try {
+    // Usar el primer mensaje como base (para metadata como messageId y timestamp)
+    const firstMessage = value.messages[0]
+    const phoneNumberId = value.metadata.phone_number_id
+
+    // Verificar si es una conversación pausada
+    const conversationPaused = await isConversationPaused(config.id, userPhoneNumber)
+    if (conversationPaused) {
+      console.log(
+        `[WHATSAPP] ⏸️ Conversación pausada para ${userPhoneNumber} en config ${config.id}, buffer ignorado`,
+      )
+      await updateWhatsAppStats(config.id, { messagesReceived: bufferedMessages.length })
+
+      // Guardar todos los mensajes del buffer
+      for (const msg of bufferedMessages) {
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: msg.userMessage || "",
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: msg.messageType || "text",
+        })
+      }
+      return
+    }
+
+    // Guardar todos los mensajes del buffer en la conversación
+    console.log(`[WHATSAPP] 💾 Guardando ${bufferedMessages.length} mensajes del buffer en historial`)
+    for (const msg of bufferedMessages) {
+      await saveConversationMessage({
+        id: nanoid(),
+        role: "user",
+        content: msg.userMessage || "",
+        timestamp: new Date().toISOString(),
+        phoneNumber: userPhoneNumber,
+        configId: config.id,
+        messageType: msg.messageType || "text",
+      })
+    }
+
+    // Obtener o crear un thread para este usuario
+    let threadResult
+    try {
+      console.log(`[WHATSAPP] Obteniendo thread para usuario ${userPhoneNumber} y config ${config.id}`)
+      threadResult = await getThreadForUser(userPhoneNumber, config.id)
+      console.log(`[WHATSAPP] Thread obtenido: ${threadResult.threadId}, isNewThread: ${threadResult.isNewThread}`)
+      if (threadResult.assistantId) {
+        console.log(`[WHATSAPP] 🤖 Thread tiene asistente personalizado: ${threadResult.assistantId}`)
+      }
+    } catch (error) {
+      console.error("[WHATSAPP] Error al obtener thread ID:", error)
+
+      const errorMessage = "Lo siento, ha ocurrido un error al procesar tus mensajes. Por favor, intenta de nuevo más tarde."
+
+      try {
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: errorMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: "error",
+        })
+        console.log(`[WHATSAPP] 💾 Mensaje de error de thread guardado en conversación`)
+      } catch (saveError) {
+        console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
+      }
+
+      await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
+      await updateWhatsAppStats(config.id, { errors: 1 })
+      return
+    }
+
+    // Construir un único mensaje que agregue todos los mensajes del buffer
+    const aggregatedUserMessage = bufferedMessages.map((msg, idx) => `${idx + 1}. ${msg.userMessage}`).join("\n")
+
+    const scheduleInfo = formatScheduleForSystemBlock(config)
+
+    let messageToSend = `[SISTEMA]
+Nombre: ${config.displayName}
+FechaHora: ${getArgentinaDateTime()}
+PrimerMensaje: ${threadResult.isNewThread}
+TipoMensaje: text
+MensajesAgregados: ${bufferedMessages.length}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${scheduleInfo}
+[/SISTEMA]
+
+El usuario envió los siguientes mensajes (pueden ser del mismo usuario al escribir rápidamente):
+
+${aggregatedUserMessage}`
+
+    // Si es un thread reseteado, indicarlo
+    if (threadResult.isResetThread) {
+      messageToSend = `[SISTEMA]
+Nombre: ${config.displayName}
+FechaHora: ${getArgentinaDateTime()}
+PrimerMensaje: true
+ThreadReseteado: true
+TipoMensaje: text
+MensajesAgregados: ${bufferedMessages.length}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${scheduleInfo}
+[/SISTEMA]
+
+El usuario envió los siguientes mensajes (pueden ser del mismo usuario al escribir rápidamente):
+
+${aggregatedUserMessage}`
+    }
+
+    console.log(`[WHATSAPP] 📨 Mensaje agregado preparado para OpenAI (${bufferedMessages.length} mensajes)`)
+
+    const assistantToUse = threadResult.assistantId || config.whatsappAssistantId
+    if (threadResult.assistantId) {
+      console.log(`[WHATSAPP] ✨ Usando asistente del thread: ${assistantToUse}`)
+    } else {
+      console.log(`[WHATSAPP] 🔵 Usando asistente por defecto: ${assistantToUse}`)
+    }
+
+    // Obtener respuesta del asistente
+    try {
+      console.log(`[v0] 📞 Antes de llamar getAssistantResponse:`, {
+        userPhoneNumber,
+        threadId: threadResult.threadId,
+        phoneNumberId,
+        assistantId: assistantToUse,
+        messagesAggregated: bufferedMessages.length,
+      })
+      console.log(`[WHATSAPP] Llamando a getAssistantResponse...`)
+      await getAssistantResponse(threadResult.threadId, messageToSend, phoneNumberId, assistantToUse, userPhoneNumber)
+
+      console.log(`[WHATSAPP] getAssistantResponse completado exitosamente`)
+
+      // Actualizar estadísticas - mensajes procesados
+      await updateWhatsAppStats(config.id, { messagesProcessed: bufferedMessages.length })
+    } catch (error) {
+      console.error("[WHATSAPP] Error al obtener respuesta del asistente:", error)
+
+      const errorMessage = "Lo siento, no puedo procesar tus mensajes en este momento. Por favor, intenta de nuevo más tarde."
+
+      try {
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: errorMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: "error",
+        })
+        console.log(`[WHATSAPP] 💾 Mensaje de error guardado en conversación`)
+      } catch (saveError) {
+        console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
+      }
+
+      await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
+      await updateWhatsAppStats(config.id, { errors: 1 })
+    }
+  } catch (error) {
+    console.error(`[WHATSAPP] ❌ Error procesando buffer de mensajes:`, error)
+    await updateWhatsAppStats(config.id, { errors: 1 })
   }
 }
 
@@ -710,9 +887,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       }
     }
 
-    // Encolar el mensaje para procesamiento secuencial por usuario
-    console.log(`[WHATSAPP] Encolando mensaje para usuario ${userPhoneNumber}`)
-    await enqueueUserMessage(userPhoneNumber, {
+    // Agregar el mensaje al buffer de agregación (con debounce de 2.5 segundos)
+    console.log(`[WHATSAPP] 📦 Agregando mensaje al buffer para usuario ${userPhoneNumber}`)
+    await addMessageToBuffer(userPhoneNumber, {
       userMessage,
       messageType: message.type,
       phoneNumberId: value.metadata.phone_number_id,
@@ -721,9 +898,52 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       audioMimeType,
     })
 
-    console.log(`[WHATSAPP] Mensaje encolado exitosamente para usuario ${userPhoneNumber}`)
+    console.log(`[WHATSAPP] ✓ Mensaje agregado al buffer exitosamente para usuario ${userPhoneNumber}`)
   } catch (error) {
     console.error("[WHATSAPP] Error al procesar el mensaje:", error)
+  }
+}
+
+// Función auxiliar para procesar mensajes cuando el buffer se vacía
+export async function processUserBuffer(userPhoneNumber: string) {
+  try {
+    console.log(`[WHATSAPP] 🔄 Procesando buffer del usuario ${userPhoneNumber}`)
+
+    // Obtener todos los mensajes del buffer y limpiarlo
+    const bufferedMessages = await flushMessageBuffer(userPhoneNumber)
+
+    if (bufferedMessages.length === 0) {
+      console.log(`[WHATSAPP] ℹ️ Buffer vacío para ${userPhoneNumber}`)
+      return
+    }
+
+    console.log(`[WHATSAPP] 📊 Buffer vaciado: ${bufferedMessages.length} mensajes para procesar`)
+
+    // Tomar la configuración del primer mensaje del buffer
+    const firstBufferedMessage = bufferedMessages[0]
+    const config = firstBufferedMessage.config
+    const phoneNumberId = firstBufferedMessage.phoneNumberId
+
+    // Crear un objeto WhatsAppValue simulado para compatibilidad
+    // Solo usamos el phoneNumberId para recuperar la config si es necesario
+    const mockValue: WhatsAppValue = {
+      messages: [
+        {
+          id: `buffer_${Date.now()}`,
+          from: userPhoneNumber,
+          type: "text",
+          text: { body: "" },
+        } as any,
+      ],
+      metadata: {
+        phone_number_id: phoneNumberId,
+      } as any,
+    }
+
+    // Procesar todos los mensajes agregados del buffer
+    await processBufferedMessages(userPhoneNumber, config, mockValue, bufferedMessages)
+  } catch (error) {
+    console.error(`[WHATSAPP] ❌ Error procesando buffer del usuario:`, error)
   }
 }
 
