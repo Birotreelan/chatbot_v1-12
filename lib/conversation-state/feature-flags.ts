@@ -133,14 +133,24 @@ const GLOBAL_FLAGS_KEY = `${FEATURE_FLAGS_PREFIX}__global__`
 export async function getGlobalFeatureFlags(): Promise<FeatureFlags> {
   try {
     const redis = getRedisClient()
-    if (!redis) return DEFAULT_FEATURE_FLAGS
-
-    const cached = await redis.get(GLOBAL_FLAGS_KEY)
-    if (cached) {
-      return JSON.parse(cached as string) as FeatureFlags
+    if (!redis) {
+      console.log("[v0] getGlobalFeatureFlags - Redis no disponible")
+      return DEFAULT_FEATURE_FLAGS
     }
+
+    console.log("[v0] getGlobalFeatureFlags - leyendo clave:", GLOBAL_FLAGS_KEY)
+    const cached = await redis.get(GLOBAL_FLAGS_KEY)
+    console.log("[v0] getGlobalFeatureFlags - valor crudo de Redis:", cached, "tipo:", typeof cached)
+    
+    if (cached) {
+      const parsed = JSON.parse(cached as string) as FeatureFlags
+      console.log("[v0] getGlobalFeatureFlags - parseado:", JSON.stringify(parsed))
+      return parsed
+    }
+    console.log("[v0] getGlobalFeatureFlags - no hay cache, devolviendo defaults")
     return DEFAULT_FEATURE_FLAGS
-  } catch {
+  } catch (err) {
+    console.log("[v0] getGlobalFeatureFlags - ERROR:", err)
     return DEFAULT_FEATURE_FLAGS
   }
 }
@@ -152,10 +162,16 @@ export async function setGlobalFeatureFlags(flags: Partial<FeatureFlags>): Promi
   const redis = getRedisClient()
   if (!redis) throw new Error("Redis no disponible")
 
+  console.log("[v0] setGlobalFeatureFlags - flags recibidos:", JSON.stringify(flags))
   const current = await getGlobalFeatureFlags()
+  console.log("[v0] setGlobalFeatureFlags - current antes de merge:", JSON.stringify(current))
   const updated = { ...current, ...flags }
+  console.log("[v0] setGlobalFeatureFlags - updated después de merge:", JSON.stringify(updated))
 
-  await redis.setex(GLOBAL_FLAGS_KEY, 30 * 24 * 60 * 60, JSON.stringify(updated))
+  const stringified = JSON.stringify(updated)
+  console.log("[v0] setGlobalFeatureFlags - guardando en clave:", GLOBAL_FLAGS_KEY, "valor:", stringified)
+  const result = await redis.setex(GLOBAL_FLAGS_KEY, 30 * 24 * 60 * 60, stringified)
+  console.log("[v0] setGlobalFeatureFlags - resultado de setex:", result)
   console.info(`[FEATURE-FLAGS] ✓ Flags GLOBALES actualizados`, { updated })
 }
 
