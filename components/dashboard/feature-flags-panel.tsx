@@ -127,8 +127,14 @@ export function FeatureFlagsPanel() {
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error)
-        setSavedFlags(data.flags)
-        setFlags(data.flags)
+
+        // Re-fetch desde Redis para confirmar el estado real guardado
+        const verify = await fetch("/api/dashboard/feature-flags")
+        const verifyData = await verify.json()
+        const confirmedFlags = verifyData.flags ?? data.flags
+
+        setSavedFlags(confirmedFlags)
+        setFlags(confirmedFlags)
         setStatusMsg({ type: "success", text: "Flags guardados correctamente." })
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Error desconocido"
@@ -234,9 +240,16 @@ export function FeatureFlagsPanel() {
                 <p className="text-sm text-muted-foreground">{meta.description}</p>
               </div>
               <div className="flex items-center gap-3 shrink-0">
-                <span className={`text-xs font-medium ${isActive ? "text-green-600" : "text-muted-foreground"}`}>
+                <Badge
+                  className={
+                    isActive
+                      ? "bg-green-100 text-green-800 border-green-200 hover:bg-green-100"
+                      : "bg-muted text-muted-foreground border-border hover:bg-muted"
+                  }
+                  variant="outline"
+                >
                   {isActive ? "Activo" : "Inactivo"}
-                </span>
+                </Badge>
                 <Switch
                   checked={isActive}
                   onCheckedChange={() => toggleFlag(key)}
