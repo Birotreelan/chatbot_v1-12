@@ -120,6 +120,10 @@ export interface FeatureFlags {
   directReagendamiento: boolean
   directPacienteNuevo: boolean
   directPacienteExistente: boolean
+
+  // Flujo de reserva unificado (Sprint 6-8)
+  // Resuelve selecciones numéricas en obra social, sede, profesional, especialidad y turno
+  directBookingFlow: boolean
 }
 
 /**
@@ -135,6 +139,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directReagendamiento: false,
   directPacienteNuevo: false,
   directPacienteExistente: false,
+  directBookingFlow: false,
 }
 
 /**

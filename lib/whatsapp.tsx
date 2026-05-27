@@ -43,6 +43,11 @@ import {
 import {
   handleDNIIfAwaiting,
 } from "./conversation-state/dni-handler"
+import {
+  handleBookingSelectionIfPending,
+  getBookingFlowState,
+  buildBookingContextBlock,
+} from "./conversation-state/booking-flow-handler"
 // Import dynamic handleAssistantSwitch
 let handleAssistantSwitch: any = null
 
@@ -1170,6 +1175,69 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             // Reemplazar el mensaje original por el DNI normalizado para que OpenAI no tenga que extraerlo
             userMessage = dniResult.dni
             // Continuar a OpenAI con el DNI limpio
+          }
+        }
+      }
+    }
+
+    // ============================================================================
+    // INTERCEPTAR FLUJO DE RESERVA (Sprint 6-8: Paciente Nuevo/Existente)
+    // Si hay un booking flow activo con selección numérica, resolver directamente
+    // ============================================================================
+    if (message.type === "text") {
+      const bookingFlags = await getClientFeatureFlags(config.id)
+      if (bookingFlags.directBookingFlow) {
+        const bookingResult = await handleBookingSelectionIfPending(userMessage, userPhoneNumber, config.id)
+        if (bookingResult.handled) {
+          const bookingLogger = createConversationLogger(userPhoneNumber, config.id, "booking-flow")
+          const bookingCtx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+
+          if (bookingResult.type === "invalid_selection") {
+            bookingLogger.warn("Seleccion fuera de rango en booking flow", { userMessage })
+            await sendDirectResponse(bookingCtx, bookingResult.errorMessage, "booking-flow")
+            return
+          }
+
+          if (bookingResult.type === "valid_turno") {
+            // Turno seleccionado: mostrar confirmación directamente
+            bookingLogger.info("Turno seleccionado correctamente via backend (sin off-by-one)", {
+              turnoId: bookingResult.turno.idTurno,
+              hora: bookingResult.turno.hora,
+            })
+            await sendDirectResponse(bookingCtx, bookingResult.confirmationMessage, "booking-flow")
+            return
+          }
+
+          if (bookingResult.type === "valid_selection") {
+            // Selección de obra social / sede / profesional / especialidad
+            bookingLogger.info("Seleccion valida en booking flow", {
+              step: bookingResult.nextStep,
+            })
+            await sendDirectResponse(bookingCtx, bookingResult.confirmationMessage, "booking-flow")
+            return
+          }
+
+          if (bookingResult.type === "search_type_selected") {
+            // Tipo de búsqueda seleccionado - si requiere mensaje directo (médico particular), enviarlo
+            // Para especialidad y cualquier médico, OpenAI continúa con el contexto inyectado
+            if (bookingResult.nextMessage) {
+              bookingLogger.info("Tipo busqueda seleccionado con mensaje directo", {
+                searchType: bookingResult.searchType,
+              })
+              await sendDirectResponse(bookingCtx, bookingResult.nextMessage, "booking-flow")
+              return
+            }
+            // Sin mensaje directo: dejar caer a OpenAI con contexto inyectado
+            bookingLogger.info("Tipo busqueda seleccionado, continuando a OpenAI con contexto", {
+              searchType: bookingResult.searchType,
+            })
+            // Continua al enqueue con contexto enriquecido
           }
         }
       }
