@@ -167,17 +167,19 @@ async function processUserQueue(userPhoneNumber: string) {
             continue
           }
 
-          if (rawMessage.userMessage && rawMessage.phoneNumberId && rawMessage.config) {
+          // Castear a QueuedMessage para acceder a las propiedades
+          const qMsg = rawMessage as QueuedMessage
+          if (qMsg.userMessage && qMsg.phoneNumberId && qMsg.config) {
             await processIndividualMessage(
-              rawMessage.userMessage,
-              rawMessage.phoneNumberId,
-              rawMessage.config,
+              qMsg.userMessage,
+              qMsg.phoneNumberId,
+              qMsg.config,
               userPhoneNumber,
-              rawMessage.messageType || "text",
-              rawMessage.audioId,
-              rawMessage.audioMimeType,
-              rawMessage.routeToReagendamiento,
-              rawMessage.functionArgs,
+              qMsg.messageType || "text",
+              qMsg.audioId,
+              qMsg.audioMimeType,
+              qMsg.routeToReagendamiento,
+              qMsg.functionArgs,
             )
             processedCount++
             continue
