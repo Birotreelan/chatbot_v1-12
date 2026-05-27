@@ -101,6 +101,7 @@ export function FeatureFlagsPanel() {
     fetch("/api/dashboard/feature-flags")
       .then((r) => r.json())
       .then((data) => {
+        console.log("[v0] useEffect GET flags:", JSON.stringify(data.flags))
         setFlags(data.flags)
         setSavedFlags(data.flags)
       })
@@ -120,17 +121,20 @@ export function FeatureFlagsPanel() {
     if (!flags) return
     startTransition(async () => {
       try {
+        console.log("[v0] handleSave - flags que se envían:", JSON.stringify(flags))
         const res = await fetch("/api/dashboard/feature-flags", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ flags }),
         })
         const data = await res.json()
+        console.log("[v0] handleSave - respuesta POST:", JSON.stringify(data))
         if (!res.ok) throw new Error(data.error)
 
         // Re-fetch desde Redis para confirmar el estado real guardado
         const verify = await fetch("/api/dashboard/feature-flags")
         const verifyData = await verify.json()
+        console.log("[v0] handleSave - re-fetch GET confirma:", JSON.stringify(verifyData.flags))
         const confirmedFlags = verifyData.flags ?? data.flags
 
         setSavedFlags(confirmedFlags)
