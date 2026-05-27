@@ -232,3 +232,30 @@ export function buildRescheduleStartMessage(chatbotData: ChatbotData): string {
 
 ¿Con qué profesional te gustaría agendar? Podés indicarme el nombre o especialidad que buscás.`
 }
+
+/**
+ * Mensaje cuando el paciente intenta confirmar un turno que ya fue cancelado
+ * (el proxy devuelve NOT_FOUND o error porque la acción ya no existe)
+ * Ejemplo: "Rosa, el turno del jueves, 28 de mayo de 2026 a las 15:10 con Andrea Paucar
+ *           fue cancelado anteriormente. Si querés agendar un nuevo turno, podés escribirme."
+ */
+export function buildAlreadyCancelledMessage(
+  chatbotData: ChatbotData,
+  turnoIndex: number = 0
+): string {
+  const nombre = formatPatientName(chatbotData)
+  const turno = chatbotData.turnos[turnoIndex]
+
+  if (!turno) {
+    return `${nombre}, el turno que intentás confirmar ya no está disponible, ya que fue cancelado previamente. Si necesitás agendar un nuevo turno, podés escribirme y te ayudo.`
+  }
+
+  const fechaCompleta = formatFullDate(turno.fecha)
+  const hora = formatTime(turno.hora)
+  const profesional = formatProfessionalName(turno)
+  const sede = turno.sede
+
+  return `${nombre}, el turno del ${fechaCompleta} a las ${hora} con ${profesional} en ${sede} ya no está disponible, ya que fue cancelado previamente.
+
+Si querés agendar un nuevo turno, podés escribirme y te ayudo con gusto.`
+}
