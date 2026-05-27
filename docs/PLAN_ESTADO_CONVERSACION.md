@@ -1,392 +1,432 @@
 # Plan de Refactorización: Sistema de Estados de Conversación
 
-## Resumen Ejecutivo
+## Enfoque: Producción Segura con Cambios Progresivos
 
-Actualmente, la lógica del chatbot está distribuida en 4 system prompts que suman **~6700 líneas** de texto. OpenAI debe "recordar" e interpretar decenas de flags de estado y reglas de comportamiento en cada turno, lo que genera:
-
-1. **Inconsistencia**: OpenAI no siempre sigue las reglas
-2. **Costos elevados**: Decisiones determinísticas pasan por LLM
-3. **Dificultad de debugging**: No hay visibilidad del estado actual
-4. **Mantenimiento complejo**: Cambios requieren editar prompts largos
-
-**Objetivo**: Mover la lógica determinística al backend con un sistema de estados explícitos en Redis, reduciendo los prompts a ~30% de su tamaño actual y mejorando fiabilidad.
+Este plan está diseñado para un sistema **en producción**. Cada cambio:
+- Tiene **feature flag** para activar/desactivar
+- Tiene **fallback automático a OpenAI** en caso de error
+- Incluye **logging extensivo** para debugging
+- Permite **rollback inmediato** sin deploy
 
 ---
 
-## Análisis de System Prompts Actuales
+## Arquitectura de Seguridad
 
-### 1. asst_router (3350 líneas)
-**Función**: Router principal - confirmación, cancelación, derivación
-
-**Estados implícitos identificados (18+)**:
-- `estado.plantilla_respondida`
-- `estado.confirmacion_asistencia_procesada`
-- `estado.esperando_confirmacion_cancelacion_boton`
-- `estado.esperando_confirmacion_cancelacion` (texto libre)
-- `estado.esperando_opcion_reagendamiento`
-- `estado.esperando_respuesta_discrepancia_recordatorio`
-- `estado.esperando_seleccion_turno`
-- `estado.esperando_dni_para_recordatorio`
-- `estado.esperando_respuesta_plantilla_texto`
-- `estado.despedida_enviada`
-- `estado.persona_equivocada`
-- `estado.paciente_nuevo`
-- `estado.datos_obtenidos_por_validacion`
-- `estado.turno_cancelado_desde_recordatorio`
-- `estado.tipo_confirmacion`
-- `estado.turno_a_cancelar`
-- `estado.ultimo_turno_cancelado`
-- `estado.ultimo_turno_datos`
-
-**Lógica determinística que puede moverse al backend**:
-- Detección de botones "Confirmar" / "Cancelar"
-- Doble confirmación de cancelación (respuestas "1" / "2")
-- Ofrecimiento de reagendamiento post-cancelación
-- Despedidas anti-repetición (MODO A / MODO B)
-- Detección de persona equivocada
-- Menú de 4 opciones de discrepancia
-- Extracción y normalización de DNI
-
-### 2. route_to_reagendamiento (1136 líneas)
-**Función**: Flujo de reagendamiento post-cancelación
-
-**Estados implícitos identificados (8+)**:
-- `estado.turno_ya_reservado`
-- `estado.esperando_confirmacion_reserva`
-- `estado.esperando_obra_social_paciente_nuevo`
-- `estado.esperando_seleccion_turno`
-- `estado.opciones_actuales`
-- `estado.turno_seleccionado`
-- `estado.id_turno_reservado`
-- `estado.ultimo_turno_datos`
-
-**Lógica determinística que puede moverse al backend**:
-- Clasificación de intent post-reserva (Categoría A/B/C)
-- Detección de selección de turno por número
-- Guardia post-reserva (una sola reserva por sesión)
-- Mapeo de número a turno (evitar off-by-one)
-
-### 3. route_to_pacienteExistente (1107 líneas)
-**Función**: Agendamiento para pacientes ya registrados
-
-**Estados implícitos identificados (10)**:
-- `estado.esperando_obra_social_paciente_existente`
-- `estado.esperando_seleccion_obra_social`
-- `estado.esperando_seleccion_sede`
-- `estado.esperando_opcion_busqueda_paciente_existente`
-- `estado.esperando_seleccion_especialidad`
-- `estado.esperando_nombre_profesional`
-- `estado.esperando_seleccion_profesional`
-- `estado.esperando_seleccion_turno_reserva`
-- `estado.esperando_email_paciente_existente`
-- `estado.esperando_confirmacion_reserva`
-
-**Lógica determinística que puede moverse al backend**:
-- Flujo secuencial completo (10 pasos)
-- Detección de selección por número
-- Validación de obra social
-- Contexto de últimas opciones presentadas
-
-### 4. route_to_pacienteNuevo (1145 líneas)
-**Función**: Registro y agendamiento de pacientes nuevos
-
-**Estados implícitos identificados (10)**:
-- `estado.esperando_nombre_apellido_paciente_nuevo`
-- `estado.esperando_obra_social_paciente_nuevo`
-- `estado.esperando_seleccion_obra_social`
-- `estado.esperando_seleccion_sede`
-- `estado.esperando_opcion_busqueda_paciente_nuevo`
-- `estado.esperando_seleccion_especialidad`
-- `estado.esperando_nombre_profesional`
-- `estado.esperando_seleccion_profesional`
-- `estado.esperando_seleccion_turno_reserva`
-- `estado.esperando_email_paciente_nuevo`
-- `estado.esperando_confirmacion_reserva`
-
-**Lógica determinística que puede moverse al backend**:
-- Flujo secuencial completo (10 pasos)
-- Extracción de nombre/apellido
-- Todo lo mismo que pacienteExistente + recopilación de datos
-
----
-
-## Modelo de Estado Propuesto
-
-### ConversationState Unificado
+### 1. Feature Flags por Cliente
 
 ```typescript
-// lib/conversation-state.ts
-
-export type AssistantType = 
-  | 'router'           // asst_router
-  | 'reagendamiento'   // route_to_reagendamiento
-  | 'paciente_nuevo'   // route_to_pacienteNuevo
-  | 'paciente_existente' // route_to_pacienteExistente
-
-export type ConversationPhase =
-  // === ROUTER (asst_router) ===
-  | 'idle'                              // Sin flujo activo
-  | 'awaiting_template_response'        // Recordatorio enviado, esperando respuesta
-  | 'awaiting_cancel_confirmation'      // Botón Cancelar presionado, esperando "1" o "2"
-  | 'awaiting_reschedule_choice'        // Post-cancelación, esperando si quiere reagendar
-  | 'awaiting_discrepancy_response'     // Datos discrepantes, esperando 1/2/3/4
-  | 'awaiting_dni'                      // Esperando que ingrese DNI
-  | 'awaiting_turn_selection'           // Múltiples turnos, eligiendo cuál gestionar
-  | 'awaiting_action_selection'         // Turnos mostrados, esperando 1/2/3
-  | 'post_confirmation'                 // Turno ya confirmado en esta sesión
-  | 'post_cancellation'                 // Turno ya cancelado en esta sesión
-  | 'wrong_person'                      // Persona equivocada confirmada
-  | 'farewell_sent'                     // Despedida enviada (anti-repetición)
+// En la config de WhatsApp de cada cliente
+interface DirectFlowConfig {
+  // Flags por funcionalidad
+  enableDirectConfirmation: boolean      // Confirmación sin OpenAI
+  enableDirectCancellation: boolean      // Cancelación sin OpenAI
+  enableDirectReschedule: boolean        // Reagendamiento sin OpenAI
+  enableDirectFarewell: boolean          // Despedidas anti-repetición
+  enableDirectDniExtraction: boolean     // Extracción de DNI
+  enableDirectTurnSelection: boolean     // Selección de turnos por número
   
-  // === REAGENDAMIENTO ===
-  | 'reagendamiento_searching'          // Buscando turnos disponibles
-  | 'reagendamiento_awaiting_selection' // Lista mostrada, esperando número
-  | 'reagendamiento_awaiting_email'     // Email requerido antes de reservar
-  | 'reagendamiento_awaiting_confirmation' // Datos mostrados, esperando "sí"
-  | 'reagendamiento_completed'          // Turno reservado exitosamente
+  // Flag maestro
+  enableAllDirectFlows: boolean          // Override para activar todo
   
-  // === PACIENTE NUEVO ===
-  | 'nuevo_awaiting_name'               // Esperando nombre y apellido
-  | 'nuevo_awaiting_obra_social'        // Esperando obra social
-  | 'nuevo_awaiting_obra_social_selection' // Múltiples OS, esperando selección
-  | 'nuevo_awaiting_sede_selection'     // Esperando selección de sede
-  | 'nuevo_awaiting_search_option'      // Esperando 1/2/3 (profesional/especialidad/cualquiera)
-  | 'nuevo_awaiting_specialty_selection'// Esperando selección de especialidad
-  | 'nuevo_awaiting_professional_name'  // Esperando nombre del profesional
-  | 'nuevo_awaiting_professional_selection' // Múltiples profesionales, esperando selección
-  | 'nuevo_awaiting_turn_selection'     // Lista de turnos mostrada
-  | 'nuevo_awaiting_email'              // Email requerido
-  | 'nuevo_awaiting_confirmation'       // Datos mostrados, esperando "sí"
-  | 'nuevo_completed'                   // Turno reservado
-  
-  // === PACIENTE EXISTENTE ===
-  | 'existente_awaiting_obra_social'
-  | 'existente_awaiting_obra_social_selection'
-  | 'existente_awaiting_sede_selection'
-  | 'existente_awaiting_search_option'
-  | 'existente_awaiting_specialty_selection'
-  | 'existente_awaiting_professional_name'
-  | 'existente_awaiting_professional_selection'
-  | 'existente_awaiting_turn_selection'
-  | 'existente_awaiting_email'
-  | 'existente_awaiting_confirmation'
-  | 'existente_completed'
-
-export interface ConversationContext {
-  // Identificación
-  phase: ConversationPhase
-  assistant: AssistantType
-  
-  // Datos del paciente
-  paciente?: {
-    id?: string
-    dni?: string
-    telefono?: string
-    nombre?: string
-    apellido?: string
-    email?: string
-    obraSocial?: string
-    obraSocialId?: string
-    esNuevo: boolean
-  }
-  
-  // Datos del turno en contexto
-  turno?: {
-    id?: string
-    fecha?: string
-    hora?: string
-    profesionalId?: string
-    profesionalNombre?: string
-    sedeId?: string
-    sedeNombre?: string
-    admiteReagendamiento?: boolean
-    estado?: string
-  }
-  
-  // Opciones mostradas al usuario (para resolver selecciones)
-  opcionesActuales?: Array<{
-    numero: number
-    tipo: 'turno' | 'sede' | 'especialidad' | 'profesional' | 'obra_social'
-    datos: Record<string, any>
-  }>
-  
-  // Flags de sesión
-  despedidaEnviada: boolean
-  turnoConfirmado: boolean
-  turnoCancelado: boolean
-  turnoReservado: boolean
-  
-  // Metadata
-  configId: string
-  lastUpdated: string
+  // Debugging
+  logLevel: 'none' | 'basic' | 'verbose' | 'debug'
 }
 ```
 
-### Estructura en Redis
-
-```
-conversation:{phone}:{configId}:state  -> JSON de ConversationContext
-conversation:{phone}:{configId}:ttl    -> 24 horas
-```
-
----
-
-## Plan de Implementación por Fases
-
-### Fase 1: Infraestructura Base (1-2 días)
-**Objetivo**: Crear el sistema de estados sin modificar flujos existentes
-
-**Archivos a crear**:
-- `lib/conversation-state.ts` - Tipos y funciones CRUD de estado
-- `lib/state-handlers/index.ts` - Registry de handlers por fase
-
-**Cambios**:
-- Refactorizar `lib/appointment-flow-state.ts` existente para usar el nuevo modelo
-
-### Fase 2: Router - Flujos de Botones (2-3 días)
-**Objetivo**: Mover confirmación/cancelación directa al backend
-
-**Ya implementado parcialmente**:
-- Confirmación directa (sin OpenAI)
-- Doble confirmación de cancelación
-- Ofrecimiento de reagendamiento
-
-**Pendiente**:
-- Integrar con ConversationContext unificado
-- Agregar handler para respuestas "1"/"2" en `awaiting_reschedule_choice`
-- Agregar handler para menú de 4 opciones de discrepancia
-
-### Fase 3: Router - Despedidas y Post-Acción (1-2 días)
-**Objetivo**: Manejar despedidas anti-repetición desde backend
-
-**Handlers a implementar**:
-- `handleFarewellMode()` - Detectar si ya hubo despedida
-- `handlePostConfirmationMessage()` - Respuestas breves post-confirmación
-- `handlePostCancellationMessage()` - Respuestas breves post-cancelación
-
-**Beneficio**: Eliminar ~200 líneas del system prompt de reglas anti-repetición
-
-### Fase 4: Router - DNI y Validación (2-3 días)
-**Objetivo**: Normalización de DNI en backend
-
-**Handlers a implementar**:
-- `extractAndValidateDNI()` - Regex robusto para extraer DNI
-- `handleAwaitingDNI()` - Procesar respuesta con DNI
-
-**Beneficio**: Eliminar ~100 líneas de reglas de extracción de DNI
-
-### Fase 5: Reagendamiento - Flujo Completo (3-4 días)
-**Objetivo**: Manejar todo el flujo de reagendamiento desde backend
-
-**Handlers a implementar**:
-- `handleTurnSelection()` - Detectar número y mapear a turno
-- `handleReagendamientoConfirmation()` - Procesar "sí"
-- `handlePostReservationGuard()` - Clasificación A/B/C
-
-**Beneficio**: Eliminar ~600 líneas del prompt de reagendamiento
-
-### Fase 6: Paciente Nuevo/Existente - Flujos Secuenciales (4-5 días)
-**Objetivo**: Manejar los 10 pasos de cada flujo
-
-**Handlers a implementar**:
-- `handleObraSocialValidation()`
-- `handleSedeSelection()`
-- `handleSearchOptionSelection()`
-- `handleSpecialtySelection()`
-- `handleProfessionalSelection()`
-- `handleEmailCapture()`
-- `handleReservationConfirmation()`
-
-**Beneficio**: Eliminar ~1500 líneas de los prompts de paciente nuevo/existente
-
-### Fase 7: Reducción de System Prompts (2-3 días)
-**Objetivo**: Simplificar prompts a tono y casos edge
-
-**Contenido que queda en prompts**:
-- Tono y personalidad
-- Interpretación de lenguaje natural ambiguo
-- Manejo de cirugías (turnos_qx)
-- Casos edge no cubiertos
-
-**Estimación de reducción**:
-- asst_router: 3350 → ~800 líneas
-- route_to_reagendamiento: 1136 → ~300 líneas
-- route_to_pacienteNuevo: 1145 → ~400 líneas
-- route_to_pacienteExistente: 1107 → ~400 líneas
-- **Total: 6738 → ~1900 líneas (72% reducción)**
-
----
-
-## Arquitectura de Handlers
+### 2. Fallback Automático
 
 ```typescript
-// lib/state-handlers/types.ts
-
-export type HandlerResult = 
-  | { type: 'direct_response', message: string, newPhase?: ConversationPhase }
-  | { type: 'delegate_to_openai', context?: string }
-  | { type: 'route_to_assistant', assistant: AssistantType, data: any }
-  | { type: 'execute_action', action: string, params: any }
-
-export type StateHandler = (
+async function handleWithFallback(
+  handler: StateHandler,
   message: string,
   context: ConversationContext,
   config: WhatsAppConfig
-) => Promise<HandlerResult>
-```
-
-```typescript
-// lib/state-handlers/router-handlers.ts
-
-export const routerHandlers: Record<ConversationPhase, StateHandler> = {
-  'awaiting_cancel_confirmation': handleCancelConfirmation,
-  'awaiting_reschedule_choice': handleRescheduleChoice,
-  'awaiting_discrepancy_response': handleDiscrepancyResponse,
-  'farewell_sent': handlePostFarewellMessage,
-  // ... etc
+): Promise<HandlerResult> {
+  try {
+    const result = await handler(message, context, config)
+    
+    if (result.type === 'direct_response') {
+      console.log(`[DIRECT-FLOW] Handler exitoso: ${context.phase}`)
+      return result
+    }
+    
+    return result
+  } catch (error) {
+    // Log del error
+    console.error(`[DIRECT-FLOW] Error en handler ${context.phase}:`, error)
+    
+    // Siempre fallback a OpenAI
+    return { 
+      type: 'delegate_to_openai', 
+      context: `[ERROR_FALLBACK] Handler falló: ${error.message}` 
+    }
+  }
 }
 ```
 
-### Flujo de Procesamiento
+### 3. Sistema de Logging
+
+```typescript
+// Niveles de log
+const LOG_LEVELS = {
+  none: 0,
+  basic: 1,    // Solo transiciones de estado
+  verbose: 2,  // + Datos de contexto
+  debug: 3     // + Payloads completos
+}
+
+function logStateTransition(
+  phone: string,
+  configId: string,
+  from: ConversationPhase,
+  to: ConversationPhase,
+  trigger: string,
+  level: number
+) {
+  if (level >= LOG_LEVELS.basic) {
+    console.log(`[STATE] ${phone} | ${from} -> ${to} | trigger: ${trigger}`)
+  }
+}
+```
+
+---
+
+## Plan de Implementación Progresivo
+
+### Sprint 1: Infraestructura Base (Semana 1)
+
+**Objetivo**: Crear la infraestructura sin cambiar comportamiento existente
+
+#### Tarea 1.1: Modelo de Estado Unificado
+**Archivo**: `lib/conversation-state.ts` (refactorizar existente)
+
+```typescript
+export type ConversationPhase =
+  // Ya implementados (mantener)
+  | 'awaiting_cancel_confirmation'
+  | 'awaiting_reschedule_choice'
+  
+  // Nuevos a agregar progresivamente
+  | 'idle'
+  | 'awaiting_template_response'
+  | 'awaiting_discrepancy_response'
+  | 'awaiting_dni'
+  | 'awaiting_turn_selection'
+  | 'post_confirmation'
+  | 'post_cancellation'
+  | 'farewell_sent'
+  // ... más estados en sprints futuros
+```
+
+**Criterio de éxito**: 
+- Los estados existentes siguen funcionando
+- Nuevos estados no afectan flujo actual
+
+#### Tarea 1.2: Feature Flags en Config
+**Archivo**: `lib/types.ts` o tabla de config
+
+Agregar campos de configuración por cliente para habilitar/deshabilitar cada feature.
+
+**Criterio de éxito**:
+- Admin puede activar/desactivar por cliente
+- Default = desactivado (seguro)
+
+#### Tarea 1.3: Logging Framework
+**Archivo**: `lib/state-logger.ts`
+
+```typescript
+export function logDirectFlow(
+  event: string,
+  data: Record<string, any>,
+  level: 'info' | 'warn' | 'error' = 'info'
+) {
+  const prefix = '[DIRECT-FLOW]'
+  const timestamp = new Date().toISOString()
+  console.log(`${prefix} [${timestamp}] ${event}`, 
+    level === 'error' ? data : JSON.stringify(data).slice(0, 500))
+}
+```
+
+**Criterio de éxito**:
+- Logs estructurados en producción
+- Fácil de filtrar por `[DIRECT-FLOW]`
+
+---
+
+### Sprint 2: Consolidar Flujos Existentes (Semana 2)
+
+**Objetivo**: Integrar los flujos ya implementados (confirmación/cancelación) con el nuevo sistema
+
+#### Tarea 2.1: Migrar appointment-flow-state.ts
+Refactorizar para usar `ConversationContext` unificado manteniendo compatibilidad.
+
+**Cambios**:
+- Renombrar tipos internos
+- Agregar logging
+- Agregar feature flag check
+
+**Rollback**: Si falla, el código anterior sigue funcionando
+
+#### Tarea 2.2: Agregar Métricas
+Trackear en Redis:
+- `direct_flow:confirmations:{clienteId}` - contador
+- `direct_flow:cancellations:{clienteId}` - contador
+- `direct_flow:fallbacks:{clienteId}` - contador de fallbacks a OpenAI
+
+**Criterio de éxito**:
+- Dashboard puede mostrar % de flujos directos vs OpenAI
+
+---
+
+### Sprint 3: Despedidas Anti-Repetición (Semana 3)
+
+**Objetivo**: Mover lógica de "MODO A / MODO B" al backend
+
+#### Problema Actual
+El system prompt tiene ~200 líneas para evitar despedidas repetitivas:
+```
+Si estado.despedida_enviada = true Y el paciente envía agradecimiento:
+  -> Respuesta BREVE sin repetir despedida
+```
+
+#### Solución Backend
+
+```typescript
+// Handler para post-farewell
+async function handlePostFarewellMessage(
+  message: string,
+  context: ConversationContext
+): Promise<HandlerResult> {
+  // Detectar agradecimiento simple
+  const isSimpleThankYou = /^(gracias|ok|dale|bueno|perfecto|listo)$/i.test(message.trim())
+  
+  if (isSimpleThankYou) {
+    return {
+      type: 'direct_response',
+      message: getRandomBriefResponse(), // "De nada", "A tu orden", etc.
+      newPhase: 'farewell_sent' // Mantener estado
+    }
+  }
+  
+  // Si es algo más, delegar a OpenAI
+  return { type: 'delegate_to_openai' }
+}
+```
+
+**Feature Flag**: `enableDirectFarewell`
+
+**Logging**:
+```
+[DIRECT-FLOW] farewell_handler | phone: xxx | input: "gracias" | response: "De nada" | direct: true
+```
+
+**Rollback**: Si `enableDirectFarewell: false`, pasa todo a OpenAI
+
+---
+
+### Sprint 4: Selección de Turnos por Número (Semana 4)
+
+**Objetivo**: Manejar respuestas "1", "2", "3" cuando hay opciones presentadas
+
+#### Problema Actual
+Cuando OpenAI presenta opciones:
+```
+1. Lunes 10:00
+2. Martes 15:00
+3. Miércoles 09:00
+```
+El usuario responde "2" y OpenAI debe recordar qué era la opción 2.
+
+#### Solución Backend
+
+```typescript
+// Guardar opciones en contexto
+interface ConversationContext {
+  opcionesActuales?: Array<{
+    numero: number
+    tipo: 'turno' | 'sede' | 'profesional' | 'especialidad'
+    id: string
+    descripcion: string
+  }>
+}
+
+// Handler para selección numérica
+async function handleNumericSelection(
+  message: string,
+  context: ConversationContext
+): Promise<HandlerResult> {
+  const numero = parseInt(message.trim())
+  
+  if (isNaN(numero) || !context.opcionesActuales) {
+    return { type: 'delegate_to_openai' }
+  }
+  
+  const seleccion = context.opcionesActuales.find(o => o.numero === numero)
+  
+  if (!seleccion) {
+    return { type: 'delegate_to_openai' } // Número fuera de rango
+  }
+  
+  // Procesar según tipo
+  switch (seleccion.tipo) {
+    case 'turno':
+      return handleTurnSelected(seleccion, context)
+    case 'sede':
+      return handleSedeSelected(seleccion, context)
+    // etc.
+  }
+}
+```
+
+**Feature Flag**: `enableDirectTurnSelection`
+
+**Dependencia**: OpenAI debe llamar a una función `set_options_context()` cuando presenta opciones
+
+---
+
+### Sprint 5: Extracción de DNI (Semana 5)
+
+**Objetivo**: Extraer y normalizar DNI sin OpenAI
+
+#### Solución Backend
+
+```typescript
+function extractDNI(message: string): string | null {
+  // Normalizar: quitar puntos, espacios, guiones
+  const normalized = message.replace(/[\s.-]/g, '')
+  
+  // Buscar secuencia de 7-8 dígitos
+  const match = normalized.match(/\b(\d{7,8})\b/)
+  
+  if (match) {
+    return match[1]
+  }
+  
+  // Buscar con texto "dni", "documento", etc.
+  const withPrefix = message.match(/(?:dni|documento|doc)[:\s]*(\d{7,8})/i)
+  if (withPrefix) {
+    return withPrefix[1]
+  }
+  
+  return null
+}
+
+async function handleAwaitingDNI(
+  message: string,
+  context: ConversationContext
+): Promise<HandlerResult> {
+  const dni = extractDNI(message)
+  
+  if (dni) {
+    // Validar contra API
+    const paciente = await validarTelefonoPaciente(context.phone, dni, context.configId)
+    
+    if (paciente.found) {
+      return {
+        type: 'direct_response',
+        message: buildPatientFoundMessage(paciente),
+        newPhase: 'awaiting_action_selection'
+      }
+    }
+  }
+  
+  // Si no se pudo extraer o validar, OpenAI intenta
+  return { type: 'delegate_to_openai' }
+}
+```
+
+**Feature Flag**: `enableDirectDniExtraction`
+
+---
+
+### Sprint 6-8: Flujos de Paciente Nuevo/Existente (Semanas 6-8)
+
+Estos son los más complejos y se abordarán después de validar los sprints anteriores.
+
+---
+
+## Monitoreo y Rollback
+
+### Dashboard de Métricas
 
 ```
-1. Mensaje llega a handleMessage()
-2. Cargar ConversationContext de Redis
-3. Buscar handler para context.phase
-4. Si handler existe:
-   - Ejecutar handler
-   - Si retorna 'direct_response': enviar mensaje, actualizar estado
-   - Si retorna 'delegate_to_openai': pasar a OpenAI con contexto
-   - Si retorna 'route_to_assistant': cambiar asistente
-5. Si no hay handler: delegar a OpenAI
+GET /api/admin/direct-flow-stats?clienteId=xxx
+
+{
+  "period": "last_24h",
+  "total_messages": 1500,
+  "direct_responses": 450,      // 30%
+  "openai_responses": 1050,     // 70%
+  "fallbacks_from_error": 12,   // 0.8%
+  "by_phase": {
+    "awaiting_cancel_confirmation": { direct: 89, openai: 3 },
+    "farewell_sent": { direct: 156, openai: 45 },
+    ...
+  }
+}
+```
+
+### Alertas
+
+```typescript
+// Si fallbacks > 5% en última hora, alertar
+if (fallbackRate > 0.05) {
+  await sendSlackAlert(`[DIRECT-FLOW] Alto rate de fallbacks: ${fallbackRate}%`)
+}
+```
+
+### Rollback Inmediato
+
+```typescript
+// En admin panel o API
+POST /api/admin/direct-flow/disable?clienteId=xxx&feature=all
+
+// Efecto inmediato: todos los mensajes pasan a OpenAI
 ```
 
 ---
 
-## Métricas de Éxito
+## Orden de Implementación Recomendado
 
-1. **Reducción de prompts**: 72% menos líneas
-2. **Consistencia**: 100% de respuestas determinísticas son idénticas
-3. **Costos**: ~40-60% reducción en tokens de OpenAI
-4. **Latencia**: Respuestas directas en <500ms (vs ~2s con OpenAI)
-5. **Debugging**: Dashboard con estado actual de cada conversación
-
----
-
-## Próximos Pasos Inmediatos
-
-1. **Revisar y aprobar** este plan
-2. **Priorizar** qué flujos atacar primero (sugiero: Fase 1-3 juntas)
-3. **Definir** formato exacto de logs para debugging
-4. **Crear** tests para handlers críticos
+| # | Sprint | Feature | Riesgo | Beneficio |
+|---|--------|---------|--------|-----------|
+| 1 | S1 | Infraestructura | Bajo | Base para todo |
+| 2 | S2 | Consolidar existente | Bajo | Ya funciona |
+| 3 | S3 | Despedidas | Bajo | ~200 líneas menos |
+| 4 | S4 | Selección numérica | Medio | Mayor consistencia |
+| 5 | S5 | Extracción DNI | Medio | ~100 líneas menos |
+| 6 | S6-8 | Paciente nuevo/existente | Alto | ~1500 líneas menos |
 
 ---
 
-## Riesgos y Mitigaciones
+## Checklist por Sprint
 
-| Riesgo | Mitigación |
-|--------|------------|
-| Regresiones en flujos existentes | Tests exhaustivos, rollback rápido |
-| Edge cases no cubiertos | Fallback a OpenAI para casos desconocidos |
-| Complejidad de migración | Migración gradual por fase |
-| Estado inconsistente en Redis | TTL + limpieza automática |
+### Antes de deployar:
+- [ ] Feature flag existe y está OFF por default
+- [ ] Logging implementado
+- [ ] Fallback a OpenAI funciona
+- [ ] Tests locales pasando
+- [ ] Documentación actualizada
+
+### Después de deployar:
+- [ ] Activar para 1 cliente de prueba
+- [ ] Monitorear logs por 24h
+- [ ] Verificar métricas de fallback
+- [ ] Si OK, activar para más clientes gradualmente
+
+### Si hay problemas:
+- [ ] Desactivar feature flag inmediatamente
+- [ ] Revisar logs de errores
+- [ ] Crear issue con reproducción
+- [ ] Fix y repetir ciclo
+
+---
+
+## Próximo Paso Inmediato
+
+**Sprint 1, Tarea 1.1**: Refactorizar `lib/appointment-flow-state.ts` para:
+1. Agregar logging estructurado
+2. Preparar para feature flags
+3. Documentar estados actuales
+
+Quieres que empecemos con esta tarea?
