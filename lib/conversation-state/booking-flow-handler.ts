@@ -129,6 +129,7 @@ export async function getBookingFlowState(
 ): Promise<BookingFlowState | null> {
   try {
     const redis = getRedisClient()
+    if (!redis) return null
     const data = await redis.get(getKey(phone, configId))
     if (!data) return null
     return JSON.parse(data as string) as BookingFlowState
@@ -144,6 +145,7 @@ export async function setBookingFlowState(
 ): Promise<void> {
   try {
     const redis = getRedisClient()
+    if (!redis) return
     const updated = { ...state, updatedAt: new Date().toISOString() }
     await redis.setex(getKey(phone, configId), BOOKING_FLOW_TTL, JSON.stringify(updated))
   } catch {
@@ -157,6 +159,7 @@ export async function clearBookingFlowState(
 ): Promise<void> {
   try {
     const redis = getRedisClient()
+    if (!redis) return
     await redis.del(getKey(phone, configId))
   } catch {
     // Silenciar errores de Redis
