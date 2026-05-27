@@ -44,10 +44,10 @@ import {
   handleDNIIfAwaiting,
 } from "./conversation-state/dni-handler"
 import {
-  handleBookingSelectionIfPending,
   getBookingFlowState,
   buildBookingContextBlock,
 } from "./conversation-state/booking-flow-handler"
+import { step1RequestName, step1ProcessName, step3ProcessSedeSelection, step4ProcessSearchType } from "./conversation-state/booking-steps-1-4"
 // Import dynamic handleAssistantSwitch
 let handleAssistantSwitch: any = null
 
