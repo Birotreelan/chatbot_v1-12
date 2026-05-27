@@ -1,4 +1,3 @@
-import type { WhatsAppValue } from "@/lib/types"
 import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
@@ -7,13 +6,33 @@ import { getArgentinaDateTime } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
-import { saveConversationMessage, isConversationPaused } from "./conversations"
+import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule } from "./appointment-stats"
 import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
 import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
+import {
+  getAppointmentContext,
+  getFlowState,
+  setFlowState,
+  clearFlowState,
+  isConfirmCancelResponse,
+  isKeepAppointmentResponse,
+  isRescheduleChoice,
+  type ChatbotData,
+} from "./appointment-flow-state"
+import {
+  buildConfirmationMessage,
+  buildCancelDoubleConfirmMessage,
+  buildCancellationSuccessMessage,
+  buildKeepAppointmentMessage,
+  buildNoRescheduleMessage,
+  buildRescheduleStartMessage,
+} from "./direct-response-templates"
+// Import dynamic handleAssistantSwitch
+let handleAssistantSwitch: any = null
 
 // Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): { content: string; audioId?: string; audioMimeType?: string } {
@@ -77,8 +96,225 @@ async function markMessageAsProcessed(messageId: string): Promise<void> {
   }
 }
 
+// ============================================================================
+// RESPUESTAS DIRECTAS (SIN OPENAI) PARA FLUJOS DE CONFIRMACION/CANCELACION
+// ============================================================================
+
+interface DirectResponseContext {
+  phoneNumberId: string
+  accessToken: string
+  userPhoneNumber: string
+  configId: string
+  clienteId?: string
+}
+
+/**
+ * Envia una respuesta directa al usuario y guarda en el historial
+ */
+async function sendDirectResponse(
+  ctx: DirectResponseContext,
+  message: string
+): Promise<boolean> {
+  try {
+    // Enviar mensaje al usuario
+    await sendWhatsAppMessage(
+      ctx.phoneNumberId,
+      ctx.accessToken,
+      ctx.userPhoneNumber,
+      message
+    )
+
+    // Guardar en historial
+    await saveConversationMessage({
+      id: nanoid(),
+      role: "assistant",
+      content: message,
+      timestamp: new Date().toISOString(),
+      phoneNumber: ctx.userPhoneNumber,
+      configId: ctx.configId,
+    })
+
+    // Actualizar stats
+    await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
+
+    console.log(`[WHATSAPP-DIRECT] Respuesta directa enviada a ${ctx.userPhoneNumber}`)
+    return true
+  } catch (error) {
+    console.error(`[WHATSAPP-DIRECT] Error enviando respuesta directa:`, (error as Error).message)
+    return false
+  }
+}
+
+/**
+ * Maneja respuestas de doble confirmacion de cancelacion ("1"/"2")
+ * Retorna:
+ * - false: respuesta no manejada, continuar a OpenAI
+ * - true: respuesta manejada completamente
+ * - object: respuesta especial (ej: reagendamiento) que necesita procesamiento posterior
+ */
+async function handlePendingFlowResponse(
+  userMessage: string,
+  userPhoneNumber: string,
+  config: any,
+  phoneNumberId: string,
+  value: any
+): Promise<boolean | { type: 'route_to_reagendamiento'; chatbotData: ChatbotData; turnoIndex: number }> {
+  // Verificar si hay un flujo pendiente
+  const flowState = await getFlowState(userPhoneNumber, config.id)
+  if (!flowState) return false
+
+  console.log(`[WHATSAPP-DIRECT] Flujo pendiente detectado: ${flowState.type}`)
+
+  const ctx: DirectResponseContext = {
+    phoneNumberId,
+    accessToken: config.accessToken,
+    userPhoneNumber,
+    configId: config.id,
+    clienteId: config.cliente_id,
+  }
+
+  // Obtener contexto del turno
+  const chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+  if (!chatbotData) {
+    console.log(`[WHATSAPP-DIRECT] No hay contexto de turno, pasando a OpenAI`)
+    await clearFlowState(userPhoneNumber, config.id)
+    return false
+  }
+
+  // Manejar segun el tipo de flujo
+  if (flowState.type === 'awaiting_cancel_confirmation') {
+    // Usuario responde a "1- Si, cancelar" / "2- No, mantener"
+    if (isConfirmCancelResponse(userMessage)) {
+      console.log(`[WHATSAPP-DIRECT] Usuario confirma cancelacion`)
+      
+      // Llamar al proxy para ejecutar la cancelacion
+      try {
+        const proxyPayload = {
+          action: "template_response",
+          Cliente_Id: config.cliente_id,
+          Phone_Number_Id: phoneNumberId,
+          // Simular estructura de boton de cancelacion
+          messages: [{
+            type: "button",
+            button: {
+              text: "Cancelar",
+              payload: "Cancelar"
+            }
+          }],
+          metadata: {
+            phone_number_id: phoneNumberId
+          },
+          contacts: value.contacts || []
+        }
+
+        console.log(`[WHATSAPP-DIRECT] Enviando cancelacion al proxy`)
+        const response = await fetchWithRetry(
+          config.proxy,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(proxyPayload),
+          },
+          TIMEOUTS.PROXY_TIMEOUT,
+          { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
+        )
+
+        if (response.ok) {
+          // Trackear evento de cancelacion
+          if (config.cliente_id) {
+            const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+            await trackAppointmentEvent({
+              clienteId: config.cliente_id,
+              phoneNumber: userPhoneNumber,
+              eventType: "cancelled",
+              timestamp: new Date().toISOString(),
+              templateSentAt: templateSentAt || undefined,
+              metadata: { source: "direct_flow" },
+            })
+            
+            // Marcar pending reschedule
+            await markPendingReschedule(config.cliente_id, userPhoneNumber)
+          }
+
+          // Limpiar estado de flujo
+          await clearFlowState(userPhoneNumber, config.id)
+
+          // Verificar si admite reagendamiento
+          const turno = chatbotData.turnos[flowState.turnoIndex || 0]
+          if (turno?.admite_reagendamiento !== false) {
+            // Setear nuevo estado para reagendamiento
+            await setFlowState(userPhoneNumber, config.id, {
+              type: 'awaiting_reschedule_choice',
+              createdAt: new Date().toISOString(),
+              turnoIndex: flowState.turnoIndex || 0
+            })
+          }
+
+          // Enviar mensaje de cancelacion exitosa
+          const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
+          await sendDirectResponse(ctx, successMsg)
+          return true
+        } else {
+          console.error(`[WHATSAPP-DIRECT] Error del proxy al cancelar: ${response.status}`)
+          // En caso de error, limpiar estado y pasar a OpenAI
+          await clearFlowState(userPhoneNumber, config.id)
+          return false
+        }
+      } catch (error) {
+        console.error(`[WHATSAPP-DIRECT] Error al cancelar via proxy:`, (error as Error).message)
+        await clearFlowState(userPhoneNumber, config.id)
+        return false
+      }
+    } else if (isKeepAppointmentResponse(userMessage)) {
+      console.log(`[WHATSAPP-DIRECT] Usuario decide mantener turno`)
+      
+      // Limpiar estado
+      await clearFlowState(userPhoneNumber, config.id)
+      
+      // Enviar mensaje de turno mantenido
+      const keepMsg = buildKeepAppointmentMessage(chatbotData, flowState.turnoIndex || 0)
+      await sendDirectResponse(ctx, keepMsg)
+      return true
+    } else {
+      // Respuesta no reconocida - limpiar estado y pasar a OpenAI
+      console.log(`[WHATSAPP-DIRECT] Respuesta no reconocida: "${userMessage}", pasando a OpenAI`)
+      await clearFlowState(userPhoneNumber, config.id)
+      return false
+    }
+  } else if (flowState.type === 'awaiting_reschedule_choice') {
+    // Usuario responde a "1- Reagendar" / "2- No reagendar"
+    const choice = isRescheduleChoice(userMessage)
+    
+    if (choice === 'reschedule') {
+      console.log(`[WHATSAPP-DIRECT] Usuario quiere reagendar - pasando a asistente de reagendamiento`)
+      await clearFlowState(userPhoneNumber, config.id)
+      
+      // Retornar información especial para que se haga el switch al asistente de reagendamiento
+      return {
+        type: 'route_to_reagendamiento',
+        chatbotData,
+        turnoIndex: flowState.turnoIndex || 0
+      }
+    } else if (choice === 'no_reschedule') {
+      console.log(`[WHATSAPP-DIRECT] Usuario no quiere reagendar`)
+      await clearFlowState(userPhoneNumber, config.id)
+      
+      const noRescheduleMsg = buildNoRescheduleMessage(chatbotData)
+      await sendDirectResponse(ctx, noRescheduleMsg)
+      return true
+    } else {
+      // Respuesta no reconocida - limpiar y pasar a OpenAI
+      console.log(`[WHATSAPP-DIRECT] Respuesta de reagendamiento no reconocida, pasando a OpenAI`)
+      await clearFlowState(userPhoneNumber, config.id)
+      return false
+    }
+  }
+
+  return false
+}
+
 // Modificar la función handleMessage para usar la cola por usuario
-export async function handleMessage(value: WhatsAppValue) {
+export async function handleMessage(value: any) {
   console.log("[WHATSAPP] Iniciando handleMessage con datos:", JSON.stringify(value, null, 2))
 
   try {
@@ -128,7 +364,100 @@ export async function handleMessage(value: WhatsAppValue) {
     if (config.cliente_id) {
       const isUserInitiated = await checkAndTrackUserInitiated(config.cliente_id, userPhoneNumber)
       if (isUserInitiated) {
-        console.log(`[WHATSAPP] 📊 Conversación USER-INITIATED registrada para ${userPhoneNumber}`)
+        console.log(`[WHATSAPP] Conversación USER-INITIATED registrada para ${userPhoneNumber}`)
+      }
+    }
+
+    // ============================================================================
+    // INTERCEPTAR RESPUESTAS DE FLUJOS PENDIENTES (doble confirmacion cancelacion, etc)
+    // Esto permite responder directamente sin pasar por OpenAI
+    // ============================================================================
+    if (message.type === "text" || message.type === "button") {
+      const flowResult = await handlePendingFlowResponse(
+        userMessage,
+        userPhoneNumber,
+        config,
+        value.metadata.phone_number_id,
+        value
+      )
+      
+      // Si fue true, la respuesta fue manejada completamente
+      if (flowResult === true) {
+        console.log(`[WHATSAPP] Mensaje manejado por flujo directo, no se pasa a OpenAI`)
+        return
+      }
+      
+      // Si fue un objeto especial (reagendamiento), hacer el switch
+      if (flowResult && typeof flowResult === 'object' && flowResult.type === 'route_to_reagendamiento') {
+        console.log(`[WHATSAPP] Detectado reagendamiento - haciendo switch al asistente de reagendamiento`)
+        
+        // Obtener el thread actual y el run ID para pasarlos a handleAssistantSwitch
+        const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
+        if (!threadInfo || !threadInfo.threadId) {
+          console.error(`[WHATSAPP] No se encontró thread para hacer el switch a reagendamiento`)
+          // Fallback: enviar mensaje de error
+          await sendWhatsAppMessage(
+            value.metadata.phone_number_id,
+            config.accessToken,
+            userPhoneNumber,
+            "Lo siento, hubo un error al iniciar el proceso de reagendamiento. Por favor, intenta nuevamente."
+          )
+          return
+        }
+
+        try {
+          // Importar handleAssistantSwitch dinámicamente
+          if (!handleAssistantSwitch) {
+            const openaiTools = await import("./openai-tools")
+            // handleAssistantSwitch es una función interna no exportada, acceder a través del módulo
+            // Tenemos que llamar directamente dentro de processIndividualMessage
+          }
+
+          // Preparar los argumentos para route_to_reagendamiento con los datos del turno
+          const turno = flowResult.chatbotData.turnos[flowResult.turnoIndex]
+          const functionArgs = {
+            paciente: {
+              nombres: flowResult.chatbotData.paciente.nombres,
+              apellido: flowResult.chatbotData.paciente.apellido,
+              dni: flowResult.chatbotData.paciente.dni,
+              telefono: flowResult.chatbotData.paciente.telefono,
+            },
+            turno_cancelado: {
+              fecha: turno.fecha,
+              hora: turno.hora_formateada,
+              profesional: turno.profesional,
+              sede: turno.sede,
+              direccion: turno.direccion,
+            },
+          }
+
+          console.log(`[WHATSAPP] Encolando mensaje de reagendamiento con datos de turno cancelado`)
+
+          // Encolar el mensaje con información especial de reagendamiento
+          await enqueueUserMessage(userPhoneNumber, {
+            userMessage: `[SISTEMA_REAGENDAMIENTO]${JSON.stringify(functionArgs)}[/SISTEMA_REAGENDAMIENTO]`,
+            messageType: "text",
+            phoneNumberId: value.metadata.phone_number_id,
+            config,
+            audioId: undefined,
+            audioMimeType: undefined,
+            routeToReagendamiento: true, // Flag especial para processIndividualMessage
+            functionArgs, // Datos a pasar al asistente de reagendamiento
+          })
+
+          console.log(`[WHATSAPP] Mensaje de reagendamiento encolado exitosamente`)
+          return
+        } catch (error) {
+          console.error(`[WHATSAPP] Error en flujo de reagendamiento:`, (error as Error).message)
+          // Fallback: enviar mensaje de error
+          await sendWhatsAppMessage(
+            value.metadata.phone_number_id,
+            config.accessToken,
+            userPhoneNumber,
+            "Lo siento, hubo un error al iniciar el proceso de reagendamiento. Por favor, intenta nuevamente."
+          )
+          return
+        }
       }
     }
 
@@ -145,7 +474,6 @@ export async function handleMessage(value: WhatsAppValue) {
         timestamp: new Date().toISOString(),
         phoneNumber: userPhoneNumber,
         configId: config.id,
-        messageType: message.type,
       })
 
       if (activeSession.status === "pending") {
@@ -154,12 +482,9 @@ export async function handleMessage(value: WhatsAppValue) {
 
         await addPendingMessageToSession(activeSession.id, {
           id: nanoid(),
-          role: "user",
+          from: "user",
           content: userMessage,
           timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
-          configId: config.id,
-          messageType: message.type,
         })
 
         // Opcional: enviar mensaje de confirmación
@@ -175,10 +500,9 @@ export async function handleMessage(value: WhatsAppValue) {
         const supportMessage: HumanSupportMessage = {
           id: nanoid(),
           sessionId: activeSession.id,
-          from: "user",
+          role: "user",
           content: userMessage,
           timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
         }
 
         await saveSupportMessage(supportMessage)
@@ -203,7 +527,6 @@ export async function handleMessage(value: WhatsAppValue) {
         timestamp: new Date().toISOString(),
         phoneNumber: userPhoneNumber,
         configId: config.id,
-        messageType: message.type,
       })
       return
     }
@@ -215,7 +538,6 @@ export async function handleMessage(value: WhatsAppValue) {
       timestamp: new Date().toISOString(),
       phoneNumber: userPhoneNumber,
       configId: config.id,
-      messageType: message.type,
     })
 
     if (message.type === "button" && message.button) {
@@ -239,11 +561,47 @@ export async function handleMessage(value: WhatsAppValue) {
         console.log(`[WHATSAPP] ℹ️ No había assistantId personalizado para limpiar`)
       }
 
-      // Si es cancelación, NO enviar al proxy - pasar directamente al chatbot
+      // Si es cancelación, intentar respuesta directa primero
       if (isCancellationButton) {
-        console.log(`[WHATSAPP] Botón de CANCELACIÓN detectado - pasando al chatbot sin ejecutar en proxy`)
+        console.log(`[WHATSAPP] Botón de CANCELACIÓN detectado`)
         
-        // Crear mensaje para el chatbot con la solicitud de cancelación
+        // Intentar respuesta directa con datos del contexto guardado
+        const chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+        
+        if (chatbotData) {
+          console.log(`[WHATSAPP-DIRECT] Contexto de turno encontrado, usando respuesta directa para cancelación`)
+          
+          // Setear estado de flujo para esperar confirmacion
+          await setFlowState(userPhoneNumber, config.id, {
+            type: 'awaiting_cancel_confirmation',
+            createdAt: new Date().toISOString(),
+            turnoIndex: 0
+          })
+          
+          // Construir y enviar mensaje de doble confirmacion
+          const ctx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+          
+          const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, 0)
+          const sent = await sendDirectResponse(ctx, doubleConfirmMsg)
+          
+          if (sent) {
+            console.log(`[WHATSAPP-DIRECT] Doble confirmación de cancelación enviada, esperando respuesta del usuario`)
+            return // Salir, no pasar a OpenAI
+          } else {
+            console.log(`[WHATSAPP-DIRECT] Error enviando respuesta directa, cayendo a OpenAI`)
+            await clearFlowState(userPhoneNumber, config.id)
+          }
+        } else {
+          console.log(`[WHATSAPP-DIRECT] No hay contexto de turno guardado, usando flujo OpenAI`)
+        }
+        
+        // Fallback: Crear mensaje para el chatbot con la solicitud de cancelación
         userMessage = `El paciente presionó el botón "${originalMessage}" solicitando cancelar su turno.
 
 [SOLICITUD_CANCELACION]
@@ -313,11 +671,11 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
       } catch (error) {
         console.error(`[WHATSAPP] Error al enviar respuesta de botón al proxy:`, error)
         console.error(`[WHATSAPP] Error details:`, {
-          message: error.message,
-          stack: error.stack,
-          name: error.name,
+          message: (error as Error).message,
+          stack: (error as Error).stack,
+          name: (error as Error).name,
         })
-        proxyResponse = { success: false, error: "NETWORK_ERROR", message: error.message }
+        proxyResponse = { success: false, error: "NETWORK_ERROR", message: (error as Error).message }
       }
 
       // Modificar el mensaje para incluir la respuesta del proxy de forma más específica
@@ -346,6 +704,29 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
                   console.log(`[WHATSAPP] Evento de confirmación registrado para cliente ${config.cliente_id}`)
                 }
 
+                // Intentar respuesta directa con datos del contexto guardado
+                const chatbotDataConfirm = await getAppointmentContext(userPhoneNumber, config.id)
+                if (chatbotDataConfirm) {
+                  console.log(`[WHATSAPP-DIRECT] Contexto encontrado, usando respuesta directa para confirmación`)
+                  
+                  const ctxConfirm: DirectResponseContext = {
+                    phoneNumberId: value.metadata.phone_number_id,
+                    accessToken: config.accessToken,
+                    userPhoneNumber,
+                    configId: config.id,
+                    clienteId: config.cliente_id,
+                  }
+                  
+                  const confirmMsg = buildConfirmationMessage(chatbotDataConfirm, 0)
+                  const sentConfirm = await sendDirectResponse(ctxConfirm, confirmMsg)
+                  
+                  if (sentConfirm) {
+                    console.log(`[WHATSAPP-DIRECT] Confirmación enviada directamente, no se pasa a OpenAI`)
+                    return // Salir, no pasar a OpenAI
+                  }
+                }
+                
+                // Fallback a OpenAI
                 userMessage = `El paciente confirmó su turno presionando "${originalMessage}".
 
 [CONFIRMACION_TURNO_EXITOSA]
@@ -480,6 +861,30 @@ Responde de manera apropiada según la acción realizada.`
                 console.log(
                   `[WHATSAPP] ✅ Evento ${eventType} registrado exitosamente para cliente ${config.cliente_id}`,
                 )
+                
+                // Si es confirmación, intentar respuesta directa
+                if (eventType === "confirmed") {
+                  const chatbotDataSimple = await getAppointmentContext(userPhoneNumber, config.id)
+                  if (chatbotDataSimple) {
+                    console.log(`[WHATSAPP-DIRECT] Usando respuesta directa para confirmación (sin action_type)`)
+                    
+                    const ctxSimple: DirectResponseContext = {
+                      phoneNumberId: value.metadata.phone_number_id,
+                      accessToken: config.accessToken,
+                      userPhoneNumber,
+                      configId: config.id,
+                      clienteId: config.cliente_id,
+                    }
+                    
+                    const confirmMsgSimple = buildConfirmationMessage(chatbotDataSimple, 0)
+                    const sentSimple = await sendDirectResponse(ctxSimple, confirmMsgSimple)
+                    
+                    if (sentSimple) {
+                      console.log(`[WHATSAPP-DIRECT] Confirmación enviada directamente`)
+                      return // Salir, no pasar a OpenAI
+                    }
+                  }
+                }
               } catch (trackError) {
                 console.error(`[WHATSAPP] ❌ Error al registrar evento de estadísticas:`, trackError)
               }
@@ -523,9 +928,9 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
                 messageType: "error",
               })
               console.log(`[WHATSAPP] 💾 Mensaje de error NOT_FOUND guardado en conversación`)
-            } catch (saveError) {
-              console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
-            }
+        } catch (saveError) {
+          console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, (saveError as Error).message)
+        }
             // </CHANGE>
 
             // Send direct message to user
@@ -549,11 +954,15 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
           }
 
           // Tratar ALREADY_CONFIRMED como éxito aunque venga con success: false
+          let templateSentAt: string | null | undefined = undefined
+          if (config.cliente_id) {
+            templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+          }
+
           if (errorType === "ALREADY_CONFIRMED") {
             console.log(`[WHATSAPP] ✅ ALREADY_CONFIRMED detectado - tratando como éxito`)
 
             if (config.cliente_id) {
-              const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
               await trackAppointmentEvent({
                 clienteId: config.cliente_id,
                 phoneNumber: userPhoneNumber,
@@ -679,8 +1088,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       } catch (error) {
         console.error("[WHATSAPP] ❌ Error al resetear conversación:", error)
         console.error("[WHATSAPP] Error details:", {
-          message: error.message,
-          stack: error.stack,
+          message: (error as Error).message,
+          stack: (error as Error).stack,
         })
 
         const errorMessage = "❌ No se pudo reiniciar la conversación. Por favor, intenta de nuevo."
@@ -723,7 +1132,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
     console.log(`[WHATSAPP] Mensaje encolado exitosamente para usuario ${userPhoneNumber}`)
   } catch (error) {
-    console.error("[WHATSAPP] Error al procesar el mensaje:", error)
+    console.error("[WHATSAPP] Error al procesar el mensaje:", (error as Error).message)
   }
 }
 
@@ -736,13 +1145,134 @@ export async function processIndividualMessage(
   messageType = "text",
   audioId?: string,
   audioMimeType?: string,
+  routeToReagendamiento?: boolean,
+  functionArgs?: any,
 ) {
   console.log(
     `[WHATSAPP] Procesando mensaje individual para usuario ${userPhoneNumber}: "${userMessage}" (tipo: ${messageType})${audioId ? ` [audioId: ${audioId}]` : ""}`,
   )
 
   try {
-    // Handle audio messages - transcribe using Whisper
+    // ============================================================================
+    // MANEJO ESPECIAL PARA REAGENDAMIENTO
+    // ============================================================================
+    if (routeToReagendamiento && functionArgs) {
+      console.log(`[WHATSAPP] 🔄 Iniciando flujo de reagendamiento con handleAssistantSwitch`)
+
+      try {
+        const openai = new (await import("openai")).default({
+          apiKey: process.env.OPENAI_API_KEY,
+        })
+
+        // Obtener el thread actual
+        const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
+        if (!threadInfo || !threadInfo.threadId) {
+          console.error(`[WHATSAPP] No se encontró thread para reagendamiento`)
+          await sendWhatsAppMessage(
+            phoneNumberId,
+            config.accessToken,
+            userPhoneNumber,
+            "Lo siento, hubo un error al procesar tu solicitud. Por favor, intenta nuevamente."
+          )
+          await updateWhatsAppStats(config.id, { errors: 1 })
+          return
+        }
+
+        // Necesitamos el run ID actual, pero como estamos en un flujo directo, no hay run activo
+        // Usamos un ID dummy que será cancelado si existe
+        const dummyRunId = `dummy-run-${Date.now()}`
+
+        // Importar handleAssistantSwitch desde openai-tools
+        // Como es una función interna no exportada, necesitamos acceder de otra forma
+        // Vamos a hacer el switch manualmente aquí
+
+        console.log(`[WHATSAPP] Creando nuevo thread para asistente de reagendamiento...`)
+
+        const newThread = await openai.beta.threads.create({
+          metadata: {
+            name: `whatsapp-${userPhoneNumber}-${config.id}`,
+            previousThread: threadInfo.threadId,
+            reason: "assistant_switch",
+          },
+        })
+
+        console.log(`[WHATSAPP] Nuevo thread creado: ${newThread.id}`)
+
+        // Actualizar en base de datos
+        const { updateThreadId } = await import("./db")
+        const reAgendAssistantId = config.whatsappReagendamientoAssistantId // Obtener del config
+        
+        if (reAgendAssistantId) {
+          await updateThreadId(userPhoneNumber, config.id, newThread.id, reAgendAssistantId)
+        }
+
+        // Crear mensaje de sistema con los datos del turno cancelado
+        const { formatScheduleForSystemBlock: formatSchedule } = await import("./utils/schedule-formatter")
+        const { getArgentinaDateTime: getArgentinaDT } = await import("./utils/date-utils")
+        const fechaHora = getArgentinaDT()
+        const scheduleInfo = formatSchedule(config)
+
+        const systemBlock = `[SISTEMA]
+Nombre: ${config.displayName}
+FechaHora: ${fechaHora}
+PrimerMensaje: true
+TipoMensaje: assistant_switch
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
+FuncionOrigen: route_to_reagendamiento${scheduleInfo}
+[/SISTEMA]
+
+${JSON.stringify(functionArgs, null, 2)}`
+
+        await openai.beta.threads.messages.create(newThread.id, {
+          role: "user",
+          content: systemBlock,
+        })
+
+        console.log(`[WHATSAPP] Mensaje de sistema enviado al nuevo thread`)
+
+        // Trackear inicio de reagendamiento
+        if (config.cliente_id) {
+          const { trackRescheduleStarted } = await import("./appointment-stats")
+          await trackRescheduleStarted(config.cliente_id, userPhoneNumber)
+        }
+
+        // Ahora llamar a getAssistantResponse con el nuevo thread y assistantId
+        if (reAgendAssistantId) {
+          await getAssistantResponse(
+            newThread.id,
+            "Hola, quisiera reagendar mi turno.", // Mensaje inicial
+            phoneNumberId,
+            reAgendAssistantId,
+            userPhoneNumber,
+          )
+        } else {
+          console.error(`[WHATSAPP] No se encontró whatsappReagendamientoAssistantId en config`)
+          await sendWhatsAppMessage(
+            phoneNumberId,
+            config.accessToken,
+            userPhoneNumber,
+            "Lo siento, el asistente de reagendamiento no está configurado. Por favor, contacta con soporte."
+          )
+        }
+
+        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+        return
+      } catch (error) {
+        console.error(`[WHATSAPP] Error en reagendamiento:`, (error as Error).message)
+        await sendWhatsAppMessage(
+          phoneNumberId,
+          config.accessToken,
+          userPhoneNumber,
+          "Lo siento, hubo un error al iniciar el proceso de reagendamiento. Por favor, intenta nuevamente."
+        )
+        await updateWhatsAppStats(config.id, { errors: 1 })
+        return
+      }
+    }
+
+    // ============================================================================
+    // PROCESAMIENTO NORMAL DE MENSAJES
+    // ============================================================================
     if (messageType === "audio" && audioId) {
       console.log(`[WHATSAPP] 🎤 Procesando mensaje de audio, iniciando transcripcion...`)
 
@@ -759,15 +1289,15 @@ export async function processIndividualMessage(
           const errorMessage =
             "Lo siento, no pude entender el audio que enviaste. ¿Podrías intentar nuevamente o enviar tu mensaje por escrito?"
 
-          await saveConversationMessage({
-            id: nanoid(),
-            role: "assistant",
-            content: errorMessage,
-            timestamp: new Date().toISOString(),
-            phoneNumber: userPhoneNumber,
-            configId: config.id,
-            messageType: "error",
-          })
+            await saveConversationMessage({
+              id: nanoid(),
+              role: "assistant",
+              content: errorMessage,
+              timestamp: new Date().toISOString(),
+              phoneNumber: userPhoneNumber,
+              configId: config.id,
+              messageType: "error",
+            })
 
           await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -812,7 +1342,7 @@ export async function processIndividualMessage(
         console.log(`[WHATSAPP] 🤖 Thread tiene asistente personalizado: ${threadResult.assistantId}`)
       }
     } catch (error) {
-      console.error("[WHATSAPP] Error al obtener thread ID:", error)
+      console.error("[WHATSAPP] Error al obtener thread ID:", (error as Error).message)
 
       const errorMessage =
         "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
@@ -889,13 +1419,13 @@ ${userMessage}`
       // Actualizar estadísticas - mensaje procesado
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
     } catch (error) {
-      console.error("[WHATSAPP] Error al obtener respuesta del asistente:", error)
+      console.error("[WHATSAPP] Error al obtener respuesta del asistente:", (error as Error).message)
 
       // Actualizar estadísticas - error
       await updateWhatsAppStats(config.id, { errors: 1 })
 
       // Si el error es 404 (thread no encontrado), intentar crear uno nuevo
-      if (error.status === 404 && error.error?.type === "invalid_request_error") {
+      if ((error as any).status === 404 && (error as any).error?.type === "invalid_request_error") {
         try {
           console.log("[WHATSAPP] Thread no encontrado, creando uno nuevo...")
           // Crear un nuevo thread directamente con OpenAI
@@ -961,7 +1491,7 @@ ${userMessage}`
             })
             console.log(`[WHATSAPP] 💾 Mensaje de error de reintento guardado en conversación`)
           } catch (saveError) {
-            console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
+            console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, (saveError as Error).message)
           }
 
           // Enviar mensaje de error al usuario
@@ -976,15 +1506,15 @@ ${userMessage}`
           "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
 
         try {
-          await saveConversationMessage({
-            id: nanoid(),
-            role: "assistant",
-            content: errorMessage,
-            timestamp: new Date().toISOString(),
-            phoneNumber: userPhoneNumber,
-            configId: config.id,
-            messageType: "error",
-          })
+            await saveConversationMessage({
+              id: nanoid(),
+              role: "assistant",
+              content: errorMessage,
+              timestamp: new Date().toISOString(),
+              phoneNumber: userPhoneNumber,
+              configId: config.id,
+              messageType: "error",
+            })
           console.log(`[WHATSAPP] 💾 Mensaje de error general guardado en conversación`)
         } catch (saveError) {
           console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
@@ -1001,21 +1531,21 @@ ${userMessage}`
 
     console.log(`[WHATSAPP] Procesamiento individual completado para usuario ${userPhoneNumber}`)
   } catch (error) {
-    console.error(`[WHATSAPP] Error al procesar mensaje individual para usuario ${userPhoneNumber}:`, error)
+    console.error(`[WHATSAPP] Error al procesar mensaje individual para usuario ${userPhoneNumber}:`, (error as Error).message)
 
     const errorMessage =
       "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
 
     try {
-      await saveConversationMessage({
-        id: nanoid(),
-        role: "assistant",
-        content: errorMessage,
-        timestamp: new Date().toISOString(),
-        phoneNumber: userPhoneNumber,
-        configId: config.id,
-        messageType: "error",
-      })
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: errorMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: "error",
+        })
       console.log(`[WHATSAPP] 💾 Mensaje de error catch guardado en conversación`)
     } catch (saveError) {
       console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
