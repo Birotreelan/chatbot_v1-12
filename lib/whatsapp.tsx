@@ -1088,10 +1088,13 @@ export async function processIndividualMessage(
 
             await saveConversationMessage({
               id: nanoid(),
-              from: "assistant",
+              role: "assistant",
               content: errorMessage,
               timestamp: new Date().toISOString(),
-            } as ConversationMessage)
+              phoneNumber: userPhoneNumber,
+              configId: config.id,
+              messageType: "error",
+            })
 
           await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -1276,10 +1279,13 @@ ${userMessage}`
           try {
             await saveConversationMessage({
               id: nanoid(),
-              from: "assistant",
+              role: "assistant",
               content: errorMessage,
               timestamp: new Date().toISOString(),
-            } as ConversationMessage)
+              phoneNumber: userPhoneNumber,
+              configId: config.id,
+              messageType: "error",
+            })
             console.log(`[WHATSAPP] 💾 Mensaje de error de reintento guardado en conversación`)
           } catch (saveError) {
             console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, (saveError as Error).message)
@@ -1299,10 +1305,13 @@ ${userMessage}`
         try {
             await saveConversationMessage({
               id: nanoid(),
-              from: "assistant",
+              role: "assistant",
               content: errorMessage,
               timestamp: new Date().toISOString(),
-            } as ConversationMessage)
+              phoneNumber: userPhoneNumber,
+              configId: config.id,
+              messageType: "error",
+            })
           console.log(`[WHATSAPP] 💾 Mensaje de error general guardado en conversación`)
         } catch (saveError) {
           console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
@@ -1327,9 +1336,12 @@ ${userMessage}`
     try {
         await saveConversationMessage({
           id: nanoid(),
-          from: "assistant",
+          role: "assistant",
           content: errorMessage,
           timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: "error",
         })
       console.log(`[WHATSAPP] 💾 Mensaje de error catch guardado en conversación`)
     } catch (saveError) {
