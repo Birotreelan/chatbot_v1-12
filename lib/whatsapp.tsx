@@ -1,4 +1,3 @@
-import type { WhatsAppValue } from "@/lib/types"
 import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
@@ -12,7 +11,7 @@ import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule } from "./appointment-stats"
 import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
-import type { HumanSupportMessage } from "./types"
+import type { HumanSupportMessage, ConversationMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 import {
   getAppointmentContext,
@@ -126,12 +125,9 @@ async function sendDirectResponse(
     // Guardar en historial
     await saveConversationMessage({
       id: nanoid(),
-      role: "assistant",
+      from: "assistant",
       content: message,
       timestamp: new Date().toISOString(),
-      phoneNumber: ctx.userPhoneNumber,
-      configId: ctx.configId,
-      messageType: "direct_response",
     })
 
     // Actualizar stats
@@ -389,12 +385,9 @@ export async function handleMessage(value: WhatsAppValue) {
       // Guardar el mensaje en el historial de conversación
       await saveConversationMessage({
         id: nanoid(),
-        role: "user",
+        from: "user",
         content: userMessage,
         timestamp: new Date().toISOString(),
-        phoneNumber: userPhoneNumber,
-        configId: config.id,
-        messageType: message.type,
       })
 
       if (activeSession.status === "pending") {
@@ -403,12 +396,9 @@ export async function handleMessage(value: WhatsAppValue) {
 
         await addPendingMessageToSession(activeSession.id, {
           id: nanoid(),
-          role: "user",
+          from: "user",
           content: userMessage,
           timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
-          configId: config.id,
-          messageType: message.type,
         })
 
         // Opcional: enviar mensaje de confirmación
@@ -424,10 +414,9 @@ export async function handleMessage(value: WhatsAppValue) {
         const supportMessage: HumanSupportMessage = {
           id: nanoid(),
           sessionId: activeSession.id,
-          from: "user",
+          role: "user",
           content: userMessage,
           timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
         }
 
         await saveSupportMessage(supportMessage)
@@ -447,24 +436,18 @@ export async function handleMessage(value: WhatsAppValue) {
       // Guardar el mensaje aunque la IA esté pausada para mantener el historial
       await saveConversationMessage({
         id: nanoid(),
-        role: "user",
+        from: "user",
         content: userMessage,
         timestamp: new Date().toISOString(),
-        phoneNumber: userPhoneNumber,
-        configId: config.id,
-        messageType: message.type,
       })
       return
     }
 
     await saveConversationMessage({
       id: nanoid(),
-      role: "user",
+      from: "user",
       content: userMessage,
       timestamp: new Date().toISOString(),
-      phoneNumber: userPhoneNumber,
-      configId: config.id,
-      messageType: message.type,
     })
 
     if (message.type === "button" && message.button) {
@@ -847,12 +830,9 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
             try {
               await saveConversationMessage({
                 id: nanoid(),
-                role: "assistant",
+                from: "assistant",
                 content: errorMessage,
                 timestamp: new Date().toISOString(),
-                phoneNumber: userPhoneNumber,
-                configId: config.id,
-                messageType: "error",
               })
               console.log(`[WHATSAPP] 💾 Mensaje de error NOT_FOUND guardado en conversación`)
             } catch (saveError) {
