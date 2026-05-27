@@ -34,6 +34,7 @@ import {
 } from "./direct-response-templates"
 import { createConversationLogger } from "./conversation-state/logger"
 import { getClientFeatureFlags } from "./conversation-state/feature-flags"
+import { handleFarewellIfDetected } from "./conversation-state/farewell-handler"
 // Import dynamic handleAssistantSwitch
 let handleAssistantSwitch: any = null
 
@@ -1122,6 +1123,52 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         await updateWhatsAppStats(config.id, { errors: 1 })
 
         return // Salir de la función después de manejar el error
+      }
+    }
+
+    // ============================================================================
+    // INTERCEPTAR DESPEDIDAS (Sprint 3: Anti-Repetición)
+    // Si el usuario envía una despedida detectada, responder directamente
+    // ============================================================================
+    if (message.type === "text") {
+      const flags = await getClientFeatureFlags(config.id)
+      if (flags.antiRepetitionFarewell) {
+        const farewellLogger = createConversationLogger(userPhoneNumber, config.id, "farewell-check")
+        
+        // Intentar obtener nombre del paciente de contexto
+        const chatbotDataForFarewell = await getAppointmentContext(userPhoneNumber, config.id)
+        const patientName = chatbotDataForFarewell?.paciente?.nombres || "amigo"
+        
+        const farewellResponse = await handleFarewellIfDetected(
+          userMessage,
+          userPhoneNumber,
+          config.id,
+          patientName
+        )
+        
+        if (farewellResponse) {
+          // Es una despedida - responder directamente sin OpenAI
+          farewellLogger.info("Despedida interceptada, respondiendo directamente", { 
+            response: farewellResponse 
+          })
+          
+          try {
+            const farewellCtx: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+            await sendDirectResponse(farewellCtx, farewellResponse, "farewell")
+            return
+          } catch (error) {
+            farewellLogger.error("Error enviando respuesta de despedida", error as Error)
+            // Fallback: continuar a OpenAI
+          }
+        } else {
+          farewellLogger.debug("No es una despedida o antiRepetitionFarewell OFF")
+        }
       }
     }
 
