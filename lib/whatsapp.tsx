@@ -6,12 +6,12 @@ import { getArgentinaDateTime } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
-import { saveConversationMessage, isConversationPaused } from "./conversations"
+import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule } from "./appointment-stats"
 import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
-import type { HumanSupportMessage, ConversationMessage } from "./types"
+import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 import {
   getAppointmentContext,
@@ -125,10 +125,12 @@ async function sendDirectResponse(
     // Guardar en historial
     await saveConversationMessage({
       id: nanoid(),
-      from: "assistant",
+      role: "assistant",
       content: message,
       timestamp: new Date().toISOString(),
-    } as ConversationMessage)
+      phoneNumber: ctx.userPhoneNumber,
+      configId: ctx.configId,
+    })
 
     // Actualizar stats
     await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
@@ -385,10 +387,12 @@ export async function handleMessage(value: any) {
       // Guardar el mensaje en el historial de conversación
       await saveConversationMessage({
         id: nanoid(),
-        from: "user",
+        role: "user",
         content: userMessage,
         timestamp: new Date().toISOString(),
-      } as ConversationMessage)
+        phoneNumber: userPhoneNumber,
+        configId: config.id,
+      })
 
       if (activeSession.status === "pending") {
         // Usuario aún esperando asignación - guardar mensaje como pendiente
@@ -436,18 +440,22 @@ export async function handleMessage(value: any) {
       // Guardar el mensaje aunque la IA esté pausada para mantener el historial
       await saveConversationMessage({
         id: nanoid(),
-        from: "user",
+        role: "user",
         content: userMessage,
         timestamp: new Date().toISOString(),
-      } as ConversationMessage)
+        phoneNumber: userPhoneNumber,
+        configId: config.id,
+      })
       return
     }
 
     await saveConversationMessage({
       id: nanoid(),
-      from: "user",
+      role: "user",
       content: userMessage,
       timestamp: new Date().toISOString(),
+      phoneNumber: userPhoneNumber,
+      configId: config.id,
     })
 
     if (message.type === "button" && message.button) {
@@ -830,9 +838,12 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
             try {
               await saveConversationMessage({
                 id: nanoid(),
-                from: "assistant",
+                role: "assistant",
                 content: errorMessage,
                 timestamp: new Date().toISOString(),
+                phoneNumber: userPhoneNumber,
+                configId: config.id,
+                messageType: "error",
               })
               console.log(`[WHATSAPP] 💾 Mensaje de error NOT_FOUND guardado en conversación`)
         } catch (saveError) {
@@ -1004,9 +1015,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         try {
           await saveConversationMessage({
             id: nanoid(),
-            from: "assistant",
+            role: "assistant",
             content: errorMessage,
             timestamp: new Date().toISOString(),
+            phoneNumber: userPhoneNumber,
+            configId: config.id,
+            messageType: "error",
           })
           console.log(`[WHATSAPP] 💾 Mensaje de error de reset guardado en conversación`)
         } catch (saveError) {
