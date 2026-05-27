@@ -123,6 +123,78 @@ export async function disableFeature(
 }
 
 /**
+ * Clave global para flags que aplican a TODOS los clientes por defecto
+ */
+const GLOBAL_FLAGS_KEY = `${FEATURE_FLAGS_PREFIX}__global__`
+
+/**
+ * Obtener flags globales (aplican a todos los clientes que no tienen flags específicos)
+ */
+export async function getGlobalFeatureFlags(): Promise<FeatureFlags> {
+  try {
+    const redis = getRedisClient()
+    if (!redis) return DEFAULT_FEATURE_FLAGS
+
+    const cached = await redis.get(GLOBAL_FLAGS_KEY)
+    if (cached) {
+      return JSON.parse(cached as string) as FeatureFlags
+    }
+    return DEFAULT_FEATURE_FLAGS
+  } catch {
+    return DEFAULT_FEATURE_FLAGS
+  }
+}
+
+/**
+ * Establecer flags globales (aplican a todos los clientes que no tienen flags específicos)
+ */
+export async function setGlobalFeatureFlags(flags: Partial<FeatureFlags>): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) throw new Error("Redis no disponible")
+
+  const current = await getGlobalFeatureFlags()
+  const updated = { ...current, ...flags }
+
+  await redis.setex(GLOBAL_FLAGS_KEY, 30 * 24 * 60 * 60, JSON.stringify(updated))
+  console.info(`[FEATURE-FLAGS] ✓ Flags GLOBALES actualizados`, { updated })
+}
+
+/**
+ * Resetear flags globales a defaults
+ */
+export async function resetGlobalFeatureFlags(): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) throw new Error("Redis no disponible")
+
+  await redis.del(GLOBAL_FLAGS_KEY)
+  console.warn(`[FEATURE-FLAGS] ⚠️ Flags GLOBALES reseteados a defaults`)
+}
+
+/**
+ * Obtener flags para un cliente: primero busca flags específicos,
+ * si no tiene, usa los flags globales (que pueden diferir de los defaults)
+ */
+export async function getEffectiveFeatureFlags(configId: string): Promise<FeatureFlags> {
+  try {
+    const redis = getRedisClient()
+    if (!redis) return DEFAULT_FEATURE_FLAGS
+
+    const clientKey = `${FEATURE_FLAGS_PREFIX}${configId}`
+    const clientData = await redis.get(clientKey)
+
+    // Si tiene flags específicos, úsalos
+    if (clientData) {
+      return JSON.parse(clientData as string) as FeatureFlags
+    }
+
+    // Si no, usar flags globales
+    return getGlobalFeatureFlags()
+  } catch {
+    return DEFAULT_FEATURE_FLAGS
+  }
+}
+
+/**
  * Listar todos los clientes con feature flags personalizados
  * Útil para dashboard de monitoreo
  */
