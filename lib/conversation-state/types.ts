@@ -124,6 +124,10 @@ export interface FeatureFlags {
   // Flujo de reserva unificado (Sprint 6-8)
   // Resuelve selecciones numéricas en obra social, sede, profesional, especialidad y turno
   directBookingFlow: boolean
+
+  // Extractor de selecciones inteligente (Sprint 7)
+  // Multi-capa: números, letras, ordinales, posicionales, coincidencias de texto, fuzzy matching
+  directSelectionExtraction: boolean
 }
 
 /**
@@ -140,6 +144,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directPacienteNuevo: false,
   directPacienteExistente: false,
   directBookingFlow: false,
+  directSelectionExtraction: false,
 }
 
 /**

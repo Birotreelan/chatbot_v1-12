@@ -49,23 +49,29 @@ const FLAG_META: Record<
     risk: "alto",
     sprint: "Sprint 6",
   },
+  directSelectionExtraction: {
+    label: "Selection Extractor Multi-Capa",
+    description: "Detecta selecciones con 8 capas: números, letras, ordinales, posicionales, texto, fuzzy matching.",
+    risk: "medio",
+    sprint: "Sprint 7",
+  },
   directReagendamiento: {
     label: "Flujo de reagendamiento",
     description: "Maneja el flujo completo de reagendamiento sin OpenAI.",
     risk: "alto",
-    sprint: "Sprint 7",
+    sprint: "Sprint 8",
   },
   directPacienteNuevo: {
     label: "Flujo paciente nuevo",
     description: "Guía el registro de un paciente nuevo paso a paso sin OpenAI.",
     risk: "alto",
-    sprint: "Sprint 8",
+    sprint: "Sprint 9",
   },
   directPacienteExistente: {
     label: "Flujo paciente existente",
     description: "Guía la búsqueda de turno para paciente existente sin OpenAI.",
     risk: "alto",
-    sprint: "Sprint 8",
+    sprint: "Sprint 9",
   },
 }
 
@@ -85,6 +91,7 @@ const FLAG_ORDER: FlagKey[] = [
   "directTurnSelection",
   "directDNIExtraction",
   "directBookingFlow",
+  "directSelectionExtraction",
   "directReagendamiento",
   "directPacienteNuevo",
   "directPacienteExistente",
