@@ -33,7 +33,7 @@ import {
   buildAlreadyCancelledMessage,
 } from "./direct-response-templates"
 import { createConversationLogger } from "./conversation-state/logger"
-import { getClientFeatureFlags } from "./conversation-state/feature-flags"
+import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
 import { handleFarewellIfDetected } from "./conversation-state/farewell-handler"
 import {
   handleTurnSelectionIfPending,
@@ -176,7 +176,7 @@ async function handlePendingFlowResponse(
   value: any
 ): Promise<boolean | { type: 'route_to_reagendamiento'; chatbotData: ChatbotData; turnoIndex: number }> {
   // Verificar feature flags - si directCancellation está OFF, pasar todo a OpenAI
-  const flags = await getClientFeatureFlags(config.id)
+  const flags = await getEffectiveFeatureFlags(config.id)
   const logger = createConversationLogger(userPhoneNumber, config.id, "pending-flow")
 
   if (!flags.directCancellation) {
@@ -874,7 +874,7 @@ Responde de manera apropiada según la acción realizada.`
                 
                 // Si es confirmación, intentar respuesta directa si el flag está activo
                 if (eventType === "confirmed") {
-                  const confirmFlags = await getClientFeatureFlags(config.id)
+                  const confirmFlags = await getEffectiveFeatureFlags(config.id)
                   const confirmLogger = createConversationLogger(userPhoneNumber, config.id, "awaiting_confirmation")
                   
                   if (confirmFlags.directConfirmation) {
@@ -1144,7 +1144,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // Si hay un estado awaiting_dni activo, validar directamente sin OpenAI
     // ============================================================================
     if (message.type === "text") {
-      const dniFlags = await getClientFeatureFlags(config.id)
+      const dniFlags = await getEffectiveFeatureFlags(config.id)
       if (dniFlags.directDNIExtraction) {
         const dniResult = await handleDNIIfAwaiting(userMessage, userPhoneNumber, config.id)
         if (dniResult.handled) {
@@ -1185,7 +1185,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // Si hay un booking flow activo con selección numérica, resolver directamente
     // ============================================================================
     if (message.type === "text") {
-      const bookingFlags = await getClientFeatureFlags(config.id)
+      const bookingFlags = await getEffectiveFeatureFlags(config.id)
       if (bookingFlags.directBookingFlow) {
         const bookingResult = await handleBookingSelectionIfPending(userMessage, userPhoneNumber, config.id)
         if (bookingResult.handled) {
@@ -1248,7 +1248,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // Si hay un estado awaiting_turn_selection activo, resolver directamente
     // ============================================================================
     if (message.type === "text") {
-      const turnFlags = await getClientFeatureFlags(config.id)
+      const turnFlags = await getEffectiveFeatureFlags(config.id)
       if (turnFlags.directTurnSelection) {
         const turnResult = await handleTurnSelectionIfPending(userMessage, userPhoneNumber, config.id)
         if (turnResult.handled) {
@@ -1287,7 +1287,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // Si el usuario envía una despedida detectada, responder directamente
     // ============================================================================
     if (message.type === "text") {
-      const flags = await getClientFeatureFlags(config.id)
+      const flags = await getEffectiveFeatureFlags(config.id)
       if (flags.antiRepetitionFarewell) {
         const farewellLogger = createConversationLogger(userPhoneNumber, config.id, "farewell-check")
         
