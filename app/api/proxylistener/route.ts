@@ -7,6 +7,7 @@ import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { trackAppointmentEvent, trackTemplateSent, getTemplateSentTime, markPendingReschedule } from "@/lib/appointment-stats"
 import { extractAndFormatDate } from "@/lib/utils/date-utils"
+import { saveAppointmentContext } from "@/lib/appointment-flow-state"
 
 export async function POST(request: Request) {
   try {
@@ -611,6 +612,16 @@ async function handleTemplateSend(data: any) {
             console.log("[PROXYLISTENER] =====================================")
           } catch (e) {
             console.error("[PROXYLISTENER] ❌ Error al parsear Chatbot_Data:", e)
+          }
+        }
+
+        // Guardar el Chatbot_Data en Redis para respuestas directas (sin OpenAI)
+        if (chatbotDataParsed && config && cleanPhoneNumber) {
+          try {
+            await saveAppointmentContext(cleanPhoneNumber, config.id, chatbotDataParsed)
+            console.log("[PROXYLISTENER] ✅ Contexto de turno guardado en Redis para respuestas directas")
+          } catch (e) {
+            console.error("[PROXYLISTENER] ⚠️ Error guardando contexto en Redis (continuando):", e)
           }
         }
 

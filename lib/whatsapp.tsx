@@ -14,6 +14,24 @@ import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated,
 import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
 import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
+import {
+  getAppointmentContext,
+  getFlowState,
+  setFlowState,
+  clearFlowState,
+  isConfirmCancelResponse,
+  isKeepAppointmentResponse,
+  isRescheduleChoice,
+  type ChatbotData,
+} from "./appointment-flow-state"
+import {
+  buildConfirmationMessage,
+  buildCancelDoubleConfirmMessage,
+  buildCancellationSuccessMessage,
+  buildKeepAppointmentMessage,
+  buildNoRescheduleMessage,
+  buildRescheduleStartMessage,
+} from "./direct-response-templates"
 
 // Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): { content: string; audioId?: string; audioMimeType?: string } {
@@ -77,6 +95,219 @@ async function markMessageAsProcessed(messageId: string): Promise<void> {
   }
 }
 
+// ============================================================================
+// RESPUESTAS DIRECTAS (SIN OPENAI) PARA FLUJOS DE CONFIRMACION/CANCELACION
+// ============================================================================
+
+interface DirectResponseContext {
+  phoneNumberId: string
+  accessToken: string
+  userPhoneNumber: string
+  configId: string
+  clienteId?: string
+}
+
+/**
+ * Envia una respuesta directa al usuario y guarda en el historial
+ */
+async function sendDirectResponse(
+  ctx: DirectResponseContext,
+  message: string
+): Promise<boolean> {
+  try {
+    // Enviar mensaje al usuario
+    await sendWhatsAppMessage(
+      ctx.phoneNumberId,
+      ctx.accessToken,
+      ctx.userPhoneNumber,
+      message
+    )
+
+    // Guardar en historial
+    await saveConversationMessage({
+      id: nanoid(),
+      role: "assistant",
+      content: message,
+      timestamp: new Date().toISOString(),
+      phoneNumber: ctx.userPhoneNumber,
+      configId: ctx.configId,
+      messageType: "direct_response",
+    })
+
+    // Actualizar stats
+    await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
+
+    console.log(`[WHATSAPP-DIRECT] Respuesta directa enviada a ${ctx.userPhoneNumber}`)
+    return true
+  } catch (error) {
+    console.error(`[WHATSAPP-DIRECT] Error enviando respuesta directa:`, error)
+    return false
+  }
+}
+
+/**
+ * Maneja respuestas de doble confirmacion de cancelacion ("1"/"2")
+ * Retorna true si la respuesta fue manejada, false si debe continuar al flujo normal
+ */
+async function handlePendingFlowResponse(
+  userMessage: string,
+  userPhoneNumber: string,
+  config: any,
+  phoneNumberId: string,
+  value: any
+): Promise<boolean> {
+  // Verificar si hay un flujo pendiente
+  const flowState = await getFlowState(userPhoneNumber, config.id)
+  if (!flowState) return false
+
+  console.log(`[WHATSAPP-DIRECT] Flujo pendiente detectado: ${flowState.type}`)
+
+  const ctx: DirectResponseContext = {
+    phoneNumberId,
+    accessToken: config.accessToken,
+    userPhoneNumber,
+    configId: config.id,
+    clienteId: config.cliente_id,
+  }
+
+  // Obtener contexto del turno
+  const chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+  if (!chatbotData) {
+    console.log(`[WHATSAPP-DIRECT] No hay contexto de turno, pasando a OpenAI`)
+    await clearFlowState(userPhoneNumber, config.id)
+    return false
+  }
+
+  // Manejar segun el tipo de flujo
+  if (flowState.type === 'awaiting_cancel_confirmation') {
+    // Usuario responde a "1- Si, cancelar" / "2- No, mantener"
+    if (isConfirmCancelResponse(userMessage)) {
+      console.log(`[WHATSAPP-DIRECT] Usuario confirma cancelacion`)
+      
+      // Llamar al proxy para ejecutar la cancelacion
+      try {
+        const proxyPayload = {
+          action: "template_response",
+          Cliente_Id: config.cliente_id,
+          Phone_Number_Id: phoneNumberId,
+          // Simular estructura de boton de cancelacion
+          messages: [{
+            type: "button",
+            button: {
+              text: "Cancelar",
+              payload: "Cancelar"
+            }
+          }],
+          metadata: {
+            phone_number_id: phoneNumberId
+          },
+          contacts: value.contacts || []
+        }
+
+        console.log(`[WHATSAPP-DIRECT] Enviando cancelacion al proxy`)
+        const response = await fetchWithRetry(
+          config.proxy,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(proxyPayload),
+          },
+          TIMEOUTS.PROXY_TIMEOUT,
+          { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
+        )
+
+        if (response.ok) {
+          // Trackear evento de cancelacion
+          if (config.cliente_id) {
+            const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+            await trackAppointmentEvent({
+              clienteId: config.cliente_id,
+              phoneNumber: userPhoneNumber,
+              eventType: "cancelled",
+              timestamp: new Date().toISOString(),
+              templateSentAt: templateSentAt || undefined,
+              metadata: { source: "direct_flow" },
+            })
+            
+            // Marcar pending reschedule
+            await markPendingReschedule(config.cliente_id, userPhoneNumber)
+          }
+
+          // Limpiar estado de flujo
+          await clearFlowState(userPhoneNumber, config.id)
+
+          // Verificar si admite reagendamiento
+          const turno = chatbotData.turnos[flowState.turnoIndex || 0]
+          if (turno?.admite_reagendamiento !== false) {
+            // Setear nuevo estado para reagendamiento
+            await setFlowState(userPhoneNumber, config.id, {
+              type: 'awaiting_reschedule_choice',
+              createdAt: new Date().toISOString(),
+              turnoIndex: flowState.turnoIndex || 0
+            })
+          }
+
+          // Enviar mensaje de cancelacion exitosa
+          const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
+          await sendDirectResponse(ctx, successMsg)
+          return true
+        } else {
+          console.error(`[WHATSAPP-DIRECT] Error del proxy al cancelar: ${response.status}`)
+          // En caso de error, limpiar estado y pasar a OpenAI
+          await clearFlowState(userPhoneNumber, config.id)
+          return false
+        }
+      } catch (error) {
+        console.error(`[WHATSAPP-DIRECT] Error al cancelar via proxy:`, error)
+        await clearFlowState(userPhoneNumber, config.id)
+        return false
+      }
+    } else if (isKeepAppointmentResponse(userMessage)) {
+      console.log(`[WHATSAPP-DIRECT] Usuario decide mantener turno`)
+      
+      // Limpiar estado
+      await clearFlowState(userPhoneNumber, config.id)
+      
+      // Enviar mensaje de turno mantenido
+      const keepMsg = buildKeepAppointmentMessage(chatbotData, flowState.turnoIndex || 0)
+      await sendDirectResponse(ctx, keepMsg)
+      return true
+    } else {
+      // Respuesta no reconocida - limpiar estado y pasar a OpenAI
+      console.log(`[WHATSAPP-DIRECT] Respuesta no reconocida: "${userMessage}", pasando a OpenAI`)
+      await clearFlowState(userPhoneNumber, config.id)
+      return false
+    }
+  } else if (flowState.type === 'awaiting_reschedule_choice') {
+    // Usuario responde a "1- Reagendar" / "2- No reagendar"
+    const choice = isRescheduleChoice(userMessage)
+    
+    if (choice === 'reschedule') {
+      console.log(`[WHATSAPP-DIRECT] Usuario quiere reagendar`)
+      await clearFlowState(userPhoneNumber, config.id)
+      
+      // Enviar mensaje de inicio de reagendamiento
+      const rescheduleMsg = buildRescheduleStartMessage(chatbotData)
+      await sendDirectResponse(ctx, rescheduleMsg)
+      return true
+    } else if (choice === 'no_reschedule') {
+      console.log(`[WHATSAPP-DIRECT] Usuario no quiere reagendar`)
+      await clearFlowState(userPhoneNumber, config.id)
+      
+      const noRescheduleMsg = buildNoRescheduleMessage(chatbotData)
+      await sendDirectResponse(ctx, noRescheduleMsg)
+      return true
+    } else {
+      // Respuesta no reconocida - limpiar y pasar a OpenAI
+      console.log(`[WHATSAPP-DIRECT] Respuesta de reagendamiento no reconocida, pasando a OpenAI`)
+      await clearFlowState(userPhoneNumber, config.id)
+      return false
+    }
+  }
+
+  return false
+}
+
 // Modificar la función handleMessage para usar la cola por usuario
 export async function handleMessage(value: WhatsAppValue) {
   console.log("[WHATSAPP] Iniciando handleMessage con datos:", JSON.stringify(value, null, 2))
@@ -128,7 +359,25 @@ export async function handleMessage(value: WhatsAppValue) {
     if (config.cliente_id) {
       const isUserInitiated = await checkAndTrackUserInitiated(config.cliente_id, userPhoneNumber)
       if (isUserInitiated) {
-        console.log(`[WHATSAPP] 📊 Conversación USER-INITIATED registrada para ${userPhoneNumber}`)
+        console.log(`[WHATSAPP] Conversación USER-INITIATED registrada para ${userPhoneNumber}`)
+      }
+    }
+
+    // ============================================================================
+    // INTERCEPTAR RESPUESTAS DE FLUJOS PENDIENTES (doble confirmacion cancelacion, etc)
+    // Esto permite responder directamente sin pasar por OpenAI
+    // ============================================================================
+    if (message.type === "text" || message.type === "button") {
+      const handledByDirectFlow = await handlePendingFlowResponse(
+        userMessage,
+        userPhoneNumber,
+        config,
+        value.metadata.phone_number_id,
+        value
+      )
+      if (handledByDirectFlow) {
+        console.log(`[WHATSAPP] Mensaje manejado por flujo directo, no se pasa a OpenAI`)
+        return
       }
     }
 
@@ -239,11 +488,47 @@ export async function handleMessage(value: WhatsAppValue) {
         console.log(`[WHATSAPP] ℹ️ No había assistantId personalizado para limpiar`)
       }
 
-      // Si es cancelación, NO enviar al proxy - pasar directamente al chatbot
+      // Si es cancelación, intentar respuesta directa primero
       if (isCancellationButton) {
-        console.log(`[WHATSAPP] Botón de CANCELACIÓN detectado - pasando al chatbot sin ejecutar en proxy`)
+        console.log(`[WHATSAPP] Botón de CANCELACIÓN detectado`)
         
-        // Crear mensaje para el chatbot con la solicitud de cancelación
+        // Intentar respuesta directa con datos del contexto guardado
+        const chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+        
+        if (chatbotData) {
+          console.log(`[WHATSAPP-DIRECT] Contexto de turno encontrado, usando respuesta directa para cancelación`)
+          
+          // Setear estado de flujo para esperar confirmacion
+          await setFlowState(userPhoneNumber, config.id, {
+            type: 'awaiting_cancel_confirmation',
+            createdAt: new Date().toISOString(),
+            turnoIndex: 0
+          })
+          
+          // Construir y enviar mensaje de doble confirmacion
+          const ctx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+          
+          const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, 0)
+          const sent = await sendDirectResponse(ctx, doubleConfirmMsg)
+          
+          if (sent) {
+            console.log(`[WHATSAPP-DIRECT] Doble confirmación de cancelación enviada, esperando respuesta del usuario`)
+            return // Salir, no pasar a OpenAI
+          } else {
+            console.log(`[WHATSAPP-DIRECT] Error enviando respuesta directa, cayendo a OpenAI`)
+            await clearFlowState(userPhoneNumber, config.id)
+          }
+        } else {
+          console.log(`[WHATSAPP-DIRECT] No hay contexto de turno guardado, usando flujo OpenAI`)
+        }
+        
+        // Fallback: Crear mensaje para el chatbot con la solicitud de cancelación
         userMessage = `El paciente presionó el botón "${originalMessage}" solicitando cancelar su turno.
 
 [SOLICITUD_CANCELACION]
@@ -346,6 +631,29 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
                   console.log(`[WHATSAPP] Evento de confirmación registrado para cliente ${config.cliente_id}`)
                 }
 
+                // Intentar respuesta directa con datos del contexto guardado
+                const chatbotDataConfirm = await getAppointmentContext(userPhoneNumber, config.id)
+                if (chatbotDataConfirm) {
+                  console.log(`[WHATSAPP-DIRECT] Contexto encontrado, usando respuesta directa para confirmación`)
+                  
+                  const ctxConfirm: DirectResponseContext = {
+                    phoneNumberId: value.metadata.phone_number_id,
+                    accessToken: config.accessToken,
+                    userPhoneNumber,
+                    configId: config.id,
+                    clienteId: config.cliente_id,
+                  }
+                  
+                  const confirmMsg = buildConfirmationMessage(chatbotDataConfirm, 0)
+                  const sentConfirm = await sendDirectResponse(ctxConfirm, confirmMsg)
+                  
+                  if (sentConfirm) {
+                    console.log(`[WHATSAPP-DIRECT] Confirmación enviada directamente, no se pasa a OpenAI`)
+                    return // Salir, no pasar a OpenAI
+                  }
+                }
+                
+                // Fallback a OpenAI
                 userMessage = `El paciente confirmó su turno presionando "${originalMessage}".
 
 [CONFIRMACION_TURNO_EXITOSA]
@@ -480,6 +788,30 @@ Responde de manera apropiada según la acción realizada.`
                 console.log(
                   `[WHATSAPP] ✅ Evento ${eventType} registrado exitosamente para cliente ${config.cliente_id}`,
                 )
+                
+                // Si es confirmación, intentar respuesta directa
+                if (eventType === "confirmed") {
+                  const chatbotDataSimple = await getAppointmentContext(userPhoneNumber, config.id)
+                  if (chatbotDataSimple) {
+                    console.log(`[WHATSAPP-DIRECT] Usando respuesta directa para confirmación (sin action_type)`)
+                    
+                    const ctxSimple: DirectResponseContext = {
+                      phoneNumberId: value.metadata.phone_number_id,
+                      accessToken: config.accessToken,
+                      userPhoneNumber,
+                      configId: config.id,
+                      clienteId: config.cliente_id,
+                    }
+                    
+                    const confirmMsgSimple = buildConfirmationMessage(chatbotDataSimple, 0)
+                    const sentSimple = await sendDirectResponse(ctxSimple, confirmMsgSimple)
+                    
+                    if (sentSimple) {
+                      console.log(`[WHATSAPP-DIRECT] Confirmación enviada directamente`)
+                      return // Salir, no pasar a OpenAI
+                    }
+                  }
+                }
               } catch (trackError) {
                 console.error(`[WHATSAPP] ❌ Error al registrar evento de estadísticas:`, trackError)
               }
