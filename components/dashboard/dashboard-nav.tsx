@@ -40,6 +40,9 @@ export function DashboardNav() {
             <Link href="/dashboard/usuarios" className="text-foreground/60 hover:text-foreground">
               Usuarios Soporte
             </Link>
+            <Link href="/dashboard/feature-flags" className="text-foreground/60 hover:text-foreground">
+              Feature Flags
+            </Link>
             <Link
               href="/demo"
               className="text-foreground/60 hover:text-foreground"
