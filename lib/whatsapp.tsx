@@ -136,7 +136,7 @@ async function sendDirectResponse(
     console.log(`[WHATSAPP-DIRECT] Respuesta directa enviada a ${ctx.userPhoneNumber}`)
     return true
   } catch (error) {
-    console.error(`[WHATSAPP-DIRECT] Error enviando respuesta directa:`, error)
+    console.error(`[WHATSAPP-DIRECT] Error enviando respuesta directa:`, (error as Error).message)
     return false
   }
 }
@@ -254,7 +254,7 @@ async function handlePendingFlowResponse(
           return false
         }
       } catch (error) {
-        console.error(`[WHATSAPP-DIRECT] Error al cancelar via proxy:`, error)
+        console.error(`[WHATSAPP-DIRECT] Error al cancelar via proxy:`, (error as Error).message)
         await clearFlowState(userPhoneNumber, config.id)
         return false
       }
@@ -581,11 +581,11 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
       } catch (error) {
         console.error(`[WHATSAPP] Error al enviar respuesta de botón al proxy:`, error)
         console.error(`[WHATSAPP] Error details:`, {
-          message: error.message,
-          stack: error.stack,
-          name: error.name,
+          message: (error as Error).message,
+          stack: (error as Error).stack,
+          name: (error as Error).name,
         })
-        proxyResponse = { success: false, error: "NETWORK_ERROR", message: error.message }
+        proxyResponse = { success: false, error: "NETWORK_ERROR", message: (error as Error).message }
       }
 
       // Modificar el mensaje para incluir la respuesta del proxy de forma más específica
@@ -835,9 +835,9 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
                 timestamp: new Date().toISOString(),
               })
               console.log(`[WHATSAPP] 💾 Mensaje de error NOT_FOUND guardado en conversación`)
-            } catch (saveError) {
-              console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
-            }
+        } catch (saveError) {
+          console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, (saveError as Error).message)
+        }
             // </CHANGE>
 
             // Send direct message to user
@@ -991,8 +991,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       } catch (error) {
         console.error("[WHATSAPP] ❌ Error al resetear conversación:", error)
         console.error("[WHATSAPP] Error details:", {
-          message: error.message,
-          stack: error.stack,
+          message: (error as Error).message,
+          stack: (error as Error).stack,
         })
 
         const errorMessage = "❌ No se pudo reiniciar la conversación. Por favor, intenta de nuevo."
@@ -1000,12 +1000,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         try {
           await saveConversationMessage({
             id: nanoid(),
-            role: "assistant",
+            from: "assistant",
             content: errorMessage,
             timestamp: new Date().toISOString(),
-            phoneNumber: userPhoneNumber,
-            configId: config.id,
-            messageType: "error",
           })
           console.log(`[WHATSAPP] 💾 Mensaje de error de reset guardado en conversación`)
         } catch (saveError) {
@@ -1035,7 +1032,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
     console.log(`[WHATSAPP] Mensaje encolado exitosamente para usuario ${userPhoneNumber}`)
   } catch (error) {
-    console.error("[WHATSAPP] Error al procesar el mensaje:", error)
+    console.error("[WHATSAPP] Error al procesar el mensaje:", (error as Error).message)
   }
 }
 
@@ -1071,15 +1068,12 @@ export async function processIndividualMessage(
           const errorMessage =
             "Lo siento, no pude entender el audio que enviaste. ¿Podrías intentar nuevamente o enviar tu mensaje por escrito?"
 
-          await saveConversationMessage({
-            id: nanoid(),
-            role: "assistant",
-            content: errorMessage,
-            timestamp: new Date().toISOString(),
-            phoneNumber: userPhoneNumber,
-            configId: config.id,
-            messageType: "error",
-          })
+            await saveConversationMessage({
+              id: nanoid(),
+              from: "assistant",
+              content: errorMessage,
+              timestamp: new Date().toISOString(),
+            })
 
           await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -1124,7 +1118,7 @@ export async function processIndividualMessage(
         console.log(`[WHATSAPP] 🤖 Thread tiene asistente personalizado: ${threadResult.assistantId}`)
       }
     } catch (error) {
-      console.error("[WHATSAPP] Error al obtener thread ID:", error)
+      console.error("[WHATSAPP] Error al obtener thread ID:", (error as Error).message)
 
       const errorMessage =
         "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
@@ -1201,7 +1195,7 @@ ${userMessage}`
       // Actualizar estadísticas - mensaje procesado
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
     } catch (error) {
-      console.error("[WHATSAPP] Error al obtener respuesta del asistente:", error)
+      console.error("[WHATSAPP] Error al obtener respuesta del asistente:", (error as Error).message)
 
       // Actualizar estadísticas - error
       await updateWhatsAppStats(config.id, { errors: 1 })
@@ -1264,16 +1258,13 @@ ${userMessage}`
           try {
             await saveConversationMessage({
               id: nanoid(),
-              role: "assistant",
+              from: "assistant",
               content: errorMessage,
               timestamp: new Date().toISOString(),
-              phoneNumber: userPhoneNumber,
-              configId: config.id,
-              messageType: "error",
             })
             console.log(`[WHATSAPP] 💾 Mensaje de error de reintento guardado en conversación`)
           } catch (saveError) {
-            console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
+            console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, (saveError as Error).message)
           }
 
           // Enviar mensaje de error al usuario
@@ -1288,15 +1279,12 @@ ${userMessage}`
           "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
 
         try {
-          await saveConversationMessage({
-            id: nanoid(),
-            role: "assistant",
-            content: errorMessage,
-            timestamp: new Date().toISOString(),
-            phoneNumber: userPhoneNumber,
-            configId: config.id,
-            messageType: "error",
-          })
+            await saveConversationMessage({
+              id: nanoid(),
+              from: "assistant",
+              content: errorMessage,
+              timestamp: new Date().toISOString(),
+            })
           console.log(`[WHATSAPP] 💾 Mensaje de error general guardado en conversación`)
         } catch (saveError) {
           console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
@@ -1313,21 +1301,18 @@ ${userMessage}`
 
     console.log(`[WHATSAPP] Procesamiento individual completado para usuario ${userPhoneNumber}`)
   } catch (error) {
-    console.error(`[WHATSAPP] Error al procesar mensaje individual para usuario ${userPhoneNumber}:`, error)
+    console.error(`[WHATSAPP] Error al procesar mensaje individual para usuario ${userPhoneNumber}:`, (error as Error).message)
 
     const errorMessage =
       "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
 
     try {
-      await saveConversationMessage({
-        id: nanoid(),
-        role: "assistant",
-        content: errorMessage,
-        timestamp: new Date().toISOString(),
-        phoneNumber: userPhoneNumber,
-        configId: config.id,
-        messageType: "error",
-      })
+        await saveConversationMessage({
+          id: nanoid(),
+          from: "assistant",
+          content: errorMessage,
+          timestamp: new Date().toISOString(),
+        })
       console.log(`[WHATSAPP] 💾 Mensaje de error catch guardado en conversación`)
     } catch (saveError) {
       console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
