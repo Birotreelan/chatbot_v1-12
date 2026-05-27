@@ -7,8 +7,8 @@
  * Lógica determinística que reduce carga en OpenAI
  */
 
-import { createConversationLogger } from "./conversation-state/logger"
-import { getRedisClient } from "./redis"
+import { createConversationLogger } from "./logger"
+import { getRedisClient } from "@/lib/redis"
 
 const FAREWELL_KEYWORDS = [
   "gracias",
