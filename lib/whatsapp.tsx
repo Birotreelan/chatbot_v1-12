@@ -35,6 +35,14 @@ import {
 import { createConversationLogger } from "./conversation-state/logger"
 import { getClientFeatureFlags } from "./conversation-state/feature-flags"
 import { handleFarewellIfDetected } from "./conversation-state/farewell-handler"
+import {
+  handleTurnSelectionIfPending,
+  buildInvalidSelectionMessage,
+  buildTurnSelectedMessage,
+} from "./conversation-state/turn-selection-handler"
+import {
+  handleDNIIfAwaiting,
+} from "./conversation-state/dni-handler"
 // Import dynamic handleAssistantSwitch
 let handleAssistantSwitch: any = null
 
@@ -1123,6 +1131,86 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         await updateWhatsAppStats(config.id, { errors: 1 })
 
         return // Salir de la función después de manejar el error
+      }
+    }
+
+    // ============================================================================
+    // INTERCEPTAR DNI (Sprint 5: Extracción y Validación de DNI)
+    // Si hay un estado awaiting_dni activo, validar directamente sin OpenAI
+    // ============================================================================
+    if (message.type === "text") {
+      const dniFlags = await getClientFeatureFlags(config.id)
+      if (dniFlags.directDNIExtraction) {
+        const dniResult = await handleDNIIfAwaiting(userMessage, userPhoneNumber, config.id)
+        if (dniResult.handled) {
+          const dniLogger = createConversationLogger(userPhoneNumber, config.id, "awaiting_dni")
+          const dniCtx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+
+          if (dniResult.type === "invalid_dni") {
+            // DNI inválido: responder con mensaje de error y esperar nuevo intento
+            dniLogger.warn("DNI invalido interceptado, enviando mensaje de error", {
+              attemptsLeft: dniResult.attemptsLeft,
+            })
+            await sendDirectResponse(dniCtx, dniResult.errorMessage, "awaiting_dni")
+            return
+          }
+
+          if (dniResult.type === "valid_dni") {
+            // DNI válido: loguear y dejar continuar a OpenAI con el DNI ya extraído
+            // Inyectamos el DNI normalizado en el mensaje para que OpenAI lo procese correctamente
+            dniLogger.info("DNI valido extraido por backend, pasando a OpenAI con DNI normalizado", {
+              dni: dniResult.dni,
+            })
+            // Reemplazar el mensaje original por el DNI normalizado para que OpenAI no tenga que extraerlo
+            userMessage = dniResult.dni
+            // Continuar a OpenAI con el DNI limpio
+          }
+        }
+      }
+    }
+
+    // ============================================================================
+    // INTERCEPTAR SELECCION DE TURNO (Sprint 4: Selección de Turnos por Número)
+    // Si hay un estado awaiting_turn_selection activo, resolver directamente
+    // ============================================================================
+    if (message.type === "text") {
+      const turnFlags = await getClientFeatureFlags(config.id)
+      if (turnFlags.directTurnSelection) {
+        const turnResult = await handleTurnSelectionIfPending(userMessage, userPhoneNumber, config.id)
+        if (turnResult.handled) {
+          const turnLogger = createConversationLogger(userPhoneNumber, config.id, "awaiting_turn_selection")
+          const turnCtx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+
+          if (turnResult.type === "invalid_selection") {
+            // Número fuera de rango
+            turnLogger.warn("Seleccion fuera de rango", { maxTurnos: turnResult.maxTurnos })
+            const errMsg = buildInvalidSelectionMessage(turnResult.maxTurnos)
+            await sendDirectResponse(turnCtx, errMsg, "awaiting_turn_selection")
+            return
+          }
+
+          if (turnResult.type === "turn_selected") {
+            // Turno seleccionado correctamente - mostrar detalle y opciones
+            turnLogger.info("Turno seleccionado, enviando detalle y opciones de accion", {
+              turno: turnResult.turno.fecha,
+            })
+            const selectedMsg = buildTurnSelectedMessage(turnResult.turno)
+            await sendDirectResponse(turnCtx, selectedMsg, "awaiting_turn_selection")
+            return
+          }
+        }
       }
     }
 
