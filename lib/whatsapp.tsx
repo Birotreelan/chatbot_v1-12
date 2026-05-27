@@ -128,7 +128,7 @@ async function sendDirectResponse(
       from: "assistant",
       content: message,
       timestamp: new Date().toISOString(),
-    })
+    } as ConversationMessage)
 
     // Actualizar stats
     await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
@@ -305,7 +305,7 @@ async function handlePendingFlowResponse(
 }
 
 // Modificar la función handleMessage para usar la cola por usuario
-export async function handleMessage(value: WhatsAppValue) {
+export async function handleMessage(value: any) {
   console.log("[WHATSAPP] Iniciando handleMessage con datos:", JSON.stringify(value, null, 2))
 
   try {
@@ -388,7 +388,7 @@ export async function handleMessage(value: WhatsAppValue) {
         from: "user",
         content: userMessage,
         timestamp: new Date().toISOString(),
-      })
+      } as ConversationMessage)
 
       if (activeSession.status === "pending") {
         // Usuario aún esperando asignación - guardar mensaje como pendiente
@@ -439,7 +439,7 @@ export async function handleMessage(value: WhatsAppValue) {
         from: "user",
         content: userMessage,
         timestamp: new Date().toISOString(),
-      })
+      } as ConversationMessage)
       return
     }
 
@@ -861,11 +861,15 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
           }
 
           // Tratar ALREADY_CONFIRMED como éxito aunque venga con success: false
+          let templateSentAt: string | null | undefined = undefined
+          if (config.cliente_id) {
+            templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+          }
+
           if (errorType === "ALREADY_CONFIRMED") {
             console.log(`[WHATSAPP] ✅ ALREADY_CONFIRMED detectado - tratando como éxito`)
 
             if (config.cliente_id) {
-              const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
               await trackAppointmentEvent({
                 clienteId: config.cliente_id,
                 phoneNumber: userPhoneNumber,
@@ -1073,7 +1077,7 @@ export async function processIndividualMessage(
               from: "assistant",
               content: errorMessage,
               timestamp: new Date().toISOString(),
-            })
+            } as ConversationMessage)
 
           await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -1201,7 +1205,7 @@ ${userMessage}`
       await updateWhatsAppStats(config.id, { errors: 1 })
 
       // Si el error es 404 (thread no encontrado), intentar crear uno nuevo
-      if (error.status === 404 && error.error?.type === "invalid_request_error") {
+      if ((error as any).status === 404 && (error as any).error?.type === "invalid_request_error") {
         try {
           console.log("[WHATSAPP] Thread no encontrado, creando uno nuevo...")
           // Crear un nuevo thread directamente con OpenAI
@@ -1261,7 +1265,7 @@ ${userMessage}`
               from: "assistant",
               content: errorMessage,
               timestamp: new Date().toISOString(),
-            })
+            } as ConversationMessage)
             console.log(`[WHATSAPP] 💾 Mensaje de error de reintento guardado en conversación`)
           } catch (saveError) {
             console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, (saveError as Error).message)
@@ -1284,7 +1288,7 @@ ${userMessage}`
               from: "assistant",
               content: errorMessage,
               timestamp: new Date().toISOString(),
-            })
+            } as ConversationMessage)
           console.log(`[WHATSAPP] 💾 Mensaje de error general guardado en conversación`)
         } catch (saveError) {
           console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
