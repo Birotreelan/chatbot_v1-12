@@ -16,6 +16,7 @@
 
 import { getRedisClient } from "@/lib/redis"
 import { createConversationLogger } from "./logger"
+import { extractSelection, createOptionsFromLabels, SelectionResult } from "./selection-extractor"
 
 // ============================================================================
 // TIPOS
@@ -174,34 +175,32 @@ export async function clearBookingFlowState(
  * Extrae un número de selección de un mensaje.
  * Soporta: "2", "el 2", "opción 2", "número 2", "dos", "segundo"
  */
+/**
+ * Extrae selección numérica usando el extractor inteligente multi-capa
+ * 
+ * Soporta:
+ * - Números directos: "2", "3"
+ * - Números en letras: "dos", "tres"
+ * - Ordinales: "segundo", "tercero"
+ * - Posicionales: "primero", "último"
+ * - Coincidencia parcial y fuzzy matching
+ * 
+ * @deprecated Usar extractSelection() directamente del selection-extractor.ts
+ * Se mantiene por compatibilidad hacia atrás
+ */
 export function extractSelectionNumber(message: string): number | null {
-  const normalized = message.trim().toLowerCase()
-    .replace(/á/g, "a").replace(/é/g, "e").replace(/í/g, "i")
-    .replace(/ó/g, "o").replace(/ú/g, "u")
+  // Crear opciones dummy para el extractor
+  // El método espera SelectionOption[] para hacer fuzzy matching
+  const dummyOptions = Array.from({ length: 20 }, (_, i) => ({
+    index: i,
+    label: `Opción ${i + 1}`,
+  }))
 
-  // Palabras numéricas
-  const wordMap: Record<string, number> = {
-    "uno": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
-    "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
-    "primero": 1, "primer": 1, "segundo": 2, "tercero": 3, "tercer": 3,
-  }
-
-  // Limpiar palabras de relleno
-  const cleaned = normalized
-    .replace(/\b(opcion|opción|numero|número|nro|n°|el|la|quiero|prefiero|elijo|me interesa|por favor|porfavor|dale|bueno|ok)\b/g, "")
-    .trim()
-
-  // Buscar palabra numérica exacta
-  for (const [word, num] of Object.entries(wordMap)) {
-    if (cleaned === word || cleaned.startsWith(word + " ") || cleaned.endsWith(" " + word)) {
-      return num
-    }
-  }
-
-  // Buscar número en el mensaje
-  const match = cleaned.match(/\b(\d+)\b/)
-  if (match) {
-    return parseInt(match[1], 10)
+  const result = extractSelection(message, dummyOptions)
+  
+  // Retornar el índice + 1 (formato 1-based para mantener compatibilidad)
+  if (result.selected && result.selectedIndex !== undefined) {
+    return result.selectedIndex + 1
   }
 
   return null

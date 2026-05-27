@@ -12,6 +12,7 @@ import { createConversationLogger } from "./logger"
 import { getConversationContext, setConversationContext } from "./redis"
 import { ConversationPhase } from "./types"
 import { getRedisClient } from "@/lib/redis"
+import { extractSelection, createOptionsFromLabels, SelectionResult } from "./selection-extractor"
 
 const TURN_SELECTION_PREFIX = "turn_selection:"
 const TTL_SECONDS = 30 * 60 // 30 minutos
@@ -188,30 +189,25 @@ export async function handleTurnSelectionIfPending(
 }
 
 /**
- * Extrae un número de selección de un mensaje del usuario
- * Acepta: "1", " 2 ", "opción 1", "la 3", "el 2", "número 1", "turno 2"
- * Retorna null si no puede extraer un número claro
+ * Extrae un número de selección usando el extractor inteligente
+ * Usa múltiples capas: directo, letras, ordinales, positicionales, texto, fuzzy
+ * 
+ * @deprecated Usar extractSelection() directamente del selection-extractor.ts
+ * Se mantiene por compatibilidad hacia atrás
  */
 export function extractSelectionNumber(message: string): number | null {
-  const normalized = message.trim().toLowerCase()
+  // Para turnos, generamos opciones simples solo con índices
+  // El método nuevo espera SelectionOption[], así que creamos placeholders
+  const dummyOptions = Array.from({ length: 20 }, (_, i) => ({
+    index: i,
+    label: `Opción ${i + 1}`,
+  }))
 
-  // Caso más común: solo el número
-  if (/^\d+$/.test(normalized)) {
-    return parseInt(normalized, 10)
-  }
-
-  // Patrones con prefijos comunes: "opción 1", "la 2", "el 3", "turno 2", "número 1"
-  const prefixPatterns = [
-    /^(?:opci[oó]n|la|el|turno|n[uú]mero|nro\.?|#)\s*(\d+)$/i,
-    /^(\d+)\s*[-–.)]?\s*$/,        // "1.", "1)", "1-"
-    /^[^\d]*(\d+)[^\d]*$/,          // cualquier cosa + UN número + cualquier cosa (solo si hay 1 número)
-  ]
-
-  for (const pattern of prefixPatterns) {
-    const match = normalized.match(pattern)
-    if (match) {
-      return parseInt(match[1], 10)
-    }
+  const result = extractSelection(message, dummyOptions)
+  
+  // Si se detectó una selección, retorna el índice + 1 (formato 1-based)
+  if (result.selected && result.selectedIndex !== undefined) {
+    return result.selectedIndex + 1
   }
 
   return null

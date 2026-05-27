@@ -6,5 +6,6 @@
 export * from "./types"
 export * from "./logger"
 export * from "./feature-flags"
+export * from "./selection-extractor"
 export { getConversationContext, setConversationContext, clearConversationContext } from "./redis"
 export type { ConversationStateRedis } from "./redis"
