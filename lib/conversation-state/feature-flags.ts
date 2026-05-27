@@ -24,7 +24,7 @@ export async function getClientFeatureFlags(configId: string): Promise<FeatureFl
     const cached = await redis.get(key)
 
     if (cached) {
-      const flags = JSON.parse(cached) as FeatureFlags
+      const flags = JSON.parse(cached as string) as FeatureFlags
       console.debug(`[FEATURE-FLAGS] ✓ Flags cargados para ${configId}`, { flags })
       return flags
     }

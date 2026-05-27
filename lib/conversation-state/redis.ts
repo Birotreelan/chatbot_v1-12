@@ -35,7 +35,7 @@ export async function getConversationContext(
 
     if (!data) return null
 
-    const state = JSON.parse(data) as ConversationStateRedis
+    const state = JSON.parse(data as string) as ConversationStateRedis
     const logger = createConversationLogger(phone, configId, state.context.currentPhase)
 
     // Actualizar access count
@@ -133,7 +133,7 @@ export async function getAllActiveContexts(
     for (const key of keys) {
       const data = await redis.get(key)
       if (data) {
-        const state = JSON.parse(data) as ConversationStateRedis
+        const state = JSON.parse(data as string) as ConversationStateRedis
         const phone = key.split(":").pop() || "unknown"
         results.push({
           phone,
