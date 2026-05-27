@@ -24,7 +24,8 @@ export async function getClientFeatureFlags(configId: string): Promise<FeatureFl
     const cached = await redis.get(key)
 
     if (cached) {
-      const flags = JSON.parse(cached as string) as FeatureFlags
+      // Upstash REST client auto-deserializa JSON — si ya es objeto, no hacer JSON.parse
+      const flags = (typeof cached === "string" ? JSON.parse(cached) : cached) as FeatureFlags
       console.debug(`[FEATURE-FLAGS] ✓ Flags cargados para ${configId}`, { flags })
       return flags
     }
@@ -57,8 +58,8 @@ export async function setClientFeatureFlags(
     const updated = { ...current, ...flags }
 
     const key = `${FEATURE_FLAGS_PREFIX}${configId}`
-    // TTL de 7 días - si no se actualizan, vuelven a defaults
-    await redis.setex(key, 7 * 24 * 60 * 60, JSON.stringify(updated))
+    // TTL de 7 días - Upstash serializa automáticamente, no usar JSON.stringify
+    await redis.setex(key, 7 * 24 * 60 * 60, updated as unknown as string)
 
     console.info(`[FEATURE-FLAGS] ✓ Flags actualizados para ${configId}`, {
       updated,
@@ -143,7 +144,8 @@ export async function getGlobalFeatureFlags(): Promise<FeatureFlags> {
     console.log("[v0] getGlobalFeatureFlags - valor crudo de Redis:", cached, "tipo:", typeof cached)
     
     if (cached) {
-      const parsed = JSON.parse(cached as string) as FeatureFlags
+      // Upstash REST client auto-deserializa JSON — si ya es objeto, no hacer JSON.parse
+      const parsed = (typeof cached === "string" ? JSON.parse(cached) : cached) as FeatureFlags
       console.log("[v0] getGlobalFeatureFlags - parseado:", JSON.stringify(parsed))
       return parsed
     }
@@ -168,9 +170,9 @@ export async function setGlobalFeatureFlags(flags: Partial<FeatureFlags>): Promi
   const updated = { ...current, ...flags }
   console.log("[v0] setGlobalFeatureFlags - updated después de merge:", JSON.stringify(updated))
 
-  const stringified = JSON.stringify(updated)
-  console.log("[v0] setGlobalFeatureFlags - guardando en clave:", GLOBAL_FLAGS_KEY, "valor:", stringified)
-  const result = await redis.setex(GLOBAL_FLAGS_KEY, 30 * 24 * 60 * 60, stringified)
+  console.log("[v0] setGlobalFeatureFlags - guardando en clave:", GLOBAL_FLAGS_KEY, "valor:", JSON.stringify(updated))
+  // Upstash serializa automáticamente, no usar JSON.stringify
+  const result = await redis.setex(GLOBAL_FLAGS_KEY, 30 * 24 * 60 * 60, updated as unknown as string)
   console.log("[v0] setGlobalFeatureFlags - resultado de setex:", result)
   console.info(`[FEATURE-FLAGS] ✓ Flags GLOBALES actualizados`, { updated })
 }
@@ -199,8 +201,9 @@ export async function getEffectiveFeatureFlags(configId: string): Promise<Featur
     const clientData = await redis.get(clientKey)
 
     // Si tiene flags específicos, úsalos
+    // Upstash REST client auto-deserializa JSON — si ya es objeto, no hacer JSON.parse
     if (clientData) {
-      return JSON.parse(clientData as string) as FeatureFlags
+      return (typeof clientData === "string" ? JSON.parse(clientData) : clientData) as FeatureFlags
     }
 
     // Si no, usar flags globales
