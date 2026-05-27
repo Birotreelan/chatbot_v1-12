@@ -10,6 +10,8 @@ interface QueuedMessage {
   timestamp: number
   audioId?: string
   audioMimeType?: string
+  routeToReagendamiento?: boolean
+  functionArgs?: any
 }
 
 // Redis keys for distributed processing state
@@ -66,6 +68,8 @@ export async function enqueueUserMessage(
     config: any
     audioId?: string
     audioMimeType?: string
+    routeToReagendamiento?: boolean
+    functionArgs?: any
   },
 ) {
   logger.debug("USER-QUEUE", `Encolando: ${userPhoneNumber}`)
@@ -81,6 +85,8 @@ export async function enqueueUserMessage(
       messageData.messageType,
       messageData.audioId,
       messageData.audioMimeType,
+      messageData.routeToReagendamiento,
+      messageData.functionArgs,
     )
     return
   }
@@ -94,6 +100,8 @@ export async function enqueueUserMessage(
       timestamp: Date.now(),
       audioId: messageData.audioId,
       audioMimeType: messageData.audioMimeType,
+      routeToReagendamiento: messageData.routeToReagendamiento,
+      functionArgs: messageData.functionArgs,
     }
 
     const serializedMessage = JSON.stringify(queuedMessage)
@@ -168,6 +176,8 @@ async function processUserQueue(userPhoneNumber: string) {
               rawMessage.messageType || "text",
               rawMessage.audioId,
               rawMessage.audioMimeType,
+              rawMessage.routeToReagendamiento,
+              rawMessage.functionArgs,
             )
             processedCount++
             continue
@@ -217,6 +227,8 @@ async function processUserQueue(userPhoneNumber: string) {
           queuedMessage.messageType || "text",
           queuedMessage.audioId,
           queuedMessage.audioMimeType,
+          queuedMessage.routeToReagendamiento,
+          queuedMessage.functionArgs,
         )
 
         processedCount++
