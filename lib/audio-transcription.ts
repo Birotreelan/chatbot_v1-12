@@ -1,6 +1,8 @@
 import OpenAI from "openai"
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+function getOpenAI() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+}
 
 /**
  * Downloads media (audio, image, etc.) from WhatsApp servers
@@ -75,6 +77,7 @@ export async function transcribeAudio(audioBuffer: Buffer, mimeType = "audio/ogg
     // Create a File object from the buffer
     const file = new File([audioBuffer], filename, { type: mimeType })
 
+    const openai = getOpenAI()
     const transcription = await openai.audio.transcriptions.create({
       file: file,
       model: "whisper-1",

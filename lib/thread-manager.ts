@@ -1,9 +1,11 @@
 import { OpenAI } from "openai"
 import { getThread as getThreadFromDB, setThread } from "./db"
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+function getOpenAI() {
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+}
 
 interface Message {
   role: "system" | "user" | "assistant"
@@ -29,6 +31,7 @@ export async function getThreadForUser(userIdentifier: string, configId: string)
 }
 
 export async function getThread(userIdentifier: string, configId: string) {
+  const openai = getOpenAI()
   // Determinar si es WhatsApp o Web basado en el prefijo
   const isWebThread = userIdentifier.startsWith("web_")
   const threadName = isWebThread ? `web-${userIdentifier}-${configId}` : `whatsapp-${userIdentifier}-${configId}`
@@ -94,6 +97,7 @@ export async function getThread(userIdentifier: string, configId: string) {
 
 // Función para crear threads web
 export async function createThread(sessionId: string, configId: string) {
+  const openai = getOpenAI()
   const threadName = `web-${sessionId}-${configId}`
 
   try {
@@ -123,6 +127,7 @@ export async function createThread(sessionId: string, configId: string) {
 }
 
 export async function createNewThread(userIdentifier: string, configId: string) {
+  const openai = getOpenAI()
   const isWebThread = userIdentifier.startsWith("web_")
   const threadName = isWebThread ? `web-${userIdentifier}-${configId}` : `whatsapp-${userIdentifier}-${configId}`
 
@@ -161,6 +166,7 @@ export async function safelyAddMessageToThread(
   maxRetries = 5,
   retryDelay = 2000,
 ): Promise<any> {
+  const openai = getOpenAI()
   if (!threadId) {
     throw new Error("[THREAD-MANAGER] threadId is required but was undefined")
   }
@@ -284,6 +290,7 @@ export async function addMessageToThread(threadId: string, message: Message) {
 }
 
 export async function getMessagesFromThread(threadId: string) {
+  const openai = getOpenAI()
   try {
     const messages = await openai.beta.threads.messages.list(threadId, {
       order: "asc",
@@ -303,6 +310,7 @@ export async function getMessagesFromThread(threadId: string) {
 }
 
 export async function runThread(threadId: string, assistantId: string, instructions: string) {
+  const openai = getOpenAI()
   try {
     const run = await openai.beta.threads.runs.create(threadId, {
       assistant_id: assistantId,
@@ -317,6 +325,7 @@ export async function runThread(threadId: string, assistantId: string, instructi
 }
 
 export async function getRun(threadId: string, runId: string) {
+  const openai = getOpenAI()
   try {
     const run = await openai.beta.threads.runs.retrieve(threadId, runId)
     return run

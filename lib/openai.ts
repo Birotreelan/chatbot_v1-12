@@ -1,12 +1,18 @@
 import OpenAI from "openai"
 
-// Inicializar el cliente de OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+// Inicializar el cliente de OpenAI de forma lazy para evitar errores en build-time
+function getOpenAIClient() {
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+}
 
-// Exportar la instancia para uso en otros módulos
-export { openai }
+// Exportar como getter lazy para uso en otros módulos
+export const openai = new Proxy({} as OpenAI, {
+  get(_target, prop) {
+    return getOpenAIClient()[prop as keyof OpenAI]
+  },
+})
 
 // Tiempo máximo de espera para la ejecución del asistente (en milisegundos)
 const MAX_WAIT_TIME = 30000 // 30 segundos
