@@ -4,6 +4,16 @@
 
 El Sprint 9 implementa un sistema completamente determinístico para manejar pacientes que escriben SIN recordatorio previo. Esto reduce drasticamente las llamadas a OpenAI y mejora la latencia.
 
+### IDs de Asistentes OpenAI (NLU)
+
+Los siguientes asistentes estan configurados en el codigo (`lib/conversation-state/patient-detection/intent-extractor.ts`):
+
+| Asistente | ID | Uso |
+|-----------|----|----|
+| Initial Contact NLU | `asst_EJewdsboIdYEnjVyxZsoSCvk` | Detectar intencion inicial |
+| Existing Patient NLU | `asst_S4TQH7DmrqPPRbtYTCOd8zYH` | Procesar texto libre paciente existente |
+| New Patient NLU | `asst_snnYnxl1CHk8ycNyLGRgYEEI` | Procesar texto libre paciente nuevo |
+
 ### Componentes Implementados
 
 | Componente | Descripcion | Feature Flag |
