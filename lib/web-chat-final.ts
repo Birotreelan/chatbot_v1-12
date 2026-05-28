@@ -13,9 +13,11 @@ import {
 import { getThreadForUser, createThread } from "./thread-manager"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+function getOpenAI() {
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+}
 
 // Función para crear el bloque SISTEMA con datos de sede
 async function createSystemBlock(
@@ -78,6 +80,7 @@ export async function processWebChatMessage({
   sedeId?: string
 }): Promise<{ response: string; error?: string }> {
   try {
+    const openai = getOpenAI()
     const clienteId = config.cliente_id
 
     console.log(`[WEB-CHAT] 💬 Procesando mensaje para cliente: ${clienteId}`)

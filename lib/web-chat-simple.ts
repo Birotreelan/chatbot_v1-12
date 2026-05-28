@@ -3,9 +3,11 @@ import { rateLimit } from "@/lib/rate-limit"
 import type { WhatsAppConfig } from "@/lib/types"
 import { OpenAI } from "openai"
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+function getOpenAI() {
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+}
 
 interface ProcessWebMessageParams {
   message: string
@@ -80,6 +82,7 @@ ${message}`
 
 // Función para buscar thread web existente
 async function findWebThread(sessionId: string, configId: string) {
+  const openai = getOpenAI()
   const threadName = `web-${sessionId}-${configId}`
 
   console.log(`[WEB-CHAT-SIMPLE] Buscando thread: ${threadName}`)
@@ -101,6 +104,7 @@ async function findWebThread(sessionId: string, configId: string) {
 
 // Función para crear thread web
 async function createWebThread(sessionId: string, configId: string) {
+  const openai = getOpenAI()
   const threadName = `web-${sessionId}-${configId}`
 
   console.log(`[WEB-CHAT-SIMPLE] Creando thread: ${threadName}`)
@@ -125,6 +129,7 @@ async function processWebAssistantMessage(
   assistantId: string,
   clienteId: string,
 ): Promise<string> {
+  const openai = getOpenAI()
   console.log(`[WEB-ASSISTANT-SIMPLE] 🌐 Procesando mensaje web para thread: ${threadId}`)
   console.log(`[WEB-ASSISTANT-SIMPLE] 🚫 GARANTÍA: Este flujo NO enviará mensajes a WhatsApp`)
   console.log(`[WEB-ASSISTANT-SIMPLE] Assistant ID: ${assistantId}`)
@@ -178,6 +183,7 @@ async function processWebAssistantMessage(
 
 // Función para esperar la completación del run
 async function waitForRunCompletion(threadId: string, runId: string, clienteId: string): Promise<void> {
+  const openai = getOpenAI()
   // Validar parámetros antes de usar
   if (!threadId || threadId === "undefined") {
     throw new Error(`Thread ID inválido en waitForRunCompletion: ${threadId}`)
@@ -266,6 +272,7 @@ async function waitForRunCompletion(threadId: string, runId: string, clienteId: 
 
 // Función para obtener el último mensaje del asistente
 async function getLastAssistantMessage(threadId: string): Promise<string> {
+  const openai = getOpenAI()
   try {
     console.log(`[WEB-ASSISTANT-SIMPLE] Obteniendo último mensaje del thread: ${threadId}`)
 

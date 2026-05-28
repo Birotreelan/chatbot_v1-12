@@ -401,12 +401,31 @@ export async function handleMessage(value: any) {
       // Si fue true, la respuesta fue manejada completamente
       if (flowResult === true) {
         console.log(`[WHATSAPP] Mensaje manejado por flujo directo, no se pasa a OpenAI`)
+        // Guardar el mensaje del usuario antes de salir (el bot ya guardó su respuesta)
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: userMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
         return
       }
       
       // Si fue un objeto especial (reagendamiento), hacer el switch
       if (flowResult && typeof flowResult === 'object' && flowResult.type === 'route_to_reagendamiento') {
         console.log(`[WHATSAPP] Detectado reagendamiento - haciendo switch al asistente de reagendamiento`)
+        
+        // Guardar el mensaje del usuario (eligió reagendar)
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: userMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
         
         // Obtener el thread actual y el run ID para pasarlos a handleAssistantSwitch
         const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
@@ -1572,6 +1591,15 @@ ${JSON.stringify(functionArgs, null, 2)}`
       
       if (rescheduleResult.handled) {
         console.log(`[WHATSAPP] Mensaje procesado por flujo de reagendamiento determinístico`)
+        // Guardar el mensaje del usuario antes de salir
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: userMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
         return
       }
