@@ -55,6 +55,24 @@ import {
   RESCHEDULE_NLU_ASSISTANT_ID,
 } from "./conversation-state/reschedule-flow-integration"
 import { getEffectiveFeatureFlags as getFeatureFlagsForReschedule } from "./conversation-state/feature-flags"
+import {
+  initializePatientDetection,
+  handlePatientDetectionMessage,
+  shouldUsePatientDetection,
+  completePatientDetectionFlow,
+} from "./conversation-state/patient-detection/patient-flow-integration"
+import {
+  initializeExistingPatientFlow,
+  handleExistingPatientMessage,
+  isExistingPatientFlowActive,
+  completeExistingPatientFlow,
+} from "./conversation-state/existing-patient/existing-patient-flow-integration"
+import {
+  initializeNewPatientFlow,
+  handleNewPatientMessage,
+  isNewPatientFlowActive,
+  completeNewPatientFlow,
+} from "./conversation-state/new-patient/new-patient-flow-integration"
 // Import dynamic handleAssistantSwitch
 let handleAssistantSwitch: any = null
 
@@ -1202,6 +1220,93 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             userMessage = dniResult.dni
             // Continuar a OpenAI con el DNI limpio
           }
+        }
+      }
+    }
+
+    // ============================================================================
+    // NEW: INTERCEPTAR DETECCIÓN INICIAL DE PACIENTE (Sin recordatorio previo)
+    // Sprint 9a-c: Nuevo flujo determinístico de detección e intake
+    // ============================================================================
+    if (message.type === "text") {
+      const detectionFlags = await getEffectiveFeatureFlags(config.id)
+      
+      // Verificar si debe usar detección de paciente
+      const hasPendingReminder = false // TODO: Verificar si hay recordatorio pendiente en el contexto
+      const shouldDetect = await shouldUsePatientDetection(userPhoneNumber, config.id, hasPendingReminder)
+      
+      if (detectionFlags.directPatientDetection && shouldDetect) {
+        console.log(`[WHATSAPP] 🔍 Iniciando detección de paciente para ${userPhoneNumber}`)
+        
+        // Primero verificar si ya hay un flujo de detección activo
+        const detectionActive = await isExistingPatientFlowActive(userPhoneNumber) || 
+                               await isNewPatientFlowActive(userPhoneNumber)
+        
+        if (!detectionActive) {
+          // No hay flujo activo, iniciar detección
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id)
+          
+          if (detectionResult.handled) {
+            console.log(`[WHATSAPP] ✅ Detección iniciada, enviando mensaje`)
+            const detectionCtx: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+            
+            await sendDirectResponse(detectionCtx, detectionResult.message || "", "initial_detection_pending")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+        }
+      }
+    }
+
+    // ============================================================================
+    // INTERCEPTAR FLUJOS ACTIVOS: Paciente Existente o Nuevo (Sprint 9b-c)
+    // ============================================================================
+    if (message.type === "text") {
+      // Verificar si hay flujo de detección activo
+      const isDetectionActive = await isExistingPatientFlowActive(userPhoneNumber) ||
+                               await isNewPatientFlowActive(userPhoneNumber)
+      
+      if (isDetectionActive) {
+        const detectionFlags = await getEffectiveFeatureFlags(config.id)
+        
+        // Procesar mensaje durante detección
+        let detectionResult = null
+        
+        if (await isExistingPatientFlowActive(userPhoneNumber)) {
+          console.log(`[WHATSAPP] 📋 Procesando mensaje en flujo de paciente existente`)
+          detectionResult = await handleExistingPatientMessage(userPhoneNumber, userMessage, config.id)
+        } else if (await isNewPatientFlowActive(userPhoneNumber)) {
+          console.log(`[WHATSAPP] ✨ Procesando mensaje en flujo de paciente nuevo`)
+          detectionResult = await handleNewPatientMessage(userPhoneNumber, userMessage, config.id)
+        }
+        
+        if (detectionResult?.handled) {
+          const detectionCtx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+          
+          if (detectionResult.message) {
+            await sendDirectResponse(detectionCtx, detectionResult.message, "existing_patient_awaiting_turns")
+          }
+          
+          // Si el flujo completó, limpiar
+          if (detectionResult.flowCompleted) {
+            await completeExistingPatientFlow(userPhoneNumber, config.id)
+            await completeNewPatientFlow(userPhoneNumber, config.id)
+          }
+          
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
         }
       }
     }
