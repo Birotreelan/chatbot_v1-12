@@ -48,6 +48,13 @@ import {
   getBookingFlowState,
   buildBookingContextBlock,
 } from "./conversation-state/booking-flow-handler"
+import {
+  startRescheduleFlow,
+  processRescheduleMessage,
+  isRescheduleFlowActive,
+  RESCHEDULE_NLU_ASSISTANT_ID,
+} from "./conversation-state/reschedule-flow-integration"
+import { getEffectiveFeatureFlags as getFeatureFlagsForReschedule } from "./conversation-state/feature-flags"
 // Import dynamic handleAssistantSwitch
 let handleAssistantSwitch: any = null
 
@@ -1370,10 +1377,77 @@ export async function processIndividualMessage(
 
   try {
     // ============================================================================
-    // MANEJO ESPECIAL PARA REAGENDAMIENTO
+    // MANEJO ESPECIAL PARA REAGENDAMIENTO (FLUJO DETERMINISTICO)
     // ============================================================================
     if (routeToReagendamiento && functionArgs) {
-      console.log(`[WHATSAPP] 🔄 Iniciando flujo de reagendamiento con handleAssistantSwitch`)
+      console.log(`[WHATSAPP] 🔄 Iniciando flujo de reagendamiento DETERMINISTICO`)
+
+      // Verificar feature flag para usar flujo determinístico
+      const rescheduleFlags = await getFeatureFlagsForReschedule(config.id)
+      
+      if (rescheduleFlags.directReagendamiento) {
+        console.log(`[WHATSAPP] Flag directReagendamiento ON - Usando flujo determinístico`)
+        
+        try {
+          // Obtener turnos disponibles del mismo profesional y sede
+          const { buscarTurnosDisponibles } = await import("./api-tools/api-functions")
+          
+          // Extraer datos del turno cancelado
+          const turnoData = functionArgs.turno_cancelado
+          const pacienteData = functionArgs.paciente
+          
+          // Buscar turnos disponibles para el mismo profesional
+          const turnosResponse = await buscarTurnosDisponibles({
+            clienteId: config.cliente_id,
+            profesionalId: turnoData.profesional_id,
+            sedeId: turnoData.sede_id,
+            rangoFechas: 14, // Próximos 14 días
+          })
+          
+          if (turnosResponse.turnos && turnosResponse.turnos.length > 0) {
+            // Iniciar flujo determinístico con los turnos encontrados
+            const result = await startRescheduleFlow(
+              {
+                paciente: pacienteData,
+                turnos: [], // No necesario para este flujo
+              } as any,
+              turnosResponse.turnos,
+              phoneNumberId,
+              config.accessToken,
+              userPhoneNumber,
+              config.id,
+              config.cliente_id
+            )
+            
+            if (result.handled) {
+              console.log(`[WHATSAPP] Flujo de reagendamiento iniciado exitosamente`)
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+          }
+          
+          // Si no hay turnos disponibles, informar al usuario
+          console.log(`[WHATSAPP] No hay turnos disponibles para reagendar`)
+          await sendWhatsAppMessage(
+            phoneNumberId,
+            config.accessToken,
+            userPhoneNumber,
+            `Lo siento ${pacienteData.nombres.split(" ")[0]}, no hay turnos disponibles con el mismo profesional en este momento. Te recomendamos intentar más tarde o contactar a la clínica para más opciones.`
+          )
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+          
+        } catch (error) {
+          console.error(`[WHATSAPP] Error en flujo determinístico de reagendamiento:`, (error as Error).message)
+          // Fallback al flujo de OpenAI si hay error
+          console.log(`[WHATSAPP] Fallback a OpenAI por error en flujo determinístico`)
+        }
+      }
+      
+      // ========================================================================
+      // FLUJO LEGACY (OpenAI) - Se usa si flag OFF o como fallback
+      // ========================================================================
+      console.log(`[WHATSAPP] Usando flujo de reagendamiento con OpenAI (legacy)`)
 
       try {
         const openai = new (await import("openai")).default({
@@ -1394,14 +1468,6 @@ export async function processIndividualMessage(
           return
         }
 
-        // Necesitamos el run ID actual, pero como estamos en un flujo directo, no hay run activo
-        // Usamos un ID dummy que será cancelado si existe
-        const dummyRunId = `dummy-run-${Date.now()}`
-
-        // Importar handleAssistantSwitch desde openai-tools
-        // Como es una función interna no exportada, necesitamos acceder de otra forma
-        // Vamos a hacer el switch manualmente aquí
-
         console.log(`[WHATSAPP] Creando nuevo thread para asistente de reagendamiento...`)
 
         const newThread = await openai.beta.threads.create({
@@ -1416,7 +1482,7 @@ export async function processIndividualMessage(
 
         // Actualizar en base de datos
         const { updateThreadId } = await import("./db")
-        const reAgendAssistantId = config.whatsappReagendamientoAssistantId // Obtener del config
+        const reAgendAssistantId = config.whatsappReagendamientoAssistantId
         
         if (reAgendAssistantId) {
           await updateThreadId(userPhoneNumber, config.id, newThread.id, reAgendAssistantId)
@@ -1452,11 +1518,11 @@ ${JSON.stringify(functionArgs, null, 2)}`
           await trackRescheduleStarted(config.cliente_id, userPhoneNumber)
         }
 
-        // Ahora llamar a getAssistantResponse con el nuevo thread y assistantId
+        // Llamar a getAssistantResponse con el nuevo thread y assistantId
         if (reAgendAssistantId) {
           await getAssistantResponse(
             newThread.id,
-            "Hola, quisiera reagendar mi turno.", // Mensaje inicial
+            "Hola, quisiera reagendar mi turno.",
             phoneNumberId,
             reAgendAssistantId,
             userPhoneNumber,
@@ -1483,6 +1549,38 @@ ${JSON.stringify(functionArgs, null, 2)}`
         )
         await updateWhatsAppStats(config.id, { errors: 1 })
         return
+      }
+    }
+
+    // ============================================================================
+    // INTERCEPTOR: FLUJO DE REAGENDAMIENTO ACTIVO
+    // ============================================================================
+    // Si el usuario está en medio de un flujo de reagendamiento determinístico,
+    // procesar el mensaje con el handler determinístico
+    const rescheduleActive = await isRescheduleFlowActive(userPhoneNumber, config.id)
+    if (rescheduleActive) {
+      console.log(`[WHATSAPP] Usuario en flujo de reagendamiento activo - procesando deterministicamente`)
+      
+      const rescheduleResult = await processRescheduleMessage(
+        userMessage,
+        phoneNumberId,
+        config.accessToken,
+        userPhoneNumber,
+        config.id,
+        config.cliente_id
+      )
+      
+      if (rescheduleResult.handled) {
+        console.log(`[WHATSAPP] Mensaje procesado por flujo de reagendamiento determinístico`)
+        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+        return
+      }
+      
+      // Si necesita fallback a OpenAI para NLU
+      if (rescheduleResult.fallbackToOpenAI && rescheduleResult.fallbackContext) {
+        console.log(`[WHATSAPP] Fallback a OpenAI NLU para interpretar: ${rescheduleResult.fallbackContext.type}`)
+        // TODO: Implementar llamada a asistente NLU (RESCHEDULE_NLU_ASSISTANT_ID)
+        // Por ahora, continuar con flujo normal
       }
     }
 

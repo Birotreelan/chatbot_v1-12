@@ -5,11 +5,11 @@
  * Proporciona funciones para interceptar y procesar mensajes en el flujo de reagendamiento.
  */
 
-import { sendWhatsAppMessage } from "./whatsapp-api"
-import { saveConversationMessage } from "./conversations"
+import { sendWhatsAppMessage } from "../whatsapp-api"
+import { saveConversationMessage } from "../conversations"
 import { nanoid } from "nanoid"
-import { updateWhatsAppStats } from "./db"
-import { trackAppointmentEvent } from "./appointment-stats"
+import { updateWhatsAppStats } from "../db"
+import { trackAppointmentEvent } from "../appointment-stats"
 import {
   getRescheduleState,
   saveRescheduleState,
@@ -32,7 +32,14 @@ import {
   buildRescheduleErrorMessage,
   buildRescheduleOpenAIMessage,
 } from "./conversation-state/reschedule-templates"
-import type { ChatbotData } from "./appointment-flow-state"
+import type { ChatbotData } from "../appointment-flow-state"
+
+// ============================================================================
+// CONSTANTES
+// ============================================================================
+
+// ID del asistente NLU en OpenAI (solo para interpretar texto libre)
+export const RESCHEDULE_NLU_ASSISTANT_ID = "asst_mPwf9BxPNwWAOoSJZY6UtXii"
 
 // ============================================================================
 // CONTEXT PARA ENVIOS DE MENSAJES
