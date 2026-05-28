@@ -51,6 +51,38 @@ export type ConversationPhase =
   | "paciente_existente_awaiting_turno_selection"
   | "paciente_existente_awaiting_confirmation"
   | "paciente_existente_completed"
+  
+  // Flujo de detección inicial (sin recordatorio)
+  | "initial_detection_pending"
+  | "initial_detection_existing_shown"
+  | "initial_detection_new_shown"
+  | "initial_detection_awaiting_action"
+
+  // Flujo de paciente existente (new Sprint 9b)
+  | "existing_patient_initial"
+  | "existing_patient_awaiting_email"
+  | "existing_patient_awaiting_sede"
+  | "existing_patient_awaiting_search_type"
+  | "existing_patient_awaiting_professional"
+  | "existing_patient_awaiting_specialty"
+  | "existing_patient_awaiting_turns"
+  | "existing_patient_awaiting_turn_selection"
+  | "existing_patient_awaiting_confirmation"
+  | "existing_patient_completed"
+
+  // Flujo de paciente nuevo (new Sprint 9c)
+  | "new_patient_initial"
+  | "new_patient_awaiting_name"
+  | "new_patient_awaiting_health_insurance"
+  | "new_patient_awaiting_venue"
+  | "new_patient_awaiting_search_type"
+  | "new_patient_awaiting_professional"
+  | "new_patient_awaiting_specialty"
+  | "new_patient_awaiting_turns"
+  | "new_patient_awaiting_turn_selection"
+  | "new_patient_awaiting_email"
+  | "new_patient_awaiting_confirmation"
+  | "new_patient_completed"
 
 /**
  * Contexto de la conversación guardado en Redis
@@ -128,6 +160,18 @@ export interface FeatureFlags {
   // Extractor de selecciones inteligente (Sprint 7)
   // Multi-capa: números, letras, ordinales, posicionales, coincidencias de texto, fuzzy matching
   directSelectionExtraction: boolean
+
+  // Detección inicial de paciente (Sprint 9a)
+  // Detecta paciente por teléfono y muestra saludo + turnos cuando no hay recordatorio
+  directPatientDetection: boolean
+
+  // Flujo paciente existente (Sprint 9b)
+  // Maneja reserva completa de turnos para pacientes ya registrados
+  directExistingPatientFlow: boolean
+
+  // Flujo paciente nuevo (Sprint 9c)
+  // Maneja registro completo y primera reserva de turno
+  directPacienteNuevo: boolean
 }
 
 /**
@@ -145,6 +189,9 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directPacienteExistente: false,
   directBookingFlow: false,
   directSelectionExtraction: false,
+  directPatientDetection: false,
+  directExistingPatientFlow: false,
+  directPacienteNuevo: false,
 }
 
 /**
