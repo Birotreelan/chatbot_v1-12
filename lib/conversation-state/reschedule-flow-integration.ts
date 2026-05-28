@@ -21,7 +21,7 @@ import {
   type RescheduleFlowState,
   type RescheduleFlowResult,
   type TurnoDisponible,
-} from "./conversation-state/reschedule-flow-handler"
+} from "./reschedule-flow-handler"
 import {
   buildRescheduleStartMessage,
   buildRescheduleConfirmationMessage,
@@ -31,7 +31,7 @@ import {
   buildRescheduleAbandonMessage,
   buildRescheduleErrorMessage,
   buildRescheduleOpenAIMessage,
-} from "./conversation-state/reschedule-templates"
+} from "./reschedule-templates"
 import type { ChatbotData } from "../appointment-flow-state"
 
 // ============================================================================
