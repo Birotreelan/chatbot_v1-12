@@ -26,6 +26,29 @@ const FAREWELL_KEYWORDS = [
   "adiós",
 ]
 
+// Palabras que indican que el usuario quiere iniciar una conversación, NO despedirse
+const GREETING_KEYWORDS = [
+  "hola",
+  "buenos días",
+  "buenos dias",
+  "buen día",
+  "buen dia",
+  "buenas tardes",
+  "buenas noches",
+  "turno",
+  "sacar turno",
+  "quiero",
+  "necesito",
+  "consulta",
+  "quisiera",
+  "me gustaría",
+  "puedo",
+  "podría",
+  "ayuda",
+  "información",
+  "informacion",
+]
+
 const FAREWELL_MODE_A_TEMPLATES = [
   "Si necesitás algo más, no dudes en escribirme.",
   "Cualquier cosa, no dudes en comunicarte.",
@@ -48,10 +71,36 @@ export interface FarewellState {
 }
 
 /**
- * Detecta si el mensaje es una despedida
+ * Detecta si el mensaje contiene una palabra de saludo/intención de iniciar conversación
+ */
+function containsGreetingIntent(message: string): boolean {
+  const lowerMessage = message.toLowerCase().trim()
+  return GREETING_KEYWORDS.some((keyword) =>
+    lowerMessage.includes(keyword)
+  )
+}
+
+/**
+ * Detecta si el mensaje es una despedida genuina
+ * 
+ * Reglas:
+ * 1. Debe contener una keyword de despedida
+ * 2. NO debe contener una keyword de saludo/intención
+ * 3. Mensajes muy largos (>50 chars) probablemente NO son despedidas simples
  */
 export function isFarewellMessage(message: string): boolean {
   const lowerMessage = message.toLowerCase().trim()
+  
+  // Si contiene intención de iniciar conversación, NO es despedida
+  if (containsGreetingIntent(lowerMessage)) {
+    return false
+  }
+  
+  // Mensajes muy largos no son despedidas simples
+  if (message.length > 50) {
+    return false
+  }
+  
   return FAREWELL_KEYWORDS.some((keyword) =>
     lowerMessage.includes(keyword)
   )

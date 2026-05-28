@@ -1293,7 +1293,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         
         // Intentar obtener nombre del paciente de contexto
         const chatbotDataForFarewell = await getAppointmentContext(userPhoneNumber, config.id)
-        const patientName = chatbotDataForFarewell?.paciente?.nombres || "amigo"
+        // Prioridad: nombre de paciente en contexto > nombre de perfil de WhatsApp > fallback "amigo"
+        const whatsappProfileName = value.contacts?.[0]?.profile?.name || null
+        const patientName = chatbotDataForFarewell?.paciente?.nombres || whatsappProfileName || "amigo"
         
         const farewellResponse = await handleFarewellIfDetected(
           userMessage,
