@@ -51,6 +51,12 @@ export type ConversationPhase =
   | "paciente_existente_awaiting_turno_selection"
   | "paciente_existente_awaiting_confirmation"
   | "paciente_existente_completed"
+  
+  // Flujo de detección inicial (sin recordatorio)
+  | "initial_detection_pending"
+  | "initial_detection_existing_shown"
+  | "initial_detection_new_shown"
+  | "initial_detection_awaiting_action"
 
 /**
  * Contexto de la conversación guardado en Redis
@@ -128,6 +134,10 @@ export interface FeatureFlags {
   // Extractor de selecciones inteligente (Sprint 7)
   // Multi-capa: números, letras, ordinales, posicionales, coincidencias de texto, fuzzy matching
   directSelectionExtraction: boolean
+
+  // Detección inicial de paciente (Sprint 9a)
+  // Detecta paciente por teléfono y muestra saludo + turnos cuando no hay recordatorio
+  directPatientDetection: boolean
 }
 
 /**
@@ -145,6 +155,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directPacienteExistente: false,
   directBookingFlow: false,
   directSelectionExtraction: false,
+  directPatientDetection: false,
 }
 
 /**
