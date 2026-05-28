@@ -11,7 +11,7 @@
  * 4. completed - Reserva ejecutada exitosamente
  */
 
-import { getRedisClient } from "./redis"
+import { getRedisClient } from "@/lib/redis"
 import { extractSelection, SelectionResult } from "./selection-extractor"
 import type { ChatbotData, ChatbotDataTurno } from "../appointment-flow-state"
 
