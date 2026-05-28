@@ -4,7 +4,8 @@
  * Detecta despedidas múltiples y evita que OpenAI repita la misma despedida
  * Implementa MODO A (cierre completo) vs MODO B (cierre breve)
  * 
- * Lógica determinística que reduce carga en OpenAI
+ * IMPORTANTE: Solo se activa cuando hay un recordatorio previo (contexto de turno).
+ * La verificación de recordatorio previo se hace en whatsapp.tsx ANTES de llamar aquí.
  */
 
 import { createConversationLogger } from "./logger"
@@ -24,6 +25,25 @@ const FAREWELL_KEYWORDS = [
   "hasta luego",
   "chau",
   "adiós",
+]
+
+// Palabras que indican intención de iniciar una nueva consulta (NO despedirse)
+// Esta es una capa de seguridad adicional para evitar falsos positivos
+const NON_FAREWELL_INDICATORS = [
+  "turno",
+  "sacar turno",
+  "quiero",
+  "necesito",
+  "consulta",
+  "quisiera",
+  "puedo",
+  "podría",
+  "ayuda",
+  "información",
+  "informacion",
+  "cancelar",
+  "cambiar",
+  "reagendar",
 ]
 
 const FAREWELL_MODE_A_TEMPLATES = [
@@ -48,10 +68,39 @@ export interface FarewellState {
 }
 
 /**
- * Detecta si el mensaje es una despedida
+ * Detecta si el mensaje contiene indicadores de que NO es una despedida
+ * (el usuario quiere hacer algo más, no despedirse)
+ */
+function containsNonFarewellIndicator(message: string): boolean {
+  const lowerMessage = message.toLowerCase().trim()
+  return NON_FAREWELL_INDICATORS.some((indicator) =>
+    lowerMessage.includes(indicator)
+  )
+}
+
+/**
+ * Detecta si el mensaje es una despedida genuina
+ * 
+ * Reglas:
+ * 1. Debe contener una keyword de despedida
+ * 2. NO debe contener indicadores de nueva consulta
+ * 3. Mensajes muy largos (>50 chars) probablemente NO son despedidas simples
+ * 
+ * NOTA: La verificación de recordatorio previo se hace en whatsapp.tsx
  */
 export function isFarewellMessage(message: string): boolean {
   const lowerMessage = message.toLowerCase().trim()
+  
+  // Si contiene indicadores de nueva consulta, NO es despedida
+  if (containsNonFarewellIndicator(lowerMessage)) {
+    return false
+  }
+  
+  // Mensajes muy largos no son despedidas simples
+  if (message.length > 50) {
+    return false
+  }
+  
   return FAREWELL_KEYWORDS.some((keyword) =>
     lowerMessage.includes(keyword)
   )
