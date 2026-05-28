@@ -58,6 +58,18 @@ export type ConversationPhase =
   | "initial_detection_new_shown"
   | "initial_detection_awaiting_action"
 
+  // Flujo de paciente existente (new Sprint 9b)
+  | "existing_patient_initial"
+  | "existing_patient_awaiting_email"
+  | "existing_patient_awaiting_sede"
+  | "existing_patient_awaiting_search_type"
+  | "existing_patient_awaiting_professional"
+  | "existing_patient_awaiting_specialty"
+  | "existing_patient_awaiting_turns"
+  | "existing_patient_awaiting_turn_selection"
+  | "existing_patient_awaiting_confirmation"
+  | "existing_patient_completed"
+
 /**
  * Contexto de la conversación guardado en Redis
  * Incluye tanto los datos del usuario como el estado actual
@@ -138,6 +150,10 @@ export interface FeatureFlags {
   // Detección inicial de paciente (Sprint 9a)
   // Detecta paciente por teléfono y muestra saludo + turnos cuando no hay recordatorio
   directPatientDetection: boolean
+
+  // Flujo paciente existente (Sprint 9b)
+  // Maneja reserva completa de turnos para pacientes ya registrados
+  directExistingPatientFlow: boolean
 }
 
 /**
@@ -156,6 +172,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directBookingFlow: false,
   directSelectionExtraction: false,
   directPatientDetection: false,
+  directExistingPatientFlow: false,
 }
 
 /**
