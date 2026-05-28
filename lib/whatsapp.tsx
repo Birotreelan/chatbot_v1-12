@@ -1284,48 +1284,53 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
     // ============================================================================
     // INTERCEPTAR DESPEDIDAS (Sprint 3: Anti-Repetición)
-    // Si el usuario envía una despedida detectada, responder directamente
+    // SOLO si hay un recordatorio previo (contexto de turno), responder directamente
+    // Si NO hay recordatorio previo, SIEMPRE pasar a OpenAI
     // ============================================================================
     if (message.type === "text") {
       const flags = await getEffectiveFeatureFlags(config.id)
       if (flags.antiRepetitionFarewell) {
         const farewellLogger = createConversationLogger(userPhoneNumber, config.id, "farewell-check")
         
-        // Intentar obtener nombre del paciente de contexto
+        // Verificar si hay contexto de turno (indica que hubo un recordatorio previo)
         const chatbotDataForFarewell = await getAppointmentContext(userPhoneNumber, config.id)
-        // Prioridad: nombre de paciente en contexto > nombre de perfil de WhatsApp > fallback "amigo"
-        const whatsappProfileName = value.contacts?.[0]?.profile?.name || null
-        const patientName = chatbotDataForFarewell?.paciente?.nombres || whatsappProfileName || "amigo"
         
-        const farewellResponse = await handleFarewellIfDetected(
-          userMessage,
-          userPhoneNumber,
-          config.id,
-          patientName
-        )
-        
-        if (farewellResponse) {
-          // Es una despedida - responder directamente sin OpenAI
-          farewellLogger.info("Despedida interceptada, respondiendo directamente", { 
-            response: farewellResponse 
-          })
+        // SOLO procesar directamente si hay recordatorio previo
+        if (chatbotDataForFarewell) {
+          const patientName = chatbotDataForFarewell.paciente?.nombres || "amigo"
           
-          try {
-            const farewellCtx: DirectResponseContext = {
-              phoneNumberId: value.metadata.phone_number_id,
-              accessToken: config.accessToken,
-              userPhoneNumber,
-              configId: config.id,
-              clienteId: config.cliente_id,
+          const farewellResponse = await handleFarewellIfDetected(
+            userMessage,
+            userPhoneNumber,
+            config.id,
+            patientName
+          )
+          
+          if (farewellResponse) {
+            // Es una despedida - responder directamente sin OpenAI
+            farewellLogger.info("Despedida interceptada (con recordatorio previo), respondiendo directamente", { 
+              response: farewellResponse 
+            })
+            
+            try {
+              const farewellCtx: DirectResponseContext = {
+                phoneNumberId: value.metadata.phone_number_id,
+                accessToken: config.accessToken,
+                userPhoneNumber,
+                configId: config.id,
+                clienteId: config.cliente_id,
+              }
+              await sendDirectResponse(farewellCtx, farewellResponse, "farewell")
+              return
+            } catch (error) {
+              farewellLogger.error("Error enviando respuesta de despedida", error as Error)
+              // Fallback: continuar a OpenAI
             }
-            await sendDirectResponse(farewellCtx, farewellResponse, "farewell")
-            return
-          } catch (error) {
-            farewellLogger.error("Error enviando respuesta de despedida", error as Error)
-            // Fallback: continuar a OpenAI
+          } else {
+            farewellLogger.debug("No es una despedida, pasando a OpenAI")
           }
         } else {
-          farewellLogger.debug("No es una despedida o antiRepetitionFarewell OFF")
+          farewellLogger.debug("Sin recordatorio previo, pasando a OpenAI (no se procesa directamente)")
         }
       }
     }

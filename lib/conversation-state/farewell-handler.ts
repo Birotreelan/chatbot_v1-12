@@ -4,7 +4,8 @@
  * Detecta despedidas múltiples y evita que OpenAI repita la misma despedida
  * Implementa MODO A (cierre completo) vs MODO B (cierre breve)
  * 
- * Lógica determinística que reduce carga en OpenAI
+ * IMPORTANTE: Solo se activa cuando hay un recordatorio previo (contexto de turno).
+ * La verificación de recordatorio previo se hace en whatsapp.tsx ANTES de llamar aquí.
  */
 
 import { createConversationLogger } from "./logger"
@@ -26,27 +27,23 @@ const FAREWELL_KEYWORDS = [
   "adiós",
 ]
 
-// Palabras que indican que el usuario quiere iniciar una conversación, NO despedirse
-const GREETING_KEYWORDS = [
-  "hola",
-  "buenos días",
-  "buenos dias",
-  "buen día",
-  "buen dia",
-  "buenas tardes",
-  "buenas noches",
+// Palabras que indican intención de iniciar una nueva consulta (NO despedirse)
+// Esta es una capa de seguridad adicional para evitar falsos positivos
+const NON_FAREWELL_INDICATORS = [
   "turno",
   "sacar turno",
   "quiero",
   "necesito",
   "consulta",
   "quisiera",
-  "me gustaría",
   "puedo",
   "podría",
   "ayuda",
   "información",
   "informacion",
+  "cancelar",
+  "cambiar",
+  "reagendar",
 ]
 
 const FAREWELL_MODE_A_TEMPLATES = [
@@ -71,12 +68,13 @@ export interface FarewellState {
 }
 
 /**
- * Detecta si el mensaje contiene una palabra de saludo/intención de iniciar conversación
+ * Detecta si el mensaje contiene indicadores de que NO es una despedida
+ * (el usuario quiere hacer algo más, no despedirse)
  */
-function containsGreetingIntent(message: string): boolean {
+function containsNonFarewellIndicator(message: string): boolean {
   const lowerMessage = message.toLowerCase().trim()
-  return GREETING_KEYWORDS.some((keyword) =>
-    lowerMessage.includes(keyword)
+  return NON_FAREWELL_INDICATORS.some((indicator) =>
+    lowerMessage.includes(indicator)
   )
 }
 
@@ -85,14 +83,16 @@ function containsGreetingIntent(message: string): boolean {
  * 
  * Reglas:
  * 1. Debe contener una keyword de despedida
- * 2. NO debe contener una keyword de saludo/intención
+ * 2. NO debe contener indicadores de nueva consulta
  * 3. Mensajes muy largos (>50 chars) probablemente NO son despedidas simples
+ * 
+ * NOTA: La verificación de recordatorio previo se hace en whatsapp.tsx
  */
 export function isFarewellMessage(message: string): boolean {
   const lowerMessage = message.toLowerCase().trim()
   
-  // Si contiene intención de iniciar conversación, NO es despedida
-  if (containsGreetingIntent(lowerMessage)) {
+  // Si contiene indicadores de nueva consulta, NO es despedida
+  if (containsNonFarewellIndicator(lowerMessage)) {
     return false
   }
   
