@@ -15,6 +15,7 @@ import {
   buildDetectionErrorMessage,
   buildTurnosSummary,
 } from './patient-templates'
+import { extractIntent, mapIntentToAction } from './intent-extractor'
 
 /**
  * Patient Detection Flow Integration
@@ -261,4 +262,67 @@ export async function getPatientContextForOpenAI(
   }
 
   return context
+}
+
+/**
+ * Procesa mensaje con NLU para extraer intención
+ */
+export async function processMessageWithNLU(
+  phoneNumber: string,
+  userMessage: string,
+  clientId: string
+): Promise<PatientDetectionResult> {
+  const logger = createConversationLogger(phoneNumber, clientId, 'nlu_processing')
+  logger.info('Processing with NLU', { message: userMessage.substring(0, 50) })
+
+  const patientInfo = await getDetectedPatientInfo(phoneNumber)
+
+  if (!patientInfo) {
+    logger.warn('No patient info found', { phone: phoneNumber })
+    return {
+      handled: false,
+      shouldCallOpenAI: true,
+      openAIContext: 'No patient context available',
+    }
+  }
+
+  try {
+    // Llamar al extractor de intenciones
+    const intentResult = await extractIntent(userMessage, phoneNumber, clientId, {
+      isNewPatient: patientInfo.isNewPatient,
+      patientName: patientInfo.patientName,
+      patientTurnos: patientInfo.turnos,
+    })
+
+    if (!intentResult) {
+      logger.warn('Intent extraction failed', {})
+      return {
+        handled: false,
+        shouldCallOpenAI: true,
+        openAIContext: 'NLU error, fallback to full router',
+      }
+    }
+
+    logger.info('Intent extracted', {
+      intent: intentResult.intent,
+      confidence: intentResult.confidence,
+    })
+
+    // Mapear intención a acción
+    const action = mapIntentToAction(intentResult.intent, patientInfo.isNewPatient)
+
+    return {
+      handled: true,
+      message: `Entendido: ${intentResult.reasoning}`,
+      action,
+      patientInfo: patientInfo,
+    }
+  } catch (error) {
+    logger.error('Error in NLU processing', error as Error)
+    return {
+      handled: false,
+      shouldCallOpenAI: true,
+      openAIContext: 'NLU error',
+    }
+  }
 }
