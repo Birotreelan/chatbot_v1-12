@@ -33,12 +33,13 @@ function getDefaultDateRange(): { desde: string; hasta: string } {
  * Tipos internos del flujo
  */
 interface PatientDetectionState {
-  phase: 'awaiting_initial_response' | 'awaiting_action_selection' | 'completed'
+  phase: 'awaiting_initial_response' | 'awaiting_dni_for_disambiguation' | 'awaiting_action_selection' | 'completed'
   patientPhone: string
   patientId?: string
   patientName?: string
   patientDNI?: string
   turnos?: any[]
+  multiplePatients?: any[] // Array de pacientes si hay múltiples
   detectedAt: number
   attempts: number
 }
@@ -46,6 +47,7 @@ interface PatientDetectionState {
 /**
  * Inicia el flujo de detección de paciente
  * Busca al paciente por teléfono y obtiene sus turnos próximos
+ * Detecta si hay múltiples pacientes asociados al teléfono
  */
 export async function startPatientDetectionFlow(
   phoneNumber: string,
@@ -53,6 +55,7 @@ export async function startPatientDetectionFlow(
   clienteId: string
 ): Promise<{
   isNewPatient: boolean
+  multiplePatients?: any[]
   patientName?: string
   patientId?: string
   turnos?: any[]
@@ -98,9 +101,71 @@ export async function startPatientDetectionFlow(
       }
     }
 
+    // Verificar si hay múltiples pacientes
+    const patientData = patientResponse.datos
+    let multiplePatients: any[] | null = null
+    let patient: any
+
+    // Caso 1: Array de múltiples pacientes
+    if (Array.isArray(patientData)) {
+      multiplePatients = patientData
+      logger.info('Multiple patients found by phone', {
+        count: multiplePatients.length,
+        phone: phoneNumber,
+      })
+    }
+    // Caso 2: Objeto con flag "multiple" y array de pacientes
+    else if (patientData.multiple && Array.isArray(patientData.pacientes)) {
+      multiplePatients = patientData.pacientes
+      logger.info('Multiple patients found by phone', {
+        count: multiplePatients.length,
+        phone: phoneNumber,
+      })
+    }
+    // Caso 3: Objeto con flag "multiple" y array genérico
+    else if (patientData.multiple && Array.isArray(patientData.data)) {
+      multiplePatients = patientData.data
+      logger.info('Multiple patients found by phone', {
+        count: multiplePatients.length,
+        phone: phoneNumber,
+      })
+    }
+    // Caso 4: Paciente único
+    else {
+      patient = patientData
+    }
+
+    // Si hay múltiples pacientes, solicitar DNI para desambiguar
+    if (multiplePatients && multiplePatients.length > 1) {
+      const multiPatientState: PatientDetectionState = {
+        phase: 'awaiting_dni_for_disambiguation',
+        patientPhone: phoneNumber,
+        multiplePatients: multiplePatients,
+        detectedAt: Date.now(),
+        attempts: 1,
+      }
+
+      await redis.setex(
+        `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`,
+        PATIENT_DETECTION_TTL,
+        JSON.stringify(multiPatientState)
+      )
+
+      return {
+        isNewPatient: false,
+        multiplePatients: multiplePatients,
+        message: 'Multiple patients found, requesting DNI',
+      }
+    }
+
+    // Si solo hay un paciente (o solo uno en el array)
+    if (!patient && multiplePatients && multiplePatients.length === 1) {
+      patient = multiplePatients[0]
+    }
+
     // Paciente encontrado
-    const patient = patientResponse.datos
     const patientId = patient.paciente_id || patient.id
+
 
     logger.info('Patient found', {
       patientId,
@@ -167,6 +232,146 @@ export async function startPatientDetectionFlow(
     return {
       isNewPatient: true,
       error: 'API error, will request DNI',
+    }
+  }
+}
+
+/**
+ * Procesa el DNI cuando hay múltiples pacientes
+ * Identifica al paciente correcto y obtiene sus turnos
+ */
+export async function processDNIForDisambiguation(
+  phoneNumber: string,
+  dni: string,
+  configId: string,
+  clienteId: string
+): Promise<{
+  found: boolean
+  patientId?: string
+  patientName?: string
+  turnos?: any[]
+  message?: string
+  error?: string
+}> {
+  const logger = createConversationLogger(phoneNumber, configId, 'dni_disambiguation')
+  logger.info('Processing DNI for patient disambiguation', { dni: dni.substring(0, 3) + '****' })
+
+  try {
+    const redis = getRedisClient()
+    if (!redis) {
+      logger.warn('Redis not available', {})
+      return { found: false, error: 'Redis unavailable' }
+    }
+
+    // Obtener estado actual (debe estar en fase de espera de DNI)
+    const state = await getPatientDetectionState(phoneNumber)
+    if (!state || state.phase !== 'awaiting_dni_for_disambiguation') {
+      logger.warn('Invalid state for DNI disambiguation', { phase: state?.phase })
+      return { found: false, error: 'Invalid state' }
+    }
+
+    if (!state.multiplePatients || state.multiplePatients.length === 0) {
+      logger.warn('No multiple patients in state', {})
+      return { found: false, error: 'No patients to disambiguate' }
+    }
+
+    // Buscar el paciente que coincida con el DNI
+    const matchingPatient = state.multiplePatients.find(
+      (p: any) => p.dni && p.dni.replace(/[^0-9]/g, '') === dni.replace(/[^0-9]/g, '')
+    )
+
+    if (!matchingPatient) {
+      logger.warn('No patient found with provided DNI', {})
+
+      // Incrementar intentos
+      state.attempts = (state.attempts || 0) + 1
+      if (state.attempts >= 3) {
+        // Después de 3 intentos fallidos, marcar como nuevo paciente
+        await redis.del(`${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`)
+        return { 
+          found: false, 
+          error: 'Max attempts reached. Will register as new patient.' 
+        }
+      }
+
+      await redis.setex(
+        `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`,
+        PATIENT_DETECTION_TTL,
+        JSON.stringify(state)
+      )
+
+      return { 
+        found: false, 
+        error: `DNI no encontrado. Intento ${state.attempts} de 3.` 
+      }
+    }
+
+    // Paciente encontrado con el DNI
+    logger.info('Patient identified by DNI', {
+      patientId: matchingPatient.paciente_id || matchingPatient.id,
+      patientName: matchingPatient.nombre,
+    })
+
+    // Obtener turnos próximos
+    let turnos: any[] = []
+    try {
+      const clinicAPI = new ClinicAPI(clienteId)
+      const dateRange = getDefaultDateRange()
+
+      const turnosResponse = await clinicAPI.obtenerTurnos(
+        dateRange.desde,
+        dateRange.hasta,
+        undefined,
+        matchingPatient.dni
+      )
+
+      if (turnosResponse.exito && turnosResponse.datos) {
+        turnos = Array.isArray(turnosResponse.datos)
+          ? turnosResponse.datos
+          : turnosResponse.datos.turnos || []
+
+        // Filtrar turnos cancelados
+        turnos = turnos.filter(
+          (t: any) => t.estado !== 'cancelado' && t.status !== 'cancelado'
+        )
+      }
+    } catch (e) {
+      logger.warn('Error fetching turns', {
+        error: String(e),
+        patientId: matchingPatient.paciente_id || matchingPatient.id,
+      })
+    }
+
+    // Actualizar estado a paciente existente identificado
+    const identifiedPatientState: PatientDetectionState = {
+      phase: 'awaiting_action_selection',
+      patientPhone: phoneNumber,
+      patientId: matchingPatient.paciente_id || matchingPatient.id,
+      patientName: matchingPatient.nombre,
+      patientDNI: matchingPatient.dni,
+      turnos: turnos,
+      detectedAt: Date.now(),
+      attempts: 0,
+    }
+
+    await redis.setex(
+      `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`,
+      PATIENT_DETECTION_TTL,
+      JSON.stringify(identifiedPatientState)
+    )
+
+    return {
+      found: true,
+      patientId: matchingPatient.paciente_id || matchingPatient.id,
+      patientName: matchingPatient.nombre,
+      turnos: turnos,
+      message: `Patient identified as ${matchingPatient.nombre}`,
+    }
+  } catch (error) {
+    logger.error('Error processing DNI for disambiguation', error as Error)
+    return {
+      found: false,
+      error: 'Error processing DNI',
     }
   }
 }

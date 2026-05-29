@@ -6,10 +6,13 @@ import {
   isPatientDetectionFlowActive,
   getDetectedPatientInfo,
   clearPatientDetectionFlow,
+  processDNIForDisambiguation,
+  getPatientDetectionState,
 } from './patient-flow-handler'
 import {
   buildExistingPatientGreeting,
   buildNewPatientGreeting,
+  buildMultiplePatientGreeting,
   buildSelectionConfirmation,
   buildInvalidSelectionMessage,
   buildDetectionErrorMessage,
@@ -86,6 +89,21 @@ export async function initializePatientDetection(
         message: buildNewPatientGreeting(),
         patientInfo: {
           isNewPatient: true,
+        },
+      }
+    }
+
+    // Si hay múltiples pacientes, solicitar DNI
+    if (detectionResult.multiplePatients && detectionResult.multiplePatients.length > 1) {
+      logger.info('Multiple patients detected, requesting DNI', {
+        count: detectionResult.multiplePatients.length,
+        phone: phoneNumber,
+      })
+      return {
+        handled: true,
+        message: buildMultiplePatientGreeting(detectionResult.multiplePatients),
+        patientInfo: {
+          isNewPatient: false,
         },
       }
     }
@@ -328,6 +346,105 @@ export async function processMessageWithNLU(
       shouldCallOpenAI: true,
       openAIContext: 'NLU error',
     }
+  }
+}
+
+/**
+ * Procesa DNI cuando hay múltiples pacientes
+ * Se llama cuando el usuario envía su DNI durante la fase de desambiguación
+ */
+export async function handleDNIForMultiplePatients(
+  phoneNumber: string,
+  dniMessage: string,
+  configId: string,
+  clienteId: string
+): Promise<PatientDetectionResult> {
+  const logger = createConversationLogger(phoneNumber, configId, 'dni_disambiguation')
+  logger.info('Processing DNI for multiple patients', {})
+
+  // Verificar estado
+  const state = await getPatientDetectionState(phoneNumber)
+
+  if (!state || state.phase !== 'awaiting_dni_for_disambiguation') {
+    logger.warn('Invalid state for DNI processing', { phase: state?.phase })
+    return {
+      handled: false,
+      shouldCallOpenAI: true,
+      openAIContext: 'Invalid state, route to asst_router',
+    }
+  }
+
+  // Extraer DNI del mensaje
+  const dniMatch = dniMessage.trim().replace(/[^0-9]/g, '')
+
+  if (dniMatch.length < 7 || dniMatch.length > 9) {
+    logger.warn('Invalid DNI format', { length: dniMatch.length })
+    return {
+      handled: true,
+      message:
+        `El DNI no parece válido. ` +
+        `Por favor, ingresa tu DNI sin puntos ni espacios (7 u 8 dígitos).`,
+      patientInfo: {
+        isNewPatient: false,
+      },
+    }
+  }
+
+  // Procesar DNI
+  const result = await processDNIForDisambiguation(
+    phoneNumber,
+    dniMatch,
+    configId,
+    clienteId
+  )
+
+  if (!result.found) {
+    logger.warn('DNI not found in patients list', {})
+
+    if (result.error?.includes('Max attempts')) {
+      // Después de 3 intentos fallidos, registrar como nuevo paciente
+      await clearPatientDetectionFlow(phoneNumber, configId)
+      return {
+        handled: true,
+        message: buildNewPatientGreeting(),
+        patientInfo: {
+          isNewPatient: true,
+        },
+      }
+    }
+
+    return {
+      handled: true,
+      message:
+        `El DNI ${dniMatch} no está registrado con este número de teléfono. ` +
+        `Por favor, intenta de nuevo o contacta al centro.\n\n` +
+        `${result.error || ''}`,
+      patientInfo: {
+        isNewPatient: false,
+      },
+    }
+  }
+
+  // Paciente identificado correctamente
+  logger.info('Patient identified', {
+    patientId: result.patientId,
+    patientName: result.patientName,
+  })
+
+  const greeting = buildExistingPatientGreeting(
+    result.patientName || 'Paciente',
+    result.turnos || []
+  )
+
+  return {
+    handled: true,
+    message: greeting,
+    patientInfo: {
+      isNewPatient: false,
+      patientId: result.patientId,
+      patientName: result.patientName,
+      turnos: result.turnos,
+    },
   }
 }
 
