@@ -336,3 +336,6 @@ export async function shouldUseExistingPatientFlow(
 export async function completeExistingPatientFlow(phoneNumber: string): Promise<void> {
   await clearExistingPatientFlow(phoneNumber)
 }
+
+// Re-export isExistingPatientFlowActive para que pueda ser importado desde este módulo
+export { isExistingPatientFlowActive } from './existing-patient-flow-handler'
