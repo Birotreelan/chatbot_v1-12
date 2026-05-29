@@ -73,6 +73,12 @@ const FLAG_META: Record<
     risk: "alto",
     sprint: "Sprint 9",
   },
+  directPatientDetection: {
+    label: "Detección inicial de paciente",
+    description: "Identifica al paciente por teléfono/DNI sin OpenAI antes de derivar al flujo correspondiente.",
+    risk: "alto",
+    sprint: "Sprint 9a",
+  },
 }
 
 const RISK_BADGE: Record<"bajo" | "medio" | "alto", string> = {
@@ -95,6 +101,7 @@ const FLAG_ORDER: FlagKey[] = [
   "directReagendamiento",
   "directPacienteNuevo",
   "directPacienteExistente",
+  "directPatientDetection",
 ]
 
 export function FeatureFlagsPanel() {
