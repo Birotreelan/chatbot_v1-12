@@ -105,32 +105,48 @@ export async function startPatientDetectionFlow(
     const patientData = patientResponse.datos
     let multiplePatients: any[] | null = null
     let patient: any
+    let turnosFromResponse: any[] = []
 
-    // Caso 1: Array de múltiples pacientes
-    if (Array.isArray(patientData)) {
-      multiplePatients = patientData
-      logger.info('Multiple patients found by phone', {
-        count: multiplePatients.length,
+    // Caso 1: Respuesta con warning "pacientes_multiples" (estructura real de la API)
+    if (patientData.warning === 'pacientes_multiples' && Array.isArray(patientData.pacientes)) {
+      multiplePatients = patientData.pacientes
+      logger.info('Multiple patients found by phone (pacientes_multiples)', {
+        count: patientData.total_pacientes || multiplePatients.length,
         phone: phoneNumber,
       })
     }
-    // Caso 2: Objeto con flag "multiple" y array de pacientes
+    // Caso 2: Respuesta con objeto "paciente" (paciente único - estructura real de la API)
+    else if (patientData.paciente) {
+      patient = patientData.paciente
+      // Los turnos ya vienen en la respuesta
+      turnosFromResponse = patientData.turnos_proximos || []
+      logger.info('Single patient found by phone (paciente object)', {
+        patientId: patient.Id,
+        patientName: patient.Nombres,
+        turnosCount: turnosFromResponse.length,
+      })
+    }
+    // Caso 3: Array directo de múltiples pacientes
+    else if (Array.isArray(patientData)) {
+      if (patientData.length > 1) {
+        multiplePatients = patientData
+        logger.info('Multiple patients found by phone (array)', {
+          count: multiplePatients.length,
+          phone: phoneNumber,
+        })
+      } else if (patientData.length === 1) {
+        patient = patientData[0]
+      }
+    }
+    // Caso 4: Objeto con flag "multiple" y array de pacientes
     else if (patientData.multiple && Array.isArray(patientData.pacientes)) {
       multiplePatients = patientData.pacientes
-      logger.info('Multiple patients found by phone', {
+      logger.info('Multiple patients found by phone (multiple flag)', {
         count: multiplePatients.length,
         phone: phoneNumber,
       })
     }
-    // Caso 3: Objeto con flag "multiple" y array genérico
-    else if (patientData.multiple && Array.isArray(patientData.data)) {
-      multiplePatients = patientData.data
-      logger.info('Multiple patients found by phone', {
-        count: multiplePatients.length,
-        phone: phoneNumber,
-      })
-    }
-    // Caso 4: Paciente único
+    // Caso 5: Paciente único directo (fallback)
     else {
       patient = patientData
     }
@@ -163,52 +179,56 @@ export async function startPatientDetectionFlow(
       patient = multiplePatients[0]
     }
 
-    // Paciente encontrado
-    const patientId = patient.paciente_id || patient.id
-
+    // Paciente encontrado - normalizar campos (API usa mayusculas: Id, Nrodoc, Apellido, Nombres)
+    const patientId = patient.paciente_id || patient.Id || patient.id
+    const patientName = patient.nombre || patient.Nombres || `${patient.Nombres || ''} ${patient.Apellido || ''}`.trim()
+    const patientDNI = patient.dni || patient.Nrodoc
 
     logger.info('Patient found', {
       patientId,
-      patientName: patient.nombre,
+      patientName: patientName,
     })
 
-    // Obtener turnos próximos
-    let turnos: any[] = []
-    try {
-      const dateRange = getDefaultDateRange()
+    // Usar turnos de la respuesta inicial si existen, sino buscar
+    let turnos: any[] = turnosFromResponse
+    
+    // Si no hay turnos en la respuesta, intentar buscarlos
+    if (turnos.length === 0 && patientDNI) {
+      try {
+        const dateRange = getDefaultDateRange()
 
-      // Obtener turnos del paciente
-      const turnosResponse = await clinicAPI.obtenerTurnos(
-        dateRange.desde,
-        dateRange.hasta,
-        undefined,
-        patient.dni
-      )
-
-      if (turnosResponse.exito && turnosResponse.datos) {
-        turnos = Array.isArray(turnosResponse.datos)
-          ? turnosResponse.datos
-          : turnosResponse.datos.turnos || []
-
-        // Filtrar turnos cancelados
-        turnos = turnos.filter(
-          (t: any) => t.estado !== 'cancelado' && t.status !== 'cancelado'
+        const turnosResponse = await clinicAPI.obtenerTurnos(
+          dateRange.desde,
+          dateRange.hasta,
+          undefined,
+          patientDNI
         )
+
+        if (turnosResponse.exito && turnosResponse.datos) {
+          turnos = Array.isArray(turnosResponse.datos)
+            ? turnosResponse.datos
+            : turnosResponse.datos.turnos || []
+        }
+      } catch (e) {
+        logger.warn('Error fetching turns', {
+          error: String(e),
+          patientId,
+        })
       }
-    } catch (e) {
-      logger.warn('Error fetching turns', {
-        error: String(e),
-        patientId,
-      })
     }
+
+    // Filtrar turnos cancelados
+    turnos = turnos.filter(
+      (t: any) => t.estado !== 'cancelado' && t.status !== 'cancelado' && t.Estado !== 'Cancelado'
+    )
 
     // Crear estado para paciente existente
     const existingPatientState: PatientDetectionState = {
       phase: 'awaiting_action_selection',
       patientPhone: phoneNumber,
       patientId: patientId,
-      patientName: patient.nombre,
-      patientDNI: patient.dni,
+      patientName: patientName,
+      patientDNI: patientDNI,
       turnos: turnos,
       detectedAt: Date.now(),
       attempts: 0,
@@ -222,7 +242,7 @@ export async function startPatientDetectionFlow(
 
     return {
       isNewPatient: false,
-      patientName: patient.nombre,
+      patientName: patientName,
       patientId: patientId,
       turnos: turnos,
     }
