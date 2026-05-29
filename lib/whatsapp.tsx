@@ -1244,7 +1244,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         
         if (!detectionActive) {
           // No hay flujo activo, iniciar detección
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id)
+          // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id)
           
           if (detectionResult.handled) {
             console.log(`[WHATSAPP] ✅ Detección iniciada, enviando mensaje`)

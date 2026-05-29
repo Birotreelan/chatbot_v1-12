@@ -40,16 +40,20 @@ export interface PatientDetectionResult {
 /**
  * Punto de entrada principal: Iniciar detección de paciente
  * Se llama cuando el usuario escribe SIN recordatorio previo
+ * @param phoneNumber - Número de teléfono del usuario
+ * @param configId - ID de configuración de WhatsApp (para feature flags y logging)
+ * @param clienteId - ID del cliente en el sistema de la clínica (para llamadas a la API)
  */
 export async function initializePatientDetection(
   phoneNumber: string,
-  clientId: string
+  configId: string,
+  clienteId: string
 ): Promise<PatientDetectionResult> {
-  const logger = createConversationLogger(phoneNumber, clientId, 'initial_detection_pending')
+  const logger = createConversationLogger(phoneNumber, configId, 'initial_detection_pending')
   logger.info('Initializing patient detection', {})
 
   // Verificar si el feature flag está habilitado
-  const flags = await getEffectiveFeatureFlags(clientId)
+  const flags = await getEffectiveFeatureFlags(configId)
 
   if (!flags.directPatientDetection) {
     logger.debug('Feature flag disabled, using OpenAI', {})
@@ -61,7 +65,7 @@ export async function initializePatientDetection(
   }
 
   try {
-    const detectionResult = await startPatientDetectionFlow(phoneNumber, clientId)
+    const detectionResult = await startPatientDetectionFlow(phoneNumber, configId, clienteId)
 
     if (detectionResult.error) {
       logger.warn('Detection error, fallback to OpenAI', {

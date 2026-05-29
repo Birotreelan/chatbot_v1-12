@@ -49,7 +49,8 @@ interface PatientDetectionState {
  */
 export async function startPatientDetectionFlow(
   phoneNumber: string,
-  clientId: string
+  configId: string,
+  clienteId: string
 ): Promise<{
   isNewPatient: boolean
   patientName?: string
@@ -58,7 +59,7 @@ export async function startPatientDetectionFlow(
   message?: string
   error?: string
 }> {
-  const logger = createConversationLogger(phoneNumber, clientId, 'initial_detection_pending')
+  const logger = createConversationLogger(phoneNumber, configId, 'initial_detection_pending')
   logger.info('Starting patient detection flow', { phone: phoneNumber })
 
   try {
@@ -68,8 +69,8 @@ export async function startPatientDetectionFlow(
       return { isNewPatient: true, error: 'Redis unavailable' }
     }
 
-    // Crear instancia de ClinicAPI
-    const clinicAPI = new ClinicAPI(clientId)
+    // Crear instancia de ClinicAPI con el clienteId REAL (no el configId)
+    const clinicAPI = new ClinicAPI(clienteId)
 
     // Buscar paciente por teléfono
     const patientResponse = await clinicAPI.paciente_telefono(phoneNumber)
