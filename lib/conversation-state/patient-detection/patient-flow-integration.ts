@@ -46,11 +46,13 @@ export interface PatientDetectionResult {
  * @param phoneNumber - Número de teléfono del usuario
  * @param configId - ID de configuración de WhatsApp (para feature flags y logging)
  * @param clienteId - ID del cliente en el sistema de la clínica (para llamadas a la API)
+ * @param clinicName - Nombre de la clínica/centro para personalizar mensajes
  */
 export async function initializePatientDetection(
   phoneNumber: string,
   configId: string,
-  clienteId: string
+  clienteId: string,
+  clinicName?: string
 ): Promise<PatientDetectionResult> {
   const logger = createConversationLogger(phoneNumber, configId, 'initial_detection_pending')
   logger.info('Initializing patient detection', {})
@@ -86,7 +88,7 @@ export async function initializePatientDetection(
       logger.info('New patient detected', { phone: phoneNumber })
       return {
         handled: true,
-        message: buildNewPatientGreeting(),
+        message: buildNewPatientGreeting(clinicName),
         patientInfo: {
           isNewPatient: true,
         },
@@ -101,7 +103,7 @@ export async function initializePatientDetection(
       })
       return {
         handled: true,
-        message: buildMultiplePatientGreeting(detectionResult.multiplePatients),
+        message: buildMultiplePatientGreeting(detectionResult.multiplePatients, clinicName),
         patientInfo: {
           isNewPatient: false,
         },
@@ -111,7 +113,8 @@ export async function initializePatientDetection(
     // Paciente existente: mostrar saludo con turnos
     const greeting = buildExistingPatientGreeting(
       detectionResult.patientName || 'Paciente',
-      detectionResult.turnos || []
+      detectionResult.turnos || [],
+      clinicName
     )
 
     return {
@@ -400,7 +403,8 @@ export async function handleDNIForMultiplePatients(
   phoneNumber: string,
   dniMessage: string,
   configId: string,
-  clienteId: string
+  clienteId: string,
+  clinicName?: string
 ): Promise<PatientDetectionResult> {
   const logger = createConversationLogger(phoneNumber, configId, 'dni_disambiguation')
   logger.info('Processing DNI for multiple patients', {})
@@ -449,7 +453,7 @@ export async function handleDNIForMultiplePatients(
       await clearPatientDetectionFlow(phoneNumber, configId)
       return {
         handled: true,
-        message: buildNewPatientGreeting(),
+        message: buildNewPatientGreeting(clinicName),
         patientInfo: {
           isNewPatient: true,
         },
@@ -476,7 +480,8 @@ export async function handleDNIForMultiplePatients(
 
   const greeting = buildExistingPatientGreeting(
     result.patientName || 'Paciente',
-    result.turnos || []
+    result.turnos || [],
+    clinicName
   )
 
   return {

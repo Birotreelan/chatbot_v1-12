@@ -1250,7 +1250,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         if (!detectionActive) {
           // No hay flujo activo, iniciar detección
           // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id)
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
           
           if (detectionResult.handled) {
             console.log(`[WHATSAPP] ✅ Detección iniciada, enviando mensaje`)
@@ -1309,7 +1309,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         if (detectionResult?.action === 'dni_disambiguation_pending') {
           // Paciente ingresó DNI para desambiguar múltiples pacientes
           const dniResult = await handleDNIForMultiplePatients(
-            userPhoneNumber, userMessage, config.id, config.cliente_id
+            userPhoneNumber, userMessage, config.id, config.cliente_id, config.displayName
           )
           if (dniResult.handled && dniResult.message) {
             await sendDirectResponse(detectionCtx, dniResult.message, "dni_disambiguation")
