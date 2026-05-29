@@ -51,7 +51,7 @@ export async function initializeExistingPatientFlow(
   logger.info('Initializing existing patient flow', { patientId })
 
   const flags = await getEffectiveFeatureFlags(clientId)
-  if (!flags.directExistingPatientFlow) {
+  if (!flags.directPacienteExistente) {
     logger.debug('Feature flag disabled', {})
     return {
       handled: false,
@@ -327,7 +327,7 @@ export async function shouldUseExistingPatientFlow(
   if (isActive) return true
 
   const flags = await getEffectiveFeatureFlags(clientId)
-  return flags.directExistingPatientFlow
+  return flags.directPacienteExistente
 }
 
 /**
