@@ -15,6 +15,7 @@ import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 import {
   getAppointmentContext,
+  saveAppointmentContext,
   getFlowState,
   setFlowState,
   clearFlowState,
@@ -22,6 +23,7 @@ import {
   isKeepAppointmentResponse,
   isRescheduleChoice,
   type ChatbotData,
+  type ChatbotDataTurno,
 } from "./appointment-flow-state"
 import {
   buildConfirmationMessage,
@@ -1354,8 +1356,75 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")
               }
             } else if (detectionResult.action === 'confirm_appointment' || detectionResult.action === 'cancel_appointment') {
-              // Derivar a OpenAI para confirmación/cancelación con contexto del paciente
-              console.log(`[WHATSAPP] Acción "${detectionResult.action}" → derivando a OpenAI`)
+              // Sprint 9a: Manejar confirmación/cancelación directamente con los turnos del paciente detectado
+              console.log(`[WHATSAPP] Acción "${detectionResult.action}" → iniciando flujo directo`)
+              
+              // Verificar que tenemos turnos del paciente
+              if (patientInfo?.turnos && patientInfo.turnos.length > 0) {
+                const turno = patientInfo.turnos[0] // Usar el primer turno
+                
+                // Convertir el turno del flujo de detección al formato ChatbotData
+                const chatbotData: ChatbotData = {
+                  paciente: {
+                    nombres: patientInfo.patientName || 'Paciente',
+                    apellido: '',
+                    dni: '',
+                    telefono: userPhoneNumber,
+                  },
+                  turnos: patientInfo.turnos.map((t: any): ChatbotDataTurno => ({
+                    fecha: t.Fecha || t.fecha,
+                    fecha_formateada: t.Fecha || t.fecha,
+                    hora: t.Hora || t.hora,
+                    hora_formateada: (t.Hora || t.hora || '').substring(0, 5),
+                    profesional: t.Profesional_Nombre || t.profesional || '',
+                    profesional_id: t.Profesional_Id || t.profesional_id || '',
+                    sede: t.Centro_Nombre || t.sede || '',
+                    direccion: t.Direccion || t.direccion || '',
+                    agenda_id: t.Agenda_Id || t.agenda_id || '',
+                    admite_reagendamiento: t.admite_reagendamiento || false,
+                    tipo: t.Motivo_Nombre || t.tipo || 'consulta',
+                  })),
+                  cantidad_turnos: patientInfo.turnos.length,
+                  sede_id: turno.Sede_Id || turno.sede_id || '',
+                  clinica: config.displayName || 'Clínica',
+                  tipo_mensaje: 'user_initiated',
+                }
+                
+                // Guardar el contexto para que el flujo de confirmación/cancelación lo use
+                await saveAppointmentContext(userPhoneNumber, config.id, chatbotData)
+                
+                if (detectionResult.action === 'confirm_appointment') {
+                  // Confirmar asistencia directamente
+                  console.log(`[WHATSAPP] Confirmando turno directamente`)
+                  const confirmMsg = buildConfirmationMessage(chatbotData, 0)
+                  await sendDirectResponse(detectionCtx, confirmMsg, "confirm_flow")
+                  
+                  // Registrar evento de confirmación
+                  await trackAppointmentEvent({
+                    clienteId: config.cliente_id,
+                    phoneNumber: userPhoneNumber,
+                    eventType: 'confirmed',
+                    metadata: { source: 'user_initiated_menu', turnoIndex: 0 }
+                  })
+                } else {
+                  // Cancelación: mostrar doble confirmación
+                  console.log(`[WHATSAPP] Iniciando flujo de cancelación con doble confirmación`)
+                  
+                  // Setear estado de flujo para esperar confirmación
+                  await setFlowState(userPhoneNumber, config.id, {
+                    type: 'awaiting_cancel_confirmation',
+                    createdAt: new Date().toISOString(),
+                    turnoIndex: 0
+                  })
+                  
+                  // Construir y enviar mensaje de doble confirmación
+                  const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, 0)
+                  await sendDirectResponse(detectionCtx, doubleConfirmMsg, "cancel_flow")
+                }
+              } else {
+                // Sin turnos - no debería pasar, pero por seguridad derivar a OpenAI
+                console.log(`[WHATSAPP] Acción "${detectionResult.action}" sin turnos → derivando a OpenAI`)
+              }
             }
           }
 
@@ -1833,7 +1902,7 @@ ${JSON.stringify(functionArgs, null, 2)}`
     }
 
     if (messageType === "sticker" || messageType === "reaction") {
-      console.log(`[WHATSAPP] 🔇 Tipo de mensaje ${messageType} ignorado sin respuesta`)
+      console.log(`[WHATSAPP] �� Tipo de mensaje ${messageType} ignorado sin respuesta`)
       // Update stats - message received but not processed
       await updateWhatsAppStats(config.id, { messagesReceived: 1 })
       return // Exit early, don't process or respond
