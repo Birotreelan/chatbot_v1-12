@@ -330,7 +330,8 @@ export async function getExistingPatientState(
 
   if (!stateStr) return null
 
-  return JSON.parse(stateStr) as ExistingPatientFlowState
+  if (typeof stateStr === 'object') return stateStr as ExistingPatientFlowState
+  return JSON.parse(stateStr as string) as ExistingPatientFlowState
 }
 
 /**
