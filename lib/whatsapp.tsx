@@ -58,8 +58,10 @@ import { getEffectiveFeatureFlags as getFeatureFlagsForReschedule } from "./conv
 import {
   initializePatientDetection,
   handlePatientDetectionMessage,
+  handleDNIForMultiplePatients,
   shouldUsePatientDetection,
   completePatientDetectionFlow,
+  isPatientDetectionFlowActive,
 } from "./conversation-state/patient-detection/patient-flow-integration"
 import {
   initializeExistingPatientFlow,
@@ -1238,8 +1240,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       if (detectionFlags.directPatientDetection && shouldDetect) {
         console.log(`[WHATSAPP] 🔍 Iniciando detección de paciente para ${userPhoneNumber}`)
         
-        // Primero verificar si ya hay un flujo de detección activo
-        const detectionActive = await isExistingPatientFlowActive(userPhoneNumber) || 
+        // Primero verificar si ya hay un flujo de detección activo (Sprint 9a, 9b o 9c)
+        const detectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
+                               await isExistingPatientFlowActive(userPhoneNumber) || 
                                await isNewPatientFlowActive(userPhoneNumber)
         
         if (!detectionActive) {
@@ -1266,11 +1269,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     }
 
     // ============================================================================
-    // INTERCEPTAR FLUJOS ACTIVOS: Paciente Existente o Nuevo (Sprint 9b-c)
+    // INTERCEPTAR FLUJOS ACTIVOS: Detección inicial, Paciente Existente o Nuevo (Sprint 9a-c)
     // ============================================================================
     if (message.type === "text") {
-      // Verificar si hay flujo de detección activo
-      const isDetectionActive = await isExistingPatientFlowActive(userPhoneNumber) ||
+      // Verificar si hay algún flujo activo de Sprint 9a, 9b o 9c
+      const isDetectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
+                               await isExistingPatientFlowActive(userPhoneNumber) ||
                                await isNewPatientFlowActive(userPhoneNumber)
       
       if (isDetectionActive) {
@@ -1279,33 +1283,88 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // Procesar mensaje durante detección
         let detectionResult = null
         
-        if (await isExistingPatientFlowActive(userPhoneNumber)) {
-          console.log(`[WHATSAPP] 📋 Procesando mensaje en flujo de paciente existente`)
+        if (await isPatientDetectionFlowActive(userPhoneNumber)) {
+          // Sprint 9a: Flujo de detección inicial (menú principal, desambiguación por DNI, etc.)
+          console.log(`[WHATSAPP] Procesando mensaje en flujo de detección inicial (Sprint 9a)`)
+          detectionResult = await handlePatientDetectionMessage(userPhoneNumber, userMessage, config.id)
+        } else if (await isExistingPatientFlowActive(userPhoneNumber)) {
+          console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente existente`)
           detectionResult = await handleExistingPatientMessage(userPhoneNumber, userMessage, config.id)
         } else if (await isNewPatientFlowActive(userPhoneNumber)) {
-          console.log(`[WHATSAPP] ✨ Procesando mensaje en flujo de paciente nuevo`)
+          console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente nuevo`)
           detectionResult = await handleNewPatientMessage(userPhoneNumber, userMessage, config.id)
         }
         
+        const detectionCtx: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+        }
+
+        // Acciones especiales del flujo de detección inicial (Sprint 9a) que necesitan clienteId
+        if (detectionResult?.action === 'dni_disambiguation_pending') {
+          // Paciente ingresó DNI para desambiguar múltiples pacientes
+          const dniResult = await handleDNIForMultiplePatients(
+            userPhoneNumber, userMessage, config.id, config.cliente_id
+          )
+          if (dniResult.handled && dniResult.message) {
+            await sendDirectResponse(detectionCtx, dniResult.message, "dni_disambiguation")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+        }
+
+        if (detectionResult?.action === 'new_patient_dni_pending') {
+          // Paciente nuevo ingresó DNI — derivar al flujo de paciente nuevo
+          const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
+          console.log(`[WHATSAPP] DNI de paciente nuevo recibido, derivando a flujo nuevo`)
+          const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.id)
+          if (newPatientResult?.handled && newPatientResult.message) {
+            await sendDirectResponse(detectionCtx, newPatientResult.message, "new_patient_flow")
+            await completePatientDetectionFlow(userPhoneNumber, config.id)
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+        }
+
         if (detectionResult?.handled) {
-          const detectionCtx: DirectResponseContext = {
-            phoneNumberId: value.metadata.phone_number_id,
-            accessToken: config.accessToken,
-            userPhoneNumber,
-            configId: config.id,
-            clienteId: config.cliente_id,
-          }
-          
           if (detectionResult.message) {
-            await sendDirectResponse(detectionCtx, detectionResult.message, "existing_patient_awaiting_turns")
+            await sendDirectResponse(detectionCtx, detectionResult.message, "detection_flow")
           }
-          
-          // Si el flujo completó, limpiar
+
+          // Cuando el paciente seleccionó una opción del menú inicial, derivar al flujo correcto
+          if (detectionResult.action) {
+            const patientInfo = detectionResult.patientInfo
+            await completePatientDetectionFlow(userPhoneNumber, config.id)
+
+            if (detectionResult.action === 'book_new_appointment' || detectionResult.action === 'other_inquiry') {
+              // Derivar a flujo de paciente existente para reservar turno
+              console.log(`[WHATSAPP] Acción "${detectionResult.action}" → iniciando flujo de paciente existente`)
+              const existingResult = await initializeExistingPatientFlow(
+                userPhoneNumber,
+                patientInfo?.patientId || '',
+                patientInfo?.patientName || '',
+                '',   // patientDNI — el flujo lo obtiene del estado
+                undefined,
+                config.id
+              )
+              if (existingResult?.handled && existingResult.message) {
+                await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")
+              }
+            } else if (detectionResult.action === 'confirm_appointment' || detectionResult.action === 'cancel_appointment') {
+              // Derivar a OpenAI para confirmación/cancelación con contexto del paciente
+              console.log(`[WHATSAPP] Acción "${detectionResult.action}" → derivando a OpenAI`)
+            }
+          }
+
+          // Si el flujo completó (Sprint 9b/9c), limpiar
           if (detectionResult.flowCompleted) {
             await completeExistingPatientFlow(userPhoneNumber, config.id)
             await completeNewPatientFlow(userPhoneNumber, config.id)
           }
-          
+
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
           return
         }

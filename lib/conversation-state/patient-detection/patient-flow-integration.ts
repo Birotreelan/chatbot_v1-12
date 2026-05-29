@@ -157,7 +157,61 @@ export async function handlePatientDetectionMessage(
     return { handled: false, shouldCallOpenAI: true }
   }
 
-  // Procesar mensaje
+  // Leer el estado actual para saber en qué fase estamos
+  const state = await getPatientDetectionState(phoneNumber)
+
+  if (!state) {
+    logger.warn('No state found despite flow being active', {})
+    return { handled: false, shouldCallOpenAI: true }
+  }
+
+  // --- Fase: Espera de DNI para desambiguar múltiples pacientes ---
+  if (state.phase === 'awaiting_dni_for_disambiguation') {
+    logger.info('Processing DNI for disambiguation', {})
+    // La desambiguación necesita clienteId real, pero desde aquí solo tenemos configId.
+    // Delegamos al handler que ya tiene la lógica correcta.
+    const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
+
+    if (dniOnly.length < 7 || dniOnly.length > 9) {
+      return {
+        handled: true,
+        message:
+          'El DNI ingresado no parece válido. Por favor indicame tu DNI (7 u 8 dígitos) sin puntos ni espacios.',
+      }
+    }
+
+    // Necesitamos clienteId para llamar a la API — lo pasamos como shouldCallOpenAI
+    // para que whatsapp.tsx lo procese con clienteId disponible.
+    // Por eso retornamos una señal especial para que whatsapp.tsx llame a handleDNIForMultiplePatients.
+    return {
+      handled: false,
+      shouldCallOpenAI: false,
+      action: 'dni_disambiguation_pending',
+      patientInfo: { isNewPatient: false },
+    }
+  }
+
+  // --- Fase: Espera de respuesta inicial (paciente nuevo — pide DNI) ---
+  if (state.phase === 'awaiting_initial_response') {
+    const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
+    if (dniOnly.length >= 7 && dniOnly.length <= 9) {
+      // Tiene pinta de DNI — delegar a whatsapp.tsx con clienteId
+      return {
+        handled: false,
+        shouldCallOpenAI: false,
+        action: 'new_patient_dni_pending',
+        patientInfo: { isNewPatient: true },
+      }
+    }
+    // Texto libre — va a OpenAI
+    return {
+      handled: false,
+      shouldCallOpenAI: true,
+      openAIContext: 'New patient, waiting for DNI. Extract DNI from message.',
+    }
+  }
+
+  // --- Fase: Selección de acción (menú 1-4) ---
   const processResult = await processPatientDetectionMessage(
     phoneNumber,
     userMessage,
@@ -165,24 +219,18 @@ export async function handlePatientDetectionMessage(
   )
 
   if (!processResult.handled) {
-    // Mensaje no numérico o requiere NLU
+    // Mensaje no numérico — requiere NLU
     logger.info('Message requires NLU processing', {
       nextPhase: processResult.nextPhase,
     })
 
-    // Preparar contexto para OpenAI
     const patientInfo = await getDetectedPatientInfo(phoneNumber)
-
     let openAIContext = ''
-    if (patientInfo) {
-      if (patientInfo.isNewPatient) {
-        openAIContext =
-          'User is a new patient, waiting for DNI. Extract DNI from message.'
-      } else {
-        openAIContext = `User is an existing patient (${patientInfo.patientName}). ` +
-          `They have ${patientInfo.turnos?.length || 0} turns. ` +
-          `Help with: confirming, canceling, or booking a turn.`
-      }
+    if (patientInfo && !patientInfo.isNewPatient) {
+      openAIContext =
+        `Paciente existente: ${patientInfo.patientName}. ` +
+        `Tiene ${patientInfo.turnos?.length || 0} turno(s) agendado(s). ` +
+        `Opciones disponibles: 1-Confirmar turno, 2-Cancelar turno, 3-Solicitar otro turno.`
     }
 
     return {
@@ -192,19 +240,14 @@ export async function handlePatientDetectionMessage(
     }
   }
 
-  // Mensaje procesado como selección numérica válida
+  // Selección numérica válida procesada
   logger.info('Valid selection processed', {
     action: processResult.action,
   })
 
-  const message = buildSelectionConfirmation(
-    extractNumberFromMessage(userMessage),
-    processResult.data?.patientName
-  )
-
+  // La acción se propaga a whatsapp.tsx para derivar al flujo correspondiente
   return {
     handled: true,
-    message,
     action: processResult.action,
     patientInfo: processResult.data,
   }
