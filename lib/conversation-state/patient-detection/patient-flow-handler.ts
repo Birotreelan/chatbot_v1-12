@@ -428,7 +428,10 @@ export async function processPatientDetectionMessage(
     return { handled: false }
   }
 
-  const state: PatientDetectionState = JSON.parse(stateStr)
+  // Upstash puede devolver objeto ya deserializado o string JSON
+  const state: PatientDetectionState = typeof stateStr === 'object'
+    ? stateStr as PatientDetectionState
+    : JSON.parse(stateStr as string)
 
   // Detectar selección numérica (1-4)
   const numMatch = userMessage.trim().match(/^[1-4]$/)
@@ -520,7 +523,9 @@ export async function getPatientDetectionState(
 
   if (!stateStr) return null
 
-  return JSON.parse(stateStr) as PatientDetectionState
+  // Upstash puede devolver objeto ya deserializado o string JSON
+  if (typeof stateStr === 'object') return stateStr as PatientDetectionState
+  return JSON.parse(stateStr as string) as PatientDetectionState
 }
 
 /**
