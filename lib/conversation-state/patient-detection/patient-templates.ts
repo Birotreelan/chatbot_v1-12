@@ -1,182 +1,390 @@
 /**
  * Patient Detection Flow - Message Templates
- * Mensajes personalizados para el flujo de detección inicial
+ * Mensajes personalizados para el flujo de deteccion inicial
+ * 
+ * IMPORTANTE: Estos mensajes siguen EXACTAMENTE el formato del asst_router.md
+ * - NO usar "Hola [nombre]" al inicio (excepto primer mensaje de bienvenida)
+ * - Usar "[nombre], [mensaje]" como formato estandar
+ * - Usar tuteo argentino (vos, tenes, podes)
+ * - Nombre de la clinica: parametrizable
  */
+
+// Nombre de la clinica por defecto (se puede parametrizar)
+const DEFAULT_CLINIC_NAME = 'Salud Ocular'
 
 /**
- * Formatea la información del paciente existente
- * Saludo personalizado + resumen de turnos próximos
+ * Normaliza el nombre del paciente: Primera letra mayuscula, resto minuscula
+ * Ejemplo: "JUAN CARLOS" -> "Juan Carlos"
  */
-export function buildExistingPatientGreeting(
-  patientName: string,
-  turnos: any[]
-): string {
-  const firstName = patientName.split(' ')[0]
-
-  if (!turnos || turnos.length === 0) {
-    return `¡Hola ${firstName}! 👋\n\nNo tienes turnos agendados actualmente. ¿En qué puedo ayudarte?\n\n1️⃣ Agendar un turno\n2️⃣ Consultar disponibilidad\n3️⃣ Otra consulta\n4️⃣ Más tarde`
-  }
-
-  // Obtener próximo turno
-  const proximoTurno = turnos[0]
-  const fecha = formatearFecha(proximoTurno.fecha)
-  const hora = proximoTurno.hora || proximoTurno.turno_hora || 'sin horario'
-  const profesional =
-    proximoTurno.nombre_profesional ||
-    proximoTurno.profesional_nombre ||
-    'profesional'
-
-  let message = `¡Hola ${firstName}! 👋\n\n`
-  message += `Tu próximo turno es:\n`
-  message += `📅 ${fecha} a las ${hora}\n`
-  message += `👨‍⚕️ ${profesional}\n\n`
-
-  if (turnos.length > 1) {
-    message += `Tienes ${turnos.length} turno(s) agendado(s).\n\n`
-  }
-
-  message += `¿Qué deseas hacer?\n\n`
-  message += `1️⃣ Confirmar turno\n`
-  message += `2️⃣ Cancelar turno\n`
-  message += `3️⃣ Agendar otro turno\n`
-  message += `4️⃣ Otra consulta`
-
-  return message
+function normalizeName(name: string): string {
+  if (!name) return ''
+  return name
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
 }
 
 /**
- * Saludo para paciente nuevo (no encontrado)
+ * Extrae el primer nombre del paciente
  */
-export function buildNewPatientGreeting(): string {
-  return (
-    `¡Hola! 👋\n\n` +
-    `Bienvenido a nuestro centro. Para continuar, necesito tu número de DNI para verificar tu información.\n\n` +
-    `Por favor, ingresa tu DNI (sin puntos ni espacios).\n\n` +
-    `Ejemplo: 12345678`
-  )
+function getFirstName(fullName: string): string {
+  const normalized = normalizeName(fullName)
+  return normalized.split(' ')[0] || 'Paciente'
 }
 
 /**
- * Saludo cuando hay múltiples pacientes asociados al número
- */
-export function buildMultiplePatientGreeting(
-  patients: any[]
-): string {
-  return (
-    `¡Hola! 👋\n\n` +
-    `Veo que este número está asociado a más de un paciente. ` +
-    `Para poder ayudarte mejor, por favor indicame tu DNI (7 u 8 dígitos) ` +
-    `para identificar correctamente tu información.\n\n` +
-    `Ejemplo: 12345678`
-  )
-}
-
-/**
- * Mensaje cuando se selecciona una opción válida
- */
-export function buildSelectionConfirmation(
-  selection: number,
-  patientName?: string
-): string {
-  const firstName = patientName
-    ? patientName.split(' ')[0]
-    : 'Vale'
-
-  const messages: Record<number, string> = {
-    1: `${firstName}, vamos a confirmar tu turno. Un momento...`,
-    2: `Entendido, vamos a cancelar tu turno. Un momento...`,
-    3: `Perfecto, vamos a agendar un nuevo turno. Un momento...`,
-    4: `Claro, ¿en qué más puedo ayudarte?`,
-  }
-
-  return messages[selection] || `Procesando tu solicitud...`
-}
-
-/**
- * Mensaje de error cuando la selección es inválida
- */
-export function buildInvalidSelectionMessage(): string {
-  return (
-    `No entendí tu respuesta. Por favor, selecciona una opción:\n\n` +
-    `1️⃣ Confirmar turno\n` +
-    `2️⃣ Cancelar turno\n` +
-    `3️⃣ Agendar otro turno\n` +
-    `4️⃣ Otra consulta`
-  )
-}
-
-/**
- * Mensaje cuando hay error al detectar al paciente
- */
-export function buildDetectionErrorMessage(): string {
-  return (
-    `Parece que hay un problema temporal en nuestro sistema. ` +
-    `Por favor, dame tu número de DNI para continuar.\n\n` +
-    `Ejemplo: 12345678`
-  )
-}
-
-/**
- * Mensaje de resumen de turnos cuando hay múltiples
- */
-export function buildTurnosSummary(turnos: any[]): string {
-  if (!turnos || turnos.length === 0) {
-    return `No tienes turnos agendados.`
-  }
-
-  let message = `📋 **Tus turnos agendados:**\n\n`
-
-  turnos.slice(0, 5).forEach((turno: any, idx: number) => {
-    const fecha = formatearFecha(turno.fecha)
-    const hora = turno.hora || turno.turno_hora || 'sin horario'
-    const profesional =
-      turno.nombre_profesional || turno.profesional_nombre || 'profesional'
-
-    message += `${idx + 1}. ${fecha} - ${hora}\n`
-    message += `   ${profesional}\n`
-  })
-
-  if (turnos.length > 5) {
-    message += `\n... y ${turnos.length - 5} más`
-  }
-
-  return message
-}
-
-/**
- * Helper: Formatea fecha para mensajes
+ * Formatea fecha al estilo argentino
+ * Ejemplo: "2026-05-29" -> "viernes, 29 de mayo de 2026"
  */
 function formatearFecha(fecha: string | Date): string {
   try {
     const date = typeof fecha === 'string' ? new Date(fecha) : fecha
-
     const options: Intl.DateTimeFormatOptions = {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric',
     }
-
-    return new Intl.DateTimeFormat('es-ES', options).format(date)
+    return new Intl.DateTimeFormat('es-AR', options).format(date)
   } catch {
     return fecha.toString()
   }
 }
 
 /**
- * Mensaje cuando el usuario debe esperar (procesamiento)
+ * Formatea hora: "14:30:00" -> "14:30"
+ */
+function formatearHora(hora: string): string {
+  if (!hora) return ''
+  const parts = hora.split(':')
+  return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : hora
+}
+
+/**
+ * Formatea nombre del profesional
+ * Ejemplo: "LOPEZ, Martin Alejandro" -> "Dr/Dra. Lopez, Martin Alejandro"
+ */
+function formatearProfesional(nombre: string): string {
+  if (!nombre) return 'el profesional'
+  return normalizeName(nombre)
+}
+
+/**
+ * Saludo para PACIENTE EXISTENTE CON TURNOS
+ * Formato exacto del asst_router
+ */
+export function buildExistingPatientGreeting(
+  patientName: string,
+  turnos: any[],
+  clinicName: string = DEFAULT_CLINIC_NAME
+): string {
+  const firstName = getFirstName(patientName)
+
+  // CASO: Sin turnos agendados
+  if (!turnos || turnos.length === 0) {
+    return buildExistingPatientNoTurnosGreeting(patientName, clinicName)
+  }
+
+  // CASO: Un solo turno
+  if (turnos.length === 1) {
+    return buildSingleTurnoGreeting(firstName, turnos[0], clinicName)
+  }
+
+  // CASO: Multiples turnos
+  return buildMultipleTurnosGreeting(firstName, turnos, clinicName)
+}
+
+/**
+ * Saludo para paciente existente SIN turnos agendados
+ */
+function buildExistingPatientNoTurnosGreeting(
+  patientName: string,
+  clinicName: string = DEFAULT_CLINIC_NAME
+): string {
+  const firstName = getFirstName(patientName)
+
+  return (
+    `${firstName}, ¡bienvenido de nuevo a ${clinicName}!\n\n` +
+    `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +
+    `Veo que actualmente no tenés turnos agendados. ¿En qué te puedo ayudar?\n\n` +
+    `1- Solicitar turno médico.\n\n` +
+    `Por favor, respondé con el número de opción que prefieras.`
+  )
+}
+
+/**
+ * Saludo con UN solo turno
+ */
+function buildSingleTurnoGreeting(
+  firstName: string,
+  turno: any,
+  clinicName: string
+): string {
+  const fecha = formatearFecha(turno.Fecha || turno.fecha)
+  const hora = formatearHora(turno.Hora || turno.hora || '')
+  const profesional = formatearProfesional(
+    turno.Profesional_Nombre || turno.profesional_nombre || turno.nombre_profesional || ''
+  )
+  const sede = turno.Centro_Nombre || turno.sede || clinicName
+  const estado = (turno.Estado || turno.estado || '').toLowerCase()
+  const estaConfirmado = estado === 'confirmado'
+
+  let mensaje = `${firstName}, ¡bienvenido de nuevo a ${clinicName}!\n\n`
+  mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
+
+  if (estaConfirmado) {
+    mensaje += `*Veo que ya tenés un turno médico agendado y con la asistencia confirmada para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
+    mensaje += `¿En qué te podemos ayudar?\n\n`
+    mensaje += `1- Confirmar asistencia al turno médico (ya confirmado)\n`
+    mensaje += `2- Cancelar el turno médico confirmado\n`
+    mensaje += `3- Solicitar otro turno médico\n\n`
+  } else {
+    mensaje += `*Veo que ya tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
+    mensaje += `¿En qué te podemos ayudar?\n\n`
+    mensaje += `1- Confirmar asistencia al turno médico\n`
+    mensaje += `2- Cancelar turno médico\n`
+    mensaje += `3- Solicitar otro turno médico\n\n`
+  }
+
+  mensaje += `Respondé con el número de opción que prefieras.`
+
+  return mensaje
+}
+
+/**
+ * Saludo con MULTIPLES turnos
+ */
+function buildMultipleTurnosGreeting(
+  firstName: string,
+  turnos: any[],
+  clinicName: string
+): string {
+  let mensaje = `${firstName}, ¡bienvenido de nuevo a ${clinicName}!\n\n`
+  mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
+  mensaje += `*Veo que tenés ${turnos.length} turnos médicos agendados:*\n\n`
+
+  turnos.forEach((turno, idx) => {
+    const fecha = formatearFecha(turno.Fecha || turno.fecha)
+    const hora = formatearHora(turno.Hora || turno.hora || '')
+    const profesional = formatearProfesional(
+      turno.Profesional_Nombre || turno.profesional_nombre || turno.nombre_profesional || ''
+    )
+    const estado = (turno.Estado || turno.estado || '').toLowerCase()
+    const estadoTexto = estado === 'confirmado' ? ' ✓ Confirmado' : ''
+
+    mensaje += `${idx + 1}. ${fecha} a las ${hora}\n`
+    mensaje += `   ${profesional}${estadoTexto}\n\n`
+  })
+
+  mensaje += `¿En qué te podemos ayudar?\n\n`
+  mensaje += `1- Confirmar asistencia a un turno\n`
+  mensaje += `2- Cancelar un turno\n`
+  mensaje += `3- Solicitar otro turno médico\n\n`
+  mensaje += `Respondé con el número de opción que prefieras.`
+
+  return mensaje
+}
+
+/**
+ * Saludo para paciente NO identificado (no encontrado por telefono)
+ * Se solicita DNI para continuar
+ */
+export function buildNewPatientGreeting(
+  clinicName: string = DEFAULT_CLINIC_NAME
+): string {
+  return (
+    `¡Bienvenido a ${clinicName}!\n\n` +
+    `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +
+    `Para continuar, por favor indicame tu DNI.`
+  )
+}
+
+/**
+ * Saludo cuando hay MULTIPLES pacientes asociados al numero de telefono
+ * Se solicita DNI para desambiguar
+ */
+export function buildMultiplePatientGreeting(
+  patients: any[],
+  clinicName: string = DEFAULT_CLINIC_NAME
+): string {
+  return (
+    `¡Bienvenido a ${clinicName}!\n\n` +
+    `Veo que este número está asociado a más de un paciente. ` +
+    `Para poder ayudarte mejor, por favor indicame tu DNI (7 u 8 dígitos) ` +
+    `para identificar correctamente tu información.`
+  )
+}
+
+/**
+ * Mensaje cuando el DNI fue validado y es paciente nuevo
+ */
+export function buildNewPatientDNIValidated(): string {
+  return (
+    `Gracias, ya hemos validado tu DNI. Te agendaremos como nuevo paciente.\n\n` +
+    `¿En qué te podemos ayudar?\n\n` +
+    `1- Solicitar turno médico.\n\n` +
+    `Por favor seleccioná el número de opción para continuar.`
+  )
+}
+
+/**
+ * Mensaje de confirmacion cuando se selecciona una opcion valida
+ */
+export function buildSelectionConfirmation(
+  selection: number,
+  patientName?: string
+): string {
+  const firstName = patientName ? getFirstName(patientName) : ''
+
+  const messages: Record<number, string> = {
+    1: firstName
+      ? `${firstName}, vamos a procesar tu confirmación de asistencia.`
+      : `Vamos a procesar tu confirmación de asistencia.`,
+    2: firstName
+      ? `${firstName}, vamos a procesar la cancelación de tu turno.`
+      : `Vamos a procesar la cancelación de tu turno.`,
+    3: firstName
+      ? `Perfecto ${firstName}, vamos a buscar turnos disponibles para vos.`
+      : `Perfecto, vamos a buscar turnos disponibles.`,
+  }
+
+  return messages[selection] || `Procesando tu solicitud...`
+}
+
+/**
+ * Mensaje cuando la seleccion es invalida
+ */
+export function buildInvalidSelectionMessage(): string {
+  return (
+    `No pude identificar tu selección. Por favor, respondé con el número de la opción que prefieras:\n\n` +
+    `1- Confirmar asistencia al turno\n` +
+    `2- Cancelar turno\n` +
+    `3- Solicitar otro turno médico`
+  )
+}
+
+/**
+ * Mensaje cuando hay error al detectar al paciente
+ */
+export function buildDetectionErrorMessage(
+  clinicName: string = DEFAULT_CLINIC_NAME
+): string {
+  return (
+    `Disculpá, estamos teniendo un inconveniente técnico momentáneo. ` +
+    `Por favor, indicame tu DNI para poder ayudarte.`
+  )
+}
+
+/**
+ * Mensaje cuando el DNI no es valido (formato incorrecto)
+ */
+export function buildInvalidDNIMessage(): string {
+  return (
+    `No pude identificar un DNI en tu mensaje. ` +
+    `Por favor, enviame tu número de documento (7 u 8 dígitos).`
+  )
+}
+
+/**
+ * Mensaje cuando el DNI no se encuentra en los pacientes multiples
+ */
+export function buildDNINotFoundInMultipleMessage(attempts: number): string {
+  if (attempts >= 3) {
+    return (
+      `No encontré el DNI ingresado asociado a este número de teléfono. ` +
+      `Te voy a registrar como nuevo paciente para poder ayudarte.`
+    )
+  }
+
+  return (
+    `El DNI ingresado no está asociado a este número de teléfono. ` +
+    `Por favor, verificá e ingresá nuevamente tu DNI (7 u 8 dígitos).`
+  )
+}
+
+/**
+ * Mensaje de resumen de turnos
+ */
+export function buildTurnosSummary(turnos: any[]): string {
+  if (!turnos || turnos.length === 0) {
+    return `Actualmente no tenés turnos médicos agendados.`
+  }
+
+  let mensaje = `Tus turnos agendados:\n\n`
+
+  turnos.slice(0, 5).forEach((turno, idx) => {
+    const fecha = formatearFecha(turno.Fecha || turno.fecha)
+    const hora = formatearHora(turno.Hora || turno.hora || '')
+    const profesional = formatearProfesional(
+      turno.Profesional_Nombre || turno.profesional_nombre || turno.nombre_profesional || ''
+    )
+    const estado = (turno.Estado || turno.estado || '').toLowerCase()
+    const estadoTexto = estado === 'confirmado' ? ' (Confirmado)' : ''
+
+    mensaje += `${idx + 1}. ${fecha} - ${hora}\n`
+    mensaje += `   ${profesional}${estadoTexto}\n\n`
+  })
+
+  if (turnos.length > 5) {
+    mensaje += `... y ${turnos.length - 5} turno(s) más.`
+  }
+
+  return mensaje
+}
+
+/**
+ * Mensaje de procesamiento
  */
 export function buildProcessingMessage(): string {
   return `Un momento, estoy procesando tu solicitud...`
 }
 
 /**
- * Mensaje cuando se requiere más información
+ * Mensaje de despedida (MODO A - primera vez)
  */
-export function buildMoreInfoRequestMessage(): string {
-  return (
-    `Necesito un poco más de información. ` +
-    `¿Podrías especificar qué necesitas? ` +
-    `(confirmar turno, cancelar, agendar, etc.)`
-  )
+export function buildFarewellMessage(
+  patientName?: string,
+  timeOfDay: 'morning' | 'afternoon' | 'evening' = 'afternoon'
+): string {
+  const firstName = patientName ? getFirstName(patientName) : ''
+  
+  const saludos: Record<string, string> = {
+    morning: '¡Que tengas un excelente día!',
+    afternoon: '¡Que tengas un excelente día!',
+    evening: '¡Que tengas buena noche!',
+  }
+
+  const saludo = saludos[timeOfDay]
+
+  if (firstName) {
+    return `Si necesitás algo más, no dudes en escribirme. ${saludo}`
+  }
+  return `Si necesitás algo más, no dudes en escribirme. ${saludo}`
+}
+
+/**
+ * Mensaje de despedida breve (MODO B - ya se despidio antes)
+ */
+export function buildBriefFarewellMessage(
+  patientName?: string,
+  userMessageType: 'thanks' | 'ok' = 'thanks'
+): string {
+  const firstName = patientName ? getFirstName(patientName) : ''
+
+  if (userMessageType === 'thanks') {
+    const variants = [
+      `¡A vos, ${firstName}!`,
+      `¡Un gusto, ${firstName}!`,
+      `¡Cualquier cosa por acá estoy!`,
+    ]
+    return firstName ? variants[0] : variants[2]
+  }
+
+  const variants = [
+    `¡Listo, ${firstName}!`,
+    `¡Perfecto, ${firstName}!`,
+    `¡Buenísimo!`,
+  ]
+  return firstName ? variants[0] : variants[2]
 }
