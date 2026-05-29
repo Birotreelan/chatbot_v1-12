@@ -296,9 +296,17 @@ export async function processDNIForDisambiguation(
     }
 
     // Buscar el paciente que coincida con el DNI
-    const matchingPatient = state.multiplePatients.find(
-      (p: any) => p.dni && p.dni.replace(/[^0-9]/g, '') === dni.replace(/[^0-9]/g, '')
-    )
+    // La API usa "Nrodoc" (con mayuscula) para el DNI
+    logger.info('Searching for DNI in multiplePatients', {
+      inputDNI: dni.replace(/[^0-9]/g, ''),
+      patientsCount: state.multiplePatients.length,
+      availableDNIs: state.multiplePatients.map((p: any) => (p.dni || p.Nrodoc || '').toString()),
+    })
+    const matchingPatient = state.multiplePatients.find((p: any) => {
+      const patientDNI = (p.dni || p.Nrodoc || '').toString().replace(/[^0-9]/g, '')
+      const inputDNI = dni.replace(/[^0-9]/g, '')
+      return patientDNI === inputDNI
+    })
 
     if (!matchingPatient) {
       logger.warn('No patient found with provided DNI', {})
@@ -326,10 +334,14 @@ export async function processDNIForDisambiguation(
       }
     }
 
-    // Paciente encontrado con el DNI
+    // Paciente encontrado con el DNI - normalizar campos
+    const foundPatientId = matchingPatient.paciente_id || matchingPatient.Id || matchingPatient.id
+    const foundPatientName = matchingPatient.nombre || `${matchingPatient.Nombres || ''} ${matchingPatient.Apellido || ''}`.trim()
+    const foundPatientDNI = (matchingPatient.dni || matchingPatient.Nrodoc || '').toString()
+
     logger.info('Patient identified by DNI', {
-      patientId: matchingPatient.paciente_id || matchingPatient.id,
-      patientName: matchingPatient.nombre,
+      patientId: foundPatientId,
+      patientName: foundPatientName,
     })
 
     // Obtener turnos próximos
@@ -342,7 +354,7 @@ export async function processDNIForDisambiguation(
         dateRange.desde,
         dateRange.hasta,
         undefined,
-        matchingPatient.dni
+        foundPatientDNI
       )
 
       if (turnosResponse.exito && turnosResponse.datos) {
@@ -358,7 +370,7 @@ export async function processDNIForDisambiguation(
     } catch (e) {
       logger.warn('Error fetching turns', {
         error: String(e),
-        patientId: matchingPatient.paciente_id || matchingPatient.id,
+        patientId: foundPatientId,
       })
     }
 
@@ -366,9 +378,9 @@ export async function processDNIForDisambiguation(
     const identifiedPatientState: PatientDetectionState = {
       phase: 'awaiting_action_selection',
       patientPhone: phoneNumber,
-      patientId: matchingPatient.paciente_id || matchingPatient.id,
-      patientName: matchingPatient.nombre,
-      patientDNI: matchingPatient.dni,
+      patientId: foundPatientId,
+      patientName: foundPatientName,
+      patientDNI: foundPatientDNI,
       turnos: turnos,
       detectedAt: Date.now(),
       attempts: 0,
@@ -382,10 +394,10 @@ export async function processDNIForDisambiguation(
 
     return {
       found: true,
-      patientId: matchingPatient.paciente_id || matchingPatient.id,
-      patientName: matchingPatient.nombre,
+      patientId: foundPatientId,
+      patientName: foundPatientName,
       turnos: turnos,
-      message: `Patient identified as ${matchingPatient.nombre}`,
+      message: `Patient identified as ${foundPatientName}`,
     }
   } catch (error) {
     logger.error('Error processing DNI for disambiguation', error as Error)
