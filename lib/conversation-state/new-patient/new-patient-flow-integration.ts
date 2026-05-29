@@ -214,3 +214,6 @@ export async function getNewPatientContextForOpenAI(phone: string): Promise<stri
 
   return context
 }
+
+// Re-export functions from handler so they can be imported from this module
+export { isNewPatientFlowActive, getNewPatientState, clearNewPatientFlow } from './new-patient-flow-handler'

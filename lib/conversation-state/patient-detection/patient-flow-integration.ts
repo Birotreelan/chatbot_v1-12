@@ -326,3 +326,6 @@ export async function processMessageWithNLU(
     }
   }
 }
+
+// Re-export functions from handler so they can be imported from this module
+export { isPatientDetectionFlowActive, getDetectedPatientInfo, clearPatientDetectionFlow } from './patient-flow-handler'
