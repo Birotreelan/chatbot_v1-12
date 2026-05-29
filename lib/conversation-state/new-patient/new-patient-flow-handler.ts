@@ -91,7 +91,9 @@ export async function processNewPatientMessage(
     return { handled: false }
   }
 
-  const state: NewPatientFlowState = JSON.parse(stateStr)
+  const state: NewPatientFlowState = typeof stateStr === 'object'
+    ? stateStr as NewPatientFlowState
+    : JSON.parse(stateStr as string)
 
   switch (state.phase) {
     case 'name_input':
@@ -299,7 +301,8 @@ export async function getNewPatientState(phone: string): Promise<NewPatientFlowS
   const stateStr = await redis.get(`${NEW_PATIENT_STATE_KEY}:${phone}`)
   if (!stateStr) return null
 
-  return JSON.parse(stateStr) as NewPatientFlowState
+  if (typeof stateStr === 'object') return stateStr as NewPatientFlowState
+  return JSON.parse(stateStr as string) as NewPatientFlowState
 }
 
 export async function isNewPatientFlowActive(phone: string): Promise<boolean> {
