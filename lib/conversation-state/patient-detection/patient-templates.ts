@@ -57,6 +57,21 @@ export function buildNewPatientGreeting(): string {
 }
 
 /**
+ * Saludo cuando hay múltiples pacientes asociados al número
+ */
+export function buildMultiplePatientGreeting(
+  patients: any[]
+): string {
+  return (
+    `¡Hola! 👋\n\n` +
+    `Veo que este número está asociado a más de un paciente. ` +
+    `Para poder ayudarte mejor, por favor indicame tu DNI (7 u 8 dígitos) ` +
+    `para identificar correctamente tu información.\n\n` +
+    `Ejemplo: 12345678`
+  )
+}
+
+/**
  * Mensaje cuando se selecciona una opción válida
  */
 export function buildSelectionConfirmation(
