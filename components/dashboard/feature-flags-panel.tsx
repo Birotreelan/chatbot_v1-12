@@ -79,6 +79,24 @@ const FLAG_META: Record<
     risk: "alto",
     sprint: "Sprint 9a",
   },
+  pendingFlowContextualNLU: {
+    label: "NLU contextual para flujos pendientes",
+    description: "Detecta intención cuando el usuario responde texto libre en medio de un flujo (ej: cancelación) y genera respuestas inteligentes.",
+    risk: "medio",
+    sprint: "Sprint 10",
+  },
+  postActionConsultationPassthrough: {
+    label: "Consultas post-acción a OpenAI",
+    description: "Pasa consultas del paciente a OpenAI con contexto cuando acaba de completar una acción (confirmar/cancelar/reservar).",
+    risk: "medio",
+    sprint: "Sprint 11",
+  },
+  directFarewellDetection: {
+    label: "Detección de despedida pre-flujo",
+    description: "Detecta 'gracias', 'chau', etc. ANTES de iniciar detección de paciente. Usa NLU para casos ambiguos.",
+    risk: "bajo",
+    sprint: "Sprint 12",
+  },
 }
 
 const RISK_BADGE: Record<"bajo" | "medio" | "alto", string> = {
@@ -102,6 +120,9 @@ const FLAG_ORDER: FlagKey[] = [
   "directPacienteNuevo",
   "directPacienteExistente",
   "directPatientDetection",
+  "pendingFlowContextualNLU",
+  "postActionConsultationPassthrough",
+  "directFarewellDetection",
 ]
 
 export function FeatureFlagsPanel() {
