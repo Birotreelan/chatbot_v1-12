@@ -10,6 +10,7 @@ import {
 import {
   buildNameRequestMessage,
   buildHealthInsuranceRequestMessage,
+  buildHealthInsuranceRetryMessage,
   buildVenueSelectionMessage,
   buildSearchTypeMessage,
   buildTurnsListMessage,
@@ -121,6 +122,12 @@ export async function handleNewPatientMessage(
     switch (processResult.nextPhase) {
       case 'health_insurance':
         responseMessage = buildHealthInsuranceRequestMessage(updatedState.name || 'Paciente')
+        break
+      case 'health_insurance_retry':
+        responseMessage = buildHealthInsuranceRetryMessage(
+          updatedState.name || 'Paciente',
+          updatedState.lastInvalidInput || 'tu respuesta'
+        )
         break
       case 'venue_selection':
         responseMessage = buildVenueSelectionMessage(updatedState.name || 'Paciente', [])

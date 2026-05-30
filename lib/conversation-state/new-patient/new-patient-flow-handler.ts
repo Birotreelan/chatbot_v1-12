@@ -30,6 +30,7 @@ interface NewPatientFlowState {
   selectedTurnId?: string
   selectedTurnNumber?: number
   email?: string
+  lastInvalidInput?: string // Para mostrar el input incorrecto en mensajes de retry
   createdAt: number
   attempts: number
 }
@@ -156,13 +157,26 @@ async function handleHealthInsurance(
     const result = await clinicAPI.validarObraSocial(message)
     
     if (!result.exito) {
-      return { handled: false, nextPhase: 'invalid_health_insurance' }
+      // Guardar el intento fallido en el estado pero mantener la fase actual
+      state.attempts = (state.attempts || 0) + 1
+      state.lastInvalidInput = message
+      await redis.setex(stateKey, NEW_PATIENT_TTL, JSON.stringify(state))
+      
+      logger.info('Health insurance validation failed, will retry', { 
+        input: message, 
+        attempts: state.attempts 
+      })
+      
+      // Retornar handled: true para que el flujo NO se reinicie
+      // nextPhase: 'health_insurance_retry' indica que hay que re-preguntar
+      return { handled: true, nextPhase: 'health_insurance_retry' }
     }
 
     state.healthInsurance = result.datos.nombre
     state.healthInsuranceId = result.datos.id
     state.phase = 'venue_selection'
     state.attempts = 0
+    state.lastInvalidInput = undefined
 
     await redis.setex(stateKey, NEW_PATIENT_TTL, JSON.stringify(state))
     logger.info('Health insurance validated', { healthInsurance: state.healthInsurance })
@@ -170,7 +184,12 @@ async function handleHealthInsurance(
     return { handled: true, nextPhase: 'venue_selection' }
   } catch (error) {
     logger.error('Health insurance validation error', error as Error)
-    return { handled: false, nextPhase: 'nlu_required' }
+    
+    // En caso de error de red/API, guardar estado y permitir retry
+    state.attempts = (state.attempts || 0) + 1
+    await redis.setex(stateKey, NEW_PATIENT_TTL, JSON.stringify(state))
+    
+    return { handled: true, nextPhase: 'health_insurance_retry' }
   }
 }
 
