@@ -14,8 +14,7 @@ import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
 
 // ID del asistente NLU de despedida creado en OpenAI Platform
-// Se configura después de crear el asistente
-const FAREWELL_NLU_ASSISTANT_ID = ""
+const FAREWELL_NLU_ASSISTANT_ID = "asst_68NiTYXUNHnyqyvY04VrZLk7"
 
 const FAREWELL_KEYWORDS = [
   "gracias",
