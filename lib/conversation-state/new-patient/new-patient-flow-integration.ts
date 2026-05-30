@@ -10,6 +10,7 @@ import {
 import {
   buildNameRequestMessage,
   buildHealthInsuranceRequestMessage,
+  buildHealthInsuranceRetryMessage,
   buildVenueSelectionMessage,
   buildSearchTypeMessage,
   buildTurnsListMessage,
@@ -112,39 +113,48 @@ export async function handleNewPatientMessage(
       }
     }
 
+    // Re-fetch state after processing to get updated values (e.g., name after capture)
+    const updatedState = await getNewPatientState(phone) || state
+
     // Determine message based on next phase
     let responseMessage = ''
     
     switch (processResult.nextPhase) {
       case 'health_insurance':
-        responseMessage = buildHealthInsuranceRequestMessage(state.name || 'Paciente')
+        responseMessage = buildHealthInsuranceRequestMessage(updatedState.name || 'Paciente')
+        break
+      case 'health_insurance_retry':
+        responseMessage = buildHealthInsuranceRetryMessage(
+          updatedState.name || 'Paciente',
+          updatedState.lastInvalidInput || 'tu respuesta'
+        )
         break
       case 'venue_selection':
-        responseMessage = buildVenueSelectionMessage(state.name || 'Paciente', [])
+        responseMessage = buildVenueSelectionMessage(updatedState.name || 'Paciente', [])
         break
       case 'search_type':
-        responseMessage = buildSearchTypeMessage(state.venueName || 'la sede')
+        responseMessage = buildSearchTypeMessage(updatedState.venueName || 'la sede')
         break
       case 'turn_selection':
-        responseMessage = buildTurnsListMessage(state.name || 'Paciente', [])
+        responseMessage = buildTurnsListMessage(updatedState.name || 'Paciente', [])
         break
       case 'email_confirmation':
-        responseMessage = buildEmailRequestMessage(state.name || 'Paciente')
+        responseMessage = buildEmailRequestMessage(updatedState.name || 'Paciente')
         break
       case 'final_confirmation':
         responseMessage = buildConfirmationMessage(
-          state.name || 'Paciente',
-          state.lastName || '',
-          state.dni,
-          state.phone,
-          state.email || '',
-          state.healthInsurance || '',
+          updatedState.name || 'Paciente',
+          updatedState.lastName || '',
+          updatedState.dni,
+          updatedState.phone,
+          updatedState.email || '',
+          updatedState.healthInsurance || '',
           {},
-          state.selectedTurnNumber || 0
+          updatedState.selectedTurnNumber || 0
         )
         break
       case 'completed':
-        responseMessage = buildSuccessMessage(state.name || 'Paciente')
+        responseMessage = buildSuccessMessage(updatedState.name || 'Paciente')
         break
       default:
         responseMessage = 'Continuando con tu solicitud...'
@@ -155,10 +165,10 @@ export async function handleNewPatientMessage(
       message: responseMessage,
       action: processResult.nextPhase,
       patientInfo: {
-        dni: state.dni,
-        name: state.name,
-        email: state.email,
-        healthInsurance: state.healthInsurance,
+        dni: updatedState.dni,
+        name: updatedState.name,
+        email: updatedState.email,
+        healthInsurance: updatedState.healthInsurance,
       },
     }
   } catch (error) {

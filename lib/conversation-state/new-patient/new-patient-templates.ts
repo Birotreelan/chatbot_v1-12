@@ -10,6 +10,10 @@ export function buildHealthInsuranceRequestMessage(firstName: string): string {
   return `Perfecto ${firstName}. Ahora necesito que me indiques tu obra social. Si no tenés obra social, escribí 'particular'.`
 }
 
+export function buildHealthInsuranceRetryMessage(firstName: string, invalidInput: string): string {
+  return `${firstName}, no pude encontrar la obra social "${invalidInput}". Por favor, verificá el nombre e intentá de nuevo. Podés escribir el nombre completo (ej: "OSDE 210", "Swiss Medical", "Galeno") o "particular" si no tenés obra social.`
+}
+
 export function buildVenueSelectionMessage(firstName: string, venues: any[]): string {
   let message = `Perfecto ${firstName}, la obra social está habilitada.\n\nPara continuar, necesito que selecciones la sede donde querés atenderte:\n\n`
   
