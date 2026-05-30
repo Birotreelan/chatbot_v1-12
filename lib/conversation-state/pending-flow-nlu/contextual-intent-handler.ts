@@ -17,6 +17,9 @@ import type { ChatbotData, ChatbotDataTurno } from "../../appointment-flow-state
 import type { FlowState } from "../../appointment-flow-state"
 import { buildContextualResponseTemplates, type PendingFlowType } from "./response-templates"
 
+// ID del asistente NLU contextual creado en OpenAI Platform
+const PENDING_FLOW_NLU_ASSISTANT_ID = "asst_BbKf8VdJurpmXvEK2YgkFhjn"
+
 // ============================================================================
 // TIPOS
 // ============================================================================
@@ -59,57 +62,8 @@ interface FlowContext {
 }
 
 // ============================================================================
-// PROMPT NLU CONTEXTUAL
+// PROMPT USER
 // ============================================================================
-
-function buildSystemPrompt(): string {
-  return `# Intérprete de Intención Contextual
-
-## Rol
-Eres un intérprete de lenguaje natural que analiza mensajes de usuarios en un chatbot médico.
-El usuario está en MEDIO de un flujo (ej: confirmando una cancelación) pero responde con algo diferente a las opciones dadas.
-
-Tu tarea es:
-1. Identificar la INTENCIÓN REAL del usuario
-2. Determinar si es una confirmación/rechazo implícito o un cambio de intención
-3. Responder SOLO con JSON válido
-
-## Intenciones posibles
-
-### Relacionadas al flujo actual:
-- **confirmar_accion**: Usuario acepta la acción pendiente (ej: "sí", "dale", "ok", "hacelo", "confirmo")
-- **rechazar_accion**: Usuario rechaza la acción pendiente (ej: "no", "mejor no", "dejalo", "no quiero")
-
-### Cambio de intención:
-- **solicitar_turno**: Usuario quiere agendar un NUEVO turno
-- **cancelar_turno**: Usuario menciona cancelar (puede ser confirmación implícita si el flujo es de cancelación)
-- **confirmar_turno**: Usuario quiere confirmar asistencia a un turno
-- **reagendar**: Usuario quiere cambiar fecha/hora de un turno existente
-- **consulta_info**: Pregunta sobre horarios, ubicación, profesionales, etc
-
-### Genéricas:
-- **saludo**: Saludo genérico ("hola", "buenos días")
-- **despedida**: Despedida ("gracias", "chau", "hasta luego")
-- **queja_frustracion**: Usuario frustrado, quejándose del servicio
-- **otro**: No se puede clasificar con confianza
-
-## Reglas de clasificación
-
-1. Si el mensaje contiene una solicitud de turno nuevo ("quiero turno", "necesito turno", "agendar", "reservar"), es **solicitar_turno**
-2. Si el mensaje es afirmativo corto ("sí", "dale", "ok", "bueno", "1"), es **confirmar_accion**
-3. Si el mensaje es negativo corto ("no", "mejor no", "2", "dejalo"), es **rechazar_accion**
-4. Si menciona explícitamente cancelar Y el flujo actual es de cancelación, considerar **confirmar_accion**
-5. Si pregunta algo sin decidir, es **consulta_info** o **otro**
-
-## Formato de respuesta (JSON puro)
-{
-  "intent": "solicitar_turno",
-  "confidence": 0.85,
-  "reasoning": "El usuario dice 'solicito un turno nuevo', indicando que quiere agendar otro turno"
-}
-
-Responde SOLO JSON, sin markdown, sin explicaciones adicionales.`
-}
 
 function buildUserPrompt(userMessage: string, context: FlowContext): string {
   const flowDescriptions: Record<PendingFlowType, string> = {
@@ -222,25 +176,53 @@ async function extractIntentWithOpenAI(
   logger: ReturnType<typeof createConversationLogger>
 ): Promise<{ intent: DetectedIntent; confidence: number; reasoning: string } | null> {
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 300,
-      temperature: 0.1,
-      messages: [
-        {
-          role: "system",
-          content: buildSystemPrompt(),
-        },
-        {
-          role: "user",
-          content: buildUserPrompt(userMessage, context),
-        },
-      ],
+    // Crear un thread para la conversación
+    const thread = await openai.beta.threads.create()
+    
+    logger.debug("Thread creado", { threadId: thread.id })
+
+    // Agregar el mensaje del usuario al thread
+    const userPrompt = buildUserPrompt(userMessage, context)
+    
+    await openai.beta.threads.messages.create(thread.id, {
+      role: "user",
+      content: userPrompt,
     })
 
-    const responseText = response.choices[0]?.message?.content || ""
+    // Ejecutar el asistente
+    const run = await openai.beta.threads.runs.createAndPoll(thread.id, {
+      assistant_id: PENDING_FLOW_NLU_ASSISTANT_ID,
+    })
+
+    logger.debug("Run completado", { runStatus: run.status })
+
+    if (run.status !== "completed") {
+      logger.error("Run no completado", { status: run.status })
+      return null
+    }
+
+    // Obtener los mensajes del thread
+    const messages = await openai.beta.threads.messages.list(thread.id)
     
-    logger.debug("Respuesta de OpenAI", {
+    // El último mensaje debe ser la respuesta del asistente
+    const assistantMessage = messages.data
+      .filter((msg) => msg.role === "assistant")
+      .at(0)
+
+    if (!assistantMessage) {
+      logger.error("No se encontró mensaje del asistente")
+      return null
+    }
+
+    const responseContent = assistantMessage.content[0]
+    if (responseContent.type !== "text") {
+      logger.error("Respuesta del asistente no es texto", { type: responseContent.type })
+      return null
+    }
+
+    const responseText = responseContent.text
+
+    logger.debug("Respuesta del asistente", {
       response: responseText.substring(0, 100),
     })
 
@@ -251,14 +233,14 @@ async function extractIntentWithOpenAI(
     }
 
     const parsed = JSON.parse(cleanJson)
-    
+
     return {
       intent: parsed.intent as DetectedIntent,
       confidence: parsed.confidence,
       reasoning: parsed.reasoning,
     }
   } catch (error) {
-    logger.error("Error llamando a OpenAI", error as Error)
+    logger.error("Error en extractIntentWithOpenAI", error as Error)
     return null
   }
 }
