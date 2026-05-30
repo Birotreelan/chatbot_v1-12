@@ -467,13 +467,30 @@ export async function processPatientDetectionMessage(
 
   // Mapear acciones según fase
   if (state.phase === 'awaiting_action_selection') {
-    // Paciente existente: 1-Confirmar, 2-Cancelar, 3-Nuevo turno, 4-Consulta
-    const actionMap: Record<number, string> = {
-      1: 'confirm_appointment',
-      2: 'cancel_appointment',
-      3: 'book_new_appointment',
-      4: 'other_inquiry',
+    // El mapeo depende de si el paciente tiene turnos o no
+    const hasTurnos = state.turnos && state.turnos.length > 0
+    
+    let actionMap: Record<number, string>
+    
+    if (hasTurnos) {
+      // Paciente con turnos: 1-Confirmar, 2-Cancelar, 3-Nuevo turno
+      actionMap = {
+        1: 'confirm_appointment',
+        2: 'cancel_appointment',
+        3: 'book_new_appointment',
+      }
+    } else {
+      // Paciente SIN turnos: 1-Solicitar turno (único opción mostrada)
+      actionMap = {
+        1: 'book_new_appointment',
+      }
     }
+    
+    logger.info('Action map selected', {
+      hasTurnos,
+      selection,
+      mappedAction: actionMap[selection] || 'none',
+    })
 
     const action = actionMap[selection]
 
