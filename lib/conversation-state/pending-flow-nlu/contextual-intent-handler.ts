@@ -11,13 +11,11 @@
  * Y genera respuestas que reconocen la intención pero guían al usuario a completar el flujo actual.
  */
 
-import Anthropic from "@anthropic-ai/sdk"
+import { openai } from "../../openai"
 import { createConversationLogger } from "../logger"
 import type { ChatbotData, ChatbotDataTurno } from "../../appointment-flow-state"
 import type { FlowState } from "../../appointment-flow-state"
 import { buildContextualResponseTemplates, type PendingFlowType } from "./response-templates"
-
-const client = new Anthropic()
 
 // ============================================================================
 // TIPOS
@@ -175,8 +173,8 @@ export async function handleContextualIntent(
       options: getFlowOptions(flowType),
     }
 
-    // Llamar a Claude para extraer intención
-    const intentResult = await extractIntentWithClaude(userMessage, context, logger)
+    // Llamar a OpenAI para extraer intención
+    const intentResult = await extractIntentWithOpenAI(userMessage, context, logger)
     
     if (!intentResult) {
       logger.warn("No se pudo extraer intención, abandonando flujo")
@@ -218,17 +216,21 @@ export async function handleContextualIntent(
 // HELPERS
 // ============================================================================
 
-async function extractIntentWithClaude(
+async function extractIntentWithOpenAI(
   userMessage: string,
   context: FlowContext,
   logger: ReturnType<typeof createConversationLogger>
 ): Promise<{ intent: DetectedIntent; confidence: number; reasoning: string } | null> {
   try {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       max_tokens: 300,
-      system: buildSystemPrompt(),
+      temperature: 0.1,
       messages: [
+        {
+          role: "system",
+          content: buildSystemPrompt(),
+        },
         {
           role: "user",
           content: buildUserPrompt(userMessage, context),
@@ -236,9 +238,9 @@ async function extractIntentWithClaude(
       ],
     })
 
-    const responseText = response.content[0].type === "text" ? response.content[0].text : ""
+    const responseText = response.choices[0]?.message?.content || ""
     
-    logger.debug("Respuesta de Claude", {
+    logger.debug("Respuesta de OpenAI", {
       response: responseText.substring(0, 100),
     })
 
@@ -256,7 +258,7 @@ async function extractIntentWithClaude(
       reasoning: parsed.reasoning,
     }
   } catch (error) {
-    logger.error("Error llamando a Claude", error as Error)
+    logger.error("Error llamando a OpenAI", error as Error)
     return null
   }
 }
