@@ -77,6 +77,10 @@ import {
   isNewPatientFlowActive,
   completeNewPatientFlow,
 } from "./conversation-state/new-patient/new-patient-flow-integration"
+import {
+  handleContextualIntent,
+  type ContextualIntentResult,
+} from "./conversation-state/pending-flow-nlu/contextual-intent-handler"
 // Import dynamic handleAssistantSwitch
 let handleAssistantSwitch: any = null
 
@@ -321,6 +325,54 @@ async function handlePendingFlowResponse(
       await sendDirectResponse(ctx, keepMsg, "awaiting_cancel_confirmation")
       return true
     } else {
+      // Respuesta no reconocida como 1/2 - usar NLU contextual si está habilitado
+      if (flags.pendingFlowContextualNLU) {
+        logger.info("Usando NLU contextual para respuesta no reconocida", { userMessage })
+        
+        const contextualResult = await handleContextualIntent(
+          userMessage,
+          flowState,
+          chatbotData,
+          userPhoneNumber,
+          config.id
+        )
+        
+        logger.info("Resultado NLU contextual", {
+          intent: contextualResult.detectedIntent,
+          action: contextualResult.action,
+          confidence: contextualResult.confidence,
+        })
+        
+        // Procesar según la acción determinada
+        if (contextualResult.action === "process_as_confirmation") {
+          // Tratar como si hubiera dicho "1"
+          logger.info("NLU: procesando como confirmación de cancelación")
+          // Reusar la lógica de confirmación - llamar recursivamente con "1"
+          return handlePendingFlowResponse("1", userPhoneNumber, config, phoneNumberId, value)
+        }
+        
+        if (contextualResult.action === "process_as_rejection") {
+          // Tratar como si hubiera dicho "2"
+          logger.info("NLU: procesando como rechazo de cancelación")
+          return handlePendingFlowResponse("2", userPhoneNumber, config, phoneNumberId, value)
+        }
+        
+        if (contextualResult.action === "maintain_flow_with_response" && contextualResult.contextualResponse) {
+          // Enviar respuesta contextual SIN limpiar el estado
+          logger.info("NLU: manteniendo flujo con respuesta contextual", {
+            intent: contextualResult.detectedIntent,
+          })
+          await sendDirectResponse(ctx, contextualResult.contextualResponse, "awaiting_cancel_confirmation")
+          return true  // Flujo manejado, NO pasar a OpenAI
+        }
+        
+        // action === "abandon_flow" o fallback
+        logger.info("NLU: abandonando flujo", { reason: contextualResult.reasoning })
+        await clearFlowState(userPhoneNumber, config.id)
+        return false
+      }
+      
+      // Sin NLU contextual, comportamiento original
       logger.info("Respuesta no reconocida, pasando a OpenAI", { userMessage })
       await clearFlowState(userPhoneNumber, config.id)
       return false
@@ -343,6 +395,53 @@ async function handlePendingFlowResponse(
       await sendDirectResponse(ctx, noRescheduleMsg, "awaiting_reschedule_choice")
       return true
     } else {
+      // Respuesta no reconocida como 1/2 - usar NLU contextual si está habilitado
+      if (flags.pendingFlowContextualNLU) {
+        logger.info("Usando NLU contextual para respuesta de reagendamiento no reconocida", { userMessage })
+        
+        const contextualResult = await handleContextualIntent(
+          userMessage,
+          flowState,
+          chatbotData,
+          userPhoneNumber,
+          config.id
+        )
+        
+        logger.info("Resultado NLU contextual (reagendamiento)", {
+          intent: contextualResult.detectedIntent,
+          action: contextualResult.action,
+          confidence: contextualResult.confidence,
+        })
+        
+        // Procesar según la acción determinada
+        if (contextualResult.action === "process_as_confirmation") {
+          // Tratar como si hubiera dicho "1" (reagendar)
+          logger.info("NLU: procesando como confirmación de reagendamiento")
+          return handlePendingFlowResponse("1", userPhoneNumber, config, phoneNumberId, value)
+        }
+        
+        if (contextualResult.action === "process_as_rejection") {
+          // Tratar como si hubiera dicho "2" (no reagendar)
+          logger.info("NLU: procesando como rechazo de reagendamiento")
+          return handlePendingFlowResponse("2", userPhoneNumber, config, phoneNumberId, value)
+        }
+        
+        if (contextualResult.action === "maintain_flow_with_response" && contextualResult.contextualResponse) {
+          // Enviar respuesta contextual SIN limpiar el estado
+          logger.info("NLU: manteniendo flujo de reagendamiento con respuesta contextual", {
+            intent: contextualResult.detectedIntent,
+          })
+          await sendDirectResponse(ctx, contextualResult.contextualResponse, "awaiting_reschedule_choice")
+          return true
+        }
+        
+        // action === "abandon_flow" o fallback
+        logger.info("NLU: abandonando flujo de reagendamiento", { reason: contextualResult.reasoning })
+        await clearFlowState(userPhoneNumber, config.id)
+        return false
+      }
+      
+      // Sin NLU contextual, comportamiento original
       logger.info("Respuesta de reagendamiento no reconocida, pasando a OpenAI", { userMessage })
       await clearFlowState(userPhoneNumber, config.id)
       return false
