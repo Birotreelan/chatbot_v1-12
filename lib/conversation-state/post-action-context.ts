@@ -16,7 +16,7 @@ const POST_ACTION_PREFIX = "post-action:"
 const POST_ACTION_TTL = 2 * 60 * 60 // 2 horas
 
 // ID del asistente NLU post-acción creado en OpenAI Platform
-const POST_ACTION_NLU_ASSISTANT_ID = "" // Se configurará después de crear el asistente
+const POST_ACTION_NLU_ASSISTANT_ID = "asst_6N1OEitpLbxCvtssgmcr1S34"
 
 export type PostActionType = "confirmation" | "cancellation" | "booking" | "reschedule"
 
