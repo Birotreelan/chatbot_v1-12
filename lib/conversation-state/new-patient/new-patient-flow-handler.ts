@@ -8,7 +8,7 @@ import { ClinicAPI } from '../../clinic-api'
  */
 
 const NEW_PATIENT_STATE_KEY = 'new_patient_flow'
-const NEW_PATIENT_TTL = 7200 // 2 horas
+const NEW_PATIENT_TTL = 86400 // 24 horas (antes 2h era muy corto para pacientes que tardan en responder)
 
 interface NewPatientFlowState {
   phase: 'name_input' | 'health_insurance' | 'venue_selection' | 'search_type' | 
