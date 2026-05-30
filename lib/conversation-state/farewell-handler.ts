@@ -1,5 +1,6 @@
 /**
  * Sprint 3: Despedidas Anti-Repetición
+ * Sprint 12: Detección de despedida pre-flujo con NLU para casos ambiguos
  * 
  * Detecta despedidas múltiples y evita que OpenAI repita la misma despedida
  * Implementa MODO A (cierre completo) vs MODO B (cierre breve)
@@ -10,6 +11,11 @@
 
 import { createConversationLogger } from "./logger"
 import { getRedisClient } from "@/lib/redis"
+import { openai } from "@/lib/openai"
+
+// ID del asistente NLU de despedida creado en OpenAI Platform
+// Se configura después de crear el asistente
+const FAREWELL_NLU_ASSISTANT_ID = ""
 
 const FAREWELL_KEYWORDS = [
   "gracias",
@@ -25,6 +31,17 @@ const FAREWELL_KEYWORDS = [
   "hasta luego",
   "chau",
   "adiós",
+]
+
+// Patrones de despedida PURA (sin ambigüedad)
+// Si coincide con estos, es despedida segura sin necesidad de NLU
+const PURE_FAREWELL_PATTERNS = [
+  /^\.?(?:muchas?\s+)?gracias(?:\s*[!.]+)?$/i,
+  /^(?:ok|bueno|perfecto|listo|dale)\s*,?\s*(?:muchas?\s+)?gracias[!.]*$/i,
+  /^(?:chau|adiós|adios|hasta\s+luego|nos\s+vemos|bye)(?:\s*[!.]+)?$/i,
+  /^bueno\s+(?:chau|hasta\s+luego)[!.]*$/i,
+  /^gracias\s+(?:chau|hasta\s+luego)[!.]*$/i,
+  /^(?:mil\s+)?gracias\s+por\s+todo[!.]*$/i,
 ]
 
 // Palabras que indican intención de iniciar una nueva consulta (NO despedirse)
@@ -76,6 +93,150 @@ function containsNonFarewellIndicator(message: string): boolean {
   return NON_FAREWELL_INDICATORS.some((indicator) =>
     lowerMessage.includes(indicator)
   )
+}
+
+/**
+ * Detecta si el mensaje es una despedida PURA usando patrones regex
+ * Estos son casos 100% seguros que no necesitan NLU
+ */
+export function isPureFarewellPattern(message: string): boolean {
+  const cleanMessage = message.trim()
+  return PURE_FAREWELL_PATTERNS.some((pattern) => pattern.test(cleanMessage))
+}
+
+/**
+ * Detecta si el mensaje PODRÍA ser despedida (contiene keywords)
+ * pero necesita NLU para confirmar si es despedida pura o consulta con cortesía
+ */
+export function mightBeFarewell(message: string): boolean {
+  const lowerMessage = message.toLowerCase().trim()
+  return FAREWELL_KEYWORDS.some((keyword) => lowerMessage.includes(keyword))
+}
+
+/**
+ * Tipo de intención detectada por el NLU de despedida
+ */
+export type FarewellIntent = "despedida_pura" | "consulta_con_cortesia" | "otro"
+
+/**
+ * Llama al NLU de OpenAI para clasificar si es despedida pura o consulta con cortesía
+ */
+export async function classifyFarewellWithNLU(
+  message: string,
+  userPhone: string,
+  configId: string
+): Promise<{ intent: FarewellIntent; confidence: number; reasoning: string }> {
+  const logger = createConversationLogger(userPhone, configId, "farewell-nlu")
+
+  // Si no hay asistente configurado, usar fallback por reglas
+  if (!FAREWELL_NLU_ASSISTANT_ID) {
+    logger.info("NLU no configurado, usando fallback por reglas")
+    return classifyFarewellByRules(message)
+  }
+
+  try {
+    // Crear thread para la clasificación
+    const thread = await openai.beta.threads.create()
+
+    await openai.beta.threads.messages.create(thread.id, {
+      role: "user",
+      content: `Clasifica el siguiente mensaje:\n\n"${message}"`,
+    })
+
+    const run = await openai.beta.threads.runs.createAndPoll(thread.id, {
+      assistant_id: FAREWELL_NLU_ASSISTANT_ID,
+    })
+
+    if (run.status !== "completed") {
+      logger.error("Run no completado", { status: run.status })
+      return classifyFarewellByRules(message)
+    }
+
+    const messages = await openai.beta.threads.messages.list(thread.id)
+    const assistantMessage = messages.data
+      .filter((msg) => msg.role === "assistant")
+      .at(0)
+
+    if (!assistantMessage) {
+      logger.error("No se encontró mensaje del asistente")
+      return classifyFarewellByRules(message)
+    }
+
+    const responseContent = assistantMessage.content[0]
+    if (responseContent.type !== "text") {
+      return classifyFarewellByRules(message)
+    }
+
+    let cleanJson = responseContent.text.value.trim()
+    if (cleanJson.startsWith("```")) {
+      cleanJson = cleanJson.replace(/```json?\n?/g, "").replace(/```/g, "").trim()
+    }
+
+    const parsed = JSON.parse(cleanJson)
+    
+    logger.info("NLU clasificación exitosa", {
+      intent: parsed.intent,
+      confidence: parsed.confidence,
+    })
+
+    return {
+      intent: parsed.intent as FarewellIntent,
+      confidence: parsed.confidence,
+      reasoning: parsed.reasoning,
+    }
+  } catch (error) {
+    logger.error("Error en NLU de despedida", error as Error)
+    return classifyFarewellByRules(message)
+  }
+}
+
+/**
+ * Clasificación por reglas como fallback cuando NLU no está disponible
+ */
+function classifyFarewellByRules(message: string): { intent: FarewellIntent; confidence: number; reasoning: string } {
+  const lowerMessage = message.toLowerCase().trim()
+  
+  // Si es patrón puro, es despedida segura
+  if (isPureFarewellPattern(message)) {
+    return {
+      intent: "despedida_pura",
+      confidence: 0.95,
+      reasoning: "Coincide con patrón de despedida pura",
+    }
+  }
+  
+  // Si contiene signos de interrogación, probablemente es consulta
+  if (message.includes("?")) {
+    return {
+      intent: "consulta_con_cortesia",
+      confidence: 0.85,
+      reasoning: "Contiene signo de interrogación, indica consulta",
+    }
+  }
+  
+  // Si contiene indicadores de no-despedida, es consulta
+  if (containsNonFarewellIndicator(lowerMessage)) {
+    return {
+      intent: "consulta_con_cortesia",
+      confidence: 0.80,
+      reasoning: "Contiene indicadores de consulta/solicitud",
+    }
+  }
+  
+  // Si es mensaje corto con keyword de despedida, es despedida
+  if (message.length < 30 && mightBeFarewell(message)) {
+    return {
+      intent: "despedida_pura",
+      confidence: 0.75,
+      reasoning: "Mensaje corto con keyword de despedida",
+    }
+  }
+  
+  return {
+    intent: "otro",
+    confidence: 0.50,
+    reasoning: "No se pudo clasificar con certeza",
+  }
 }
 
 /**
@@ -262,4 +423,87 @@ export const FarewellDebug = {
   getTimeBasedGreeting,
   selectFarewellTemplate,
   isFarewellMessage,
+}
+
+/**
+ * Sprint 12: Detección de despedida pre-flujo
+ * 
+ * Detecta despedidas ANTES de iniciar la detección de paciente.
+ * Usa patrones para casos simples y NLU para casos ambiguos.
+ * 
+ * @returns string con respuesta de despedida, o null si no es despedida
+ */
+export async function detectFarewellPreFlow(
+  message: string,
+  userPhone: string,
+  configId: string,
+  useNLU: boolean = true
+): Promise<{ isFarewell: boolean; response?: string }> {
+  const logger = createConversationLogger(userPhone, configId, "farewell-preflow")
+
+  // Paso 1: Verificar patrón puro (0ms latencia)
+  if (isPureFarewellPattern(message)) {
+    logger.info("Despedida pura detectada por patrón", { message })
+    
+    const response = buildSimpleFarewellResponse()
+    return { isFarewell: true, response }
+  }
+
+  // Paso 2: Si no parece despedida en absoluto, salir rápido
+  if (!mightBeFarewell(message)) {
+    return { isFarewell: false }
+  }
+
+  // Paso 3: Caso ambiguo - usar NLU si está habilitado
+  if (useNLU) {
+    logger.info("Caso ambiguo, usando NLU", { message })
+    
+    const classification = await classifyFarewellWithNLU(message, userPhone, configId)
+    
+    logger.info("Clasificación NLU", {
+      intent: classification.intent,
+      confidence: classification.confidence,
+    })
+
+    if (classification.intent === "despedida_pura" && classification.confidence >= 0.70) {
+      const response = buildSimpleFarewellResponse()
+      return { isFarewell: true, response }
+    }
+
+    // consulta_con_cortesia u otro = no es despedida, continuar flujo normal
+    return { isFarewell: false }
+  }
+
+  // Sin NLU, usar fallback por reglas
+  const fallback = classifyFarewellByRules(message)
+  if (fallback.intent === "despedida_pura" && fallback.confidence >= 0.75) {
+    const response = buildSimpleFarewellResponse()
+    return { isFarewell: true, response }
+  }
+
+  return { isFarewell: false }
+}
+
+/**
+ * Construye una respuesta de despedida simple para el flujo pre-detección
+ */
+function buildSimpleFarewellResponse(): string {
+  const greetings = [
+    "¡Gracias por comunicarte! Si necesitás algo más, estoy acá para ayudarte.",
+    "¡Un placer! Cualquier consulta, no dudes en escribirme.",
+    "¡Gracias! Estoy a tu disposición cuando lo necesites.",
+  ]
+  
+  const timeGreeting = getTimeBasedGreeting()
+  const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)]
+  
+  return `${randomGreeting} ${timeGreeting}`
+}
+
+/**
+ * Configura el ID del asistente NLU de despedida
+ */
+export function setFarewellNLUAssistantId(assistantId: string): void {
+  // @ts-ignore - Permitir asignación a constante en runtime
+  FAREWELL_NLU_ASSISTANT_ID = assistantId
 }
