@@ -583,8 +583,11 @@ export async function handleMessage(value: any) {
               fecha: turno.fecha,
               hora: turno.hora_formateada,
               profesional: turno.profesional,
+              profesional_id: turno.profesional_id,
               sede: turno.sede,
+              sede_id: flowResult.chatbotData.sede_id,
               direccion: turno.direccion,
+              agenda_id: turno.agenda_id,
             },
           }
 
@@ -1748,46 +1751,65 @@ export async function processIndividualMessage(
           const turnoData = functionArgs.turno_cancelado
           const pacienteData = functionArgs.paciente
           
-          // Buscar turnos disponibles para el mismo profesional
-          const turnosResponse = await buscarTurnosDisponibles({
-            clienteId: config.cliente_id,
-            profesionalId: turnoData.profesional_id,
-            sedeId: turnoData.sede_id,
-            rangoFechas: 14, // Próximos 14 días
+          console.log(`[WHATSAPP] Datos del turno cancelado para reagendamiento:`, {
+            profesional_id: turnoData.profesional_id,
+            sede_id: turnoData.sede_id,
+            profesional: turnoData.profesional,
+            sede: turnoData.sede,
           })
           
-          if (turnosResponse.turnos && turnosResponse.turnos.length > 0) {
-            // Iniciar flujo determinístico con los turnos encontrados
-            const result = await startRescheduleFlow(
-              {
-                paciente: pacienteData,
-                turnos: [], // No necesario para este flujo
-              } as any,
-              turnosResponse.turnos,
+          // Verificar que tenemos los IDs necesarios
+          if (!turnoData.profesional_id || !turnoData.sede_id) {
+            console.error(`[WHATSAPP] Faltan IDs para buscar turnos:`, {
+              profesional_id: turnoData.profesional_id,
+              sede_id: turnoData.sede_id,
+            })
+            // Fallback al flujo legacy de OpenAI
+            console.log(`[WHATSAPP] Fallback a OpenAI por falta de IDs`)
+          } else {
+            // Buscar turnos disponibles para el mismo profesional
+            const turnosResponse = await buscarTurnosDisponibles({
+              clienteId: config.cliente_id,
+              profesionalId: turnoData.profesional_id,
+              sedeId: turnoData.sede_id,
+              rangoFechas: 14, // Próximos 14 días
+            })
+            
+            console.log(`[WHATSAPP] Turnos disponibles encontrados:`, turnosResponse.turnos?.length || 0)
+            
+            if (turnosResponse.turnos && turnosResponse.turnos.length > 0) {
+              // Iniciar flujo determinístico con los turnos encontrados
+              const result = await startRescheduleFlow(
+                {
+                  paciente: pacienteData,
+                  turnos: [], // No necesario para este flujo
+                } as any,
+                turnosResponse.turnos,
+                phoneNumberId,
+                config.accessToken,
+                userPhoneNumber,
+                config.id,
+                config.cliente_id
+              )
+              
+              if (result.handled) {
+                console.log(`[WHATSAPP] Flujo de reagendamiento iniciado exitosamente`)
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
+              }
+            }
+            
+            // Si no hay turnos disponibles, informar al usuario
+            console.log(`[WHATSAPP] No hay turnos disponibles para reagendar`)
+            await sendWhatsAppMessage(
               phoneNumberId,
               config.accessToken,
               userPhoneNumber,
-              config.id,
-              config.cliente_id
+              `Lo siento ${pacienteData.nombres.split(" ")[0]}, no hay turnos disponibles con el mismo profesional en este momento. Te recomendamos intentar más tarde o contactar a la clínica para más opciones.`
             )
-            
-            if (result.handled) {
-              console.log(`[WHATSAPP] Flujo de reagendamiento iniciado exitosamente`)
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
-            }
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
           }
-          
-          // Si no hay turnos disponibles, informar al usuario
-          console.log(`[WHATSAPP] No hay turnos disponibles para reagendar`)
-          await sendWhatsAppMessage(
-            phoneNumberId,
-            config.accessToken,
-            userPhoneNumber,
-            `Lo siento ${pacienteData.nombres.split(" ")[0]}, no hay turnos disponibles con el mismo profesional en este momento. Te recomendamos intentar más tarde o contactar a la clínica para más opciones.`
-          )
-          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-          return
           
         } catch (error) {
           console.error(`[WHATSAPP] Error en flujo determinístico de reagendamiento:`, (error as Error).message)
