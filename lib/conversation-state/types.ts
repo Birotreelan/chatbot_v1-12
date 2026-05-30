@@ -177,6 +177,11 @@ export interface FeatureFlags {
   // Detecta intención cuando usuario responde con texto libre en medio de un flujo
   // y genera respuestas que reconocen la intención pero mantienen el flujo actual
   pendingFlowContextualNLU: boolean
+
+  // Detección de despedida pre-flujo (Sprint 12)
+  // Detecta "gracias", "chau", etc. ANTES de iniciar detección de paciente
+  // Evita mostrar menú de bienvenida cuando el usuario solo se despide
+  directFarewellDetection: boolean
 }
 
 /**
@@ -198,6 +203,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directExistingPatientFlow: false,
   directPacienteNuevo: false,
   pendingFlowContextualNLU: false,
+  directFarewellDetection: false,
 }
 
 /**

@@ -36,7 +36,7 @@ import {
 } from "./direct-response-templates"
 import { createConversationLogger } from "./conversation-state/logger"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
-import { handleFarewellIfDetected } from "./conversation-state/farewell-handler"
+import { handleFarewellIfDetected, detectFarewellPreFlow } from "./conversation-state/farewell-handler"
 import {
   handleTurnSelectionIfPending,
   buildInvalidSelectionMessage,
@@ -1326,6 +1326,41 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             userMessage = dniResult.dni
             // Continuar a OpenAI con el DNI limpio
           }
+        }
+      }
+    }
+
+    // ============================================================================
+    // SPRINT 12: INTERCEPTAR DESPEDIDAS PRE-FLUJO
+    // Detecta "gracias", "chau", etc. ANTES de iniciar detección de paciente
+    // ============================================================================
+    if (message.type === "text") {
+      const farewellFlags = await getEffectiveFeatureFlags(config.id)
+      
+      if (farewellFlags.directFarewellDetection) {
+        console.log(`[WHATSAPP] 👋 Verificando despedida pre-flujo para ${userPhoneNumber}`)
+        
+        const farewellResult = await detectFarewellPreFlow(
+          userMessage,
+          userPhoneNumber,
+          config.id,
+          true // useNLU para casos ambiguos
+        )
+        
+        if (farewellResult.isFarewell && farewellResult.response) {
+          console.log(`[WHATSAPP] ✅ Despedida detectada, respondiendo sin iniciar flujo`)
+          
+          const farewellCtx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+          
+          await sendDirectResponse(farewellCtx, farewellResult.response, "farewell_sent")
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
         }
       }
     }
