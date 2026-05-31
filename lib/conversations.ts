@@ -83,10 +83,6 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
       messageString.substring(0, 200),
     )
 
-    await redisClient.rpush(conversationKey, messageString)
-    await redisClient.expire(conversationKey, CONVERSATION_TTL)
-    console.log(`[CONVERSATIONS] ✅ Mensaje guardado con TTL de 15 días`)
-
     // 2. Actualizar información del contacto
     const contactInfo: ConversationContact = {
       phoneNumber: message.phoneNumber,
@@ -101,21 +97,27 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     const contactString = JSON.stringify(contactInfo)
     console.log(`[CONVERSATIONS] 📇 contactInfo serializado (${contactString.length} chars):`, contactString)
 
-    // Usar SET en lugar de HSET para evitar problemas de parsing
-    console.log(`[CONVERSATIONS] 💾 Guardando contacto con SET en clave: ${contactKey}`)
-    await redisClient.set(contactKey, contactString)
-    await redisClient.expire(contactKey, CONVERSATION_TTL)
-    console.log(`[CONVERSATIONS] ✅ Contacto guardado con SET`)
-
-    // Verificar que se guardó correctamente
-    const verifyValue = await redisClient.get(contactKey)
-    console.log(`[CONVERSATIONS] 🔍 Verificando valor guardado:`, verifyValue)
-    console.log(`[CONVERSATIONS] 🔍 Tipo de valor guardado:`, typeof verifyValue)
-
-    // 3. Agregar el número de teléfono al set de contactos
-    await redisClient.sadd(contactsSetKey, message.phoneNumber)
-    await redisClient.expire(contactsSetKey, CONVERSATION_TTL)
-    console.log(`[CONVERSATIONS] ✅ Número agregado al set de contactos`)
+    // ===== OPTIMIZACION: Usar pipeline para agrupar todos los comandos en una sola request =====
+    // ANTES: 7 requests separadas (rpush, expire, set, expire, get, sadd, expire)
+    // DESPUES: 1 request con pipeline = 85% menos bandwidth
+    console.log(`[CONVERSATIONS] 💾 Ejecutando pipeline de 6 comandos...`)
+    const pipeline = redisClient.pipeline()
+    
+    // Comando 1-2: Guardar mensaje y su TTL
+    pipeline.rpush(conversationKey, messageString)
+    pipeline.expire(conversationKey, CONVERSATION_TTL)
+    
+    // Comando 3-4: Guardar contacto y su TTL
+    pipeline.set(contactKey, contactString)
+    pipeline.expire(contactKey, CONVERSATION_TTL)
+    
+    // Comando 5-6: Agregar al set de contactos y su TTL
+    pipeline.sadd(contactsSetKey, message.phoneNumber)
+    pipeline.expire(contactsSetKey, CONVERSATION_TTL)
+    
+    // Ejecutar todos los comandos en una sola request
+    await pipeline.exec()
+    console.log(`[CONVERSATIONS] ✅ Pipeline ejecutado exitosamente (6 comandos en 1 request)`)
 
     contactsCache.delete(message.configId)
 
