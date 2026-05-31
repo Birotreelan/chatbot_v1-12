@@ -1222,6 +1222,13 @@ export async function buscarTurnosDisponiblesHerramienta(
 export async function validarObraSocialHerramienta(clienteId: string, busqueda: string): Promise<string> {
   try {
     console.log(`[TOOLS] 🏥 Validando obra social: "${busqueda}" para cliente: ${clienteId}`)
+    console.log(`[TOOLS-DEBUG] 🔍 clienteId details:`, {
+      clienteId,
+      clienteIdEmpty: !clienteId || clienteId.length === 0,
+      clienteIdType: typeof clienteId,
+      clienteIdLength: clienteId?.length || 0,
+      isConfigId: clienteId?.length === 17,  // configId tiene 17 chars
+    })
 
     const resultado = await validarObraSocial(clienteId, busqueda)
 
@@ -2370,6 +2377,13 @@ async function executeToolCall(
   } else {
     console.log(`[OPENAI] 🔕 Sin mensaje de espera para: ${functionName}`)
   }
+
+  console.log(`[OPENAI-TOOLS-DEBUG] 🔍 Ejecutando tool con clienteId:`, {
+    functionName,
+    clienteId,
+    clienteIdEmpty: !clienteId || clienteId.length === 0,
+    clienteIdLength: clienteId?.length || 0,
+  })
 
   const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
   console.log(`[OPENAI] ✅ ${functionName} completado`)

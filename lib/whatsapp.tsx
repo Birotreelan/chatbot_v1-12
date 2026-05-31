@@ -1737,13 +1737,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         if (await isPatientDetectionFlowActive(userPhoneNumber)) {
           // Sprint 9a: Flujo de detección inicial (menú principal, desambiguación por DNI, etc.)
           console.log(`[WHATSAPP] Procesando mensaje en flujo de detección inicial (Sprint 9a)`)
-          detectionResult = await handlePatientDetectionMessage(userPhoneNumber, userMessage, config.id)
+          detectionResult = await handlePatientDetectionMessage(userPhoneNumber, userMessage, config.cliente_id)
         } else if (await isExistingPatientFlowActive(userPhoneNumber)) {
           console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente existente`)
-          detectionResult = await handleExistingPatientMessage(userPhoneNumber, userMessage, config.id)
+          detectionResult = await handleExistingPatientMessage(userPhoneNumber, userMessage, config.cliente_id)
         } else if (await isNewPatientFlowActive(userPhoneNumber)) {
           console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente nuevo`)
-          detectionResult = await handleNewPatientMessage(userPhoneNumber, userMessage, config.id)
+          detectionResult = await handleNewPatientMessage(userPhoneNumber, userMessage, config.cliente_id)
         }
         
         const detectionCtx: DirectResponseContext = {

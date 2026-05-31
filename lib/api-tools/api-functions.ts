@@ -71,6 +71,12 @@ async function fetchProxyApi<T>(
     }
 
     console.log(`[API] 📤 ${action} → ${proxyUrl}`)
+    console.log(`[API-DEBUG] 🔍 Cliente_Id Details:`, {
+      clienteId,
+      clienteIdTrimmed: clienteId.trim(),
+      clienteIdLength: clienteId.trim().length,
+      isConfigId: clienteId.trim().length === 17,  // configId típicamente tiene 17 chars
+    })
     console.log(`[API] 📋 Params: ${JSON.stringify(params)}`)
 
     const response = await fetchWithTimeout(
