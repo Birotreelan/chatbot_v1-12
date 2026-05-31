@@ -212,6 +212,13 @@ export interface FeatureFlags {
   // Ej: "Está con neumonía" (explicación de por qué canceló)
   // Responde empáticamente sin reiniciar el flujo de bienvenida
   postActionContextHandler: boolean
+
+  // NLU Fallback Router (Sprint 18)
+  // Cuando ningún handler específico (regex puro) detecta intención con alta confianza,
+  // este handler NLU actúa como "fallback inteligente" para clasificar la intención real
+  // Resuelve false positives (ej: "Si estaré ede dia" detectado como consulta de fecha)
+  // y redirige al flujo correcto (confirmación, cancelación, queja, etc.)
+  nluFallbackRouter: boolean
 }
 
 /**
@@ -239,6 +246,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   reciprocalFarewellSilence: false,
   directInformationalQuery: false,
   postActionContextHandler: false,
+  nluFallbackRouter: false,
 }
 
 /**

@@ -41,6 +41,7 @@ import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-st
 import { detectDirectConfirmationPreFlow, buildConfirmationSuccessResponse, buildCancelConfirmationPrompt } from "./conversation-state/direct-confirmation-handler"
 import { detectInformationalQueryPreFlow } from "./conversation-state/informational-query-handler"
 import { detectPostActionContextPreFlow, savePostActionContext } from "./conversation-state/post-action-context"
+import { detectNLUFallbackPreFlow } from "./conversation-state/nlu-fallback-handler"
 import {
   handleTurnSelectionIfPending,
   buildInvalidSelectionMessage,
@@ -1675,6 +1676,66 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
   return
   }
   }
+  }
+  
+  // ============================================================================
+  // SPRINT 18: NLU FALLBACK ROUTER
+  // Cuando ningún handler específico detecta intención con alta confianza,
+  // este handler NLU actúa como "fallback inteligente" para clasificar la intención real
+  // Resuelve false positives y redirige al flujo correcto
+  // ============================================================================
+  if (message.type === "text") {
+    const nluFallbackFlags = await getEffectiveFeatureFlags(config.id)
+    
+    if (nluFallbackFlags.nluFallbackRouter) {
+      console.log(`[WHATSAPP] 🧠 Verificando NLU fallback router para ${userPhoneNumber}`)
+      
+      // Obtener el appointmentContext si existe
+      const appointmentData = await getAppointmentContext(userPhoneNumber, config.id)
+      
+      const nluFallbackResult = await detectNLUFallbackPreFlow(
+        userPhoneNumber,
+        userMessage,
+        config.id,
+        appointmentData,
+        undefined // conversationHistory - puede agregarse después si es necesario
+      )
+      
+      if (nluFallbackResult.shouldHandle && nluFallbackResult.response) {
+        console.log(`[WHATSAPP] ✅ NLU fallback detectó intención: ${nluFallbackResult.result?.intent}, respondiendo`)
+        
+        const nluCtx: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+        }
+        
+        await sendDirectResponse(nluCtx, nluFallbackResult.response, "nlu_fallback_response")
+        
+        // Si fue confirmación, actualizar stats
+        if (nluFallbackResult.result?.intent === "confirmar_asistencia" && appointmentData) {
+          await trackAppointmentEvent(config.cliente_id, userPhoneNumber, "direct_confirm", appointmentData.appointment_id)
+        }
+        
+        // Si fue cancelación, marcar como confirmación para el flujo de cancelación
+        if (nluFallbackResult.result?.intent === "cancelar_turno") {
+          // Establecer flowState para esperar la doble confirmación de cancelación
+          if (appointmentData?.appointment_id) {
+            await setFlowState(userPhoneNumber, config.id, {
+              state: "awaiting_cancel_confirmation",
+              appointmentId: String(appointmentData.appointment_id),
+              patientName: appointmentData.pacient_name || "Paciente",
+              timestamp: Date.now(),
+            })
+          }
+        }
+        
+        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+        return
+      }
+    }
   }
   
   // ============================================================================
