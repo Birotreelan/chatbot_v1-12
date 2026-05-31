@@ -122,10 +122,30 @@ otro                     → No encaja en ninguna → Continuar flujo normal
 
 ```json
 {
-  "intent": "confirmar_asistencia",
-  "confidence": 0.85,
-  "reasoning": "El paciente usa 'estaré' que indica futuro de presencia, a pesar del typo 'ede' por 'el'. Claramente confirma asistencia."
+  "intent": "queja_frustracion",
+  "confidence": 0.92,
+  "reasoning": "El paciente expresa clara frustración por no poder comunicarse durante 3 días. Menciona deseo de cambiar turno por motivos de salud.",
+  "response": "Lamento mucho los inconvenientes que tuviste para comunicarte con nosotros. Entendemos tu frustración y te pedimos disculpas."
 }
+```
+
+**Importante**: El campo `response` contiene la respuesta empática generada por GPT. El backend agregará automáticamente:
+1. Información del turno actual
+2. Menú estándar de opciones (1-Confirmar, 2-Cancelar, 3-Solicitar otro)
+
+**Respuesta final enviada al paciente:**
+```
+Lamento mucho los inconvenientes que tuviste para comunicarte con nosotros. Entendemos tu frustración y te pedimos disculpas.
+
+Veo que tenés un turno programado para el *lunes, 2 de junio de 2026* a las *14:00* con NICOLI MANUEL en SALUD OCULAR CALLAO.
+
+¿En qué te podemos ayudar?
+
+1- Confirmar asistencia al turno médico
+2- Cancelar el turno médico
+3- Solicitar otro turno médico
+
+Respondé con el número de opción que prefieras.
 ```
 
 ## Flujo de Ejecución

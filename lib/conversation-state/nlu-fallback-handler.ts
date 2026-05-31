@@ -39,8 +39,9 @@ export interface FallbackIntentResult {
   intent: FallbackIntent
   confidence: number
   reasoning: string
+  response?: string  // Respuesta empática generada por GPT
   action?: {
-    type: "direct_confirmation" | "direct_cancellation" | "escalate_to_nlu" | "continue_flow"
+    type: "direct_confirmation" | "direct_cancellation" | "show_menu" | "continue_flow"
     data?: Record<string, any>
   }
 }
@@ -106,7 +107,7 @@ export async function detectNLUFallbackPreFlow(
 
     // Si es confirmación → activar acción directa de confirmación
     if (classificationResult.intent === "confirmar_asistencia") {
-      const response = buildConfirmationResponse(appointmentContext, classificationResult)
+      const response = buildConfirmationResponse(appointmentContext)
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -114,9 +115,9 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es cancelación → preparar para cancelación directa
+    // Si es cancelación → mostrar menú para confirmar cancelación
     if (classificationResult.intent === "cancelar_turno") {
-      const response = buildCancellationResponse(appointmentContext, classificationResult)
+      const response = buildMenuResponse(appointmentContext, classificationResult.response)
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -124,9 +125,19 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es queja/frustración → responder empáticamente + ofrecer opciones
+    // Si es reagendar → mostrar menú
+    if (classificationResult.intent === "reagendar_turno") {
+      const response = buildMenuResponse(appointmentContext, classificationResult.response)
+      return {
+        shouldHandle: true,
+        result: classificationResult,
+        response,
+      }
+    }
+
+    // Si es queja/frustración → respuesta empática de GPT + menú estándar
     if (classificationResult.intent === "queja_frustracion") {
-      const response = buildComplaintResponse(appointmentContext, classificationResult)
+      const response = buildMenuResponse(appointmentContext, classificationResult.response)
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -134,9 +145,9 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es explicación contextual → responder empáticamente
+    // Si es explicación contextual → respuesta empática de GPT + menú estándar
     if (classificationResult.intent === "explicacion_contextual") {
-      const response = buildContextualResponse(appointmentContext, classificationResult)
+      const response = buildMenuResponse(appointmentContext, classificationResult.response)
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -241,49 +252,55 @@ function classifyIntentWithRegex(userMessage: string): FallbackIntentResult {
 function buildSystemPrompt(): string {
   return `Eres un clasificador de intenciones para un chatbot médico de WhatsApp.
 
-Tu tarea es analizar mensajes de pacientes y clasificar su intención en una de estas categorías:
+Tu tarea es analizar mensajes de pacientes y:
+1. Clasificar su intención en una categoría
+2. Generar una respuesta empática y contextualizada (1-2 oraciones máximo)
 
-1. **confirmar_asistencia**: El paciente confirma que asistirá al turno (a pesar de posibles cambios menor o confusión)
+**CATEGORÍAS DE INTENCIÓN:**
+
+1. **confirmar_asistencia**: El paciente confirma que asistirá al turno
    - Ejemplos: "Si estaré ese día", "Ahi voy", "Dale, allá estaré", "La confirmo"
-   - IMPORTANTE: Si el paciente dice algo como "Si estaré ede dia" (confusión/typo), pero la intención es confirmar, clasificar como confirmar_asistencia
+   - IMPORTANTE: Aunque tenga typos ("Si estaré ede dia"), si la intención es confirmar, clasificar así
 
 2. **cancelar_turno**: El paciente quiere cancelar el turno
-   - Ejemplos: "No puedo ir", "Cancelo", "Tengo que cancelar", "No voy a poder"
+   - Ejemplos: "No puedo ir", "Cancelo", "Tengo que cancelar"
 
-3. **reagendar_turno**: El paciente quiere cambiar la fecha/hora del turno
+3. **reagendar_turno**: El paciente quiere cambiar la fecha/hora
    - Ejemplos: "Quiero cambiar el turno", "Otra fecha", "En otro horario"
 
 4. **consulta_informativa**: El paciente pregunta por detalles del turno
-   - Ejemplos: "¿Donde queda?", "¿A qué hora es?", "¿Con quién es?", "¿En qué sede?"
+   - Ejemplos: "¿Donde queda?", "¿A qué hora es?", "¿Con quién es?"
 
-5. **queja_frustracion**: El paciente expresa frustración, queja o problema de comunicación
-   - Ejemplos: "Estuve 3 días tratando de llamar", "Nunca me atendieron", "Es imposible comunicarse"
-   - IMPORTANTE: Si la queja va acompañada de deseo de acción (cancelar/reagendar), detectar la acción principal pero notar la frustración
+5. **queja_frustracion**: El paciente expresa frustración o queja
+   - Ejemplos: "Estuve 3 días tratando de llamar", "Nunca me atendieron"
+   - Respuesta debe ser empática y pedir disculpas
 
-6. **explicacion_contextual**: El paciente explica un motivo sin acción clara (enfermedad, mudanza, cambio de cobertura)
-   - Ejemplos: "Está con neumonía", "Se mudó", "Cambié de obra social"
+6. **explicacion_contextual**: El paciente explica un motivo (enfermedad, mudanza, etc.)
+   - Ejemplos: "Está con neumonía", "Se mudó", "Cambié de obra social", "Por motivos de salud"
+   - Respuesta debe ser empática y comprensiva
 
 7. **saludo_despedida**: El paciente se despide o saluda
-   - Ejemplos: "Gracias", "Chau", "Igualmente", "Buen día"
+   - Ejemplos: "Gracias", "Chau", "Igualmente"
 
-8. **numero_equivocado**: El paciente señala que no es la persona buscada
-   - Ejemplos: "Se equivocaron", "No soy esa persona", "No es para mí"
+8. **numero_equivocado**: No es la persona buscada
+   - Ejemplos: "Se equivocaron", "No soy esa persona"
 
 9. **otro**: No encaja en ninguna categoría
 
-**INSTRUCCIONES IMPORTANTES:**
-- Responde SIEMPRE en formato JSON
-- Incluye: intent (string), confidence (0.0-1.0), reasoning (string explicativo)
-- Confidence mínimo para considerar válida una clasificación: 0.6
-- Si hay ambigüedad, inclina hacia "otro"
-- Ten en cuenta el contexto del turno (fecha, hora, profesional) si es relevante
-- Si el paciente es confuso pero hay intención clara (typos, confusión), mantén la intención con confidence moderado
+**INSTRUCCIONES PARA LA RESPUESTA:**
+- Para "queja_frustracion": Pedir disculpas sinceras por los inconvenientes, mostrar empatía
+- Para "explicacion_contextual": Mostrar comprensión y empatía por la situación
+- Para "cancelar_turno" o "reagendar_turno": Confirmar que entendiste su necesidad
+- La respuesta debe ser breve (1-2 oraciones), cálida y profesional
+- NO incluir el menú de opciones en la respuesta (eso se agrega después)
+- NO incluir información del turno en la respuesta (eso se agrega después)
 
-**SALIDA ESPERADA:**
+**SALIDA JSON:**
 {
   "intent": "confirmar_asistencia" | "cancelar_turno" | "reagendar_turno" | "consulta_informativa" | "queja_frustracion" | "explicacion_contextual" | "saludo_despedida" | "numero_equivocado" | "otro",
   "confidence": 0.0-1.0,
-  "reasoning": "Explicación breve de por qué clasifiactste así"
+  "reasoning": "Explicación breve",
+  "response": "Respuesta empática contextualizada (solo para queja_frustracion, explicacion_contextual, cancelar_turno, reagendar_turno)"
 }`
 }
 
@@ -321,31 +338,49 @@ Clasifica la intención y retorna JSON.`
 // RESPONSE BUILDERS
 // ============================================================================
 
-function buildConfirmationResponse(appointmentContext: any, result: FallbackIntentResult): string {
-  return `Perfecto, tu confirmación de asistencia fue recibida. Te esperamos el ${formatDate(appointmentContext.fecha)} a las ${appointmentContext.hora} con ${appointmentContext.profesional} en la sede ${appointmentContext.sede}.
+/**
+ * Menú estándar de opciones (consistente con el resto del sistema)
+ */
+const MENU_OPCIONES = `¿En qué te podemos ayudar?
 
-Si necesitás algo más, no dudes en escribirme. ¡Que disfrutes!`
+1- Confirmar asistencia al turno médico
+2- Cancelar el turno médico
+3- Solicitar otro turno médico
+
+Respondé con el número de opción que prefieras.`
+
+/**
+ * Respuesta para confirmación directa (sin menú)
+ */
+function buildConfirmationResponse(appointmentContext: any): string {
+  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
+  const hora = appointmentContext.appointment_time || appointmentContext.hora
+  const profesional = appointmentContext.profesional || appointmentContext.professional_name
+  const sede = appointmentContext.sede || appointmentContext.sede_name
+
+  return `Perfecto, tu confirmación de asistencia fue recibida. Te esperamos el *${fecha}* a las *${hora}* con ${profesional} en la sede ${sede}.
+
+Si necesitás algo más, no dudes en escribirme.`
 }
 
-function buildCancellationResponse(appointmentContext: any, result: FallbackIntentResult): string {
-  return `Entendemos. Vamos a procesar la cancelación de tu turno del ${formatDate(appointmentContext.fecha)} a las ${appointmentContext.hora}.
+/**
+ * Respuesta empática (de GPT) + menú estándar
+ * Usada para: queja_frustracion, explicacion_contextual, cancelar_turno, reagendar_turno
+ */
+function buildMenuResponse(appointmentContext: any, gptResponse?: string): string {
+  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
+  const hora = appointmentContext.appointment_time || appointmentContext.hora
+  const profesional = appointmentContext.profesional || appointmentContext.professional_name
+  const sede = appointmentContext.sede || appointmentContext.sede_name
 
-¿Deseas cancelar sin reagendar, o prefieres reservar otro turno?`
-}
+  // Usar respuesta de GPT si existe, sino usar fallback
+  const empaticResponse = gptResponse || "Entendemos tu situación."
 
-function buildComplaintResponse(appointmentContext: any, result: FallbackIntentResult): string {
-  return `Lamento mucho los inconvenientes que has tenido para comunicarte. Entendemos tu frustración.
+  return `${empaticResponse}
 
-¿Cómo podemos ayudarte ahora? ¿Deseas:
-1. Confirmar el turno del ${formatDate(appointmentContext.fecha)} a las ${appointmentContext.hora}
-2. Cancelarlo
-3. Reagendarlo para otra fecha`
-}
+Veo que tenés un turno programado para el *${fecha}* a las *${hora}* con ${profesional} en ${sede}.
 
-function buildContextualResponse(appointmentContext: any, result: FallbackIntentResult): string {
-  return `Entendemos la situación. Si necesitás algo, contáctanos sin problema. Tu turno del ${formatDate(appointmentContext.fecha)} a las ${appointmentContext.hora} queda como está.
-
-¿Hay algo más en lo que podamos ayudarte?`
+${MENU_OPCIONES}`
 }
 
 // ============================================================================
