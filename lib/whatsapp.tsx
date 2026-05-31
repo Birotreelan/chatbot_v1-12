@@ -1698,7 +1698,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         userMessage,
         config.id,
         appointmentData,
-        undefined // conversationHistory - puede agregarse después si es necesario
+        undefined, // conversationHistory - puede agregarse después si es necesario
+        config.escalationPhoneNumber // Número de derivación para consultas que no podemos responder
       )
       
       if (nluFallbackResult.shouldHandle && nluFallbackResult.response) {

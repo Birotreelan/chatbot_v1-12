@@ -47,12 +47,35 @@ Cuando **ningún handler anterior matchea con alta confianza**, este handler NLU
 confirmar_asistencia     → El paciente confirma que irá (con o sin typos/confusión)
 cancelar_turno           → El paciente quiere cancelar
 reagendar_turno          → El paciente quiere cambiar fecha/hora
-consulta_informativa     → El paciente pregunta detalles del turno
+consulta_informativa     → El paciente pregunta detalles del turno que TENEMOS (dirección, hora, profesional)
+consulta_no_disponible   → El paciente pregunta algo que NO podemos responder (costos, pagos, cobertura)
 queja_frustracion        → El paciente expresa frustración/problema comunicacional
 explicacion_contextual   → Explicación de motivo sin acción clara (enfermedad, mudanza)
 saludo_despedida         → Simple saludo/despedida
 numero_equivocado        → Señala que no es la persona buscada
 otro                     → No encaja en ninguna → Continuar flujo normal
+```
+
+### Consulta No Disponible (NUEVO)
+**Ejemplos:**
+- "¿Cuánto cuesta la consulta?"
+- "¿Se debe abonar algo al momento de la consulta?"
+- "¿Aceptan tarjeta?"
+- "¿Qué documentación tengo que llevar?"
+- "¿Tienen estacionamiento?"
+- "¿Cubren PAMI?"
+
+**Respuesta**: GPT genera respuesta empática + se agrega derivación al número de la clínica (`config.escalationPhoneNumber`)
+
+**Ejemplo de respuesta final:**
+```
+Esa información no la tengo disponible desde este canal.
+
+Para esa consulta te recomiendo comunicarte directamente con la clínica al *011-4555-1234*.
+
+Tu turno sigue confirmado para el *lunes, 2 de junio de 2026* a las *14:00* con NICOLI MANUEL en SALUD OCULAR CALLAO.
+
+Si necesitás algo más respecto al turno, no dudes en escribirme.
 ```
 
 ## Lógica de Clasificación
