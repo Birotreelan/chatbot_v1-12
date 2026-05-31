@@ -484,6 +484,17 @@ export async function handleMessage(value: any) {
 
     console.log(`[WHATSAPP] Procesando mensaje de ${userPhoneNumber}: "${userMessage}" (tipo: ${message.type})${audioId ? ` [audioId: ${audioId}]` : ""}`)
 
+    // Ignorar stickers, reacciones e iconos (mensajes de texto compuestos únicamente por emojis)
+    if (message.type === "sticker" || message.type === "reaction") {
+      console.log(`[WHATSAPP] Ignorando mensaje de tipo "${message.type}" de ${userPhoneNumber}`)
+      return
+    }
+
+    if (message.type === "text" && userMessage && /^[\p{Emoji}\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u.test(userMessage.trim()) && !/\w/.test(userMessage)) {
+      console.log(`[WHATSAPP] Ignorando mensaje de texto con solo emojis/iconos de ${userPhoneNumber}: "${userMessage}"`)
+      return
+    }
+
     // Obtener la configuración de WhatsApp
     console.log(`[WHATSAPP] Buscando configuración para phone_number_id: ${value.metadata.phone_number_id}`)
     const config = await getWhatsAppConfigByPhoneId(value.metadata.phone_number_id)
