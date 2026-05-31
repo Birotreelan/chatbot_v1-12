@@ -12,6 +12,7 @@
 import { createConversationLogger } from "./logger"
 import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
+import { getArgentinaHour } from "@/lib/utils/date-utils"
 
 // ID del asistente NLU de despedida creado en OpenAI Platform
 const FAREWELL_NLU_ASSISTANT_ID = "asst_68NiTYXUNHnyqyvY04VrZLk7"
@@ -335,10 +336,10 @@ function selectFarewellTemplate(mode: "A" | "B"): string {
 }
 
 /**
- * Obtiene el saludo de despedida según la hora del día
+ * Obtiene el saludo de despedida según la hora del día en Argentina
  */
 function getTimeBasedGreeting(): string {
-  const hour = new Date().getHours()
+  const hour = getArgentinaHour()
   
   if (hour >= 5 && hour < 12) {
     return "¡Que tengas un excelente día!"
