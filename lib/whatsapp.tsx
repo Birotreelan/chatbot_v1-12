@@ -1857,24 +1857,41 @@ export async function processIndividualMessage(
             // Fallback al flujo legacy de OpenAI
             console.log(`[WHATSAPP] Fallback a OpenAI por falta de IDs`)
           } else {
+            // Calcular rango de fechas (próximos 14 días)
+            const today = new Date()
+            const futureDate = new Date(today)
+            futureDate.setDate(today.getDate() + 14)
+            const formatDate = (date: Date) => date.toISOString().split("T")[0]
+            const rangoFechas = `${formatDate(today)} a ${formatDate(futureDate)}`
+            
+            console.log(`[WHATSAPP] Buscando turnos con rango: ${rangoFechas}`)
+            
             // Buscar turnos disponibles para el mismo profesional
-            const turnosResponse = await buscarTurnosDisponibles({
-              clienteId: config.cliente_id,
-              profesionalId: turnoData.profesional_id,
-              sedeId: turnoData.sede_id,
-              rangoFechas: 14, // Próximos 14 días
-            })
+            // Firma: buscarTurnosDisponibles(rangoFechas, profesional, especialidad, profesionalId, clienteId, sedeId, ...)
+            const turnosResponse = await buscarTurnosDisponibles(
+              rangoFechas,           // rangoFechas (string "YYYY-MM-DD a YYYY-MM-DD")
+              undefined,             // profesional (nombre, no necesario si tenemos ID)
+              undefined,             // especialidad
+              turnoData.profesional_id,  // profesionalId
+              config.cliente_id,     // clienteId
+              turnoData.sede_id,     // sedeId
+            )
             
-            console.log(`[WHATSAPP] Turnos disponibles encontrados:`, turnosResponse.turnos?.length || 0)
+            console.log(`[WHATSAPP] Turnos disponibles encontrados:`, turnosResponse.datos?.length || 0)
             
-            if (turnosResponse.turnos && turnosResponse.turnos.length > 0) {
+            // Extraer turnos del response (puede venir en datos.turnos_disponibles o datos directamente)
+            const turnosDisponibles = turnosResponse.exito 
+              ? (turnosResponse.datos?.turnos_disponibles || turnosResponse.datos || [])
+              : []
+            
+            if (Array.isArray(turnosDisponibles) && turnosDisponibles.length > 0) {
               // Iniciar flujo determinístico con los turnos encontrados
               const result = await startRescheduleFlow(
                 {
                   paciente: pacienteData,
                   turnos: [], // No necesario para este flujo
                 } as any,
-                turnosResponse.turnos,
+                turnosDisponibles,
                 phoneNumberId,
                 config.accessToken,
                 userPhoneNumber,
