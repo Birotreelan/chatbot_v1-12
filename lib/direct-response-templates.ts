@@ -6,6 +6,7 @@
  */
 
 import type { ChatbotData, ChatbotDataTurno } from "./appointment-flow-state"
+import { getTimeBasedGreeting } from "./utils/date-utils"
 
 // ============================================================================
 // HELPERS DE FORMATO
@@ -108,7 +109,7 @@ export function buildConfirmationMessage(
   
   return `${nombre}, tu confirmación de asistencia fue recibida correctamente. Te esperamos el ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede} (${direccion}).
 
-Si necesitás algo más, no dudes en escribirme. ¡Que tengas un excelente día!`
+Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}`
 }
 
 /**
@@ -219,7 +220,7 @@ export function buildNoRescheduleMessage(chatbotData: ChatbotData): string {
   
   return `Entendido, ${nombre}. Si en el futuro necesitás agendar un nuevo turno, no dudes en escribirme.
 
-¡Que tengas un excelente día!`
+${getTimeBasedGreeting()}`
 }
 
 /**

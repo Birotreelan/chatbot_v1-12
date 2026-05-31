@@ -7,6 +7,7 @@
 
 import type { ChatbotData } from "../appointment-flow-state"
 import type { TurnoDisponible, RescheduleFlowState } from "./reschedule-flow-handler"
+import { getTimeBasedGreeting } from "../utils/date-utils"
 
 // ============================================================================
 // HELPERS DE FORMATO (reutilizados de direct-response-templates.ts)
@@ -155,7 +156,7 @@ export function buildRescheduleAbandonMessage(
   const nombre = formatPatientName(state.paciente.nombres)
   return `Entendido, ${nombre}. Si cambias de idea y querés reagendar en el futuro, no dudes en escribirme.
 
-¡Que tengas un excelente día!`
+${getTimeBasedGreeting()}`
 }
 
 /**
