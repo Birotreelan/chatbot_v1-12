@@ -20,13 +20,27 @@ export function buildInvalidEmailMessage(attempt: number): string {
 }
 
 export function buildSedeSelectionMessage(sedes: any[]): string {
-  let message = `Selecciona la sede donde quieres tu turno:\n\n`
+  let message = `Para continuar, necesito que selecciones la sede donde queres atenderte:\n\n`
 
   sedes.forEach((sede, index) => {
-    message += `${index + 1}. ${sede.nombre}\n`
+    // Usar nombre completo y agregar direccion si esta disponible
+    const nombre = sede.nombre || sede.Nombre_Completo || 'Sede sin nombre'
+    const domicilio = sede.domicilio || sede.Domicilio || ''
+    const localidad = sede.localidad || sede.Localidad || ''
+    const provincia = sede.provincia || sede.Provincia || ''
+    
+    let sedeInfo = `${index + 1}. ${nombre}`
+    
+    // Agregar ubicacion si esta disponible
+    const ubicacionParts = [domicilio, localidad, provincia].filter(Boolean)
+    if (ubicacionParts.length > 0) {
+      sedeInfo += `, ubicada en ${ubicacionParts.join(', ')}`
+    }
+    
+    message += `${sedeInfo}\n`
   })
 
-  message += `\nResponde con el número de tu opción:`
+  message += `\nResponde con el numero de tu opcion:`
   return message
 }
 

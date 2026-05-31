@@ -26,6 +26,7 @@ import {
   buildTooManyAttemptsMessage,
 } from './existing-patient-templates'
 import { validateEmail } from './existing-patient-validators'
+import { obtenerTodasLasSedes } from '../../api-tools/api-functions'
 
 export interface ExistingPatientResult {
   handled: boolean
@@ -38,6 +39,7 @@ export interface ExistingPatientResult {
 
 /**
  * Inicia el flujo de paciente existente
+ * FLUJO CORRECTO: Sedes primero, email DESPUES de seleccionar turno
  */
 export async function initializeExistingPatientFlow(
   phoneNumber: string,
@@ -70,11 +72,60 @@ export async function initializeExistingPatientFlow(
       phoneNumber
     )
 
-    if (result.nextPhase === 'awaiting_email') {
-      return {
-        handled: true,
-        message: buildEmailRequestMessage(),
-        nextPhase: 'awaiting_email',
+    // El flujo ahora siempre empieza en awaiting_sede
+    // Debemos obtener las sedes de la API y mostrarlas junto con el mensaje de bienvenida
+    if (result.nextPhase === 'awaiting_sede') {
+      try {
+        const sedesResult = await obtenerTodasLasSedes(clientId)
+        
+        if (sedesResult.success && sedesResult.sedes && sedesResult.sedes.length > 0) {
+          // Mapear sedes al formato esperado por el template
+          const sedesFormateadas = sedesResult.sedes.map((sede) => ({
+            id: sede.Id,
+            nombre: sede.Nombre_Completo,
+            domicilio: sede.Domicilio,
+            localidad: sede.Localidad,
+            provincia: sede.Provincia,
+          }))
+          
+          // Guardar las opciones de sedes en el estado para referencia posterior
+          const redis = await import('@/lib/redis').then((m) => m.getRedisClient())
+          if (redis) {
+            const stateKey = `existing_patient_flow:${phoneNumber}`
+            const stateStr = await redis.get(stateKey)
+            if (stateStr) {
+              const state = typeof stateStr === 'object' ? stateStr : JSON.parse(stateStr as string)
+              state.sedesOpciones = sedesFormateadas
+              await redis.setex(stateKey, 7200, JSON.stringify(state))
+            }
+          }
+          
+          logger.info('Sedes obtenidas desde API para inicializacion', { total: sedesFormateadas.length })
+          
+          // Construir mensaje de bienvenida + sedes
+          const welcomeMessage = buildWelcomeMessage(patientName)
+          const sedesMessage = buildSedeSelectionMessage(sedesFormateadas)
+          
+          return {
+            handled: true,
+            message: `${welcomeMessage}\n\n${sedesMessage}`,
+            nextPhase: 'awaiting_sede',
+          }
+        } else {
+          logger.warn('No se pudieron obtener sedes desde la API en inicializacion', { error: sedesResult.error })
+          return {
+            handled: true,
+            message: `${buildWelcomeMessage(patientName)}\n\nNo pude obtener las sedes disponibles en este momento. Por favor, comunicate directamente con la clinica.`,
+            nextPhase: 'error',
+          }
+        }
+      } catch (error) {
+        logger.error('Error obteniendo sedes en inicializacion', error as Error)
+        return {
+          handled: true,
+          message: `${buildWelcomeMessage(patientName)}\n\nOcurrio un error al obtener las sedes. Por favor, intenta nuevamente mas tarde.`,
+          nextPhase: 'error',
+        }
       }
     }
 
@@ -180,14 +231,52 @@ async function handleEmailInput(
 
   logger.info('Email validated', {})
 
-  return {
-    handled: true,
-    message: buildSedeSelectionMessage([
-      { nombre: 'Centro Principal' },
-      { nombre: 'Sucursal Zona Norte' },
-      { nombre: 'Sucursal Zona Sur' },
-    ]),
-    nextPhase: 'awaiting_sede',
+  // Obtener sedes reales desde la API
+  try {
+    const sedesResult = await obtenerTodasLasSedes(clientId)
+    
+    if (sedesResult.success && sedesResult.sedes && sedesResult.sedes.length > 0) {
+      // Mapear sedes al formato esperado por el template
+      const sedesFormateadas = sedesResult.sedes.map((sede) => ({
+        id: sede.Id,
+        nombre: sede.Nombre_Completo,
+        domicilio: sede.Domicilio,
+        localidad: sede.Localidad,
+        provincia: sede.Provincia,
+      }))
+      
+      // Guardar las opciones de sedes en el estado para referencia posterior
+      state.sedesOpciones = sedesFormateadas
+      if (redis) {
+        await redis.setex(
+          `existing_patient_flow:${phoneNumber}`,
+          7200,
+          JSON.stringify(state)
+        )
+      }
+      
+      logger.info('Sedes obtenidas desde API', { total: sedesFormateadas.length })
+      
+      return {
+        handled: true,
+        message: buildSedeSelectionMessage(sedesFormateadas),
+        nextPhase: 'awaiting_sede',
+      }
+    } else {
+      logger.warn('No se pudieron obtener sedes desde la API', { error: sedesResult.error })
+      return {
+        handled: true,
+        message: 'No pude obtener las sedes disponibles en este momento. Por favor, comunicate directamente con la clinica.',
+        nextPhase: 'error',
+      }
+    }
+  } catch (error) {
+    logger.error('Error obteniendo sedes', error as Error)
+    return {
+      handled: true,
+      message: 'Ocurrio un error al obtener las sedes. Por favor, intenta nuevamente mas tarde.',
+      nextPhase: 'error',
+    }
   }
 }
 

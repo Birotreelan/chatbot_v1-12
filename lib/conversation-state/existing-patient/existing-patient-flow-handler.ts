@@ -41,6 +41,15 @@ export interface ExistingPatientFlowState {
 
 /**
  * Inicia el flujo de paciente existente
+ * FLUJO CORRECTO segun documentacion:
+ * 1. Verificar Obra Social (si no esta disponible, pedirla)
+ * 2. Seleccion de Sede
+ * 3. Opciones de Busqueda
+ * 4. Busqueda de turnos
+ * 5. Seleccion de turno
+ * 6. Email (VERIFICAR si existe, SOLICITAR si falta) - DESPUES de seleccionar turno
+ * 7. Confirmacion
+ * 8. Reserva
  */
 export async function startExistingPatientFlow(
   patientId: string,
@@ -62,12 +71,13 @@ export async function startExistingPatientFlow(
     return { nextPhase: 'error', message: 'Sistema no disponible' }
   }
 
+  // El flujo siempre inicia en awaiting_sede - el email se solicita DESPUES de seleccionar turno
   const state: ExistingPatientFlowState = {
-    phase: patientEmail ? 'awaiting_sede' : 'awaiting_email',
+    phase: 'awaiting_sede',
     patientId,
     patientName,
     patientDNI,
-    patientEmail,
+    patientEmail, // Guardar si existe, pero no bloquear el flujo
     attempts: 0,
     createdAt: Date.now(),
   }
@@ -75,7 +85,7 @@ export async function startExistingPatientFlow(
   const stateKey = `${EXISTING_PATIENT_FLOW_KEY}:${phoneNumber}`
   await redis.setex(stateKey, EXISTING_PATIENT_FLOW_TTL, JSON.stringify(state))
 
-  logger.info('Flow initialized', { phase: state.phase })
+  logger.info('Flow initialized', { phase: state.phase, hasEmail: !!patientEmail })
 
   return {
     nextPhase: state.phase,
