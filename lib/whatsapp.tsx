@@ -39,6 +39,7 @@ import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
 import { handleFarewellIfDetected, detectFarewellPreFlow, detectReciprocalFarewellPreFlow } from "./conversation-state/farewell-handler"
 import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
 import { detectDirectConfirmationPreFlow, buildConfirmationSuccessResponse, buildCancelConfirmationPrompt } from "./conversation-state/direct-confirmation-handler"
+import { detectInformationalQueryPreFlow } from "./conversation-state/informational-query-handler"
 import {
   handleTurnSelectionIfPending,
   buildInvalidSelectionMessage,
@@ -778,7 +779,7 @@ export async function handleMessage(value: any) {
         userMessage = `El paciente presionó el botón "${originalMessage}" solicitando cancelar su turno.
 
 [SOLICITUD_CANCELACION]
-Accion: El paciente ha presionado el botón de cancelación
+Accion: El paciente ha presionado el botón de cancelaci��n
 Boton_Texto: ${message.button.text}
 Boton_Payload: ${message.button.payload}
 Timestamp: ${new Date().toISOString()}
@@ -1455,7 +1456,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             
             // Construir detalles del turno para el mensaje
             const turnoDetails = appointmentCtx.turno 
-              ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n📍 ${appointmentCtx.turno.sede}`
+              ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n�� ${appointmentCtx.turno.sede}`
               : "Tu turno programado"
             
             const cancelPrompt = buildCancelConfirmationPrompt(patientName, turnoDetails)
@@ -1480,6 +1481,48 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
+        }
+      }
+    }
+
+    // ============================================================================
+    // SPRINT 16: INTERCEPTAR CONSULTAS INFORMATIVAS (DIRECCION, HORARIO, ETC.)
+    // Detecta "¿Cuál es la dirección?", "¿A qué hora es?", "¿Con quién es?", etc.
+    // cuando hay un turno en contexto (appointmentData)
+    // Responde directamente con la información solicitada sin reiniciar el flujo
+    // IMPORTANTE: Ejecutar DESPUES de confirmación/cancelación pero ANTES de despedidas
+    // ============================================================================
+    if (message.type === "text") {
+      const infoQueryFlags = await getEffectiveFeatureFlags(config.id)
+      
+      if (infoQueryFlags.directInformationalQuery) {
+        console.log(`[WHATSAPP] 📍 Verificando consulta informativa para ${userPhoneNumber}`)
+        
+        // Obtener el appointmentContext si existe
+        const appointmentData = await getAppointmentContext(userPhoneNumber, config.id)
+        
+        const infoQueryResult = await detectInformationalQueryPreFlow(
+          userMessage,
+          userPhoneNumber,
+          config.id,
+          appointmentData,
+          true // useNLU para casos ambiguos
+        )
+        
+        if (infoQueryResult.detected && infoQueryResult.response) {
+          console.log(`[WHATSAPP] ✅ Consulta informativa detectada (${infoQueryResult.queryType}), respondiendo directamente`)
+          
+          const infoCtx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+          
+          await sendDirectResponse(infoCtx, infoQueryResult.response, "informational_query")
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
         }
       }
     }
