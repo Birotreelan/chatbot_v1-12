@@ -109,6 +109,12 @@ const FLAG_META: Record<
     risk: "medio",
     sprint: "Sprint 14",
   },
+  reciprocalFarewellSilence: {
+    label: "Silencio en respuestas recíprocas",
+    description: "Detecta 'Igualmente', 'Vos también', etc. después de una despedida del bot. NO responde nada (silencio).",
+    risk: "bajo",
+    sprint: "Sprint 15",
+  },
 }
 
 const RISK_BADGE: Record<"bajo" | "medio" | "alto", string> = {
@@ -137,6 +143,7 @@ const FLAG_ORDER: FlagKey[] = [
   "directFarewellDetection",
   "directWrongNumberDetection",
   "directConfirmCancelDetection",
+  "reciprocalFarewellSilence",
 ]
 
 export function FeatureFlagsPanel() {

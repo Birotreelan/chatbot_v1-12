@@ -36,7 +36,7 @@ import {
 } from "./direct-response-templates"
 import { createConversationLogger } from "./conversation-state/logger"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
-import { handleFarewellIfDetected, detectFarewellPreFlow } from "./conversation-state/farewell-handler"
+import { handleFarewellIfDetected, detectFarewellPreFlow, detectReciprocalFarewellPreFlow } from "./conversation-state/farewell-handler"
 import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
 import { detectDirectConfirmationPreFlow, buildConfirmationSuccessResponse, buildCancelConfirmationPrompt } from "./conversation-state/direct-confirmation-handler"
 import {
@@ -1339,6 +1339,37 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             userMessage = dniResult.dni
             // Continuar a OpenAI con el DNI limpio
           }
+        }
+      }
+    }
+
+    // ============================================================================
+    // SPRINT 15: INTERCEPTAR RESPUESTAS RECIPROCAS A DESPEDIDAS (SILENCIO)
+    // Detecta "Igualmente", "Vos también", etc. después de una despedida del bot
+    // En estos casos NO respondemos nada - silencio total
+    // IMPORTANTE: Ejecutar PRIMERO porque si el usuario solo dice "igualmente"
+    // no queremos iniciar ningún flujo
+    // ============================================================================
+    if (message.type === "text") {
+      const reciprocalFlags = await getEffectiveFeatureFlags(config.id)
+      
+      if (reciprocalFlags.reciprocalFarewellSilence) {
+        console.log(`[WHATSAPP] 🤫 Verificando respuesta recíproca a despedida para ${userPhoneNumber}`)
+        
+        const reciprocalResult = await detectReciprocalFarewellPreFlow(
+          userMessage,
+          userPhoneNumber,
+          config.id
+        )
+        
+        if (reciprocalResult.shouldSilence) {
+          console.log(`[WHATSAPP] 🤫 Respuesta recíproca detectada, aplicando SILENCIO: ${reciprocalResult.reason}`)
+          
+          // Trackear evento para analytics
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          
+          // NO enviar ninguna respuesta - silencio total
+          return
         }
       }
     }
