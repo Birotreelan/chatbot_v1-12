@@ -1,30 +1,123 @@
+/**
+ * Integracion del flujo de paciente nuevo
+ * Usa modulos compartidos para reutilizacion de codigo con paciente existente
+ * 
+ * FLUJO PACIENTE NUEVO segun documentacion:
+ * 1. DNI (validado externamente antes de iniciar)
+ * 2. Nombre y Apellido
+ * 3. Obra Social (validacion via API)
+ * 4. Sede (igual que paciente existente)
+ * 5. Tipo de busqueda (igual que paciente existente)
+ * 6. Busqueda profesional/especialidad (igual que paciente existente)
+ * 7. Seleccion de turno (igual que paciente existente)
+ * 8. Email (obligatorio para paciente nuevo)
+ * 9. Confirmacion y reserva (igual que paciente existente)
+ */
+
+import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
-import {
-  startNewPatientFlow,
-  processNewPatientMessage,
-  isNewPatientFlowActive,
-  getNewPatientState,
-  clearNewPatientFlow,
-} from './new-patient-flow-handler'
-import {
-  buildNewPatientInitialMenuMessage,
-  buildNameRequestMessage,
-  buildHealthInsuranceRequestMessage,
-  buildHealthInsuranceRetryMessage,
-  buildVenueSelectionMessage,
-  buildSearchTypeMessage,
-  buildTurnsListMessage,
-  buildEmailRequestMessage,
-  buildConfirmationMessage,
-  buildSuccessMessage,
-  buildErrorMessage,
-} from './new-patient-templates'
+import { validarObraSocial } from '@/lib/api-tools/api-functions'
 
-/**
- * New Patient Flow Integration
- * API limpia para integrar el flujo de nuevo paciente en whatsapp.tsx
- */
+// Importar handlers compartidos
+import {
+  fetchSedes,
+  buildSedesMessage,
+  handleSedeSelection as handleSedeSelectionShared,
+  buildSedesErrorMessage,
+} from '../shared/sede-handler'
+import {
+  buildSearchOptionsMessage,
+  handleSearchTypeSelection,
+  buildProfessionalNameRequestMessage,
+} from '../shared/search-options-handler'
+import {
+  fetchSpecialties,
+  buildSpecialtiesMessage,
+  handleSpecialtySelection,
+  buildSpecialtiesErrorMessage,
+} from '../shared/specialty-handler'
+import {
+  handleProfessionalNameInput,
+  handleProfessionalSelection,
+} from '../shared/professional-handler'
+import {
+  searchTurnosAcumulativo,
+  buildTurnosListMessage,
+  buildNoTurnosMessage,
+} from '../shared/turnos-handler'
+import {
+  handleTurnoSelection,
+  buildTurnoSelectedMessage,
+} from '../shared/turno-selection-handler'
+import {
+  buildEmailRequestMessage,
+  handleEmailInput as handleEmailInputShared,
+} from '../shared/email-handler'
+import {
+  buildConfirmationMessage,
+  handleConfirmationResponse,
+  executeReservation,
+} from '../shared/confirmation-handler'
+import type {
+  SedeOption,
+  SpecialtyOption,
+  ProfessionalOption,
+  TurnoOption,
+  FlowPhase,
+  ObraSocialValidada,
+} from '../shared/types'
+
+// Constantes
+const NEW_PATIENT_FLOW_KEY = 'new_patient_flow'
+const NEW_PATIENT_FLOW_TTL = 86400 // 24 horas
+
+// Estado del flujo de paciente nuevo
+export interface NewPatientFlowState {
+  phase: FlowPhase | 'awaiting_name' | 'awaiting_obra_social'
+  dni: string
+  phone: string
+  
+  // Datos personales (especificos de paciente nuevo)
+  nombre?: string
+  apellido?: string
+  
+  // Obra social
+  obraSocialId?: string
+  obraSocialNombre?: string
+  obraSocialValidada: boolean
+  
+  // Sede
+  sedeId?: string
+  sedeNombre?: string
+  sedesOpciones?: SedeOption[]
+  
+  // Busqueda
+  searchType?: 'medico_particular' | 'especialidad' | 'cualquier_medico'
+  
+  // Profesional
+  profesionalId?: string
+  profesionalNombre?: string
+  profesionalesOpciones?: ProfessionalOption[]
+  
+  // Especialidad
+  especialidadId?: string
+  especialidadNombre?: string
+  especialidadesOpciones?: SpecialtyOption[]
+  
+  // Turnos
+  turnosOpciones?: TurnoOption[]
+  turnoSeleccionado?: TurnoOption
+  
+  // Email (obligatorio para paciente nuevo)
+  email?: string
+  
+  // Control
+  attempts: number
+  createdAt: number
+  lastUpdated: number
+  lastInvalidInput?: string
+}
 
 export interface NewPatientResult {
   handled: boolean
@@ -41,152 +134,698 @@ export interface NewPatientResult {
 }
 
 /**
- * Inicia el flujo de nuevo paciente
+ * Obtiene el estado del flujo desde Redis
+ */
+async function getFlowState(phone: string): Promise<NewPatientFlowState | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+
+  const stateKey = `${NEW_PATIENT_FLOW_KEY}:${phone}`
+  const stateStr = await redis.get(stateKey)
+  if (!stateStr) return null
+
+  return typeof stateStr === 'object' ? stateStr as NewPatientFlowState : JSON.parse(stateStr as string)
+}
+
+/**
+ * Guarda el estado del flujo en Redis
+ */
+async function saveFlowState(phone: string, state: NewPatientFlowState): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+
+  state.lastUpdated = Date.now()
+  const stateKey = `${NEW_PATIENT_FLOW_KEY}:${phone}`
+  await redis.setex(stateKey, NEW_PATIENT_FLOW_TTL, JSON.stringify(state))
+}
+
+/**
+ * Inicializa el flujo de paciente nuevo
  */
 export async function initializeNewPatientFlow(
   dni: string,
   phone: string,
   clientId: string
 ): Promise<NewPatientResult> {
-  const logger = createConversationLogger(phone, clientId, 'new_patient_initial')
+  const logger = createConversationLogger(phone, clientId, 'new_patient_init')
   logger.info('Initializing new patient flow', { dni })
 
   const flags = await getEffectiveFeatureFlags(clientId)
-
   if (!flags.directPacienteNuevo) {
-    logger.debug('Feature flag disabled, using OpenAI', {})
     return {
       handled: false,
       shouldCallOpenAI: true,
-      openAIContext: 'New patient registration disabled',
+      openAIContext: 'Use route_to_pacienteNuevo',
     }
   }
 
-  try {
-    await startNewPatientFlow(dni, phone, clientId)
+  // Crear estado inicial - primer paso: solicitar nombre
+  const state: NewPatientFlowState = {
+    phase: 'awaiting_name',
+    dni,
+    phone,
+    obraSocialValidada: false,
+    attempts: 0,
+    createdAt: Date.now(),
+    lastUpdated: Date.now(),
+  }
 
-    return {
-      handled: true,
-      message: buildNewPatientInitialMenuMessage(),
-      patientInfo: { dni },
-    }
-  } catch (error) {
-    logger.error('Error initializing flow', error as Error)
-    return {
-      handled: false,
-      shouldCallOpenAI: true,
-      openAIContext: 'New patient flow error',
-    }
+  await saveFlowState(phone, state)
+
+  logger.info('Flow initialized, requesting name', {})
+
+  return {
+    handled: true,
+    message: `Veo que es tu primera vez con nosotros. Para registrarte y agendar un turno, necesito algunos datos.\n\nPor favor, escribi tu *nombre y apellido completo*.`,
+    patientInfo: { dni },
   }
 }
 
 /**
- * Procesa mensajes durante el flujo de nuevo paciente
+ * Procesa mensaje del usuario durante el flujo
  */
 export async function handleNewPatientMessage(
   phone: string,
   userMessage: string,
   clientId: string
 ): Promise<NewPatientResult> {
-  const logger = createConversationLogger(phone, clientId, 'new_patient_processing')
-  logger.info('Handling new patient message', { message: userMessage.substring(0, 50) })
+  const logger = createConversationLogger(phone, clientId, 'new_patient_message')
 
-  const isActive = await isNewPatientFlowActive(phone)
-
-  if (!isActive) {
-    logger.debug('Flow not active', { phone })
+  const state = await getFlowState(phone)
+  if (!state) {
     return { handled: false, shouldCallOpenAI: true }
   }
 
-  try {
-    const state = await getNewPatientState(phone)
-    if (!state) {
+  logger.info('Processing message', { phase: state.phase, message: userMessage.substring(0, 50) })
+
+  // Router por fase
+  switch (state.phase) {
+    case 'awaiting_name':
+      return handleNamePhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_obra_social':
+      return handleObraSocialPhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_sede':
+      return handleSedePhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_search_type':
+      return handleSearchTypePhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_professional_name':
+      return handleProfessionalNamePhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_professional_selection':
+      return handleProfessionalSelectionPhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_specialty_selection':
+      return handleSpecialtyPhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_turno_selection':
+      return handleTurnoPhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_email':
+      return handleEmailPhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_confirmation':
+      return handleConfirmationPhase(phone, userMessage, clientId, state)
+
+    default:
+      logger.warn('Unhandled phase', { phase: state.phase })
       return { handled: false, shouldCallOpenAI: true }
-    }
+  }
+}
 
-    const processResult = await processNewPatientMessage(phone, userMessage, clientId)
+/**
+ * Fase: Nombre y apellido (especifica de paciente nuevo)
+ */
+async function handleNamePhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'name_phase')
 
-    if (!processResult.handled) {
+  const input = userMessage.trim()
+  const parts = input.split(/\s+/)
+
+  if (parts.length < 2) {
+    state.attempts += 1
+    await saveFlowState(phone, state)
+
+    if (state.attempts >= 3) {
       return {
         handled: false,
         shouldCallOpenAI: true,
-        openAIContext: `New patient flow error in phase: ${state.phase}`,
+        openAIContext: 'Patient cannot provide valid name format',
       }
-    }
-
-    // Re-fetch state after processing to get updated values (e.g., name after capture)
-    const updatedState = await getNewPatientState(phone) || state
-
-    // Determine message based on next phase
-    let responseMessage = ''
-    
-    switch (processResult.nextPhase) {
-      case 'name_input':
-        responseMessage = buildNameRequestMessage()
-        break
-      case 'health_insurance':
-        responseMessage = buildHealthInsuranceRequestMessage(updatedState.name || 'Paciente')
-        break
-      case 'health_insurance_retry':
-        responseMessage = buildHealthInsuranceRetryMessage(
-          updatedState.name || 'Paciente',
-          updatedState.lastInvalidInput || 'la opción ingresada'
-        )
-        break
-      case 'venue_selection':
-        responseMessage = buildVenueSelectionMessage(updatedState.name || 'Paciente', [])
-        break
-      case 'search_type':
-        responseMessage = buildSearchTypeMessage(updatedState.venueName || 'la sede')
-        break
-      case 'turn_selection':
-        responseMessage = buildTurnsListMessage(updatedState.name || 'Paciente', [])
-        break
-      case 'email_confirmation':
-        responseMessage = buildEmailRequestMessage(updatedState.name || 'Paciente')
-        break
-      case 'final_confirmation':
-        responseMessage = buildConfirmationMessage(
-          updatedState.name || 'Paciente',
-          updatedState.lastName || '',
-          updatedState.dni,
-          updatedState.phone,
-          updatedState.email || '',
-          updatedState.healthInsurance || '',
-          {},
-          updatedState.selectedTurnNumber || 0
-        )
-        break
-      case 'completed':
-        responseMessage = buildSuccessMessage(updatedState.name || 'Paciente')
-        break
-      default:
-        responseMessage = 'Continuando con tu solicitud...'
     }
 
     return {
       handled: true,
-      message: responseMessage,
-      action: processResult.nextPhase,
-      patientInfo: {
-        dni: updatedState.dni,
-        name: updatedState.name,
-        email: updatedState.email,
-        healthInsurance: updatedState.healthInsurance,
-      },
+      message: 'Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*',
+    }
+  }
+
+  // Capitalizar nombre y apellido
+  const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
+  
+  state.nombre = capitalize(parts[0])
+  state.apellido = parts.slice(1).map(capitalize).join(' ')
+  state.phase = 'awaiting_obra_social'
+  state.attempts = 0
+  await saveFlowState(phone, state)
+
+  logger.info('Name captured', { nombre: state.nombre, apellido: state.apellido })
+
+  return {
+    handled: true,
+    message: `Gracias ${state.nombre}. Ahora necesito saber tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenes cobertura.`,
+    patientInfo: {
+      dni: state.dni,
+      name: `${state.nombre} ${state.apellido}`,
+    },
+  }
+}
+
+/**
+ * Fase: Obra social (especifica de paciente nuevo)
+ */
+async function handleObraSocialPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'obra_social_phase')
+
+  const input = userMessage.trim()
+
+  try {
+    const result = await validarObraSocial(clientId, input)
+
+    if (!result.exito || !result.datos || result.datos.total_encontradas === 0) {
+      state.attempts += 1
+      state.lastInvalidInput = input
+      await saveFlowState(phone, state)
+
+      if (state.attempts >= 3) {
+        return {
+          handled: false,
+          shouldCallOpenAI: true,
+          openAIContext: `Cannot validate health insurance: ${input}`,
+        }
+      }
+
+      return {
+        handled: true,
+        message: `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de tu obra social e intenta nuevamente.\n\nSi no tenes cobertura, escribi *Particular*.`,
+      }
+    }
+
+    // Una sola obra social encontrada
+    if (result.datos.total_encontradas === 1) {
+      const obraSocial = result.datos.obras_sociales[0]
+      state.obraSocialId = obraSocial.id
+      state.obraSocialNombre = obraSocial.nombre
+      state.obraSocialValidada = true
+      state.attempts = 0
+      await saveFlowState(phone, state)
+
+      logger.info('Obra social validated', { obraSocialId: state.obraSocialId, nombre: state.obraSocialNombre })
+
+      // Siguiente paso: obtener sedes
+      return await transitionToSedes(phone, clientId, state)
+    }
+
+    // Multiples resultados - mostrar opciones
+    const opciones = result.datos.obras_sociales.slice(0, 5)
+    let mensaje = `Encontre varias opciones para "${input}":\n\n`
+    opciones.forEach((os, i) => {
+      mensaje += `${i + 1}. ${os.nombre}\n`
+    })
+    mensaje += `\nResponde con el *numero* de tu obra social.`
+
+    // Guardar opciones temporalmente
+    state.lastInvalidInput = JSON.stringify(opciones)
+    await saveFlowState(phone, state)
+
+    return {
+      handled: true,
+      message: mensaje,
     }
   } catch (error) {
-    logger.error('Error processing message', error as Error)
+    logger.error('Error validating obra social', error as Error)
+    state.attempts += 1
+    await saveFlowState(phone, state)
+
     return {
-      handled: false,
-      shouldCallOpenAI: true,
-      openAIContext: 'New patient flow processing error',
+      handled: true,
+      message: 'Ocurrio un error al validar tu obra social. Por favor, intenta nuevamente.',
     }
   }
 }
 
 /**
- * Verifica si debe usar flujo de nuevo paciente
+ * Transicion a fase de sedes
+ */
+async function transitionToSedes(
+  phone: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'transition_sedes')
+
+  const sedesResult = await fetchSedes(clientId)
+  if (!sedesResult.success || !sedesResult.sedes) {
+    return {
+      handled: true,
+      message: buildSedesErrorMessage(),
+    }
+  }
+
+  state.sedesOpciones = sedesResult.sedes
+  state.phase = 'awaiting_sede'
+  await saveFlowState(phone, state)
+
+  logger.info('Transitioned to sedes', { count: sedesResult.sedes.length })
+
+  const nombreCompleto = `${state.nombre} ${state.apellido}`
+  return {
+    handled: true,
+    message: buildSedesMessage(sedesResult.sedes, nombreCompleto, state.obraSocialNombre),
+    patientInfo: {
+      dni: state.dni,
+      name: nombreCompleto,
+      healthInsurance: state.obraSocialNombre,
+    },
+  }
+}
+
+/**
+ * Fase: Seleccion de sede (reutiliza modulo compartido)
+ */
+async function handleSedePhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  if (!state.sedesOpciones || state.sedesOpciones.length === 0) {
+    return { handled: false, shouldCallOpenAI: true }
+  }
+
+  const result = await handleSedeSelectionShared(userMessage, state.sedesOpciones, phone, clientId)
+
+  if (result.selectedSede) {
+    state.sedeId = result.selectedSede.id
+    state.sedeNombre = result.selectedSede.nombre
+    state.phase = 'awaiting_search_type'
+    state.attempts = 0
+    await saveFlowState(phone, state)
+
+    return {
+      handled: true,
+      message: buildSearchOptionsMessage(state.sedeNombre),
+    }
+  }
+
+  state.attempts += 1
+  await saveFlowState(phone, state)
+
+  return {
+    handled: true,
+    message: result.message,
+  }
+}
+
+/**
+ * Fase: Tipo de busqueda (reutiliza modulo compartido)
+ */
+async function handleSearchTypePhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const result = await handleSearchTypeSelection(userMessage, phone, clientId)
+
+  if (result.searchType) {
+    state.searchType = result.searchType
+    state.attempts = 0
+
+    if (result.searchType === 'medico_particular') {
+      state.phase = 'awaiting_professional_name'
+      await saveFlowState(phone, state)
+      return {
+        handled: true,
+        message: buildProfessionalNameRequestMessage(),
+      }
+    }
+
+    if (result.searchType === 'especialidad') {
+      const espResult = await fetchSpecialties(clientId)
+      if (!espResult.success || !espResult.especialidades) {
+        return {
+          handled: true,
+          message: buildSpecialtiesErrorMessage(),
+        }
+      }
+
+      state.especialidadesOpciones = espResult.especialidades
+      state.phase = 'awaiting_specialty_selection'
+      await saveFlowState(phone, state)
+
+      return {
+        handled: true,
+        message: buildSpecialtiesMessage(espResult.especialidades),
+      }
+    }
+
+    if (result.searchType === 'cualquier_medico') {
+      return await searchAndShowTurnos(phone, clientId, state)
+    }
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+  }
+}
+
+/**
+ * Fase: Nombre del profesional
+ */
+async function handleProfessionalNamePhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const result = await handleProfessionalNameInput(userMessage, clientId, phone)
+
+  if (result.profesionales && result.profesionales.length > 0) {
+    state.profesionalesOpciones = result.profesionales
+
+    if (result.profesionales.length === 1) {
+      state.profesionalId = result.profesionales[0].id
+      state.profesionalNombre = result.profesionales[0].nombre
+      await saveFlowState(phone, state)
+      return await searchAndShowTurnos(phone, clientId, state)
+    }
+
+    state.phase = 'awaiting_professional_selection'
+    await saveFlowState(phone, state)
+
+    return {
+      handled: true,
+      message: result.message,
+    }
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+  }
+}
+
+/**
+ * Fase: Seleccion de profesional
+ */
+async function handleProfessionalSelectionPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  if (!state.profesionalesOpciones) {
+    return { handled: false, shouldCallOpenAI: true }
+  }
+
+  const result = await handleProfessionalSelection(userMessage, state.profesionalesOpciones, phone, clientId)
+
+  if (result.selectedProfessional) {
+    state.profesionalId = result.selectedProfessional.id
+    state.profesionalNombre = result.selectedProfessional.nombre
+    state.attempts = 0
+    await saveFlowState(phone, state)
+
+    return await searchAndShowTurnos(phone, clientId, state)
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+  }
+}
+
+/**
+ * Fase: Seleccion de especialidad
+ */
+async function handleSpecialtyPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  if (!state.especialidadesOpciones) {
+    return { handled: false, shouldCallOpenAI: true }
+  }
+
+  const result = await handleSpecialtySelection(userMessage, state.especialidadesOpciones, phone, clientId)
+
+  if (result.selectedSpecialty) {
+    state.especialidadId = result.selectedSpecialty.id
+    state.especialidadNombre = result.selectedSpecialty.nombre
+    state.attempts = 0
+    await saveFlowState(phone, state)
+
+    return await searchAndShowTurnos(phone, clientId, state)
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+  }
+}
+
+/**
+ * Busca turnos y los muestra
+ */
+async function searchAndShowTurnos(
+  phone: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const result = await searchTurnosAcumulativo(
+    clientId,
+    {
+      sedeId: state.sedeId!,
+      obraSocialId: state.obraSocialId, // Paciente nuevo usa obra social ID
+      profesionalId: state.profesionalId,
+      especialidadId: state.especialidadId,
+    },
+    phone
+  )
+
+  if (!result.success || !result.turnos || result.turnos.length === 0) {
+    return {
+      handled: true,
+      message: buildNoTurnosMessage(state.sedeNombre, state.profesionalNombre, state.especialidadNombre),
+    }
+  }
+
+  state.turnosOpciones = result.turnos
+  state.phase = 'awaiting_turno_selection'
+  await saveFlowState(phone, state)
+
+  const nombreCompleto = `${state.nombre} ${state.apellido}`
+  return {
+    handled: true,
+    message: buildTurnosListMessage(result.turnos, nombreCompleto, state.sedeNombre),
+  }
+}
+
+/**
+ * Fase: Seleccion de turno
+ */
+async function handleTurnoPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  if (!state.turnosOpciones) {
+    return { handled: false, shouldCallOpenAI: true }
+  }
+
+  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phone, clientId)
+
+  if (result.selectedTurno) {
+    state.turnoSeleccionado = result.selectedTurno
+    state.phase = 'awaiting_email' // Email siempre es obligatorio para paciente nuevo
+    state.attempts = 0
+    await saveFlowState(phone, state)
+
+    const turnoMsg = buildTurnoSelectedMessage(result.selectedTurno)
+    const emailMsg = buildEmailRequestMessage()
+
+    return {
+      handled: true,
+      message: `${turnoMsg}\n\n${emailMsg}`,
+    }
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+  }
+}
+
+/**
+ * Fase: Email (obligatorio para paciente nuevo)
+ */
+async function handleEmailPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const result = await handleEmailInputShared(userMessage, phone, clientId, state.attempts)
+
+  if (result.validatedEmail) {
+    state.email = result.validatedEmail
+    state.phase = 'awaiting_confirmation'
+    state.attempts = 0
+    await saveFlowState(phone, state)
+
+    const nombreCompleto = `${state.nombre} ${state.apellido}`
+    return {
+      handled: true,
+      message: buildConfirmationMessage(
+        state.turnoSeleccionado!,
+        nombreCompleto,
+        state.sedeNombre,
+        state.obraSocialNombre
+      ),
+    }
+  }
+
+  if (result.nextPhase === 'abandoned') {
+    await clearNewPatientFlow(phone, clientId)
+    return {
+      handled: true,
+      message: result.message,
+    }
+  }
+
+  state.attempts += 1
+  await saveFlowState(phone, state)
+
+  return {
+    handled: true,
+    message: result.message,
+  }
+}
+
+/**
+ * Fase: Confirmacion y reserva
+ */
+async function handleConfirmationPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'confirmation_phase')
+
+  const result = await handleConfirmationResponse(userMessage, phone, clientId)
+
+  if (result.confirmed === true) {
+    const reservaResult = await executeReservation(
+      clientId,
+      state.turnoSeleccionado!,
+      {
+        nombre: state.nombre,
+        apellido: state.apellido,
+        dni: state.dni,
+        telefono: phone,
+        email: state.email!,
+        obraSocialId: state.obraSocialId,
+        obraSocialNombre: state.obraSocialNombre,
+      },
+      phone
+    )
+
+    if (reservaResult.success) {
+      state.phase = 'completed'
+      await saveFlowState(phone, state)
+
+      logger.info('Reserva exitosa', { turnoId: state.turnoSeleccionado?.id })
+
+      return {
+        handled: true,
+        message: reservaResult.message,
+        action: 'turno_reservado',
+        patientInfo: {
+          dni: state.dni,
+          name: `${state.nombre} ${state.apellido}`,
+          email: state.email,
+          healthInsurance: state.obraSocialNombre,
+        },
+      }
+    }
+
+    return {
+      handled: true,
+      message: reservaResult.message,
+    }
+  }
+
+  if (result.confirmed === false && result.nextPhase === 'abandoned') {
+    await clearNewPatientFlow(phone, clientId)
+    return {
+      handled: true,
+      message: result.message,
+    }
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+  }
+}
+
+/**
+ * Verifica si el flujo esta activo
+ */
+export async function isNewPatientFlowActive(phone: string): Promise<boolean> {
+  const state = await getFlowState(phone)
+  return !!state && state.phase !== 'completed' && state.phase !== 'abandoned'
+}
+
+/**
+ * Obtiene el estado del flujo
+ */
+export async function getNewPatientState(phone: string): Promise<NewPatientFlowState | null> {
+  return getFlowState(phone)
+}
+
+/**
+ * Limpia el flujo
+ */
+export async function clearNewPatientFlow(phone: string, clientId: string): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+
+  const logger = createConversationLogger(phone, clientId, 'new_patient_clear')
+  await redis.del(`${NEW_PATIENT_FLOW_KEY}:${phone}`)
+  logger.info('Flow cleared', {})
+}
+
+/**
+ * Verifica si debe usar el flujo directo
  */
 export async function shouldUseNewPatientFlow(
   phone: string,
@@ -198,36 +837,3 @@ export async function shouldUseNewPatientFlow(
   const flags = await getEffectiveFeatureFlags(clientId)
   return flags.directPacienteNuevo
 }
-
-/**
- * Completa el flujo de nuevo paciente
- */
-export async function completeNewPatientFlow(
-  phone: string,
-  clientId: string
-): Promise<void> {
-  const logger = createConversationLogger(phone, clientId, 'new_patient_initial')
-  logger.info('Completing new patient flow', { phone })
-
-  await clearNewPatientFlow(phone, clientId)
-}
-
-/**
- * Obtiene contexto para OpenAI si es necesario
- */
-export async function getNewPatientContextForOpenAI(phone: string): Promise<string> {
-  const state = await getNewPatientState(phone)
-
-  if (!state) {
-    return 'New patient registration - collect DNI and initiate registration'
-  }
-
-  let context = `New patient registration in progress (phase: ${state.phase})\n`
-  if (state.name) context += `Name: ${state.name}\n`
-  if (state.healthInsurance) context += `Health Insurance: ${state.healthInsurance}\n`
-
-  return context
-}
-
-// Re-export functions from handler so they can be imported from this module
-export { isNewPatientFlowActive, getNewPatientState, clearNewPatientFlow } from './new-patient-flow-handler'
