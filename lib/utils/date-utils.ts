@@ -1,4 +1,30 @@
 /**
+ * Obtiene la hora actual en Argentina (0-23)
+ * @returns Hora en formato 24h (0-23)
+ */
+export function getArgentinaHour(): number {
+  const argentinaTime = new Date().toLocaleString("en-US", { 
+    timeZone: "America/Argentina/Buenos_Aires",
+    hour: "numeric",
+    hour12: false 
+  })
+  return parseInt(argentinaTime, 10)
+}
+
+/**
+ * Obtiene el periodo del dia en Argentina
+ * @returns 'morning' (5-11), 'afternoon' (12-17), 'evening' (18-21), 'night' (22-4)
+ */
+export function getArgentinaTimeOfDay(): 'morning' | 'afternoon' | 'evening' | 'night' {
+  const hour = getArgentinaHour()
+  
+  if (hour >= 5 && hour < 12) return 'morning'
+  if (hour >= 12 && hour < 18) return 'afternoon'
+  if (hour >= 18 && hour < 22) return 'evening'
+  return 'night'
+}
+
+/**
  * Obtiene la fecha y hora actual en formato argentino
  * @returns String con la fecha y hora en formato: "DD/MM/YYYY HH:MM:SS"
  */
