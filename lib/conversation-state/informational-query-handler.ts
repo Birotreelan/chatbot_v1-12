@@ -82,12 +82,16 @@ const PROFESSIONAL_QUERY_PATTERNS = [
 
 /**
  * Patrones de consulta de FECHA
- * IMPORTANTE: Usar \b word boundaries para evitar falsos positivos como
- * "Necesito" matcheando "es" en el patrón (?:es|tengo)
+ * IMPORTANTE: 
+ * - Usar \b word boundaries para evitar "Necesito" matcheando "es"
+ * - Patrón 1: Si "cuándo" está presente, es clara consulta de fecha
+ *   Si "cuándo" NO está, requiere contexto de cita (turno, hoy, mañana, etc)
+ *   Evita falsos positivos como "Esto es importante"
  */
 const DATE_QUERY_PATTERNS = [
   /(?:qu[eé]\s+)?d[ií]a\s+\b(?:es|tengo)\b(?:\s+el\s+turno)?/i,
-  /(?:cu[aá]ndo\s+)?\b(?:es|tengo)\b(?:\s+el\s+turno)?/i,
+  // "cuándo es" + OPCIONAL contexto, O "es/tengo" + REQUERIDO contexto de cita
+  /(?:cu[aá]ndo\s+\b(?:es|tengo)\b)|(?:es|tengo)\b\s+(?:el\s+)?(?:turno|hoy|mañana|mi|a\s+las)/i,
   /(?:para\s+)?(?:qu[eé]\s+)?fecha/i,
   /(?:cu[aá]l\s+es\s+)?(?:la\s+)?fecha\s+(?:del\s+turno)?/i,
 ]
