@@ -351,7 +351,7 @@ export function buildFarewellMessage(
   
   const saludos: Record<string, string> = {
     morning: '¡Que tengas un excelente día!',
-    afternoon: '¡Que tengas un excelente día!',
+    afternoon: '¡Que disfrutes la tarde!',
     evening: '¡Que tengas buena noche!',
   }
 

@@ -12,6 +12,26 @@ import type { TurnoDisponible, RescheduleFlowState } from "./reschedule-flow-han
 // HELPERS DE FORMATO (reutilizados de direct-response-templates.ts)
 // ============================================================================
 
+function getArgentinaHour(): number {
+  const now = new Date()
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000
+  const argentina = new Date(utc - 3 * 60 * 60 * 1000)
+  return argentina.getHours()
+}
+
+function getTimeBasedGreeting(): string {
+  const hour = getArgentinaHour()
+  if (hour >= 5 && hour < 12) {
+    return "¡Que tengas un excelente día!"
+  } else if (hour >= 12 && hour < 18) {
+    return "¡Que disfrutes la tarde!"
+  } else if (hour >= 18 && hour < 22) {
+    return "¡Que tengas buena noche!"
+  } else {
+    return "¡Que descanses!"
+  }
+}
+
 function formatPatientName(nombres: string): string {
   const primerNombre = nombres.split(" ")[0]
   return primerNombre.charAt(0).toUpperCase() + primerNombre.slice(1).toLowerCase()
@@ -155,7 +175,7 @@ export function buildRescheduleAbandonMessage(
   const nombre = formatPatientName(state.paciente.nombres)
   return `Entendido, ${nombre}. Si cambias de idea y querés reagendar en el futuro, no dudes en escribirme.
 
-¡Que tengas un excelente día!`
+${getTimeBasedGreeting()}`
 }
 
 /**
