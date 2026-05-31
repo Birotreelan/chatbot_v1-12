@@ -497,12 +497,12 @@ export async function detectReciprocalFarewellPreFlow(
   const farewellState = await getFarewellState(userPhone, configId)
   
   if (farewellState && farewellState.farewell_sent) {
-    // Verificar que la despedida fue reciente (dentro de 10 minutos)
+    // Verificar que la despedida fue reciente (dentro de 30 minutos)
     const farewellTime = new Date(farewellState.farewell_sent_at).getTime()
     const now = Date.now()
-    const tenMinutes = 10 * 60 * 1000
+    const thirtyMinutes = 30 * 60 * 1000
     
-    if (now - farewellTime < tenMinutes) {
+    if (now - farewellTime < thirtyMinutes) {
       logger.info("Despedida reciente encontrada, aplicando silencio", {
         farewellSentAt: farewellState.farewell_sent_at,
         minutesAgo: Math.round((now - farewellTime) / 60000),
