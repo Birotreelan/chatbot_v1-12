@@ -37,6 +37,7 @@ import {
 import { createConversationLogger } from "./conversation-state/logger"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
 import { handleFarewellIfDetected, detectFarewellPreFlow } from "./conversation-state/farewell-handler"
+import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
 import {
   handleTurnSelectionIfPending,
   buildInvalidSelectionMessage,
@@ -1377,8 +1378,51 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     }
 
     // ============================================================================
-    // NEW: INTERCEPTAR DETECCIÓN INICIAL DE PACIENTE (Sin recordatorio previo)
-    // Sprint 9a-c: Nuevo flujo determinístico de detección e intake
+    // SPRINT 13: INTERCEPTAR NUMERO EQUIVOCADO PRE-FLUJO
+    // Detecta "se equivocaron de numero", "no soy esa persona", etc.
+    // ANTES de iniciar deteccion de paciente
+    // ============================================================================
+    if (message.type === "text") {
+      const wrongNumberFlags = await getEffectiveFeatureFlags(config.id)
+      
+      if (wrongNumberFlags.directWrongNumberDetection) {
+        console.log(`[WHATSAPP] 📞 Verificando numero equivocado para ${userPhoneNumber}`)
+        
+        // Verificar si hubo recordatorio reciente (ventana de 24h)
+        let hasRecentReminder = false
+        if (config.cliente_id) {
+          const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+          hasRecentReminder = templateSentAt !== null
+        }
+        
+        const wrongNumberResult = await detectWrongNumberPreFlow(
+          userMessage,
+          userPhoneNumber,
+          config.id,
+          hasRecentReminder
+        )
+        
+        if (wrongNumberResult.isWrongNumber && wrongNumberResult.response) {
+          console.log(`[WHATSAPP] ✅ Numero equivocado detectado, respondiendo con disculpa`)
+          
+          const wrongNumberCtx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+          
+          await sendDirectResponse(wrongNumberCtx, wrongNumberResult.response, "wrong_person_confirmed")
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+      }
+    }
+
+    // ============================================================================
+    // NEW: INTERCEPTAR DETECCION INICIAL DE PACIENTE (Sin recordatorio previo)
+    // Sprint 9a-c: Nuevo flujo deterministico de deteccion e intake
     // ============================================================================
     if (message.type === "text") {
       const detectionFlags = await getEffectiveFeatureFlags(config.id)
