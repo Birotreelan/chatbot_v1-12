@@ -29,6 +29,8 @@ export type FallbackIntent =
   | "cancelar_turno"            // "no puedo ir", "tengo que cancelar"
   | "reagendar_turno"           // "quiero cambiar el turno", "otra fecha"
   | "consulta_informativa"      // "¿donde queda?", "¿a que hora?"
+  | "consulta_no_disponible"    // "¿cuánto cuesta?", "¿aceptan tarjeta?", consultas administrativas que no podemos responder
+  | "consulta_medica_prohibida" // CRÍTICO: Consultas médicas que JAMÁS debemos responder (síntomas, diagnósticos, medicamentos, tratamientos)
   | "queja_frustracion"         // "estuve 3 dias llamando...", "nunca atienden"
   | "explicacion_contextual"    // "Esta con neumonia", "por motivos de salud"
   | "saludo_despedida"          // "gracias", "chau", "igualmente"
@@ -64,6 +66,7 @@ export async function detectNLUFallbackPreFlow(
   configId: string,
   appointmentContext?: any,
   conversationHistory?: string,
+  escalationPhoneNumber?: string,
 ): Promise<{
   shouldHandle: boolean
   result?: FallbackIntentResult
@@ -148,6 +151,26 @@ export async function detectNLUFallbackPreFlow(
     // Si es explicación contextual → respuesta empática de GPT + menú estándar
     if (classificationResult.intent === "explicacion_contextual") {
       const response = buildMenuResponse(appointmentContext, classificationResult.response)
+      return {
+        shouldHandle: true,
+        result: classificationResult,
+        response,
+      }
+    }
+
+    // Si es consulta que no podemos responder → derivar a la clínica
+    if (classificationResult.intent === "consulta_no_disponible") {
+      const response = buildDerivationResponse(appointmentContext, classificationResult.response, escalationPhoneNumber)
+      return {
+        shouldHandle: true,
+        result: classificationResult,
+        response,
+      }
+    }
+
+    // CRÍTICO: Consultas médicas que JAMÁS debemos responder → derivar a profesional médico
+    if (classificationResult.intent === "consulta_medica_prohibida") {
+      const response = buildMedicalDerivationResponse(appointmentContext, escalationPhoneNumber)
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -268,39 +291,54 @@ Tu tarea es analizar mensajes de pacientes y:
 3. **reagendar_turno**: El paciente quiere cambiar la fecha/hora
    - Ejemplos: "Quiero cambiar el turno", "Otra fecha", "En otro horario"
 
-4. **consulta_informativa**: El paciente pregunta por detalles del turno
+4. **consulta_informativa**: El paciente pregunta por detalles del turno QUE TENEMOS (dirección, hora, profesional)
    - Ejemplos: "¿Donde queda?", "¿A qué hora es?", "¿Con quién es?"
+   - SOLO clasificar así si la información está en el contexto del turno
 
-5. **queja_frustracion**: El paciente expresa frustración o queja
+5. **consulta_no_disponible**: El paciente pregunta algo ADMINISTRATIVO que NO podemos responder (costos, pagos, cobertura, documentación, etc.)
+   - Ejemplos: "¿Cuánto cuesta la consulta?", "¿Se debe abonar algo?", "¿Aceptan tarjeta?", "¿Qué documentación llevo?", "¿Cubren PAMI?", "¿Tienen estacionamiento?"
+   - Respuesta debe indicar que no tenemos esa información y derivar a la clínica
+
+6. **consulta_medica_prohibida**: 🚨 CRÍTICO - El paciente hace una consulta MÉDICA que JAMÁS debemos responder
+   - DETECTAR: Cualquier pregunta sobre síntomas, diagnósticos, tratamientos, medicamentos, dosis, efectos secundarios, pronósticos, o consejos de salud
+   - Ejemplos: "¿Qué me pasa si tengo visión borrosa?", "¿Debo tomar algún medicamento?", "¿Es grave mi condición?", "¿Qué tratamiento me recomiendan?", "¿Puedo tomar ibuprofeno?", "¿Cuántas gotas me pongo?", "¿Es normal que me duela?", "¿Qué hago si me arde el ojo?"
+   - También incluye: solicitud de recetas, estudios médicos, resultados de análisis, guardia/emergencias
+   - 🚨 NUNCA generar respuesta médica - SIEMPRE derivar a profesional médico
+   - Esta categoría tiene PRIORIDAD MÁXIMA sobre cualquier otra clasificación
+
+7. **queja_frustracion**: El paciente expresa frustración o queja
    - Ejemplos: "Estuve 3 días tratando de llamar", "Nunca me atendieron"
    - Respuesta debe ser empática y pedir disculpas
 
-6. **explicacion_contextual**: El paciente explica un motivo (enfermedad, mudanza, etc.)
+7. **explicacion_contextual**: El paciente explica un motivo (enfermedad, mudanza, etc.)
    - Ejemplos: "Está con neumonía", "Se mudó", "Cambié de obra social", "Por motivos de salud"
    - Respuesta debe ser empática y comprensiva
 
-7. **saludo_despedida**: El paciente se despide o saluda
+8. **saludo_despedida**: El paciente se despide o saluda
    - Ejemplos: "Gracias", "Chau", "Igualmente"
 
-8. **numero_equivocado**: No es la persona buscada
+9. **numero_equivocado**: No es la persona buscada
    - Ejemplos: "Se equivocaron", "No soy esa persona"
 
-9. **otro**: No encaja en ninguna categoría
+10. **otro**: No encaja en ninguna categoría
 
 **INSTRUCCIONES PARA LA RESPUESTA:**
 - Para "queja_frustracion": Pedir disculpas sinceras por los inconvenientes, mostrar empatía
 - Para "explicacion_contextual": Mostrar comprensión y empatía por la situación
 - Para "cancelar_turno" o "reagendar_turno": Confirmar que entendiste su necesidad
+- Para "consulta_no_disponible": Indicar amablemente que no tenés esa información
+- Para "consulta_medica_prohibida": NO generar ninguna respuesta médica (el sistema lo maneja automáticamente)
 - La respuesta debe ser breve (1-2 oraciones), cálida y profesional
 - NO incluir el menú de opciones en la respuesta (eso se agrega después)
 - NO incluir información del turno en la respuesta (eso se agrega después)
+- NO incluir número de teléfono de derivación (eso se agrega después)
 
 **SALIDA JSON:**
 {
-  "intent": "confirmar_asistencia" | "cancelar_turno" | "reagendar_turno" | "consulta_informativa" | "queja_frustracion" | "explicacion_contextual" | "saludo_despedida" | "numero_equivocado" | "otro",
+  "intent": "confirmar_asistencia" | "cancelar_turno" | "reagendar_turno" | "consulta_informativa" | "consulta_no_disponible" | "consulta_medica_prohibida" | "queja_frustracion" | "explicacion_contextual" | "saludo_despedida" | "numero_equivocado" | "otro",
   "confidence": 0.0-1.0,
   "reasoning": "Explicación breve",
-  "response": "Respuesta empática contextualizada (solo para queja_frustracion, explicacion_contextual, cancelar_turno, reagendar_turno)"
+  "response": "Respuesta empática contextualizada (NO generar para consulta_medica_prohibida)"
 }`
 }
 
@@ -381,6 +419,57 @@ function buildMenuResponse(appointmentContext: any, gptResponse?: string): strin
 Veo que tenés un turno programado para el *${fecha}* a las *${hora}* con ${profesional} en ${sede}.
 
 ${MENU_OPCIONES}`
+}
+
+/**
+ * Respuesta para consultas que no podemos responder → derivar a la clínica
+ * Usada para: consulta_no_disponible (costos, pagos, cobertura, etc.)
+ */
+function buildDerivationResponse(appointmentContext: any, gptResponse?: string, escalationPhoneNumber?: string): string {
+  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
+  const hora = appointmentContext.appointment_time || appointmentContext.hora
+  const profesional = appointmentContext.profesional || appointmentContext.professional_name
+  const sede = appointmentContext.sede || appointmentContext.sede_name
+
+  // Usar respuesta de GPT si existe, sino usar fallback
+  const empaticResponse = gptResponse || "Esa información no la tengo disponible en este momento."
+
+  // Construir mensaje de derivación con número si está disponible
+  const derivacionMsg = escalationPhoneNumber
+    ? `Para esa consulta te recomiendo comunicarte directamente con la clínica al *${escalationPhoneNumber}*.`
+    : `Para esa consulta te recomiendo comunicarte directamente con la clínica.`
+
+  return `${empaticResponse}
+
+${derivacionMsg}
+
+Tu turno sigue confirmado para el *${fecha}* a las *${hora}* con ${profesional} en ${sede}.
+
+Si necesitás algo más respecto al turno, no dudes en escribirme.`
+}
+
+/**
+ * 🚨 CRÍTICO: Respuesta para consultas médicas que JAMÁS debemos responder
+ * NO usa respuesta de GPT - respuesta fija para evitar cualquier riesgo
+ */
+function buildMedicalDerivationResponse(appointmentContext: any, escalationPhoneNumber?: string): string {
+  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
+  const hora = appointmentContext.appointment_time || appointmentContext.hora
+  const profesional = appointmentContext.profesional || appointmentContext.professional_name
+  const sede = appointmentContext.sede || appointmentContext.sede_name
+
+  // Número de derivación
+  const derivacionMsg = escalationPhoneNumber
+    ? `Para consultas médicas, por favor comunicate directamente con la clínica al *${escalationPhoneNumber}* o consultalo con tu médico en tu próxima visita.`
+    : `Para consultas médicas, por favor consultalo directamente con tu médico en tu próxima visita o comunicate con la clínica.`
+
+  return `No puedo brindarte información médica, ya que ese tipo de consultas deben ser respondidas por un profesional de la salud.
+
+${derivacionMsg}
+
+Tu turno sigue confirmado para el *${fecha}* a las *${hora}* con ${profesional} en ${sede}.
+
+Si necesitás ayuda con tu turno (confirmar, cancelar o reagendar), con gusto te ayudo.`
 }
 
 // ============================================================================

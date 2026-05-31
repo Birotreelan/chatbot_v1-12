@@ -44,15 +44,62 @@ Cuando **ningún handler anterior matchea con alta confianza**, este handler NLU
 ## Intenciones Clasificables
 
 ```
-confirmar_asistencia     → El paciente confirma que irá (con o sin typos/confusión)
-cancelar_turno           → El paciente quiere cancelar
-reagendar_turno          → El paciente quiere cambiar fecha/hora
-consulta_informativa     → El paciente pregunta detalles del turno
-queja_frustracion        → El paciente expresa frustración/problema comunicacional
-explicacion_contextual   → Explicación de motivo sin acción clara (enfermedad, mudanza)
-saludo_despedida         → Simple saludo/despedida
-numero_equivocado        → Señala que no es la persona buscada
-otro                     → No encaja en ninguna → Continuar flujo normal
+confirmar_asistencia       → El paciente confirma que irá (con o sin typos/confusión)
+cancelar_turno             → El paciente quiere cancelar
+reagendar_turno            → El paciente quiere cambiar fecha/hora
+consulta_informativa       → El paciente pregunta detalles del turno que TENEMOS (dirección, hora, profesional)
+consulta_no_disponible     → El paciente pregunta algo ADMINISTRATIVO que NO podemos responder (costos, pagos)
+consulta_medica_prohibida  → 🚨 CRÍTICO: Consultas médicas que JAMÁS debemos responder
+queja_frustracion          → El paciente expresa frustración/problema comunicacional
+explicacion_contextual     → Explicación de motivo sin acción clara (enfermedad, mudanza)
+saludo_despedida           → Simple saludo/despedida
+numero_equivocado          → Señala que no es la persona buscada
+otro                       → No encaja en ninguna → Continuar flujo normal
+```
+
+### 🚨 CONSULTA MÉDICA PROHIBIDA (CRÍTICO)
+**Esta categoría tiene PRIORIDAD MÁXIMA. JAMÁS se debe brindar información médica.**
+
+**Detectar:**
+- Síntomas: "¿Qué me pasa si tengo visión borrosa?", "¿Es normal que me duela?"
+- Diagnósticos: "¿Qué tengo?", "¿Es grave mi condición?"
+- Tratamientos: "¿Qué tratamiento me recomiendan?", "¿Qué debo hacer?"
+- Medicamentos: "¿Puedo tomar ibuprofeno?", "¿Cuántas gotas me pongo?", "¿Debo tomar algún medicamento?"
+- Recetas: "Necesito una receta", "¿Me pueden renovar la receta?"
+- Estudios: "¿Qué estudios necesito?", "¿Cómo salieron mis análisis?"
+- Emergencias: "¿Es urgente?", "¿Debo ir a guardia?"
+
+**Respuesta FIJA (no generada por GPT):**
+```
+No puedo brindarte información médica, ya que ese tipo de consultas deben ser respondidas por un profesional de la salud.
+
+Para consultas médicas, por favor comunicate directamente con la clínica al *011-4555-1234* o consultalo con tu médico en tu próxima visita.
+
+Tu turno sigue confirmado para el *lunes, 2 de junio de 2026* a las *14:00* con NICOLI MANUEL en SALUD OCULAR CALLAO.
+
+Si necesitás ayuda con tu turno (confirmar, cancelar o reagendar), con gusto te ayudo.
+```
+
+### Consulta No Disponible (Administrativa)
+**Ejemplos:**
+- "¿Cuánto cuesta la consulta?"
+- "¿Se debe abonar algo al momento de la consulta?"
+- "¿Aceptan tarjeta?"
+- "¿Qué documentación tengo que llevar?"
+- "¿Tienen estacionamiento?"
+- "¿Cubren PAMI?"
+
+**Respuesta**: GPT genera respuesta empática + se agrega derivación al número de la clínica (`config.escalationPhoneNumber`)
+
+**Ejemplo de respuesta final:**
+```
+Esa información no la tengo disponible desde este canal.
+
+Para esa consulta te recomiendo comunicarte directamente con la clínica al *011-4555-1234*.
+
+Tu turno sigue confirmado para el *lunes, 2 de junio de 2026* a las *14:00* con NICOLI MANUEL en SALUD OCULAR CALLAO.
+
+Si necesitás algo más respecto al turno, no dudes en escribirme.
 ```
 
 ## Lógica de Clasificación
