@@ -97,6 +97,12 @@ const FLAG_META: Record<
     risk: "bajo",
     sprint: "Sprint 12",
   },
+  directWrongNumberDetection: {
+    label: "Detección de número equivocado",
+    description: "Detecta 'se equivocaron de número', 'no soy esa persona', etc. ANTES de iniciar detección de paciente.",
+    risk: "bajo",
+    sprint: "Sprint 13",
+  },
 }
 
 const RISK_BADGE: Record<"bajo" | "medio" | "alto", string> = {
@@ -123,6 +129,7 @@ const FLAG_ORDER: FlagKey[] = [
   "pendingFlowContextualNLU",
   "postActionConsultationPassthrough",
   "directFarewellDetection",
+  "directWrongNumberDetection",
 ]
 
 export function FeatureFlagsPanel() {

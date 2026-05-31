@@ -182,6 +182,12 @@ export interface FeatureFlags {
   // Detecta "gracias", "chau", etc. ANTES de iniciar detección de paciente
   // Evita mostrar menú de bienvenida cuando el usuario solo se despide
   directFarewellDetection: boolean
+
+  // Detección de número equivocado (Sprint 13)
+  // Detecta "se equivocaron de número", "no soy esa persona", etc.
+  // ANTES de iniciar detección de paciente, para evitar tratar al usuario
+  // como el paciente del recordatorio cuando no lo es
+  directWrongNumberDetection: boolean
 }
 
 /**
@@ -204,6 +210,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directPacienteNuevo: false,
   pendingFlowContextualNLU: false,
   directFarewellDetection: false,
+  directWrongNumberDetection: false,
 }
 
 /**
