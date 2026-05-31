@@ -119,3 +119,24 @@ export function extractAndFormatDate(text: string): string {
 
   return text
 }
+
+/**
+ * Retorna el saludo de despedida dinámico según la hora del día en Argentina
+ * - 5:00 a 11:59: "¡Que tengas un excelente día!"
+ * - 12:00 a 17:59: "¡Que disfrutes la tarde!"
+ * - 18:00 a 21:59: "¡Que tengas buena noche!"
+ * - 22:00 a 4:59: "¡Que descanses!"
+ */
+export function getTimeBasedGreeting(): string {
+  const hour = getArgentinaHour()
+
+  if (hour >= 5 && hour < 12) {
+    return "¡Que tengas un excelente día!"
+  } else if (hour >= 12 && hour < 18) {
+    return "¡Que disfrutes la tarde!"
+  } else if (hour >= 18 && hour < 22) {
+    return "¡Que tengas buena noche!"
+  } else {
+    return "¡Que descanses!"
+  }
+}

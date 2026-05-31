@@ -12,7 +12,7 @@
 import { createConversationLogger } from "./logger"
 import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
-import { getArgentinaHour } from "@/lib/utils/date-utils"
+import { getArgentinaHour, getTimeBasedGreeting } from "@/lib/utils/date-utils"
 
 // ID del asistente NLU de despedida creado en OpenAI Platform
 const FAREWELL_NLU_ASSISTANT_ID = "asst_68NiTYXUNHnyqyvY04VrZLk7"
@@ -378,7 +378,7 @@ function selectFarewellTemplate(mode: "A" | "B"): string {
 }
 
 /**
- * Obtiene el saludo de despedida según la hora del día en Argentina
+ * Selecciona una plantilla aleatoria del banco correspondiente
  */
 function getTimeBasedGreeting(): string {
   const hour = getArgentinaHour()

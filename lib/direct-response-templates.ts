@@ -6,36 +6,7 @@
  */
 
 import type { ChatbotData, ChatbotDataTurno } from "./appointment-flow-state"
-
-// ============================================================================
-// HELPERS DE TIEMPO
-// ============================================================================
-
-/**
- * Retorna la hora actual en Argentina (UTC-3)
- */
-function getArgentinaHour(): number {
-  const now = new Date()
-  const utc = now.getTime() + now.getTimezoneOffset() * 60000
-  const argentina = new Date(utc - 3 * 60 * 60 * 1000)
-  return argentina.getHours()
-}
-
-/**
- * Retorna el saludo de despedida según la hora del día en Argentina
- */
-function getTimeBasedGreeting(): string {
-  const hour = getArgentinaHour()
-  if (hour >= 5 && hour < 12) {
-    return "¡Que tengas un excelente día!"
-  } else if (hour >= 12 && hour < 18) {
-    return "¡Que disfrutes la tarde!"
-  } else if (hour >= 18 && hour < 22) {
-    return "¡Que tengas buena noche!"
-  } else {
-    return "¡Que descanses!"
-  }
-}
+import { getTimeBasedGreeting } from "./utils/date-utils"
 
 // ============================================================================
 // HELPERS DE FORMATO

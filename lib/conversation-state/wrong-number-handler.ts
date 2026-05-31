@@ -16,7 +16,7 @@
 
 import { createConversationLogger } from "./logger"
 import { getRedisClient } from "@/lib/redis"
-import { getArgentinaHour } from "@/lib/utils/date-utils"
+import { getArgentinaHour, getTimeBasedGreeting } from "@/lib/utils/date-utils"
 
 // Patrones que indican CLARAMENTE que el usuario NO es la persona del recordatorio
 // Estos son casos 100% seguros que no necesitan NLU
@@ -129,23 +129,6 @@ export function isWrongNumberPattern(message: string): boolean {
 export function mightBeWrongNumber(message: string): boolean {
   const lowerMessage = message.toLowerCase().trim()
   return WRONG_NUMBER_KEYWORDS.some((keyword) => lowerMessage.includes(keyword))
-}
-
-/**
- * Obtiene el saludo de despedida segun la hora del dia en Argentina
- */
-function getTimeBasedGreeting(): string {
-  const hour = getArgentinaHour()
-  
-  if (hour >= 5 && hour < 12) {
-    return "Que tengas un buen dia!"
-  } else if (hour >= 12 && hour < 18) {
-    return "Que tengas buena tarde!"
-  } else if (hour >= 18 && hour < 22) {
-    return "Que tengas buena noche!"
-  } else {
-    return "Que descanses!"
-  }
 }
 
 /**
