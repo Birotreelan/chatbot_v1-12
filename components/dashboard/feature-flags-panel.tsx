@@ -103,6 +103,12 @@ const FLAG_META: Record<
     risk: "bajo",
     sprint: "Sprint 13",
   },
+  directConfirmCancelDetection: {
+    label: "Confirmación/Cancelación por texto libre",
+    description: "Detecta 'Confirmo', 'Cancelo', 'Voy', 'No puedo', etc. cuando hay template reciente (24h). Procesa sin pasar por detección de paciente.",
+    risk: "medio",
+    sprint: "Sprint 14",
+  },
 }
 
 const RISK_BADGE: Record<"bajo" | "medio" | "alto", string> = {
@@ -130,6 +136,7 @@ const FLAG_ORDER: FlagKey[] = [
   "postActionConsultationPassthrough",
   "directFarewellDetection",
   "directWrongNumberDetection",
+  "directConfirmCancelDetection",
 ]
 
 export function FeatureFlagsPanel() {
