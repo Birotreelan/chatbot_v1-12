@@ -1,32 +1,108 @@
+/**
+ * Integracion del flujo de paciente existente
+ * Usa modulos compartidos para reutilizacion de codigo con paciente nuevo
+ */
+
+import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
+
+// Importar handlers compartidos
 import {
-  startExistingPatientFlow,
-  handleSedeSelection,
-  handleTurnSelection,
-  handleConfirmation,
-  getExistingPatientState,
-  isExistingPatientFlowActive,
-  clearExistingPatientFlow,
-} from './existing-patient-flow-handler'
+  fetchSedes,
+  buildSedesMessage,
+  handleSedeSelection as handleSedeSelectionShared,
+  buildSedesErrorMessage,
+} from '../shared/sede-handler'
 import {
-  buildWelcomeMessage,
-  buildEmailRequestMessage,
-  buildInvalidEmailMessage,
-  buildSedeSelectionMessage,
-  buildSearchTypeMessage,
-  buildProfessionalSearchMessage,
-  buildSpecialtySelectionMessage,
+  buildSearchOptionsMessage,
+  handleSearchTypeSelection,
+  buildProfessionalNameRequestMessage,
+} from '../shared/search-options-handler'
+import {
+  fetchSpecialties,
+  buildSpecialtiesMessage,
+  handleSpecialtySelection,
+  buildSpecialtiesErrorMessage,
+} from '../shared/specialty-handler'
+import {
+  searchProfessionals,
+  buildProfessionalsListMessage,
+  handleProfessionalSelection,
+  handleProfessionalNameInput,
+} from '../shared/professional-handler'
+import {
+  searchTurnosAcumulativo,
   buildTurnosListMessage,
-  buildConfirmationMessage,
-  buildSuccessMessage,
-  buildErrorMessage,
-  buildInvalidSelectionMessage,
   buildNoTurnosMessage,
-  buildTooManyAttemptsMessage,
-} from './existing-patient-templates'
-import { validateEmail } from './existing-patient-validators'
-import { obtenerTodasLasSedes } from '../../api-tools/api-functions'
+} from '../shared/turnos-handler'
+import {
+  handleTurnoSelection,
+  buildTurnoSelectedMessage,
+} from '../shared/turno-selection-handler'
+import {
+  shouldRequestEmail,
+  buildEmailRequestMessage,
+  handleEmailInput as handleEmailInputShared,
+  validateEmail,
+} from '../shared/email-handler'
+import {
+  buildConfirmationMessage,
+  handleConfirmationResponse,
+  executeReservation,
+} from '../shared/confirmation-handler'
+import type {
+  SedeOption,
+  SpecialtyOption,
+  ProfessionalOption,
+  TurnoOption,
+  FlowPhase,
+} from '../shared/types'
+
+// Constantes
+const EXISTING_PATIENT_FLOW_KEY = 'existing_patient_flow'
+const EXISTING_PATIENT_FLOW_TTL = 7200 // 2 horas
+
+// Estado del flujo
+export interface ExistingPatientFlowState {
+  phase: FlowPhase
+  patientId: string
+  patientName: string
+  patientDNI: string
+  patientEmail?: string
+  patientPhone: string
+
+  // Obra social (del paciente existente)
+  obraSocialId?: string
+  obraSocialNombre?: string
+
+  // Sede
+  sedeId?: string
+  sedeNombre?: string
+  sedesOpciones?: SedeOption[]
+
+  // Busqueda
+  searchType?: 'medico_particular' | 'especialidad' | 'cualquier_medico'
+
+  // Profesional
+  profesionalId?: string
+  profesionalNombre?: string
+  profesionalesOpciones?: ProfessionalOption[]
+
+  // Especialidad
+  especialidadId?: string
+  especialidadNombre?: string
+  especialidadesOpciones?: SpecialtyOption[]
+
+  // Turnos
+  turnosOpciones?: TurnoOption[]
+  turnoSeleccionado?: TurnoOption
+
+  // Control
+  attempts: number
+  createdAt: number
+  lastUpdated: number
+}
 
 export interface ExistingPatientResult {
   handled: boolean
@@ -38,8 +114,33 @@ export interface ExistingPatientResult {
 }
 
 /**
- * Inicia el flujo de paciente existente
- * FLUJO CORRECTO: Sedes primero, email DESPUES de seleccionar turno
+ * Obtiene el estado del flujo desde Redis
+ */
+async function getFlowState(phoneNumber: string): Promise<ExistingPatientFlowState | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+
+  const stateKey = `${EXISTING_PATIENT_FLOW_KEY}:${phoneNumber}`
+  const stateStr = await redis.get(stateKey)
+  if (!stateStr) return null
+
+  return typeof stateStr === 'object' ? stateStr as ExistingPatientFlowState : JSON.parse(stateStr as string)
+}
+
+/**
+ * Guarda el estado del flujo en Redis
+ */
+async function saveFlowState(phoneNumber: string, state: ExistingPatientFlowState): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+
+  state.lastUpdated = Date.now()
+  const stateKey = `${EXISTING_PATIENT_FLOW_KEY}:${phoneNumber}`
+  await redis.setex(stateKey, EXISTING_PATIENT_FLOW_TTL, JSON.stringify(state))
+}
+
+/**
+ * Inicializa el flujo de paciente existente
  */
 export async function initializeExistingPatientFlow(
   phoneNumber: string,
@@ -49,12 +150,11 @@ export async function initializeExistingPatientFlow(
   patientEmail: string | undefined,
   clientId: string
 ): Promise<ExistingPatientResult> {
-  const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_initial')
-  logger.info('Initializing existing patient flow', { patientId })
+  const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_init')
+  logger.info('Initializing existing patient flow', { patientId, patientName })
 
   const flags = await getEffectiveFeatureFlags(clientId)
   if (!flags.directPacienteExistente) {
-    logger.debug('Feature flag disabled', {})
     return {
       handled: false,
       shouldCallOpenAI: true,
@@ -62,85 +162,44 @@ export async function initializeExistingPatientFlow(
     }
   }
 
-  try {
-    const result = await startExistingPatientFlow(
-      patientId,
-      patientName,
-      patientDNI,
-      patientEmail,
-      clientId,
-      phoneNumber
-    )
-
-    // El flujo ahora siempre empieza en awaiting_sede
-    // Debemos obtener las sedes de la API y mostrarlas junto con el mensaje de bienvenida
-    if (result.nextPhase === 'awaiting_sede') {
-      try {
-        const sedesResult = await obtenerTodasLasSedes(clientId)
-        
-        if (sedesResult.success && sedesResult.sedes && sedesResult.sedes.length > 0) {
-          // Mapear sedes al formato esperado por el template
-          const sedesFormateadas = sedesResult.sedes.map((sede) => ({
-            id: sede.Id,
-            nombre: sede.Nombre_Completo,
-            domicilio: sede.Domicilio,
-            localidad: sede.Localidad,
-            provincia: sede.Provincia,
-          }))
-          
-          // Guardar las opciones de sedes en el estado para referencia posterior
-          const redis = await import('@/lib/redis').then((m) => m.getRedisClient())
-          if (redis) {
-            const stateKey = `existing_patient_flow:${phoneNumber}`
-            const stateStr = await redis.get(stateKey)
-            if (stateStr) {
-              const state = typeof stateStr === 'object' ? stateStr : JSON.parse(stateStr as string)
-              state.sedesOpciones = sedesFormateadas
-              await redis.setex(stateKey, 7200, JSON.stringify(state))
-            }
-          }
-          
-          logger.info('Sedes obtenidas desde API para inicializacion', { total: sedesFormateadas.length })
-          
-          // Construir mensaje de bienvenida + sedes
-          const welcomeMessage = buildWelcomeMessage(patientName)
-          const sedesMessage = buildSedeSelectionMessage(sedesFormateadas)
-          
-          return {
-            handled: true,
-            message: `${welcomeMessage}\n\n${sedesMessage}`,
-            nextPhase: 'awaiting_sede',
-          }
-        } else {
-          logger.warn('No se pudieron obtener sedes desde la API en inicializacion', { error: sedesResult.error })
-          return {
-            handled: true,
-            message: `${buildWelcomeMessage(patientName)}\n\nNo pude obtener las sedes disponibles en este momento. Por favor, comunicate directamente con la clinica.`,
-            nextPhase: 'error',
-          }
-        }
-      } catch (error) {
-        logger.error('Error obteniendo sedes en inicializacion', error as Error)
-        return {
-          handled: true,
-          message: `${buildWelcomeMessage(patientName)}\n\nOcurrio un error al obtener las sedes. Por favor, intenta nuevamente mas tarde.`,
-          nextPhase: 'error',
-        }
-      }
-    }
-
+  // Obtener sedes desde la API
+  const sedesResult = await fetchSedes(clientId)
+  if (!sedesResult.success || !sedesResult.sedes) {
+    logger.error('Error fetching sedes', { error: sedesResult.error })
     return {
       handled: true,
-      message: buildWelcomeMessage(patientName),
-      nextPhase: result.nextPhase,
+      message: buildSedesErrorMessage(),
+      nextPhase: 'error',
     }
-  } catch (error) {
-    logger.error('Error initializing flow', error as Error)
-    return {
-      handled: false,
-      shouldCallOpenAI: true,
-      openAIContext: 'Error starting existing patient flow',
-    }
+  }
+
+  // Crear estado inicial
+  const state: ExistingPatientFlowState = {
+    phase: 'awaiting_sede',
+    patientId,
+    patientName,
+    patientDNI,
+    patientEmail,
+    patientPhone: phoneNumber,
+    sedesOpciones: sedesResult.sedes,
+    attempts: 0,
+    createdAt: Date.now(),
+    lastUpdated: Date.now(),
+  }
+
+  await saveFlowState(phoneNumber, state)
+
+  // Construir mensaje de bienvenida + sedes
+  const primerNombre = patientName.split(' ')[0]
+  const welcomeMessage = `Hola ${primerNombre}, te ayudo a agendar un nuevo turno.`
+  const sedesMessage = buildSedesMessage(sedesResult.sedes)
+
+  logger.info('Flow initialized', { sedesCount: sedesResult.sedes.length })
+
+  return {
+    handled: true,
+    message: `${welcomeMessage}\n\n${sedesMessage}`,
+    nextPhase: 'awaiting_sede',
   }
 }
 
@@ -154,259 +213,497 @@ export async function handleExistingPatientMessage(
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_message')
 
-  const isActive = await isExistingPatientFlowActive(phoneNumber)
-  if (!isActive) {
-    return { handled: false, shouldCallOpenAI: true }
-  }
-
-  const state = await getExistingPatientState(phoneNumber)
+  const state = await getFlowState(phoneNumber)
   if (!state) {
     return { handled: false, shouldCallOpenAI: true }
   }
 
-  logger.info('Processing message', { phase: state.phase })
+  logger.info('Processing message', { phase: state.phase, message: userMessage.substring(0, 50) })
 
-  // Distribuir según fase
+  // Router por fase
   switch (state.phase) {
-    case 'awaiting_email':
-      return handleEmailInput(phoneNumber, userMessage, clientId, state)
-
     case 'awaiting_sede':
-      return handleSedeInput(phoneNumber, userMessage, clientId, state)
+      return handleSedePhase(phoneNumber, userMessage, clientId, state)
 
-    case 'awaiting_turn_selection':
-      return handleTurnoInput(phoneNumber, userMessage, clientId, state)
+    case 'awaiting_search_type':
+      return handleSearchTypePhase(phoneNumber, userMessage, clientId, state)
+
+    case 'awaiting_professional_name':
+      return handleProfessionalNamePhase(phoneNumber, userMessage, clientId, state)
+
+    case 'awaiting_professional_selection':
+      return handleProfessionalSelectionPhase(phoneNumber, userMessage, clientId, state)
+
+    case 'awaiting_specialty_selection':
+      return handleSpecialtyPhase(phoneNumber, userMessage, clientId, state)
+
+    case 'awaiting_turno_selection':
+      return handleTurnoPhase(phoneNumber, userMessage, clientId, state)
+
+    case 'awaiting_email':
+      return handleEmailPhase(phoneNumber, userMessage, clientId, state)
 
     case 'awaiting_confirmation':
-      return handleConfirmInput(phoneNumber, userMessage, clientId, state)
+      return handleConfirmationPhase(phoneNumber, userMessage, clientId, state)
 
     default:
-      logger.debug('Phase not handled', { phase: state.phase })
+      logger.warn('Unhandled phase', { phase: state.phase })
       return { handled: false, shouldCallOpenAI: true }
   }
 }
 
 /**
- * Maneja input de email
+ * Fase: Seleccion de sede
  */
-async function handleEmailInput(
+async function handleSedePhase(
   phoneNumber: string,
   userMessage: string,
   clientId: string,
-  state: any
+  state: ExistingPatientFlowState
 ): Promise<ExistingPatientResult> {
-  const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_email')
+  const logger = createConversationLogger(phoneNumber, clientId, 'sede_phase')
 
-  if (!validateEmail(userMessage.trim())) {
-    logger.info('Invalid email', { attempts: state.attempts + 1 })
-    state.attempts += 1
+  if (!state.sedesOpciones || state.sedesOpciones.length === 0) {
+    return { handled: false, shouldCallOpenAI: true }
+  }
 
-    if (state.attempts > 2) {
-      return {
-        handled: true,
-        message: buildTooManyAttemptsMessage(),
-        nextPhase: 'abandoned',
-      }
-    }
+  const result = await handleSedeSelectionShared(userMessage, state.sedesOpciones, phoneNumber, clientId)
+
+  if (result.selectedSede) {
+    state.sedeId = result.selectedSede.id
+    state.sedeNombre = result.selectedSede.nombre
+    state.phase = 'awaiting_search_type'
+    state.attempts = 0
+    await saveFlowState(phoneNumber, state)
+
+    logger.info('Sede selected', { sedeId: state.sedeId, sedeName: state.sedeNombre })
 
     return {
       handled: true,
-      message: buildInvalidEmailMessage(state.attempts),
-      nextPhase: 'awaiting_email',
+      message: buildSearchOptionsMessage(state.sedeNombre),
+      nextPhase: 'awaiting_search_type',
     }
   }
 
-  state.patientEmail = userMessage.trim()
-  state.phase = 'awaiting_sede'
-  state.attempts = 0
+  // Seleccion invalida
+  state.attempts += 1
+  await saveFlowState(phoneNumber, state)
 
-  const redis = await import('@/lib/redis').then((m) => m.getRedisClient())
-  if (redis) {
-    await redis.setex(
-      `existing_patient_flow:${phoneNumber}`,
-      7200,
-      JSON.stringify(state)
+  return {
+    handled: true,
+    message: result.message,
+    nextPhase: 'awaiting_sede',
+  }
+}
+
+/**
+ * Fase: Tipo de busqueda
+ */
+async function handleSearchTypePhase(
+  phoneNumber: string,
+  userMessage: string,
+  clientId: string,
+  state: ExistingPatientFlowState
+): Promise<ExistingPatientResult> {
+  const logger = createConversationLogger(phoneNumber, clientId, 'search_type_phase')
+
+  const result = await handleSearchTypeSelection(userMessage, phoneNumber, clientId)
+
+  if (result.searchType) {
+    state.searchType = result.searchType
+    state.attempts = 0
+
+    if (result.searchType === 'medico_particular') {
+      state.phase = 'awaiting_professional_name'
+      await saveFlowState(phoneNumber, state)
+      return {
+        handled: true,
+        message: buildProfessionalNameRequestMessage(),
+        nextPhase: 'awaiting_professional_name',
+      }
+    }
+
+    if (result.searchType === 'especialidad') {
+      // Obtener especialidades
+      const espResult = await fetchSpecialties(clientId)
+      if (!espResult.success || !espResult.especialidades) {
+        return {
+          handled: true,
+          message: buildSpecialtiesErrorMessage(),
+          nextPhase: 'error',
+        }
+      }
+
+      state.especialidadesOpciones = espResult.especialidades
+      state.phase = 'awaiting_specialty_selection'
+      await saveFlowState(phoneNumber, state)
+
+      return {
+        handled: true,
+        message: buildSpecialtiesMessage(espResult.especialidades),
+        nextPhase: 'awaiting_specialty_selection',
+      }
+    }
+
+    if (result.searchType === 'cualquier_medico') {
+      // Buscar turnos sin filtro de profesional
+      return await searchAndShowTurnos(phoneNumber, clientId, state)
+    }
+  }
+
+  // Input no reconocido
+  return {
+    handled: true,
+    message: result.message,
+    nextPhase: 'awaiting_search_type',
+  }
+}
+
+/**
+ * Fase: Nombre del profesional
+ */
+async function handleProfessionalNamePhase(
+  phoneNumber: string,
+  userMessage: string,
+  clientId: string,
+  state: ExistingPatientFlowState
+): Promise<ExistingPatientResult> {
+  const logger = createConversationLogger(phoneNumber, clientId, 'professional_name_phase')
+
+  const result = await handleProfessionalNameInput(userMessage, clientId, phoneNumber)
+
+  if (result.profesionales && result.profesionales.length > 0) {
+    state.profesionalesOpciones = result.profesionales
+
+    if (result.profesionales.length === 1) {
+      // Un solo profesional encontrado, seleccionar automaticamente
+      state.profesionalId = result.profesionales[0].id
+      state.profesionalNombre = result.profesionales[0].nombre
+      state.phase = 'awaiting_turno_selection'
+      await saveFlowState(phoneNumber, state)
+
+      return await searchAndShowTurnos(phoneNumber, clientId, state)
+    }
+
+    // Multiples profesionales, mostrar lista
+    state.phase = 'awaiting_professional_selection'
+    await saveFlowState(phoneNumber, state)
+
+    return {
+      handled: true,
+      message: result.message,
+      nextPhase: 'awaiting_professional_selection',
+    }
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+    nextPhase: 'awaiting_professional_name',
+  }
+}
+
+/**
+ * Fase: Seleccion de profesional
+ */
+async function handleProfessionalSelectionPhase(
+  phoneNumber: string,
+  userMessage: string,
+  clientId: string,
+  state: ExistingPatientFlowState
+): Promise<ExistingPatientResult> {
+  if (!state.profesionalesOpciones) {
+    return { handled: false, shouldCallOpenAI: true }
+  }
+
+  const result = await handleProfessionalSelection(userMessage, state.profesionalesOpciones, phoneNumber, clientId)
+
+  if (result.selectedProfessional) {
+    state.profesionalId = result.selectedProfessional.id
+    state.profesionalNombre = result.selectedProfessional.nombre
+    state.attempts = 0
+    await saveFlowState(phoneNumber, state)
+
+    return await searchAndShowTurnos(phoneNumber, clientId, state)
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+    nextPhase: 'awaiting_professional_selection',
+  }
+}
+
+/**
+ * Fase: Seleccion de especialidad
+ */
+async function handleSpecialtyPhase(
+  phoneNumber: string,
+  userMessage: string,
+  clientId: string,
+  state: ExistingPatientFlowState
+): Promise<ExistingPatientResult> {
+  if (!state.especialidadesOpciones) {
+    return { handled: false, shouldCallOpenAI: true }
+  }
+
+  const result = await handleSpecialtySelection(userMessage, state.especialidadesOpciones, phoneNumber, clientId)
+
+  if (result.selectedSpecialty) {
+    state.especialidadId = result.selectedSpecialty.id
+    state.especialidadNombre = result.selectedSpecialty.nombre
+    state.attempts = 0
+    await saveFlowState(phoneNumber, state)
+
+    return await searchAndShowTurnos(phoneNumber, clientId, state)
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+    nextPhase: 'awaiting_specialty_selection',
+  }
+}
+
+/**
+ * Busca turnos y los muestra
+ */
+async function searchAndShowTurnos(
+  phoneNumber: string,
+  clientId: string,
+  state: ExistingPatientFlowState
+): Promise<ExistingPatientResult> {
+  const logger = createConversationLogger(phoneNumber, clientId, 'turnos_search')
+
+  logger.info('Searching turnos', {
+    sedeId: state.sedeId,
+    profesionalId: state.profesionalId,
+    especialidadId: state.especialidadId,
+  })
+
+  const result = await searchTurnosAcumulativo(
+    clientId,
+    {
+      sedeId: state.sedeId!,
+      pacienteDNI: state.patientDNI, // Paciente existente usa DNI
+      profesionalId: state.profesionalId,
+      especialidadId: state.especialidadId,
+    },
+    phoneNumber
+  )
+
+  if (!result.success || !result.turnos || result.turnos.length === 0) {
+    return {
+      handled: true,
+      message: buildNoTurnosMessage(state.sedeNombre, state.profesionalNombre, state.especialidadNombre),
+      nextPhase: 'awaiting_search_type', // Volver a opciones de busqueda
+    }
+  }
+
+  state.turnosOpciones = result.turnos
+  state.phase = 'awaiting_turno_selection'
+  await saveFlowState(phoneNumber, state)
+
+  logger.info('Turnos found', { count: result.turnos.length, rango: result.rangoUtilizado })
+
+  return {
+    handled: true,
+    message: buildTurnosListMessage(result.turnos, state.patientName, state.sedeNombre),
+    nextPhase: 'awaiting_turno_selection',
+  }
+}
+
+/**
+ * Fase: Seleccion de turno
+ */
+async function handleTurnoPhase(
+  phoneNumber: string,
+  userMessage: string,
+  clientId: string,
+  state: ExistingPatientFlowState
+): Promise<ExistingPatientResult> {
+  if (!state.turnosOpciones) {
+    return { handled: false, shouldCallOpenAI: true }
+  }
+
+  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phoneNumber, clientId)
+
+  if (result.selectedTurno) {
+    state.turnoSeleccionado = result.selectedTurno
+    state.attempts = 0
+
+    // Verificar si necesita email
+    if (shouldRequestEmail(state.patientEmail)) {
+      state.phase = 'awaiting_email'
+      await saveFlowState(phoneNumber, state)
+
+      const turnoMsg = buildTurnoSelectedMessage(result.selectedTurno)
+      const emailMsg = buildEmailRequestMessage()
+
+      return {
+        handled: true,
+        message: `${turnoMsg}\n\n${emailMsg}`,
+        nextPhase: 'awaiting_email',
+      }
+    }
+
+    // Ya tiene email, ir a confirmacion
+    state.phase = 'awaiting_confirmation'
+    await saveFlowState(phoneNumber, state)
+
+    return {
+      handled: true,
+      message: buildConfirmationMessage(
+        result.selectedTurno,
+        state.patientName,
+        state.sedeNombre,
+        state.obraSocialNombre
+      ),
+      nextPhase: 'awaiting_confirmation',
+    }
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+    nextPhase: 'awaiting_turno_selection',
+  }
+}
+
+/**
+ * Fase: Email
+ */
+async function handleEmailPhase(
+  phoneNumber: string,
+  userMessage: string,
+  clientId: string,
+  state: ExistingPatientFlowState
+): Promise<ExistingPatientResult> {
+  const result = await handleEmailInputShared(userMessage, phoneNumber, clientId, state.attempts)
+
+  if (result.validatedEmail) {
+    state.patientEmail = result.validatedEmail
+    state.phase = 'awaiting_confirmation'
+    state.attempts = 0
+    await saveFlowState(phoneNumber, state)
+
+    return {
+      handled: true,
+      message: buildConfirmationMessage(
+        state.turnoSeleccionado!,
+        state.patientName,
+        state.sedeNombre,
+        state.obraSocialNombre
+      ),
+      nextPhase: 'awaiting_confirmation',
+    }
+  }
+
+  if (result.nextPhase === 'abandoned') {
+    await clearExistingPatientFlow(phoneNumber)
+    return {
+      handled: true,
+      message: result.message,
+      nextPhase: 'abandoned',
+    }
+  }
+
+  state.attempts += 1
+  await saveFlowState(phoneNumber, state)
+
+  return {
+    handled: true,
+    message: result.message,
+    nextPhase: 'awaiting_email',
+  }
+}
+
+/**
+ * Fase: Confirmacion
+ */
+async function handleConfirmationPhase(
+  phoneNumber: string,
+  userMessage: string,
+  clientId: string,
+  state: ExistingPatientFlowState
+): Promise<ExistingPatientResult> {
+  const logger = createConversationLogger(phoneNumber, clientId, 'confirmation_phase')
+
+  const result = await handleConfirmationResponse(userMessage, phoneNumber, clientId)
+
+  if (result.confirmed === true) {
+    // Ejecutar reserva
+    const reservaResult = await executeReservation(
+      clientId,
+      state.turnoSeleccionado!,
+      {
+        dni: state.patientDNI,
+        telefono: state.patientPhone,
+        email: state.patientEmail!,
+        obraSocialId: state.obraSocialId,
+        obraSocialNombre: state.obraSocialNombre,
+      },
+      phoneNumber
     )
-  }
 
-  logger.info('Email validated', {})
+    if (reservaResult.success) {
+      state.phase = 'completed'
+      await saveFlowState(phoneNumber, state)
 
-  // Obtener sedes reales desde la API
-  try {
-    const sedesResult = await obtenerTodasLasSedes(clientId)
-    
-    if (sedesResult.success && sedesResult.sedes && sedesResult.sedes.length > 0) {
-      // Mapear sedes al formato esperado por el template
-      const sedesFormateadas = sedesResult.sedes.map((sede) => ({
-        id: sede.Id,
-        nombre: sede.Nombre_Completo,
-        domicilio: sede.Domicilio,
-        localidad: sede.Localidad,
-        provincia: sede.Provincia,
-      }))
-      
-      // Guardar las opciones de sedes en el estado para referencia posterior
-      state.sedesOpciones = sedesFormateadas
-      if (redis) {
-        await redis.setex(
-          `existing_patient_flow:${phoneNumber}`,
-          7200,
-          JSON.stringify(state)
-        )
-      }
-      
-      logger.info('Sedes obtenidas desde API', { total: sedesFormateadas.length })
-      
+      logger.info('Reserva exitosa', { turnoId: state.turnoSeleccionado?.id })
+
       return {
         handled: true,
-        message: buildSedeSelectionMessage(sedesFormateadas),
-        nextPhase: 'awaiting_sede',
-      }
-    } else {
-      logger.warn('No se pudieron obtener sedes desde la API', { error: sedesResult.error })
-      return {
-        handled: true,
-        message: 'No pude obtener las sedes disponibles en este momento. Por favor, comunicate directamente con la clinica.',
-        nextPhase: 'error',
+        message: reservaResult.message,
+        action: 'turno_reservado',
+        nextPhase: 'completed',
       }
     }
-  } catch (error) {
-    logger.error('Error obteniendo sedes', error as Error)
+
+    // Error en reserva
+    logger.error('Error en reserva', { error: reservaResult.error })
     return {
       handled: true,
-      message: 'Ocurrio un error al obtener las sedes. Por favor, intenta nuevamente mas tarde.',
-      nextPhase: 'error',
+      message: reservaResult.message,
+      nextPhase: 'awaiting_turno_selection', // Permitir elegir otro turno
     }
   }
-}
 
-/**
- * Maneja selección de sede
- */
-async function handleSedeInput(
-  phoneNumber: string,
-  userMessage: string,
-  clientId: string,
-  state: any
-): Promise<ExistingPatientResult> {
-  const result = await handleSedeSelection(phoneNumber, userMessage, clientId)
-
-  if (!result.handled) {
-    if (result.nextPhase === 'nlu_required') {
-      return {
-        handled: false,
-        shouldCallOpenAI: true,
-        openAIContext: 'User message not numeric for sede selection',
-      }
-    }
-    return { handled: false }
-  }
-
-  if (result.error) {
+  if (result.confirmed === false && result.nextPhase === 'abandoned') {
+    await clearExistingPatientFlow(phoneNumber)
     return {
       handled: true,
-      message: result.error,
-      nextPhase: 'awaiting_sede',
+      message: result.message,
+      nextPhase: 'abandoned',
     }
   }
 
   return {
     handled: true,
-    message: buildSearchTypeMessage(),
-    nextPhase: result.nextPhase,
-  }
-}
-
-/**
- * Maneja selección de turno
- */
-async function handleTurnoInput(
-  phoneNumber: string,
-  userMessage: string,
-  clientId: string,
-  state: any
-): Promise<ExistingPatientResult> {
-  const result = await handleTurnSelection(phoneNumber, userMessage, clientId)
-
-  if (!result.handled) {
-    if (result.nextPhase === 'nlu_required') {
-      return {
-        handled: false,
-        shouldCallOpenAI: true,
-        openAIContext: 'User message not numeric for turn selection',
-      }
-    }
-    return { handled: false }
-  }
-
-  if (result.error) {
-    return {
-      handled: true,
-      message: result.error,
-      nextPhase: 'awaiting_turn_selection',
-    }
-  }
-
-  const updatedState = await getExistingPatientState(phoneNumber)
-  if (!updatedState || !updatedState.selectedTurno) {
-    return { handled: false, message: 'Error al procesar selección' }
-  }
-
-  return {
-    handled: true,
-    message: buildConfirmationMessage(updatedState.selectedTurno, updatedState.patientName),
+    message: result.message,
     nextPhase: 'awaiting_confirmation',
   }
 }
 
 /**
- * Maneja confirmación final
+ * Verifica si el flujo esta activo
  */
-async function handleConfirmInput(
-  phoneNumber: string,
-  userMessage: string,
-  clientId: string,
-  state: any
-): Promise<ExistingPatientResult> {
-  const result = await handleConfirmation(phoneNumber, userMessage, clientId)
-
-  if (!result.handled) {
-    if (result.nextPhase === 'nlu_required') {
-      return {
-        handled: false,
-        shouldCallOpenAI: true,
-        openAIContext: 'Ambiguous confirmation message',
-      }
-    }
-    return { handled: false, message: result.error || 'Error procesando confirmación' }
-  }
-
-  if (!result.confirmed) {
-    if (result.nextPhase === 'initial') {
-      return {
-        handled: true,
-        message: 'Volvamos a comenzar. ¿Cuál es tu preferencia?',
-        nextPhase: 'awaiting_sede',
-      }
-    }
-    return { handled: false }
-  }
-
-  const updatedState = await getExistingPatientState(phoneNumber)
-  if (!updatedState || !updatedState.selectedTurno) {
-    return { handled: false, message: 'Error al reservar turno' }
-  }
-
-  return {
-    handled: true,
-    message: buildSuccessMessage(updatedState.selectedTurno),
-    action: 'turno_reservado',
-    nextPhase: 'completed',
-  }
+export async function isExistingPatientFlowActive(phoneNumber: string): Promise<boolean> {
+  const state = await getFlowState(phoneNumber)
+  return !!state && state.phase !== 'completed' && state.phase !== 'abandoned'
 }
 
 /**
- * Verifica si el flujo está activo
+ * Limpia el flujo
+ */
+export async function clearExistingPatientFlow(phoneNumber: string): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  await redis.del(`${EXISTING_PATIENT_FLOW_KEY}:${phoneNumber}`)
+}
+
+/**
+ * Verifica si debe usar el flujo directo
  */
 export async function shouldUseExistingPatientFlow(
   phoneNumber: string,
@@ -418,13 +715,3 @@ export async function shouldUseExistingPatientFlow(
   const flags = await getEffectiveFeatureFlags(clientId)
   return flags.directPacienteExistente
 }
-
-/**
- * Completa el flujo
- */
-export async function completeExistingPatientFlow(phoneNumber: string): Promise<void> {
-  await clearExistingPatientFlow(phoneNumber)
-}
-
-// Re-export isExistingPatientFlowActive para que pueda ser importado desde este módulo
-export { isExistingPatientFlowActive } from './existing-patient-flow-handler'
