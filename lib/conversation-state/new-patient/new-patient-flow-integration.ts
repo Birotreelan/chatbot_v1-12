@@ -8,6 +8,7 @@ import {
   clearNewPatientFlow,
 } from './new-patient-flow-handler'
 import {
+  buildNewPatientInitialMenuMessage,
   buildNameRequestMessage,
   buildHealthInsuranceRequestMessage,
   buildHealthInsuranceRetryMessage,
@@ -66,7 +67,7 @@ export async function initializeNewPatientFlow(
 
     return {
       handled: true,
-      message: buildNameRequestMessage(),
+      message: buildNewPatientInitialMenuMessage(),
       patientInfo: { dni },
     }
   } catch (error) {
@@ -120,13 +121,16 @@ export async function handleNewPatientMessage(
     let responseMessage = ''
     
     switch (processResult.nextPhase) {
+      case 'name_input':
+        responseMessage = buildNameRequestMessage()
+        break
       case 'health_insurance':
         responseMessage = buildHealthInsuranceRequestMessage(updatedState.name || 'Paciente')
         break
       case 'health_insurance_retry':
         responseMessage = buildHealthInsuranceRetryMessage(
           updatedState.name || 'Paciente',
-          updatedState.lastInvalidInput || 'tu respuesta'
+          updatedState.lastInvalidInput || 'la opción ingresada'
         )
         break
       case 'venue_selection':

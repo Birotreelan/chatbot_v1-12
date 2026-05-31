@@ -2,6 +2,10 @@
  * Templates para flujo de paciente nuevo
  */
 
+export function buildNewPatientInitialMenuMessage(): string {
+  return `Gracias, ya hemos validado tu DNI. Te agendaremos como nuevo paciente.\n\n¿En qué te podemos ayudar?\n\n1. Solicitar turno médico\n\nPor favor selecciona el número de opción para continuar.`
+}
+
 export function buildNameRequestMessage(): string {
   return 'Perfecto, para solicitar un nuevo turno primero te pediré que me indiques tu nombre y apellido.'
 }
@@ -11,11 +15,11 @@ export function buildHealthInsuranceRequestMessage(firstName: string): string {
 }
 
 export function buildHealthInsuranceRetryMessage(firstName: string, invalidInput: string): string {
-  return `${firstName}, no pude encontrar la obra social "${invalidInput}". Por favor, verificá el nombre e intentá de nuevo. Podés escribir el nombre completo (ej: "OSDE 210", "Swiss Medical", "Galeno") o "particular" si no tenés obra social.`
+  return `${firstName}, no pude encontrar la obra social "${invalidInput}". Es posible que la hayas escrito mal o que no esté entre las obras sociales disponibles. ¿Querés volver a intentarlo con otro nombre o corregir el que ingresaste?`
 }
 
 export function buildVenueSelectionMessage(firstName: string, venues: any[]): string {
-  let message = `Perfecto ${firstName}, la obra social está habilitada.\n\nPara continuar, necesito que selecciones la sede donde querés atenderte:\n\n`
+  let message = `Perfecto ${firstName}, la obra social está habilitada para obtener turnos por este medio.\n\nPara continuar, necesito que selecciones la sede donde querés atenderte. Por favor, indicame el número de la sede que preferís.\n\n`
   
   venues.forEach((venue, idx) => {
     message += `${idx + 1}. ${venue.name}, ubicada en ${venue.address}, ${venue.city}, ${venue.province}\n`
@@ -25,17 +29,17 @@ export function buildVenueSelectionMessage(firstName: string, venues: any[]): st
 }
 
 export function buildSearchTypeMessage(venueName: string): string {
-  return `Buscaremos turnos en ${venueName}.\n\nPara eso, necesito saber si querés un turno con un médico en particular, por especialidad, o con cualquier médico:\n\n1. Solicitar turno con un médico en particular\n2. Solicitar turno por especialidad\n3. Solicitar turno con cualquier médico`
+  return `Buscaremos turnos en ${venueName}.\n\nPara eso, necesito saber si querés un turno con un médico en particular, por especialidad, o con cualquier médico. Por favor, indicame si preferís:\n\n1. Solicitar turno con un médico en particular\n2. Solicitar turno por especialidad\n3. Solicitar turno con cualquier médico`
 }
 
 export function buildTurnsListMessage(firstName: string, turns: any[]): string {
-  let message = `${firstName}, estos son los próximos turnos disponibles:\n\n`
+  let message = `Encontre los siguientes turnos disponibles:\n\n`
   
   turns.forEach((turn, idx) => {
-    message += `${idx + 1}. ${turn.time} con Dr. ${turn.professional}\n`
+    message += `${idx + 1}. ${turn.time} con ${turn.professional}\n`
   })
   
-  message += '\nPor favor, indicame el número del turno que prefieras reservar.'
+  message += '\nPor favor, indicame el número del turno que preferís.'
   return message
 }
 
@@ -75,9 +79,11 @@ Fecha: ${turnData.date}
 
 Hora: ${turnData.time}
 
-Profesional: Dr. ${turnData.professional}
+Profesional: ${turnData.professional}
 
 Sede: ${turnData.venue}
+
+Id Turno: ${turnData.id}
 
 ¿Confirmás que los datos son correctos y deseás realizar la reserva del turno número ${turnNumber}?
 
@@ -87,7 +93,7 @@ Respondé con:
 }
 
 export function buildSuccessMessage(firstName: string): string {
-  return `¡Excelente ${firstName}! Tu turno ha sido confirmado exitosamente. Recibirás un correo de confirmación en tu email con todos los detalles de tu cita. ¡Gracias por agendar con nosotros!`
+  return `Tu solicitud de turno fue enviada exitosamente!\n\nImportante: Esta solicitud debe ser aprobada por la clínica para que el turno te sea otorgado. Te notificaremos cuando ello ocurra.`
 }
 
 export function buildErrorMessage(message: string): string {
