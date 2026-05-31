@@ -82,10 +82,12 @@ const PROFESSIONAL_QUERY_PATTERNS = [
 
 /**
  * Patrones de consulta de FECHA
+ * IMPORTANTE: Usar \b word boundaries para evitar falsos positivos como
+ * "Necesito" matcheando "es" en el patrón (?:es|tengo)
  */
 const DATE_QUERY_PATTERNS = [
-  /(?:qu[eé]\s+)?d[ií]a\s+(?:es|tengo)(?:\s+el\s+turno)?/i,
-  /(?:cu[aá]ndo\s+)?(?:es|tengo)(?:\s+el\s+turno)?/i,
+  /(?:qu[eé]\s+)?d[ií]a\s+\b(?:es|tengo)\b(?:\s+el\s+turno)?/i,
+  /(?:cu[aá]ndo\s+)?\b(?:es|tengo)\b(?:\s+el\s+turno)?/i,
   /(?:para\s+)?(?:qu[eé]\s+)?fecha/i,
   /(?:cu[aá]l\s+es\s+)?(?:la\s+)?fecha\s+(?:del\s+turno)?/i,
 ]
