@@ -127,6 +127,12 @@ const FLAG_META: Record<
     risk: "bajo",
     sprint: "Sprint 17",
   },
+  nluFallbackRouter: {
+    label: "NLU Fallback Router",
+    description: "Clasificador NLU inteligente que resuelve false positives de regex y redirige al flujo correcto (confirmación, cancelación, queja, etc.).",
+    risk: "bajo",
+    sprint: "Sprint 18",
+  },
 }
 
 const RISK_BADGE: Record<"bajo" | "medio" | "alto", string> = {
@@ -158,6 +164,7 @@ const FLAG_ORDER: FlagKey[] = [
   "reciprocalFarewellSilence",
   "directInformationalQuery",
   "postActionContextHandler",
+  "nluFallbackRouter",
 ]
 
 export function FeatureFlagsPanel() {
