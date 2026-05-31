@@ -1,6 +1,6 @@
 import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
-import { ClinicAPI } from '../../clinic-api'
+import { validarObraSocial } from '@/lib/api-tools/api-functions'
 
 /**
  * New Patient Flow Handler
@@ -11,7 +11,7 @@ const NEW_PATIENT_STATE_KEY = 'new_patient_flow'
 const NEW_PATIENT_TTL = 86400 // 24 horas (antes 2h era muy corto para pacientes que tardan en responder)
 
 interface NewPatientFlowState {
-  phase: 'name_input' | 'health_insurance' | 'venue_selection' | 'search_type' | 
+  phase: 'initial_menu' | 'name_input' | 'health_insurance' | 'venue_selection' | 'search_type' | 
          'professional_search' | 'turn_selection' | 'email_confirmation' | 'final_confirmation' | 'completed'
   dni: string
   phone: string
@@ -50,7 +50,7 @@ export async function startNewPatientFlow(
   }
 
   const state: NewPatientFlowState = {
-    phase: 'name_input',
+    phase: 'initial_menu',
     dni,
     phone,
     createdAt: Date.now(),
@@ -97,6 +97,8 @@ export async function processNewPatientMessage(
     : JSON.parse(stateStr as string)
 
   switch (state.phase) {
+    case 'initial_menu':
+      return handleInitialMenu(userMessage, state, stateKey, phone, clientId, redis, logger)
     case 'name_input':
       return handleNameInput(userMessage, state, stateKey, phone, clientId, redis, logger)
     case 'health_insurance':
@@ -115,6 +117,31 @@ export async function processNewPatientMessage(
       logger.warn('Unknown phase', { phase: state.phase })
       return { handled: false }
   }
+}
+
+async function handleInitialMenu(
+  message: string,
+  state: NewPatientFlowState,
+  stateKey: string,
+  phone: string,
+  clientId: string,
+  redis: any,
+  logger: any
+): Promise<{ handled: boolean; nextPhase?: string }> {
+  const choice = message.trim()
+  
+  // Solo aceptamos "1" para solicitar turno
+  if (choice !== '1') {
+    return { handled: false, nextPhase: 'invalid_menu_choice' }
+  }
+
+  state.phase = 'name_input'
+  state.attempts = 0
+
+  await redis.setex(stateKey, NEW_PATIENT_TTL, JSON.stringify(state))
+  logger.info('Menu choice selected', { choice })
+
+  return { handled: true, nextPhase: 'name_input' }
 }
 
 async function handleNameInput(
@@ -151,12 +178,10 @@ async function handleHealthInsurance(
   redis: any,
   logger: any
 ): Promise<{ handled: boolean; nextPhase?: string }> {
-  const clinicAPI = new ClinicAPI(clientId)
-  
   try {
-    const result = await clinicAPI.validarObraSocial(message)
+    const result = await validarObraSocial(clientId, message)
     
-    if (!result.exito) {
+    if (!result.exito || !result.datos || result.datos.total_encontradas === 0) {
       // Guardar el intento fallido en el estado pero mantener la fase actual
       state.attempts = (state.attempts || 0) + 1
       state.lastInvalidInput = message
@@ -172,21 +197,38 @@ async function handleHealthInsurance(
       return { handled: true, nextPhase: 'health_insurance_retry' }
     }
 
-    state.healthInsurance = result.datos.nombre
-    state.healthInsuranceId = result.datos.id
-    state.phase = 'venue_selection'
-    state.attempts = 0
-    state.lastInvalidInput = undefined
+    // Si hay una sola obra social encontrada
+    if (result.datos.total_encontradas === 1) {
+      const obraSocial = result.datos.obras_sociales[0]
+      state.healthInsurance = obraSocial.nombre
+      state.healthInsuranceId = obraSocial.id
+      state.phase = 'venue_selection'
+      state.attempts = 0
+      state.lastInvalidInput = undefined
 
-    await redis.setex(stateKey, NEW_PATIENT_TTL, JSON.stringify(state))
-    logger.info('Health insurance validated', { healthInsurance: state.healthInsurance })
+      await redis.setex(stateKey, NEW_PATIENT_TTL, JSON.stringify(state))
+      logger.info('Health insurance validated', { healthInsurance: state.healthInsurance })
 
-    return { handled: true, nextPhase: 'venue_selection' }
+      return { handled: true, nextPhase: 'venue_selection' }
+    } else {
+      // Si hay múltiples resultados, guardar y pedir que sea más específico
+      state.attempts = (state.attempts || 0) + 1
+      state.lastInvalidInput = message
+      await redis.setex(stateKey, NEW_PATIENT_TTL, JSON.stringify(state))
+      
+      logger.info('Multiple health insurance options found', { 
+        count: result.datos.total_encontradas,
+        options: result.datos.obras_sociales.map(o => o.nombre)
+      })
+      
+      return { handled: true, nextPhase: 'health_insurance_multiple' }
+    }
   } catch (error) {
     logger.error('Health insurance validation error', error as Error)
     
     // En caso de error de red/API, guardar estado y permitir retry
     state.attempts = (state.attempts || 0) + 1
+    state.lastInvalidInput = message
     await redis.setex(stateKey, NEW_PATIENT_TTL, JSON.stringify(state))
     
     return { handled: true, nextPhase: 'health_insurance_retry' }
