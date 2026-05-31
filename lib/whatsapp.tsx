@@ -38,6 +38,7 @@ import { createConversationLogger } from "./conversation-state/logger"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
 import { handleFarewellIfDetected, detectFarewellPreFlow } from "./conversation-state/farewell-handler"
 import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
+import { detectDirectConfirmationPreFlow, buildConfirmationSuccessResponse, buildCancelConfirmationPrompt } from "./conversation-state/direct-confirmation-handler"
 import {
   handleTurnSelectionIfPending,
   buildInvalidSelectionMessage,
@@ -1413,15 +1414,124 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             clienteId: config.cliente_id,
           }
           
-          await sendDirectResponse(wrongNumberCtx, wrongNumberResult.response, "wrong_person_confirmed")
-          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-          return
-        }
-      }
+  await sendDirectResponse(wrongNumberCtx, wrongNumberResult.response, "wrong_person_confirmed")
+  await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+  return
+  }
+  }
+  }
+  
+  // ============================================================================
+  // SPRINT 14: INTERCEPTAR CONFIRMACION/CANCELACION DIRECTA
+  // Detecta "Confirmo", "Cancelo", "Voy", "No puedo", etc. por texto libre
+  // cuando hay un template reciente (ventana 24h) pero sin flowState pendiente
+  // ============================================================================
+  if (message.type === "text") {
+  const directConfirmFlags = await getEffectiveFeatureFlags(config.id)
+  
+  if (directConfirmFlags.directConfirmCancelDetection && config.cliente_id) {
+  console.log(`[WHATSAPP] 📝 Verificando confirmación/cancelación directa para ${userPhoneNumber}`)
+  
+  const directActionResult = await detectDirectConfirmationPreFlow(
+  userPhoneNumber,
+  config.id,
+  config.cliente_id,
+  userMessage,
+  true // useNLU habilitado
+  )
+  
+  if (directActionResult.detected && directActionResult.appointmentContext) {
+  const appointmentCtx = directActionResult.appointmentContext as ChatbotData
+  const patientName = appointmentCtx.paciente?.nombres || "Estimado/a"
+  
+  if (directActionResult.action === "confirm") {
+    console.log(`[WHATSAPP] ✅ Confirmación directa detectada, procesando confirmación`)
+    
+    // Enviar confirmación al proxy
+    const confirmCtx: DirectResponseContext = {
+    phoneNumberId: value.metadata.phone_number_id,
+    accessToken: config.accessToken,
+    userPhoneNumber,
+    configId: config.id,
+    clienteId: config.cliente_id,
     }
-
-    // ============================================================================
-    // NEW: INTERCEPTAR DETECCION INICIAL DE PACIENTE (Sin recordatorio previo)
+    
+    // Procesar confirmación igual que botón "Confirmar"
+    const confirmResponse = buildConfirmationSuccessResponse(patientName)
+    await sendDirectResponse(confirmCtx, confirmResponse, "direct_confirm")
+    
+    // Enviar evento al proxy para confirmar el turno
+    try {
+    const proxyUrl = appointmentCtx.proxyUrl || process.env.CHATBOT_PROXY_URL
+    if (proxyUrl && appointmentCtx.appointment_id) {
+      await fetchWithRetry(
+      `${proxyUrl}/api/chatbot/confirmar`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+        appointment_id: appointmentCtx.appointment_id,
+        phone: userPhoneNumber,
+        }),
+      },
+      { timeoutMs: TIMEOUTS.PROXY_CONFIRM, retries: 2 }
+      )
+      console.log(`[WHATSAPP] ✅ Turno ${appointmentCtx.appointment_id} confirmado en proxy`)
+      
+      // Trackear evento
+      await trackAppointmentEvent({
+      clienteId: config.cliente_id,
+      phoneNumber: userPhoneNumber,
+      eventType: "template_confirmed",
+      timestamp: new Date().toISOString(),
+      appointmentId: String(appointmentCtx.appointment_id),
+      metadata: { method: "direct_text" },
+      })
+    }
+    } catch (proxyError) {
+    console.error("[WHATSAPP] Error enviando confirmación al proxy:", proxyError)
+    }
+    
+    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+    return
+  }
+  
+  if (directActionResult.action === "cancel") {
+    console.log(`[WHATSAPP] ⚠️ Cancelación directa detectada, iniciando doble confirmación`)
+    
+    // Construir detalles del turno para el mensaje
+    const turnoDetails = appointmentCtx.turno 
+    ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n📍 ${appointmentCtx.turno.sede}`
+    : "Tu turno programado"
+    
+    const cancelPrompt = buildCancelConfirmationPrompt(patientName, turnoDetails)
+    
+    const cancelCtx: DirectResponseContext = {
+    phoneNumberId: value.metadata.phone_number_id,
+    accessToken: config.accessToken,
+    userPhoneNumber,
+    configId: config.id,
+    clienteId: config.cliente_id,
+    }
+    
+    // Establecer flowState para esperar la doble confirmación
+    await setFlowState(userPhoneNumber, config.id, {
+    state: "awaiting_cancel_confirmation",
+    appointmentId: String(appointmentCtx.appointment_id),
+    patientName,
+    timestamp: Date.now(),
+    })
+    
+    await sendDirectResponse(cancelCtx, cancelPrompt, "direct_cancel_prompt")
+    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+    return
+  }
+  }
+  }
+  }
+  
+  // ============================================================================
+  // NEW: INTERCEPTAR DETECCION INICIAL DE PACIENTE (Sin recordatorio previo)
     // Sprint 9a-c: Nuevo flujo deterministico de deteccion e intake
     // ============================================================================
     if (message.type === "text") {

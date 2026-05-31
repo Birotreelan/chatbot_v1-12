@@ -188,6 +188,12 @@ export interface FeatureFlags {
   // ANTES de iniciar detección de paciente, para evitar tratar al usuario
   // como el paciente del recordatorio cuando no lo es
   directWrongNumberDetection: boolean
+
+  // Detección de confirmación/cancelación directa (Sprint 14)
+  // Detecta "Confirmo", "Cancelo", "Voy", "No puedo", etc. por texto libre
+  // cuando hay un template reciente (ventana 24h) pero sin flowState pendiente
+  // Procesa la acción directamente sin pasar por detección de paciente
+  directConfirmCancelDetection: boolean
 }
 
 /**
@@ -211,6 +217,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   pendingFlowContextualNLU: false,
   directFarewellDetection: false,
   directWrongNumberDetection: false,
+  directConfirmCancelDetection: false,
 }
 
 /**
