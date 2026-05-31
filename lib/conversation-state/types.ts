@@ -200,6 +200,18 @@ export interface FeatureFlags {
   // cuando el bot envió una despedida recientemente
   // En estos casos NO respondemos nada (silencio)
   reciprocalFarewellSilence: boolean
+
+  // Detección de consultas informativas (Sprint 16)
+  // Detecta "¿Cuál es la dirección?", "¿A qué hora es?", "¿Con quién es el turno?", etc.
+  // cuando hay un turno en contexto (appointmentData)
+  // Responde directamente con la información solicitada sin reiniciar el flujo
+  directInformationalQuery: boolean
+
+  // Manejo de contexto post-acción (Sprint 17)
+  // Detecta mensajes contextuales después de confirmación/cancelación
+  // Ej: "Está con neumonía" (explicación de por qué canceló)
+  // Responde empáticamente sin reiniciar el flujo de bienvenida
+  postActionContextHandler: boolean
 }
 
 /**
@@ -225,6 +237,8 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directWrongNumberDetection: false,
   directConfirmCancelDetection: false,
   reciprocalFarewellSilence: false,
+  directInformationalQuery: false,
+  postActionContextHandler: false,
 }
 
 /**

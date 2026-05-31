@@ -39,6 +39,8 @@ import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
 import { handleFarewellIfDetected, detectFarewellPreFlow, detectReciprocalFarewellPreFlow } from "./conversation-state/farewell-handler"
 import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
 import { detectDirectConfirmationPreFlow, buildConfirmationSuccessResponse, buildCancelConfirmationPrompt } from "./conversation-state/direct-confirmation-handler"
+import { detectInformationalQueryPreFlow } from "./conversation-state/informational-query-handler"
+import { detectPostActionContextPreFlow, savePostActionContext } from "./conversation-state/post-action-context"
 import {
   handleTurnSelectionIfPending,
   buildInvalidSelectionMessage,
@@ -305,6 +307,33 @@ async function handlePendingFlowResponse(
               createdAt: new Date().toISOString(),
               turnoIndex: flowState.turnoIndex || 0
             })
+          }
+
+          // Guardar contexto post-acción para mensajes contextuales posteriores
+          // Ej: "Está con neumonía" como explicación de por qué canceló
+          const turnoIndex = flowState.turnoIndex || 0
+          const turnoCancelado = chatbotData.turnos[turnoIndex]
+          if (turnoCancelado) {
+            await savePostActionContext(userPhoneNumber, config.id, {
+              timestamp: Date.now(),
+              actionType: "cancellation",
+              turno: {
+                fecha: turnoCancelado.fecha,
+                hora: turnoCancelado.hora,
+                profesional: turnoCancelado.profesional || "",
+                profesional_id: turnoCancelado.profesional_id?.toString(),
+                sede: turnoCancelado.sede || "",
+                sede_id: turnoCancelado.sede_id?.toString(),
+                direccion: turnoCancelado.direccion,
+              },
+              paciente: {
+                nombres: chatbotData.paciente?.nombres || "",
+                apellido: chatbotData.paciente?.apellido || "",
+                dni: chatbotData.paciente?.dni,
+                telefono: userPhoneNumber,
+              },
+            })
+            logger.info("Contexto post-acción guardado (cancelación)")
           }
 
           const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
@@ -778,7 +807,7 @@ export async function handleMessage(value: any) {
         userMessage = `El paciente presionó el botón "${originalMessage}" solicitando cancelar su turno.
 
 [SOLICITUD_CANCELACION]
-Accion: El paciente ha presionado el botón de cancelación
+Accion: El paciente ha presionado el botón de cancelaci��n
 Boton_Texto: ${message.button.text}
 Boton_Payload: ${message.button.payload}
 Timestamp: ${new Date().toISOString()}
@@ -1455,7 +1484,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             
             // Construir detalles del turno para el mensaje
             const turnoDetails = appointmentCtx.turno 
-              ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n📍 ${appointmentCtx.turno.sede}`
+              ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n�� ${appointmentCtx.turno.sede}`
               : "Tu turno programado"
             
             const cancelPrompt = buildCancelConfirmationPrompt(patientName, turnoDetails)
@@ -1480,6 +1509,91 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
+        }
+      }
+    }
+
+    // ============================================================================
+    // SPRINT 16: INTERCEPTAR CONSULTAS INFORMATIVAS (DIRECCION, HORARIO, ETC.)
+    // Detecta "¿Cuál es la dirección?", "¿A qué hora es?", "¿Con quién es?", etc.
+    // cuando hay un turno en contexto (appointmentData)
+    // Responde directamente con la información solicitada sin reiniciar el flujo
+    // IMPORTANTE: Ejecutar DESPUES de confirmación/cancelación pero ANTES de despedidas
+    // ============================================================================
+    if (message.type === "text") {
+      const infoQueryFlags = await getEffectiveFeatureFlags(config.id)
+      
+      if (infoQueryFlags.directInformationalQuery) {
+        console.log(`[WHATSAPP] 📍 Verificando consulta informativa para ${userPhoneNumber}`)
+        
+        // Obtener el appointmentContext si existe
+        const appointmentData = await getAppointmentContext(userPhoneNumber, config.id)
+        
+        const infoQueryResult = await detectInformationalQueryPreFlow(
+          userMessage,
+          userPhoneNumber,
+          config.id,
+          appointmentData,
+          true // useNLU para casos ambiguos
+        )
+        
+        if (infoQueryResult.detected && infoQueryResult.response) {
+          console.log(`[WHATSAPP] ✅ Consulta informativa detectada (${infoQueryResult.queryType}), respondiendo directamente`)
+          
+          const infoCtx: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+          
+          await sendDirectResponse(infoCtx, infoQueryResult.response, "informational_query")
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+      }
+    }
+
+    // ============================================================================
+    // SPRINT 17: INTERCEPTAR MENSAJES CONTEXTUALES POST-ACCIÓN
+    // Detecta mensajes como "Está con neumonía" después de una cancelación
+    // y responde empáticamente sin reiniciar el flujo de bienvenida
+    // ============================================================================
+    if (message.type === "text") {
+      const postActionFlags = await getEffectiveFeatureFlags(config.id)
+      
+      if (postActionFlags.postActionContextHandler) {
+        console.log(`[WHATSAPP] 📝 Verificando contexto post-acción para ${userPhoneNumber}`)
+        
+        const postActionResult = await detectPostActionContextPreFlow(
+          userMessage,
+          userPhoneNumber,
+          config.id,
+          true // useNLU para casos ambiguos
+        )
+        
+        if (postActionResult.detected) {
+          console.log(`[WHATSAPP] ✅ Mensaje post-acción detectado (${postActionResult.intent})`)
+          
+          // Si hay respuesta directa, enviarla
+          if (postActionResult.response) {
+            const postActionCtx: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+            
+            await sendDirectResponse(postActionCtx, postActionResult.response, "post_action_response")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+          
+          // Si debe pasar a OpenAI con contexto, continuar pero con contexto inyectado
+          // TODO: Implementar paso a OpenAI con contexto post-acción
+          // Por ahora, si no hay respuesta directa, continuar con flujo normal
         }
       }
     }

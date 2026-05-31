@@ -115,6 +115,18 @@ const FLAG_META: Record<
     risk: "bajo",
     sprint: "Sprint 15",
   },
+  directInformationalQuery: {
+    label: "Consultas informativas directas",
+    description: "Detecta '¿Cuál es la dirección?', '¿A qué hora es?', '¿Con quién es?', etc. y responde con info del turno sin reiniciar flujo.",
+    risk: "bajo",
+    sprint: "Sprint 16",
+  },
+  postActionContextHandler: {
+    label: "Contexto post-acción",
+    description: "Detecta mensajes contextuales después de confirmación/cancelación (ej: 'Está con neumonía') y responde empáticamente sin reiniciar flujo.",
+    risk: "bajo",
+    sprint: "Sprint 17",
+  },
 }
 
 const RISK_BADGE: Record<"bajo" | "medio" | "alto", string> = {
@@ -144,6 +156,8 @@ const FLAG_ORDER: FlagKey[] = [
   "directWrongNumberDetection",
   "directConfirmCancelDetection",
   "reciprocalFarewellSilence",
+  "directInformationalQuery",
+  "postActionContextHandler",
 ]
 
 export function FeatureFlagsPanel() {
