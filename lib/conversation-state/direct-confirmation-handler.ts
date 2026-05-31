@@ -16,8 +16,9 @@ import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
 import { isWithinTemplateWindow } from "@/lib/appointment-stats"
 
-// ID del asistente NLU para confirmación/cancelación (se configura después de crear en OpenAI Platform)
-let DIRECT_ACTION_NLU_ASSISTANT_ID = ""
+// ID del asistente NLU para confirmación/cancelación
+// Configurado con el system prompt: route_to_direct_action_nlu.md
+const DIRECT_ACTION_NLU_ASSISTANT_ID = "asst_MF6oPGm2Be7Hlb2c40WICsJs"
 
 // ============================================================================
 // PATRONES DE CONFIRMACIÓN
