@@ -36,6 +36,14 @@ const PURE_CONFIRMATION_PATTERNS = [
   /^\.?si,?\s*confirmo\.?$/i,
   /^\.?ok,?\s*confirmo\.?$/i,
   /^\.?listo,?\s*confirmo\.?$/i,
+  /^\.?la\s*confirmo\.?$/i,
+  /^\.?lo\s*confirmo\.?$/i,
+  
+  // Confirmaciones con agradecimiento (caso crítico: "La confirmo. Gracias por avisar")
+  /^\.?(?:la\s+)?confirmo\.?\s*[.,!]?\s*(?:muchas?\s+)?gracias.*$/i,
+  /^\.?confirmo\.?\s*[.,!]?\s*(?:muchas?\s+)?gracias.*$/i,
+  /^\.?confirmado\.?\s*[.,!]?\s*(?:muchas?\s+)?gracias.*$/i,
+  /^\.?(?:si,?\s*)?confirmo\.?\s*[.,!]?\s*gracias.*$/i,
   
   // Asistencia
   /^\.?si,?\s*asisto\.?$/i,
@@ -49,6 +57,10 @@ const PURE_CONFIRMATION_PATTERNS = [
   /^\.?ahí\s*estaré\.?$/i,
   /^\.?ahi\s*voy\.?$/i,
   /^\.?ahí\s*voy\.?$/i,
+  
+  // Asistencia con agradecimiento
+  /^\.?(?:si,?\s*)?voy\.?\s*[.,!]?\s*(?:muchas?\s+)?gracias.*$/i,
+  /^\.?(?:ahi|ahí)\s*(?:estare|estaré)\.?\s*[.,!]?\s*(?:muchas?\s+)?gracias.*$/i,
   
   // Afirmaciones simples con contexto de turno
   /^\.?dale\.?$/i,

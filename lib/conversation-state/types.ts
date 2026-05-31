@@ -194,6 +194,12 @@ export interface FeatureFlags {
   // cuando hay un template reciente (ventana 24h) pero sin flowState pendiente
   // Procesa la acción directamente sin pasar por detección de paciente
   directConfirmCancelDetection: boolean
+
+  // Detección de respuesta recíproca a despedida (Sprint 15)
+  // Detecta "Igualmente", "Vos también", "Para ti también", etc.
+  // cuando el bot envió una despedida recientemente
+  // En estos casos NO respondemos nada (silencio)
+  reciprocalFarewellSilence: boolean
 }
 
 /**
@@ -218,6 +224,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directFarewellDetection: false,
   directWrongNumberDetection: false,
   directConfirmCancelDetection: false,
+  reciprocalFarewellSilence: false,
 }
 
 /**

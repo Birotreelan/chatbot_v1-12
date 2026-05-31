@@ -63,6 +63,48 @@ const NON_FAREWELL_INDICATORS = [
   "reagendar",
 ]
 
+// ============================================================================
+// RESPUESTAS RECIPROCAS A DESPEDIDAS
+// Detecta cuando el usuario responde "igualmente", "vos tambien", etc.
+// a una despedida previa del bot. En estos casos NO debemos responder nada.
+// ============================================================================
+
+// Patrones de respuesta reciproca a despedida (el usuario responde a nuestra despedida)
+// Estos NO requieren respuesta del bot - silencio total
+const RECIPROCAL_FAREWELL_PATTERNS = [
+  // "Igualmente" y variantes
+  /^\.?igualmente\.?[!]*$/i,
+  /^\.?igual\.?[!]*$/i,
+  /^\.?(?:para\s+)?(?:vos|ti|usted)\s+(?:tambien|también)\.?[!]*$/i,
+  /^\.?(?:lo\s+mismo\s+)?(?:para\s+)?(?:vos|ti|usted)\.?[!]*$/i,
+  /^\.?que\s+(?:te|le)\s+vaya\s+bien\.?[!]*$/i,
+  
+  // Despedidas cortas de cierre
+  /^\.?(?:chau|chao|bye|adiós|adios)\.?[!]*$/i,
+  /^\.?nos\s+vemos\.?[!]*$/i,
+  /^\.?hasta\s+(?:luego|pronto|la\s+(?:proxima|próxima))\.?[!]*$/i,
+  /^\.?(?:buen|buena)\s+(?:dia|día|tarde|noche)\.?[!]*$/i,
+  
+  // Combinaciones con igualmente
+  /^\.?(?:gracias,?\s*)?igualmente\.?[!]*$/i,
+  /^\.?igualmente,?\s*(?:gracias|chau|hasta\s+luego)\.?[!]*$/i,
+  
+  // Saludos de cierre muy cortos
+  /^\.?saludos\.?[!]*$/i,
+  /^\.?un\s+abrazo\.?[!]*$/i,
+  /^\.?cuidate\.?[!]*$/i,
+  /^\.?cuídate\.?[!]*$/i,
+]
+
+/**
+ * Detecta si el mensaje es una respuesta reciproca a una despedida del bot
+ * Ej: "Igualmente", "Vos también", "Para ti también"
+ */
+export function isReciprocalFarewellPattern(message: string): boolean {
+  const cleanMessage = message.trim()
+  return RECIPROCAL_FAREWELL_PATTERNS.some((pattern) => pattern.test(cleanMessage))
+}
+
 const FAREWELL_MODE_A_TEMPLATES = [
   "Si necesitás algo más, no dudes en escribirme.",
   "Cualquier cosa, no dudes en comunicarte.",
@@ -423,6 +465,60 @@ export const FarewellDebug = {
   getTimeBasedGreeting,
   selectFarewellTemplate,
   isFarewellMessage,
+}
+
+/**
+ * Detecta si el mensaje es una respuesta reciproca a una despedida del bot
+ * y si corresponde NO responder nada (silencio).
+ * 
+ * Casos detectados:
+ * - "Igualmente" despues de "Que disfrutes la tarde!"
+ * - "Vos tambien" despues de cualquier despedida del bot
+ * - "Para ti tambien" despues de despedida
+ * 
+ * @returns { shouldSilence: true } si debemos NO responder
+ * @returns { shouldSilence: false } si debemos continuar con flujo normal
+ */
+export async function detectReciprocalFarewellPreFlow(
+  message: string,
+  userPhone: string,
+  configId: string
+): Promise<{ shouldSilence: boolean; reason?: string }> {
+  const logger = createConversationLogger(userPhone, configId, "farewell-reciprocal")
+
+  // Paso 1: Verificar si el mensaje es una respuesta reciproca
+  if (!isReciprocalFarewellPattern(message)) {
+    return { shouldSilence: false }
+  }
+
+  logger.info("Patron de respuesta reciproca detectado", { message })
+
+  // Paso 2: Verificar si el bot envio una despedida recientemente
+  const farewellState = await getFarewellState(userPhone, configId)
+  
+  if (farewellState && farewellState.farewell_sent) {
+    // Verificar que la despedida fue reciente (dentro de 30 minutos)
+    const farewellTime = new Date(farewellState.farewell_sent_at).getTime()
+    const now = Date.now()
+    const thirtyMinutes = 30 * 60 * 1000
+    
+    if (now - farewellTime < thirtyMinutes) {
+      logger.info("Despedida reciente encontrada, aplicando silencio", {
+        farewellSentAt: farewellState.farewell_sent_at,
+        minutesAgo: Math.round((now - farewellTime) / 60000),
+      })
+      
+      return {
+        shouldSilence: true,
+        reason: "Respuesta reciproca a despedida reciente del bot",
+      }
+    }
+  }
+
+  // Si no hay despedida reciente, podria ser inicio de conversacion
+  // En ese caso, no silenciamos
+  logger.info("No hay despedida reciente, continuando flujo normal")
+  return { shouldSilence: false }
 }
 
 /**
