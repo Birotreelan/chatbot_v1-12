@@ -334,45 +334,99 @@ export async function processDNIForDisambiguation(
       }
     }
 
-    // Paciente encontrado con el DNI - normalizar campos
-    const foundPatientId = matchingPatient.paciente_id || matchingPatient.Id || matchingPatient.id
-    const foundPatientName = matchingPatient.nombre || `${matchingPatient.Nombres || ''} ${matchingPatient.Apellido || ''}`.trim()
+    // Paciente encontrado en el array cacheado - ahora validar con get_paciente
     const foundPatientDNI = (matchingPatient.dni || matchingPatient.Nrodoc || '').toString()
 
-    logger.info('Patient identified by DNI', {
-      patientId: foundPatientId,
-      patientName: foundPatientName,
+    logger.info('Patient found in cached array, validating with get_paciente', {
+      dni: foundPatientDNI.substring(0, 3) + '****',
     })
 
-    // Obtener turnos próximos
-    let turnos: any[] = []
-    try {
-      const clinicAPI = new ClinicAPI(clienteId)
-      const dateRange = getDefaultDateRange()
+    // Validar identidad llamando a get_paciente
+    const clinicAPI = new ClinicAPI(clienteId)
+    const patientResponse = await clinicAPI.paciente_dni(foundPatientDNI)
 
-      const turnosResponse = await clinicAPI.obtenerTurnos(
-        dateRange.desde,
-        dateRange.hasta,
-        undefined,
-        foundPatientDNI
+    if (!patientResponse.exito || !patientResponse.datos) {
+      logger.warn('Patient not found via get_paciente', { dni: foundPatientDNI.substring(0, 3) + '****' })
+      
+      // Incrementar intentos
+      state.attempts = (state.attempts || 0) + 1
+      if (state.attempts >= 3) {
+        await redis.del(`${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`)
+        return { 
+          found: false, 
+          error: 'Max attempts reached. Will register as new patient.' 
+        }
+      }
+
+      await redis.setex(
+        `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`,
+        PATIENT_DETECTION_TTL,
+        JSON.stringify(state)
       )
 
-      if (turnosResponse.exito && turnosResponse.datos) {
-        turnos = Array.isArray(turnosResponse.datos)
-          ? turnosResponse.datos
-          : turnosResponse.datos.turnos || []
-
-        // Filtrar turnos cancelados
-        turnos = turnos.filter(
-          (t: any) => t.estado !== 'cancelado' && t.status !== 'cancelado'
-        )
+      return { 
+        found: false, 
+        error: `No se pudo validar el DNI. Intento ${state.attempts} de 3.` 
       }
-    } catch (e) {
-      logger.warn('Error fetching turns', {
-        error: String(e),
-        patientId: foundPatientId,
-      })
     }
+
+    // Extraer datos del paciente validado por get_paciente
+    const patientData = patientResponse.datos
+    let validatedPatient: any = null
+    let turnosFromResponse: any[] = []
+
+    // Procesar respuesta de get_paciente (puede venir en diferentes formatos)
+    if (patientData.paciente) {
+      validatedPatient = patientData.paciente
+      turnosFromResponse = patientData.turnos_proximos || []
+    } else if (Array.isArray(patientData) && patientData.length > 0) {
+      validatedPatient = patientData[0]
+    } else {
+      validatedPatient = patientData
+    }
+
+    // Normalizar campos del paciente validado
+    const foundPatientId = validatedPatient.paciente_id || validatedPatient.Id || validatedPatient.id
+    const foundPatientName = validatedPatient.nombre || `${validatedPatient.Nombres || ''} ${validatedPatient.Apellido || ''}`.trim()
+
+    logger.info('Patient validated via get_paciente', {
+      patientId: foundPatientId,
+      patientName: foundPatientName,
+      turnosInResponse: turnosFromResponse.length,
+    })
+
+    // Usar turnos de la respuesta de get_paciente si existen
+    let turnos: any[] = turnosFromResponse
+
+    // Si no hay turnos en la respuesta de get_paciente, buscarlos
+    if (turnos.length === 0) {
+      try {
+        const dateRange = getDefaultDateRange()
+
+        const turnosResponse = await clinicAPI.obtenerTurnos(
+          dateRange.desde,
+          dateRange.hasta,
+          undefined,
+          foundPatientDNI
+        )
+
+        if (turnosResponse.exito && turnosResponse.datos) {
+          turnos = Array.isArray(turnosResponse.datos)
+            ? turnosResponse.datos
+            : turnosResponse.datos.turnos || []
+        }
+      } catch (e) {
+        logger.warn('Error fetching turns', {
+          error: String(e),
+          patientId: foundPatientId,
+        })
+      }
+    }
+
+    // Filtrar turnos cancelados
+    turnos = turnos.filter(
+      (t: any) => t.estado !== 'cancelado' && t.status !== 'cancelado'
+    )
 
     // Actualizar estado a paciente existente identificado
     const identifiedPatientState: PatientDetectionState = {
