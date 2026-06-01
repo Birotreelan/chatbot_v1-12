@@ -6,6 +6,7 @@
 import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
+import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
 
 // Importar handlers compartidos
 import {
@@ -68,6 +69,8 @@ export interface ExistingPatientFlowState {
   phase: FlowPhase
   patientId: string
   patientName: string
+  patientFirstName?: string  // Nombre separado para reservas
+  patientLastName?: string   // Apellido separado para reservas
   patientDNI: string
   patientEmail?: string
   patientPhone: string
@@ -162,6 +165,25 @@ export async function initializeExistingPatientFlow(
     }
   }
 
+  // Obtener datos completos del paciente desde el estado de deteccion si faltan
+  let finalPatientDNI = patientDNI
+  let finalPatientFirstName: string | undefined
+  let finalPatientLastName: string | undefined
+  
+  if (!patientDNI || patientDNI === '') {
+    const detectedInfo = await getDetectedPatientInfo(phoneNumber)
+    if (detectedInfo) {
+      finalPatientDNI = detectedInfo.patientDNI || ''
+      finalPatientFirstName = detectedInfo.patientFirstName
+      finalPatientLastName = detectedInfo.patientLastName
+      logger.info('Retrieved patient data from detection state', {
+        dni: finalPatientDNI,
+        firstName: finalPatientFirstName,
+        lastName: finalPatientLastName,
+      })
+    }
+  }
+
   // Obtener sedes desde la API
   const sedesResult = await fetchSedes(clientId)
   if (!sedesResult.success || !sedesResult.sedes) {
@@ -178,7 +200,9 @@ export async function initializeExistingPatientFlow(
     phase: 'awaiting_sede',
     patientId,
     patientName,
-    patientDNI,
+    patientFirstName: finalPatientFirstName,
+    patientLastName: finalPatientLastName,
+    patientDNI: finalPatientDNI,
     patientEmail,
     patientPhone: phoneNumber,
     sedesOpciones: sedesResult.sedes,
@@ -637,6 +661,8 @@ async function handleConfirmationPhase(
       clientId,
       state.turnoSeleccionado!,
       {
+        nombre: state.patientFirstName,
+        apellido: state.patientLastName,
         dni: state.patientDNI,
         telefono: state.patientPhone,
         email: state.patientEmail!,

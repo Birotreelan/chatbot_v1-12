@@ -37,6 +37,8 @@ interface PatientDetectionState {
   patientPhone: string
   patientId?: string
   patientName?: string
+  patientFirstName?: string  // Nombre separado para reservas
+  patientLastName?: string   // Apellido separado para reservas
   patientDNI?: string
   turnos?: any[]
   multiplePatients?: any[] // Array de pacientes si hay múltiples
@@ -402,11 +404,16 @@ export async function processDNIForDisambiguation(
 
     // Normalizar campos del paciente validado
     const foundPatientId = validatedPatient.paciente_id || validatedPatient.Id || validatedPatient.id
-    const foundPatientName = validatedPatient.nombre || `${validatedPatient.Nombres || ''} ${validatedPatient.Apellido || ''}`.trim()
+    // Extraer nombre y apellido por separado para reservas
+    const foundPatientFirstName = validatedPatient.Nombres || validatedPatient.nombres || validatedPatient.nombre || ''
+    const foundPatientLastName = validatedPatient.Apellido || validatedPatient.apellido || ''
+    const foundPatientName = validatedPatient.nombre || `${foundPatientFirstName} ${foundPatientLastName}`.trim()
 
     logger.info('Patient validated via get_paciente', {
       patientId: foundPatientId,
       patientName: foundPatientName,
+      patientFirstName: foundPatientFirstName,
+      patientLastName: foundPatientLastName,
       turnosInResponse: turnosFromResponse.length,
     })
 
@@ -449,6 +456,8 @@ export async function processDNIForDisambiguation(
       patientPhone: phoneNumber,
       patientId: foundPatientId,
       patientName: foundPatientName,
+      patientFirstName: foundPatientFirstName,
+      patientLastName: foundPatientLastName,
       patientDNI: foundPatientDNI,
       turnos: turnos,
       detectedAt: Date.now(),
@@ -649,6 +658,8 @@ export async function getDetectedPatientInfo(phoneNumber: string): Promise<{
   isNewPatient: boolean
   patientId?: string
   patientName?: string
+  patientFirstName?: string
+  patientLastName?: string
   patientDNI?: string
   turnos?: any[]
 } | null> {
@@ -660,6 +671,8 @@ export async function getDetectedPatientInfo(phoneNumber: string): Promise<{
     isNewPatient: !state.patientId,
     patientId: state.patientId,
     patientName: state.patientName,
+    patientFirstName: state.patientFirstName,
+    patientLastName: state.patientLastName,
     patientDNI: state.patientDNI,
     turnos: state.turnos,
   }
