@@ -475,6 +475,12 @@ async function getAppointmentContext(
     const data = await redis.get(key)
     if (!data) return null
 
+    // Upstash Redis puede devolver el objeto ya parseado o un string
+    // dependiendo de como se guardo el dato
+    if (typeof data === 'object') {
+      return data as Record<string, unknown>
+    }
+    
     return JSON.parse(data as string)
   } catch (error) {
     console.error("[DIRECT_CONFIRM] Error leyendo appointmentContext:", error)

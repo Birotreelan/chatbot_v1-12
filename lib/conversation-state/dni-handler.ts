@@ -72,6 +72,10 @@ export async function getDNIAwaitingState(
     const data = await redis.get(key)
     if (!data) return null
 
+    // Upstash Redis puede devolver objeto ya parseado o string
+    if (typeof data === 'object') {
+      return data as DNIAwaitingState
+    }
     return JSON.parse(data as string) as DNIAwaitingState
   } catch (error) {
     console.error(`[DNI-HANDLER] Error obteniendo estado para ${phone}:`, error)

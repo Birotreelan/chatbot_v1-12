@@ -324,6 +324,10 @@ async function getFarewellState(
     const data = await redis.get(key)
     if (!data) return null
 
+    // Upstash Redis puede devolver objeto ya parseado o string
+    if (typeof data === 'object') {
+      return data as FarewellState
+    }
     return JSON.parse(data as string) as FarewellState
   } catch (error) {
     console.error("[FAREWELL] Error leyendo estado de despedida:", error)
