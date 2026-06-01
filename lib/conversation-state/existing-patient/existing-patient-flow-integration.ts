@@ -170,19 +170,26 @@ export async function initializeExistingPatientFlow(
   let finalPatientDNI = patientDNI
   let finalPatientFirstName: string | undefined
   let finalPatientLastName: string | undefined
+  let finalObraSocialId: string | undefined
+  let finalObraSocialNombre: string | undefined
   
-  if (!patientDNI || patientDNI === '') {
-    const detectedInfo = await getDetectedPatientInfo(phoneNumber)
-    if (detectedInfo) {
+  // Siempre obtener datos del estado de detección para tener la información completa
+  const detectedInfo = await getDetectedPatientInfo(phoneNumber)
+  if (detectedInfo) {
+    if (!patientDNI || patientDNI === '') {
       finalPatientDNI = detectedInfo.patientDNI || ''
-      finalPatientFirstName = detectedInfo.patientFirstName
-      finalPatientLastName = detectedInfo.patientLastName
-      logger.info('Retrieved patient data from detection state', {
-        dni: finalPatientDNI,
-        firstName: finalPatientFirstName,
-        lastName: finalPatientLastName,
-      })
     }
+    finalPatientFirstName = detectedInfo.patientFirstName
+    finalPatientLastName = detectedInfo.patientLastName
+    finalObraSocialId = detectedInfo.obraSocialId
+    finalObraSocialNombre = detectedInfo.obraSocialNombre
+    logger.info('Retrieved patient data from detection state', {
+      dni: finalPatientDNI,
+      firstName: finalPatientFirstName,
+      lastName: finalPatientLastName,
+      obraSocialId: finalObraSocialId,
+      obraSocialNombre: finalObraSocialNombre,
+    })
   }
 
   // Obtener sedes desde la API
@@ -206,6 +213,8 @@ export async function initializeExistingPatientFlow(
     patientDNI: finalPatientDNI,
     patientEmail,
     patientPhone: phoneNumber,
+    obraSocialId: finalObraSocialId,
+    obraSocialNombre: finalObraSocialNombre,
     sedesOpciones: sedesResult.sedes,
     attempts: 0,
     createdAt: Date.now(),
@@ -573,6 +582,30 @@ async function handleTurnoPhase(
     }
 
     // Ya tiene email, ir a confirmacion
+    // Enriquecer estado con datos frescos de la API si faltan campos clave
+    if (!state.patientFirstName || !state.patientLastName || !state.obraSocialNombre) {
+      try {
+        const clinicAPI = new ClinicAPI(clientId)
+        const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
+        if (pacienteResponse.exito && pacienteResponse.datos) {
+          const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
+          if (!state.patientFirstName) state.patientFirstName = paciente.Nombres || paciente.nombres || ''
+          if (!state.patientLastName) state.patientLastName = paciente.Apellido || paciente.apellido || ''
+          if (!state.patientDNI) state.patientDNI = String(paciente.Nrodoc || paciente.dni || '')
+          if (!state.patientEmail) state.patientEmail = paciente.Mail || paciente.mail || paciente.Email || paciente.email || ''
+          if (!state.obraSocialId) state.obraSocialId = paciente.Deudor_Id || paciente.deudor_id || ''
+          if (!state.obraSocialNombre) state.obraSocialNombre = paciente.Deudor_Nombre || paciente.deudor_nombre || ''
+          logger.info('Enriched patient data from API for confirmation', {
+            firstName: state.patientFirstName,
+            lastName: state.patientLastName,
+            obraSocialNombre: state.obraSocialNombre,
+          })
+        }
+      } catch (err) {
+        logger.error('Error enriching patient data from API', err instanceof Error ? err : new Error(String(err)))
+      }
+    }
+
     state.phase = 'awaiting_confirmation'
     await saveFlowState(phoneNumber, state)
 
@@ -615,8 +648,27 @@ async function handleEmailPhase(
 
   if (result.validatedEmail) {
     state.patientEmail = result.validatedEmail
-    state.phase = 'awaiting_confirmation'
     state.attempts = 0
+
+    // Enriquecer estado con datos frescos de la API si faltan campos clave
+    if (!state.patientFirstName || !state.patientLastName || !state.obraSocialNombre) {
+      try {
+        const clinicAPI = new ClinicAPI(clientId)
+        const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
+        if (pacienteResponse.exito && pacienteResponse.datos) {
+          const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
+          if (!state.patientFirstName) state.patientFirstName = paciente.Nombres || paciente.nombres || ''
+          if (!state.patientLastName) state.patientLastName = paciente.Apellido || paciente.apellido || ''
+          if (!state.patientDNI) state.patientDNI = String(paciente.Nrodoc || paciente.dni || '')
+          if (!state.obraSocialId) state.obraSocialId = paciente.Deudor_Id || paciente.deudor_id || ''
+          if (!state.obraSocialNombre) state.obraSocialNombre = paciente.Deudor_Nombre || paciente.deudor_nombre || ''
+        }
+      } catch (err) {
+        logger.error('Error enriching patient data from API', err instanceof Error ? err : new Error(String(err)))
+      }
+    }
+
+    state.phase = 'awaiting_confirmation'
     await saveFlowState(phoneNumber, state)
 
     return {
@@ -705,11 +757,16 @@ async function handleConfirmationPhase(
           dniParaReserva = (paciente.Nrodoc || paciente.dni || '').toString()
           if (!nombreParaReserva) nombreParaReserva = paciente.Nombres || paciente.nombres || ''
           if (!apellidoParaReserva) apellidoParaReserva = paciente.Apellido || paciente.apellido || ''
+          // Actualizar obra social en el estado si falta
+          if (!state.obraSocialId) state.obraSocialId = paciente.Deudor_Id || paciente.deudor_id || ''
+          if (!state.obraSocialNombre) state.obraSocialNombre = paciente.Deudor_Nombre || paciente.deudor_nombre || ''
           
           logger.info('Retrieved patient data from API for reservation', {
             firstName: nombreParaReserva,
             lastName: apellidoParaReserva,
             dni: dniParaReserva,
+            obraSocialId: state.obraSocialId,
+            obraSocialNombre: state.obraSocialNombre,
           })
         }
       } catch (error) {
