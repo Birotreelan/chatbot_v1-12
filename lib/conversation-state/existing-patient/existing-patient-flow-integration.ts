@@ -582,7 +582,14 @@ async function handleTurnoPhase(
         result.selectedTurno,
         state.patientName,
         state.sedeNombre,
-        state.obraSocialNombre
+        state.obraSocialNombre,
+        {
+          apellido: state.patientLastName,
+          nombre: state.patientFirstName,
+          dni: state.patientDNI,
+          telefono: state.patientPhone,
+          email: state.patientEmail,
+        }
       ),
       nextPhase: 'awaiting_confirmation',
     }
@@ -618,7 +625,14 @@ async function handleEmailPhase(
         state.turnoSeleccionado!,
         state.patientName,
         state.sedeNombre,
-        state.obraSocialNombre
+        state.obraSocialNombre,
+        {
+          apellido: state.patientLastName,
+          nombre: state.patientFirstName,
+          dni: state.patientDNI,
+          telefono: state.patientPhone,
+          email: state.patientEmail,
+        }
       ),
       nextPhase: 'awaiting_confirmation',
     }

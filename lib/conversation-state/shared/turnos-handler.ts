@@ -251,11 +251,7 @@ export function buildTurnosListMessage(
     turnosDia.forEach((turno) => {
       const hora = turno.hora && turno.hora !== 'undefined' && turno.hora.trim() ? turno.hora.trim() : 'Horario a confirmar'
       const profesional = turno.profesionalNombre && turno.profesionalNombre !== 'undefined' && turno.profesionalNombre.trim() ? turno.profesionalNombre.trim() : 'Profesional a confirmar'
-      message += `  ${turno.numero}. ${hora} - ${profesional}`
-      if (turno.especialidad) {
-        message += ` (${turno.especialidad})`
-      }
-      message += '\n'
+      message += `  ${turno.numero}. ${hora} - ${profesional}\n`
     })
     message += '\n'
   })
