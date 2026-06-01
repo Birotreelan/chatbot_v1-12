@@ -96,7 +96,35 @@ export async function handleSpecialtySelection(
     }
   }
 
-  // Intentar match por nombre
+  // 2. Detectar numeros escritos en palabras
+  const numerosPalabras: Record<string, number> = {
+    'primer': 1, 'primera': 1, 'primero': 1, 'uno': 1, 'un': 1,
+    'segundo': 2, 'segunda': 2, 'dos': 2,
+    'tercer': 3, 'tercera': 3, 'tercero': 3, 'tres': 3,
+    'cuarto': 4, 'cuarta': 4, 'cuatro': 4,
+    'quinto': 5, 'quinta': 5, 'cinco': 5,
+    'sexto': 6, 'sexta': 6, 'seis': 6,
+    'septimo': 7, 'septima': 7, 'séptimo': 7, 'séptima': 7, 'siete': 7,
+    'octavo': 8, 'octava': 8, 'ocho': 8,
+    'noveno': 9, 'novena': 9, 'nueve': 9,
+    'decimo': 10, 'decima': 10, 'décimo': 10, 'décima': 10, 'diez': 10,
+  }
+
+  for (const [palabra, numero] of Object.entries(numerosPalabras)) {
+    if (inputNormalizado.includes(palabra)) {
+      const especialidadSeleccionada = especialidadesOpciones.find((e) => e.numero === numero)
+      if (especialidadSeleccionada) {
+        logger.info('Especialidad seleccionada por numero en palabras', { palabra, numero })
+        return {
+          handled: true,
+          nextPhase: 'awaiting_turno_selection',
+          selectedSpecialty: especialidadSeleccionada,
+        }
+      }
+    }
+  }
+
+  // 3. Intentar match por nombre exacto
   const especialidadByName = especialidadesOpciones.find((e) =>
     e.nombre.toLowerCase().includes(inputNormalizado) ||
     inputNormalizado.includes(e.nombre.toLowerCase())
@@ -115,7 +143,19 @@ export async function handleSpecialtySelection(
     }
   }
 
-  // Input invalido
+  // 4. FALLBACK: Si es texto no reconocido, pedir numero
+  const esTexto = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(inputNormalizado)
+
+  if (esTexto) {
+    logger.info('Seleccion de especialidad por texto no reconocido - sugiriendo numero', { input: userInput })
+    return {
+      handled: true,
+      message: `No encontre la especialidad con ese nombre. Por favor, indica el *numero* de la opcion que preferis (1-${especialidadesOpciones.length}).`,
+      nextPhase: 'awaiting_specialty_selection',
+    }
+  }
+
+  // 5. Numero invalido
   logger.info('Seleccion de especialidad invalida', { input: userInput })
 
   return {
