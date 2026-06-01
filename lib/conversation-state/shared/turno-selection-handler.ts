@@ -93,12 +93,24 @@ export async function handleTurnoSelection(
     }
   }
 
-  // Input no reconocido
+  // FALLBACK: si el input contiene letras (texto en lugar de numero), indicar claramente que debe usar numero
+  const esTexto = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(inputNormalizado)
+
+  if (esTexto) {
+    logger.info('Seleccion de turno por texto no reconocido - solicitando numero', { input: userInput })
+    return {
+      handled: true,
+      message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *4*_`,
+      nextPhase: 'awaiting_turno_selection',
+    }
+  }
+
+  // Numero fuera de rango o invalido
   logger.info('Seleccion de turno no reconocida', { input: userInput })
 
   return {
     handled: true,
-    message: `No reconozco esa opcion. Por favor, responde con el *numero* del turno que prefieras (1-${turnosOpciones.length}).`,
+    message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *4*_`,
     nextPhase: 'awaiting_turno_selection',
   }
 }

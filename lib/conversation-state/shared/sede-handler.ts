@@ -147,12 +147,24 @@ export async function handleSedeSelection(
     }
   }
 
-  // Input invalido
+  // FALLBACK: si el input contiene letras (texto en lugar de numero), indicar claramente que debe usar numero
+  const esTexto = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(inputNormalizado)
+
+  if (esTexto) {
+    logger.info('Seleccion de sede por texto no reconocido - solicitando numero', { input: userInput })
+    return {
+      handled: true,
+      message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *3*_`,
+      nextPhase: 'awaiting_sede',
+    }
+  }
+
+  // Numero fuera de rango o invalido
   logger.info('Seleccion de sede invalida', { input: userInput })
 
   return {
     handled: true,
-    message: `No reconozco esa opcion. Por favor, responde con el *numero* de la sede (1-${sedesOpciones.length}).`,
+    message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *3*_`,
     nextPhase: 'awaiting_sede',
   }
 }

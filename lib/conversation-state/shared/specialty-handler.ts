@@ -115,12 +115,24 @@ export async function handleSpecialtySelection(
     }
   }
 
-  // Input invalido
+  // FALLBACK: si el input contiene letras (texto en lugar de numero), indicar claramente que debe usar numero
+  const esTexto = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(inputNormalizado)
+
+  if (esTexto) {
+    logger.info('Seleccion de especialidad por texto no reconocido - solicitando numero', { input: userInput })
+    return {
+      handled: true,
+      message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *2*_`,
+      nextPhase: 'awaiting_specialty_selection',
+    }
+  }
+
+  // Numero fuera de rango o invalido
   logger.info('Seleccion de especialidad invalida', { input: userInput })
 
   return {
     handled: true,
-    message: `No reconozco esa especialidad. Por favor, responde con el *numero* de la especialidad (1-${especialidadesOpciones.length}).`,
+    message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *2*_`,
     nextPhase: 'awaiting_specialty_selection',
   }
 }
