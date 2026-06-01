@@ -377,8 +377,23 @@ export async function processDNIForDisambiguation(
 
     // Procesar respuesta de get_paciente (puede venir en diferentes formatos)
     if (patientData.paciente) {
+      // Formato: { paciente: {...}, turnos_proximos: [...] }
       validatedPatient = patientData.paciente
       turnosFromResponse = patientData.turnos_proximos || []
+    } else if (patientData.warning === 'pacientes_multiples' && patientData.pacientes) {
+      // Formato: { warning: 'pacientes_multiples', pacientes: [...], turnos_proximos: [...] }
+      // Buscar el paciente correcto por DNI en el array
+      const pacientes = patientData.pacientes
+      validatedPatient = pacientes.find((p: any) => 
+        (p.Nrodoc || p.dni || '').toString() === foundPatientDNI
+      ) || pacientes[0] // Fallback al primero si no encuentra
+      turnosFromResponse = patientData.turnos_proximos || []
+      
+      logger.info('Handling pacientes_multiples response', {
+        totalPacientes: pacientes.length,
+        selectedPatientId: validatedPatient?.Id,
+        turnosCount: turnosFromResponse.length,
+      })
     } else if (Array.isArray(patientData) && patientData.length > 0) {
       validatedPatient = patientData[0]
     } else {
