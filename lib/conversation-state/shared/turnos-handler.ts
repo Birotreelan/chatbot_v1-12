@@ -102,26 +102,45 @@ export async function searchTurnosAcumulativo(
           turnosRaw = result.datos.turnos
         }
 
+        logger.info('Turnos raw extraidos', { 
+          count: turnosRaw.length, 
+          sample: turnosRaw.length > 0 ? { 
+            Id: turnosRaw[0].Id, 
+            Hora: turnosRaw[0].Hora, 
+            Profesional_Nombre: turnosRaw[0].Profesional_Nombre 
+          } : null 
+        })
+
         // Mapear turnos al formato interno
         // Los campos de la API vienen en PascalCase: Id, Fecha, Hora, Profesional_Nombre, etc.
         // Usar la longitud actual de allTurnos para asegurar numeración secuencial global
-        allTurnos = allTurnos.concat(
-          turnosRaw.map((turno: any) => {
-            const numero = allTurnos.length + turnosRaw.indexOf(turno) + 1
-            return {
-              numero,
-              id: turno.Id || turno.Agenda_Id || turno.id,
-              fecha: turno.Fecha || turno.fecha,
-              hora: (turno.Hora || turno.hora || 'N/A').trim(),
-              profesionalId: turno.Profesional_Id || turno.profesional_id,
-              profesionalNombre: (turno.Profesional_Nombre || turno.profesional_nombre || turno.Profesional || 'Sin asignar').trim(),
-              especialidad: turno.Especialidad || turno.especialidad,
-              sedeId: turno.Sede_Id || turno.sede_id || params.sedeId,
-              sedeNombre: turno.Sede_Nombre || turno.sede_nombre,
-              duracion: turno.Duracion || turno.duracion,
-            }
-          })
-        )
+        const baseNumero = allTurnos.length
+        const nuevosTurnos = turnosRaw.map((turno: any, index: number) => ({
+          numero: baseNumero + index + 1,
+          id: turno.Id || turno.Agenda_Id || turno.id,
+          fecha: turno.Fecha || turno.fecha,
+          hora: (turno.Hora || turno.hora || 'N/A').trim(),
+          profesionalId: turno.Profesional_Id || turno.profesional_id,
+          profesionalNombre: (turno.Profesional_Nombre || turno.profesional_nombre || turno.Profesional || 'Sin asignar').trim(),
+          especialidad: turno.Especialidad || turno.especialidad,
+          sedeId: turno.Sede_Id || turno.sede_id || params.sedeId,
+          sedeNombre: turno.Sede_Nombre || turno.sede_nombre,
+          duracion: turno.Duracion || turno.duracion,
+        }))
+        
+        // En la busqueda acumulativa, cada rango mayor REEMPLAZA los resultados 
+        // (el API devuelve todos los turnos en el rango completo, no solo los nuevos)
+        // Por eso tomamos los resultados del ultimo rango exitoso
+        allTurnos = nuevosTurnos
+        
+        logger.info('Turnos mapeados', { 
+          count: allTurnos.length, 
+          sample: allTurnos.length > 0 ? { 
+            numero: allTurnos[0].numero, 
+            hora: allTurnos[0].hora, 
+            profesionalNombre: allTurnos[0].profesionalNombre 
+          } : null 
+        })
 
         rangoUtilizado = dias
 
