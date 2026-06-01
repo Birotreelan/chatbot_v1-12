@@ -170,19 +170,26 @@ export async function initializeExistingPatientFlow(
   let finalPatientDNI = patientDNI
   let finalPatientFirstName: string | undefined
   let finalPatientLastName: string | undefined
+  let finalObraSocialId: string | undefined
+  let finalObraSocialNombre: string | undefined
   
-  if (!patientDNI || patientDNI === '') {
-    const detectedInfo = await getDetectedPatientInfo(phoneNumber)
-    if (detectedInfo) {
+  // Siempre obtener datos del estado de detección para tener la información completa
+  const detectedInfo = await getDetectedPatientInfo(phoneNumber)
+  if (detectedInfo) {
+    if (!patientDNI || patientDNI === '') {
       finalPatientDNI = detectedInfo.patientDNI || ''
-      finalPatientFirstName = detectedInfo.patientFirstName
-      finalPatientLastName = detectedInfo.patientLastName
-      logger.info('Retrieved patient data from detection state', {
-        dni: finalPatientDNI,
-        firstName: finalPatientFirstName,
-        lastName: finalPatientLastName,
-      })
     }
+    finalPatientFirstName = detectedInfo.patientFirstName
+    finalPatientLastName = detectedInfo.patientLastName
+    finalObraSocialId = detectedInfo.obraSocialId
+    finalObraSocialNombre = detectedInfo.obraSocialNombre
+    logger.info('Retrieved patient data from detection state', {
+      dni: finalPatientDNI,
+      firstName: finalPatientFirstName,
+      lastName: finalPatientLastName,
+      obraSocialId: finalObraSocialId,
+      obraSocialNombre: finalObraSocialNombre,
+    })
   }
 
   // Obtener sedes desde la API
@@ -206,6 +213,8 @@ export async function initializeExistingPatientFlow(
     patientDNI: finalPatientDNI,
     patientEmail,
     patientPhone: phoneNumber,
+    obraSocialId: finalObraSocialId,
+    obraSocialNombre: finalObraSocialNombre,
     sedesOpciones: sedesResult.sedes,
     attempts: 0,
     createdAt: Date.now(),

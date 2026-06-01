@@ -42,6 +42,8 @@ interface PatientDetectionState {
   patientDNI?: string
   patientEmail?: string      // Email para reservas (del campo Mail de la API)
   patientCelular?: string    // Teléfono celular (del campo Celular de la API)
+  obraSocialId?: string      // ID de la obra social
+  obraSocialNombre?: string  // Nombre de la obra social
   turnos?: any[]
   multiplePatients?: any[] // Array de pacientes si hay múltiples
   detectedAt: number
@@ -187,6 +189,12 @@ export async function startPatientDetectionFlow(
     const patientId = patient.paciente_id || patient.Id || patient.id
     const patientName = patient.nombre || patient.Nombres || `${patient.Nombres || ''} ${patient.Apellido || ''}`.trim()
     const patientDNI = patient.dni || patient.Nrodoc
+    const patientFirstName = patient.Nombres || patient.nombres || ''
+    const patientLastName = patient.Apellido || patient.apellido || ''
+    const patientEmail = patient.Mail || patient.mail || patient.Email || patient.email || ''
+    const patientCelular = patient.Celular || patient.celular || patient.Telefono || patient.telefono || ''
+    const obraSocialId = patient.Deudor_Id || patient.deudor_id || ''
+    const obraSocialNombre = patient.Deudor_Nombre || patient.deudor_nombre || ''
 
     logger.info('Patient found', {
       patientId,
@@ -232,7 +240,13 @@ export async function startPatientDetectionFlow(
       patientPhone: phoneNumber,
       patientId: patientId,
       patientName: patientName,
+      patientFirstName: patientFirstName,
+      patientLastName: patientLastName,
       patientDNI: patientDNI,
+      patientEmail: patientEmail,
+      patientCelular: patientCelular,
+      obraSocialId: obraSocialId,
+      obraSocialNombre: obraSocialNombre,
       turnos: turnos,
       detectedAt: Date.now(),
       attempts: 0,
@@ -676,6 +690,8 @@ export async function getDetectedPatientInfo(phoneNumber: string): Promise<{
   patientDNI?: string
   patientEmail?: string
   patientCelular?: string
+  obraSocialId?: string
+  obraSocialNombre?: string
   turnos?: any[]
 } | null> {
   const state = await getPatientDetectionState(phoneNumber)
@@ -691,6 +707,8 @@ export async function getDetectedPatientInfo(phoneNumber: string): Promise<{
     patientDNI: state.patientDNI,
     patientEmail: state.patientEmail,
     patientCelular: state.patientCelular,
+    obraSocialId: state.obraSocialId,
+    obraSocialNombre: state.obraSocialNombre,
     turnos: state.turnos,
   }
 }
