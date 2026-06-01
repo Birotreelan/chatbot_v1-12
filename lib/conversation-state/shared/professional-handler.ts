@@ -1,10 +1,16 @@
 /**
  * Handler compartido para busqueda de profesionales
+ * 
+ * Usa Smart Selection Handler para deteccion inteligente
  */
 
 import { createConversationLogger } from '../logger'
 import { buscarProfesionales } from '../../api-tools/api-functions'
 import type { ProfessionalOption, HandlerResult } from './types'
+import {
+  detectSmartSelection,
+  professionalToSelectionOption,
+} from './smart-selection-handler'
 
 /**
  * Busca profesionales por nombre
@@ -78,6 +84,7 @@ Voy a buscar los turnos disponibles con este profesional.`
 
 /**
  * Maneja la seleccion de profesional de la lista
+ * Usa Smart Selection Handler para deteccion inteligente
  */
 export async function handleProfessionalSelection(
   userInput: string,
@@ -87,21 +94,31 @@ export async function handleProfessionalSelection(
 ): Promise<HandlerResult & { selectedProfessional?: ProfessionalOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'professional_selection')
 
-  // Normalizar input
-  const inputNormalizado = userInput.trim().toLowerCase()
+  // Convertir a SelectionOption para el smart matcher
+  const selectionOptions = profesionalesOpciones.map(professionalToSelectionOption)
 
-  // Intentar extraer numero
-  const numeroMatch = inputNormalizado.match(/^\d+$/)
+  // Usar deteccion inteligente
+  const result = await detectSmartSelection(
+    userInput,
+    selectionOptions,
+    'seleccionar el profesional',
+    true
+  )
 
-  if (numeroMatch) {
-    const numero = parseInt(numeroMatch[0], 10)
+  logger.info('Smart selection result (profesional)', {
+    matched: result.matched,
+    matchType: result.matchType,
+    confidence: result.confidence,
+    isOtherIntent: result.isOtherIntent,
+  })
 
-    // Buscar profesional por numero (NO por indice)
-    const profesionalSeleccionado = profesionalesOpciones.find((p) => p.numero === numero)
+  // Si se detecto la opcion
+  if (result.matched && result.selectedOption) {
+    const profesionalSeleccionado = profesionalesOpciones.find(p => p.id === result.selectedOption!.id)
 
     if (profesionalSeleccionado) {
-      logger.info('Profesional seleccionado por numero', {
-        numero,
+      logger.info('Profesional seleccionado', {
+        matchType: result.matchType,
         profesionalId: profesionalSeleccionado.id,
         profesionalNombre: profesionalSeleccionado.nombre,
       })
@@ -114,31 +131,30 @@ export async function handleProfessionalSelection(
     }
   }
 
-  // Intentar match por nombre
-  const profesionalByName = profesionalesOpciones.find((p) =>
-    p.nombre.toLowerCase().includes(inputNormalizado) ||
-    inputNormalizado.includes(p.nombre.toLowerCase())
-  )
+  // Si es otra intencion
+  if (result.isOtherIntent && result.otherIntentResponse) {
+    logger.info('Otra intencion detectada en profesional', { type: result.otherIntentType })
 
-  if (profesionalByName) {
-    logger.info('Profesional seleccionado por nombre', {
-      profesionalId: profesionalByName.id,
-      profesionalNombre: profesionalByName.nombre,
-    })
+    const profesionalListRecap = profesionalesOpciones
+      .map(p => `${p.numero}. ${p.nombre}${p.especialidad ? ` - ${p.especialidad}` : ''}`)
+      .join('\n')
 
     return {
       handled: true,
-      nextPhase: 'awaiting_turno_selection',
-      selectedProfessional: profesionalByName,
+      message: `${result.otherIntentResponse}\n\nPara continuar, indica el *numero* del profesional:\n\n${profesionalListRecap}`,
+      nextPhase: 'awaiting_professional_selection',
     }
   }
 
-  // Input invalido
-  logger.info('Seleccion de profesional invalida', { input: userInput })
+  // No se pudo detectar
+  const errorMsg = result.errorMessage ||
+    `No reconozco esa opcion. Por favor, responde con el *numero* del profesional (1-${profesionalesOpciones.length}).`
+
+  logger.info('Seleccion de profesional no detectada', { input: userInput })
 
   return {
     handled: true,
-    message: `No reconozco esa opcion. Por favor, responde con el *numero* del profesional (1-${profesionalesOpciones.length}).`,
+    message: errorMsg,
     nextPhase: 'awaiting_professional_selection',
   }
 }

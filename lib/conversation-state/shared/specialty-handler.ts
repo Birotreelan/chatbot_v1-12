@@ -1,10 +1,16 @@
 /**
  * Handler compartido para especialidades
+ * 
+ * Usa Smart Selection Handler para deteccion inteligente
  */
 
 import { createConversationLogger } from '../logger'
 import { obtenerSubespecialidades } from '../../api-tools/api-functions'
 import type { SpecialtyOption, HandlerResult } from './types'
+import {
+  detectSmartSelection,
+  specialtyToSelectionOption,
+} from './smart-selection-handler'
 
 /**
  * Obtiene las especialidades desde la API
@@ -60,6 +66,7 @@ export function buildSpecialtiesMessage(especialidades: SpecialtyOption[]): stri
 
 /**
  * Maneja la seleccion de especialidad
+ * Usa Smart Selection Handler para deteccion inteligente
  */
 export async function handleSpecialtySelection(
   userInput: string,
@@ -69,21 +76,31 @@ export async function handleSpecialtySelection(
 ): Promise<HandlerResult & { selectedSpecialty?: SpecialtyOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'specialty_selection')
 
-  // Normalizar input
-  const inputNormalizado = userInput.trim().toLowerCase()
+  // Convertir a SelectionOption para el smart matcher
+  const selectionOptions = especialidadesOpciones.map(specialtyToSelectionOption)
 
-  // Intentar extraer numero
-  const numeroMatch = inputNormalizado.match(/^\d+$/)
+  // Usar deteccion inteligente
+  const result = await detectSmartSelection(
+    userInput,
+    selectionOptions,
+    'seleccionar la especialidad medica',
+    true
+  )
 
-  if (numeroMatch) {
-    const numero = parseInt(numeroMatch[0], 10)
+  logger.info('Smart selection result (especialidad)', {
+    matched: result.matched,
+    matchType: result.matchType,
+    confidence: result.confidence,
+    isOtherIntent: result.isOtherIntent,
+  })
 
-    // Buscar especialidad por numero (NO por indice)
-    const especialidadSeleccionada = especialidadesOpciones.find((e) => e.numero === numero)
+  // Si se detecto la opcion
+  if (result.matched && result.selectedOption) {
+    const especialidadSeleccionada = especialidadesOpciones.find(e => e.id === result.selectedOption!.id)
 
     if (especialidadSeleccionada) {
-      logger.info('Especialidad seleccionada por numero', {
-        numero,
+      logger.info('Especialidad seleccionada', {
+        matchType: result.matchType,
         especialidadId: especialidadSeleccionada.id,
         especialidadNombre: especialidadSeleccionada.nombre,
       })
@@ -96,31 +113,30 @@ export async function handleSpecialtySelection(
     }
   }
 
-  // Intentar match por nombre
-  const especialidadByName = especialidadesOpciones.find((e) =>
-    e.nombre.toLowerCase().includes(inputNormalizado) ||
-    inputNormalizado.includes(e.nombre.toLowerCase())
-  )
+  // Si es otra intencion
+  if (result.isOtherIntent && result.otherIntentResponse) {
+    logger.info('Otra intencion detectada en especialidad', { type: result.otherIntentType })
 
-  if (especialidadByName) {
-    logger.info('Especialidad seleccionada por nombre', {
-      especialidadId: especialidadByName.id,
-      especialidadNombre: especialidadByName.nombre,
-    })
+    const especialidadListRecap = especialidadesOpciones
+      .map(e => `${e.numero}. ${e.nombre}`)
+      .join('\n')
 
     return {
       handled: true,
-      nextPhase: 'awaiting_turno_selection',
-      selectedSpecialty: especialidadByName,
+      message: `${result.otherIntentResponse}\n\nPara continuar, indica el *numero* de la especialidad:\n\n${especialidadListRecap}`,
+      nextPhase: 'awaiting_specialty_selection',
     }
   }
 
-  // Input invalido
-  logger.info('Seleccion de especialidad invalida', { input: userInput })
+  // No se pudo detectar
+  const errorMsg = result.errorMessage ||
+    `No reconozco esa especialidad. Por favor, responde con el *numero* de la especialidad (1-${especialidadesOpciones.length}).`
+
+  logger.info('Seleccion de especialidad no detectada', { input: userInput })
 
   return {
     handled: true,
-    message: `No reconozco esa especialidad. Por favor, responde con el *numero* de la especialidad (1-${especialidadesOpciones.length}).`,
+    message: errorMsg,
     nextPhase: 'awaiting_specialty_selection',
   }
 }

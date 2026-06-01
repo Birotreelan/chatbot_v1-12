@@ -1,11 +1,21 @@
 /**
  * Handler compartido para seleccion de sedes
  * Reutilizado por flujos de paciente nuevo y existente
+ * 
+ * Usa Smart Selection Handler para deteccion inteligente:
+ * - Match por numero exacto
+ * - Fuzzy matching por texto
+ * - NLU fallback para distinguir seleccion de otras consultas
  */
 
 import { createConversationLogger } from '../logger'
 import { obtenerTodasLasSedes } from '../../api-tools/api-functions'
 import type { SedeOption, HandlerResult, SharedFlowState } from './types'
+import { 
+  detectSmartSelection, 
+  sedeToSelectionOption,
+  type SmartSelectionResult 
+} from './smart-selection-handler'
 
 /**
  * Obtiene las sedes desde la API y las formatea
@@ -92,6 +102,7 @@ export function buildSedesMessage(
 
 /**
  * Maneja la seleccion de sede por parte del usuario
+ * Usa Smart Selection Handler para deteccion inteligente
  */
 export async function handleSedeSelection(
   userInput: string,
@@ -101,23 +112,35 @@ export async function handleSedeSelection(
 ): Promise<HandlerResult & { selectedSede?: SedeOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'sede_selection')
 
-  // Normalizar input
-  const inputNormalizado = userInput.trim().toLowerCase()
+  // Convertir SedeOption a SelectionOption para el smart matcher
+  const selectionOptions = sedesOpciones.map(sedeToSelectionOption)
 
-  // Intentar extraer numero
-  const numeroMatch = inputNormalizado.match(/^\d+$/)
+  // Usar deteccion inteligente
+  const result = await detectSmartSelection(
+    userInput,
+    selectionOptions,
+    'seleccionar la sede donde quiere atenderse',
+    true // usar NLU
+  )
 
-  if (numeroMatch) {
-    const numero = parseInt(numeroMatch[0], 10)
+  logger.info('Smart selection result', {
+    matched: result.matched,
+    matchType: result.matchType,
+    confidence: result.confidence,
+    isOtherIntent: result.isOtherIntent,
+  })
 
-    // Buscar sede por numero (NO por indice)
-    const sedeSeleccionada = sedesOpciones.find((s) => s.numero === numero)
+  // Si se detecto la opcion
+  if (result.matched && result.selectedOption) {
+    // Encontrar la sede original por ID
+    const sedeSeleccionada = sedesOpciones.find(s => s.id === result.selectedOption!.id)
 
     if (sedeSeleccionada) {
-      logger.info('Sede seleccionada por numero', {
-        numero,
+      logger.info('Sede seleccionada', {
+        matchType: result.matchType,
         sedeId: sedeSeleccionada.id,
         sedeName: sedeSeleccionada.nombre,
+        confidence: result.confidence,
       })
 
       return {
@@ -128,31 +151,33 @@ export async function handleSedeSelection(
     }
   }
 
-  // Si no es un numero valido, intentar match por nombre
-  const sedeByName = sedesOpciones.find((s) =>
-    s.nombre.toLowerCase().includes(inputNormalizado) ||
-    inputNormalizado.includes(s.nombre.toLowerCase())
-  )
-
-  if (sedeByName) {
-    logger.info('Sede seleccionada por nombre', {
-      sedeId: sedeByName.id,
-      sedeName: sedeByName.nombre,
+  // Si es otra intencion (consulta, despedida, etc.)
+  if (result.isOtherIntent && result.otherIntentResponse) {
+    logger.info('Otra intencion detectada', {
+      type: result.otherIntentType,
     })
+
+    // Responder a la consulta y recordar que debe seleccionar sede
+    const sedeListRecap = sedesOpciones
+      .map(s => `${s.numero}. ${s.nombre}`)
+      .join('\n')
 
     return {
       handled: true,
-      nextPhase: 'awaiting_search_type',
-      selectedSede: sedeByName,
+      message: `${result.otherIntentResponse}\n\nPara continuar, por favor indica el *numero* de la sede:\n\n${sedeListRecap}`,
+      nextPhase: 'awaiting_sede',
     }
   }
 
-  // Input invalido
-  logger.info('Seleccion de sede invalida', { input: userInput })
+  // No se pudo detectar - pedir seleccion numerica
+  const errorMsg = result.errorMessage || 
+    `No reconozco esa opcion. Por favor, responde con el *numero* de la sede (1-${sedesOpciones.length}).`
+
+  logger.info('Seleccion de sede no detectada', { input: userInput })
 
   return {
     handled: true,
-    message: `No reconozco esa opcion. Por favor, responde con el *numero* de la sede (1-${sedesOpciones.length}).`,
+    message: errorMsg,
     nextPhase: 'awaiting_sede',
   }
 }

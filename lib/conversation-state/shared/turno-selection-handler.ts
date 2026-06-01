@@ -1,10 +1,16 @@
 /**
  * Handler compartido para seleccion de turno
  * CRITICO: Usa campo 'numero' para mapeo, NUNCA indice de array
+ * 
+ * Usa Smart Selection Handler para deteccion inteligente
  */
 
 import { createConversationLogger } from '../logger'
 import type { TurnoOption, HandlerResult } from './types'
+import {
+  detectSmartSelection,
+  turnoToSelectionOption,
+} from './smart-selection-handler'
 
 /**
  * Formatea fecha para mostrar al usuario (formato argentino)
@@ -21,6 +27,7 @@ function formatDateForDisplay(dateStr: string): string {
 /**
  * Maneja la seleccion de turno por parte del usuario
  * IMPORTANTE: Mapea por campo 'numero', NO por indice de array
+ * Usa Smart Selection Handler para deteccion inteligente
  */
 export async function handleTurnoSelection(
   userInput: string,
@@ -30,21 +37,33 @@ export async function handleTurnoSelection(
 ): Promise<HandlerResult & { selectedTurno?: TurnoOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turno_selection')
 
-  // Normalizar input
-  const inputNormalizado = userInput.trim().toLowerCase()
+  // Convertir a SelectionOption para el smart matcher
+  const selectionOptions = turnosOpciones.map(turnoToSelectionOption)
 
-  // Intentar extraer numero
-  const numeroMatch = inputNormalizado.match(/^\d+$/)
+  // Usar deteccion inteligente
+  const result = await detectSmartSelection(
+    userInput,
+    selectionOptions,
+    'seleccionar el turno',
+    true
+  )
 
-  if (numeroMatch) {
-    const numero = parseInt(numeroMatch[0], 10)
+  logger.info('Smart selection result (turno)', {
+    matched: result.matched,
+    matchType: result.matchType,
+    confidence: result.confidence,
+    isOtherIntent: result.isOtherIntent,
+  })
 
+  // Si se detecto la opcion
+  if (result.matched && result.selectedOption) {
     // CRITICO: Buscar turno por campo 'numero', NO por indice
-    const turnoSeleccionado = turnosOpciones.find((t) => t.numero === numero)
+    const turnoSeleccionado = turnosOpciones.find(t => t.numero === result.selectedOption!.numero)
 
     if (turnoSeleccionado) {
       logger.info('Turno seleccionado correctamente', {
-        numeroInput: numero,
+        matchType: result.matchType,
+        numeroInput: result.selectedOption.numero,
         turnoNumero: turnoSeleccionado.numero,
         agendaId: turnoSeleccionado.id,
         fecha: turnoSeleccionado.fecha,
@@ -54,32 +73,42 @@ export async function handleTurnoSelection(
 
       return {
         handled: true,
-        nextPhase: 'awaiting_email', // Siguiente paso: verificar/solicitar email
+        nextPhase: 'awaiting_email',
         selectedTurno: turnoSeleccionado,
-      }
-    } else {
-      // Numero fuera de rango
-      logger.info('Numero de turno fuera de rango', {
-        numeroInput: numero,
-        rangoValido: `1-${turnosOpciones.length}`,
-      })
-
-      return {
-        handled: true,
-        message: `Ese numero no corresponde a ninguno de los turnos mostrados. Por favor, responde con un numero del *1 al ${turnosOpciones.length}*.`,
-        nextPhase: 'awaiting_turno_selection',
       }
     }
   }
 
-  // Intentar detectar hora (HH:MM)
+  // Si es otra intencion
+  if (result.isOtherIntent && result.otherIntentResponse) {
+    logger.info('Otra intencion detectada en turno', { type: result.otherIntentType })
+
+    // Mostrar los primeros 5 turnos como recordatorio
+    const turnoListRecap = turnosOpciones
+      .slice(0, 5)
+      .map(t => `${t.numero}. ${formatDateForDisplay(t.fecha)} ${t.hora} - ${t.profesionalNombre}`)
+      .join('\n')
+    
+    const moreMsg = turnosOpciones.length > 5 
+      ? `\n... y ${turnosOpciones.length - 5} opciones mas.` 
+      : ''
+
+    return {
+      handled: true,
+      message: `${result.otherIntentResponse}\n\nPara continuar, indica el *numero* del turno:\n\n${turnoListRecap}${moreMsg}`,
+      nextPhase: 'awaiting_turno_selection',
+    }
+  }
+
+  // FALLBACK: Intentar detectar hora directamente (HH:MM)
+  const inputNormalizado = userInput.trim().toLowerCase()
   const horaMatch = inputNormalizado.match(/(\d{1,2})[:\.](\d{2})/)
   if (horaMatch) {
     const hora = `${horaMatch[1].padStart(2, '0')}:${horaMatch[2]}`
     const turnoByHora = turnosOpciones.find((t) => t.hora === hora)
 
     if (turnoByHora) {
-      logger.info('Turno seleccionado por hora', {
+      logger.info('Turno seleccionado por hora directa', {
         horaInput: hora,
         turnoNumero: turnoByHora.numero,
         agendaId: turnoByHora.id,
@@ -93,12 +122,15 @@ export async function handleTurnoSelection(
     }
   }
 
-  // Input no reconocido
+  // No se pudo detectar
+  const errorMsg = result.errorMessage ||
+    `No reconozco esa opcion. Por favor, responde con el *numero* del turno que prefieras (1-${turnosOpciones.length}).`
+
   logger.info('Seleccion de turno no reconocida', { input: userInput })
 
   return {
     handled: true,
-    message: `No reconozco esa opcion. Por favor, responde con el *numero* del turno que prefieras (1-${turnosOpciones.length}).`,
+    message: errorMsg,
     nextPhase: 'awaiting_turno_selection',
   }
 }
