@@ -127,27 +127,6 @@ export async function handleConfirmationResponse(
     nextPhase: 'awaiting_confirmation',
   }
 }
-  }
-
-  if (confirmacionNegativa.some((c) => inputNormalizado.includes(c))) {
-    logger.info('Confirmacion negativa recibida', {})
-    return {
-      handled: true,
-      confirmed: false,
-      message: 'Entendido, la reserva ha sido cancelada. Si necesitas agendar un turno en otro momento, estoy para ayudarte.',
-      nextPhase: 'abandoned',
-    }
-  }
-
-  // Input no claro
-  logger.info('Respuesta de confirmacion no clara', { input: userInput })
-
-  return {
-    handled: true,
-    message: 'No entendi tu respuesta. Por favor, responde *SI* para confirmar el turno o *NO* para cancelar.',
-    nextPhase: 'awaiting_confirmation',
-  }
-}
 
 /**
  * Ejecuta la reserva del turno
