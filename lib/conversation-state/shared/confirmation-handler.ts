@@ -40,40 +40,18 @@ export function buildConfirmationMessage(
   let message = `${primerNombre}, para confirmar tu reserva necesito verificar los datos:\n\n`
 
   message += `**DATOS DEL PACIENTE:**\n\n`
-  
-  if (patientData?.apellido) {
-    message += `Apellido: ${patientData.apellido}\n\n`
-  }
-  
-  if (patientData?.nombre) {
-    message += `Nombre: ${patientData.nombre}\n\n`
-  }
-  
-  if (patientData?.dni) {
-    message += `DNI: ${patientData.dni}\n\n`
-  }
-  
-  if (patientData?.telefono) {
-    message += `Celular: ${patientData.telefono}\n\n`
-  }
-  
-  if (patientData?.email) {
-    message += `Mail: ${patientData.email}\n\n`
-  }
-  
-  if (obraSocialNombre) {
-    message += `Obra Social: ${obraSocialNombre}\n\n`
-  }
+  message += `Apellido: ${patientData?.apellido || ''}\n\n`
+  message += `Nombre: ${patientData?.nombre || ''}\n\n`
+  message += `DNI: ${patientData?.dni || ''}\n\n`
+  message += `Celular: ${patientData?.telefono || ''}\n\n`
+  message += `Mail: ${patientData?.email || ''}\n\n`
+  message += `Obra Social: ${obraSocialNombre || ''}\n\n`
 
   message += `**DATOS DEL TURNO:**\n\n`
   message += `Fecha: ${fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1)}\n\n`
   message += `Hora: ${turno.hora}\n\n`
   message += `Profesional: Dr. ${turno.profesionalNombre}\n\n`
-
-  if (sedeName || turno.sedeNombre) {
-    message += `Sede: ${sedeName || turno.sedeNombre}\n\n`
-  }
-
+  message += `Sede: ${sedeName || turno.sedeNombre || ''}\n\n`
   message += `Id Turno: ${turno.id}\n\n`
 
   message += `¿Confirmás que los datos son correctos y deseás realizar la reserva del turno número ${turno.numero}?\n\n`
@@ -172,20 +150,11 @@ export async function executeReservation(
     if (result.exito) {
       logger.info('Reserva exitosa', { agendaId: turno.id })
 
-      const fechaFormateada = formatDateForDisplay(turno.fecha)
-
       return {
         success: true,
-        message: `¡Listo! Tu turno ha sido reservado exitosamente.
+        message: `¡Tu solicitud de turno fue enviada exitosamente!
 
-*Detalles de tu turno:*
-*Fecha:* ${fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1)}
-*Hora:* ${turno.hora}
-*Profesional:* ${turno.profesionalNombre}
-
-Te enviamos un email de confirmacion a *${patientData.email}*.
-
-Recorda llegar 15 minutos antes de tu turno. ¡Te esperamos!`,
+Importante: Esta solicitud debe ser aprobada por la clínica para que el turno te sea otorgado. Te notificaremos cuando ello ocurra.`,
       }
     } else {
       logger.error('Error en reserva', new Error(result.error?.mensaje || 'Unknown error'))
