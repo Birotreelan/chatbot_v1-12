@@ -122,8 +122,23 @@ const GENERAL_APPOINTMENT_QUERY_PATTERNS = [
 
 /**
  * Detecta el tipo de consulta informativa basándose en patrones regex
+ * 
+ * NOTA: Los regex de consultas informativas han sido DESACTIVADOS para evitar
+ * falsos positivos (ej: "Necesito preparación?" matcheaba como DATE_QUERY).
+ * 
+ * Ahora estas consultas son manejadas por el NLU Fallback Router (Sprint 18)
+ * que clasifica con GPT-4o-mini y evita los problemas de regex ambiguos.
+ * 
+ * Se mantienen los patrones comentados para referencia.
+ * 
+ * @deprecated Usar NLU Fallback Router (Sprint 18) para consultas informativas
  */
 export function detectInformationalQueryType(message: string): InformationalQueryType {
+  // DESACTIVADO: Los regex generan falsos positivos
+  // El NLU Fallback Router (Sprint 18) maneja estas consultas
+  return "unknown"
+  
+  /* PATRONES ORIGINALES (desactivados):
   const cleanMessage = message.trim()
   
   // Verificar cada tipo en orden de especificidad
@@ -152,6 +167,7 @@ export function detectInformationalQueryType(message: string): InformationalQuer
   }
   
   return "unknown"
+  */
 }
 
 /**
@@ -201,8 +217,15 @@ const INFORMATIONAL_KEYWORDS = [
 /**
  * Detecta si el mensaje PODRÍA ser una consulta informativa (contiene keywords)
  * pero necesita NLU para confirmar
+ * 
+ * @deprecated DESACTIVADO - El NLU Fallback Router (Sprint 18) maneja estas consultas
  */
 export function mightBeInformationalQuery(message: string): boolean {
+  // DESACTIVADO: El NLU Fallback Router (Sprint 18) maneja todas las consultas
+  // Esto evita que el handler llame al NLU antiguo
+  return false
+  
+  /* LÓGICA ORIGINAL (desactivada):
   const lowerMessage = message.toLowerCase().trim()
   
   // Si ya es detectado por patrones, es seguro
@@ -212,6 +235,7 @@ export function mightBeInformationalQuery(message: string): boolean {
   
   // Verificar si contiene keywords
   return INFORMATIONAL_KEYWORDS.some(keyword => lowerMessage.includes(keyword))
+  */
 }
 
 // ============================================================================
