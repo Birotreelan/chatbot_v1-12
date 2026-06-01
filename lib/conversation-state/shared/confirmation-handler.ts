@@ -172,20 +172,11 @@ export async function executeReservation(
     if (result.exito) {
       logger.info('Reserva exitosa', { agendaId: turno.id })
 
-      const fechaFormateada = formatDateForDisplay(turno.fecha)
-
       return {
         success: true,
-        message: `¡Listo! Tu turno ha sido reservado exitosamente.
+        message: `¡Tu solicitud de turno fue enviada exitosamente!
 
-*Detalles de tu turno:*
-*Fecha:* ${fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1)}
-*Hora:* ${turno.hora}
-*Profesional:* ${turno.profesionalNombre}
-
-Te enviamos un email de confirmacion a *${patientData.email}*.
-
-Recorda llegar 15 minutos antes de tu turno. ¡Te esperamos!`,
+Importante: Esta solicitud debe ser aprobada por la clínica para que el turno te sea otorgado. Te notificaremos cuando ello ocurra.`,
       }
     } else {
       logger.error('Error en reserva', new Error(result.error?.mensaje || 'Unknown error'))
