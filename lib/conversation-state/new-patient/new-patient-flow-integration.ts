@@ -707,7 +707,14 @@ async function handleEmailPhase(
         state.turnoSeleccionado!,
         nombreCompleto,
         state.sedeNombre,
-        state.obraSocialNombre
+        state.obraSocialNombre,
+        {
+          apellido: state.apellido,
+          nombre: state.nombre,
+          dni: state.dni,
+          telefono: state.telefono,
+          email: state.email,
+        }
       ),
     }
   }

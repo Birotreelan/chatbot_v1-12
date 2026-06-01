@@ -25,31 +25,61 @@ export function buildConfirmationMessage(
   turno: TurnoOption,
   patientName: string,
   sedeName?: string,
-  obraSocialNombre?: string
+  obraSocialNombre?: string,
+  patientData?: {
+    apellido?: string
+    nombre?: string
+    dni?: string
+    telefono?: string
+    email?: string
+  }
 ): string {
   const fechaFormateada = formatDateForDisplay(turno.fecha)
+  const primerNombre = patientName.split(' ')[0]
 
-  let message = `*Resumen de tu turno*\n\n`
+  let message = `${primerNombre}, para confirmar tu reserva necesito verificar los datos:\n\n`
 
-  message += `*Paciente:* ${patientName}\n`
-  message += `*Fecha:* ${fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1)}\n`
-  message += `*Hora:* ${turno.hora}\n`
-  message += `*Profesional:* ${turno.profesionalNombre}\n`
-
-  if (turno.especialidad) {
-    message += `*Especialidad:* ${turno.especialidad}\n`
+  message += `**DATOS DEL PACIENTE:**\n\n`
+  
+  if (patientData?.apellido) {
+    message += `Apellido: ${patientData.apellido}\n\n`
   }
+  
+  if (patientData?.nombre) {
+    message += `Nombre: ${patientData.nombre}\n\n`
+  }
+  
+  if (patientData?.dni) {
+    message += `DNI: ${patientData.dni}\n\n`
+  }
+  
+  if (patientData?.telefono) {
+    message += `Celular: ${patientData.telefono}\n\n`
+  }
+  
+  if (patientData?.email) {
+    message += `Mail: ${patientData.email}\n\n`
+  }
+  
+  if (obraSocialNombre) {
+    message += `Obra Social: ${obraSocialNombre}\n\n`
+  }
+
+  message += `**DATOS DEL TURNO:**\n\n`
+  message += `Fecha: ${fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1)}\n\n`
+  message += `Hora: ${turno.hora}\n\n`
+  message += `Profesional: Dr. ${turno.profesionalNombre}\n\n`
 
   if (sedeName || turno.sedeNombre) {
-    message += `*Sede:* ${sedeName || turno.sedeNombre}\n`
+    message += `Sede: ${sedeName || turno.sedeNombre}\n\n`
   }
 
-  if (obraSocialNombre) {
-    message += `*Obra Social:* ${obraSocialNombre}\n`
-  }
+  message += `Id Turno: ${turno.id}\n\n`
 
-  message += `\n¿Confirmas la reserva de este turno?\n\n`
-  message += `Responde *SI* para confirmar o *NO* para cancelar.`
+  message += `¿Confirmás que los datos son correctos y deseás realizar la reserva del turno número ${turno.numero}?\n\n`
+  message += `Respondé con:\n`
+  message += `1. Sí, confirmar\n`
+  message += `2. No, modificar`
 
   return message
 }
@@ -68,7 +98,7 @@ export async function handleConfirmationResponse(
 
   // Detectar confirmacion positiva
   const confirmacionPositiva = ['si', 'sí', 'yes', 'confirmo', 'confirmar', 'ok', 'dale', 'bueno', 'perfecto', '1']
-  const confirmacionNegativa = ['no', 'cancelar', 'cancelo', 'no quiero', '2']
+  const confirmacionNegativa = ['no', 'cancelar', 'cancelo', 'no quiero', 'modificar', '2']
 
   if (confirmacionPositiva.some((c) => inputNormalizado.includes(c))) {
     logger.info('Confirmacion positiva recibida', {})
@@ -83,7 +113,7 @@ export async function handleConfirmationResponse(
     return {
       handled: true,
       confirmed: false,
-      message: 'Entendido, la reserva ha sido cancelada. Si necesitas agendar un turno en otro momento, estoy para ayudarte.',
+      message: 'Entendido. Volvamos al inicio para que puedas elegir otro turno o cambiar tus datos.',
       nextPhase: 'abandoned',
     }
   }
@@ -93,7 +123,7 @@ export async function handleConfirmationResponse(
 
   return {
     handled: true,
-    message: 'No entendi tu respuesta. Por favor, responde *SI* para confirmar el turno o *NO* para cancelar.',
+    message: 'No entendi tu respuesta. Por favor, respondé con:\n1. Sí, confirmar\n2. No, modificar',
     nextPhase: 'awaiting_confirmation',
   }
 }
@@ -158,7 +188,7 @@ Te enviamos un email de confirmacion a *${patientData.email}*.
 Recorda llegar 15 minutos antes de tu turno. ¡Te esperamos!`,
       }
     } else {
-      logger.error('Error en reserva', { error: result.error })
+      logger.error('Error en reserva', new Error(result.error?.mensaje || 'Unknown error'))
 
       return {
         success: false,
@@ -167,7 +197,7 @@ Recorda llegar 15 minutos antes de tu turno. ¡Te esperamos!`,
       }
     }
   } catch (error) {
-    logger.error('Excepcion en reserva', { error: error instanceof Error ? error.message : 'Unknown' })
+    logger.error('Excepcion en reserva', error instanceof Error ? error : new Error(String(error)))
 
     return {
       success: false,

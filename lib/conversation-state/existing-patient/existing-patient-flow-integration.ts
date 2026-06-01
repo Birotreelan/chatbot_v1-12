@@ -188,7 +188,7 @@ export async function initializeExistingPatientFlow(
   // Obtener sedes desde la API
   const sedesResult = await fetchSedes(clientId)
   if (!sedesResult.success || !sedesResult.sedes) {
-    logger.error('Error fetching sedes', { error: sedesResult.error })
+    logger.error('Error fetching sedes', new Error(sedesResult.error || 'Unknown error'))
     return {
       handled: true,
       message: buildSedesErrorMessage(),
@@ -582,7 +582,14 @@ async function handleTurnoPhase(
         result.selectedTurno,
         state.patientName,
         state.sedeNombre,
-        state.obraSocialNombre
+        state.obraSocialNombre,
+        {
+          apellido: state.patientLastName,
+          nombre: state.patientFirstName,
+          dni: state.patientDNI,
+          telefono: state.patientPhone,
+          email: state.patientEmail,
+        }
       ),
       nextPhase: 'awaiting_confirmation',
     }
@@ -618,7 +625,14 @@ async function handleEmailPhase(
         state.turnoSeleccionado!,
         state.patientName,
         state.sedeNombre,
-        state.obraSocialNombre
+        state.obraSocialNombre,
+        {
+          apellido: state.patientLastName,
+          nombre: state.patientFirstName,
+          dni: state.patientDNI,
+          telefono: state.patientPhone,
+          email: state.patientEmail,
+        }
       ),
       nextPhase: 'awaiting_confirmation',
     }
@@ -667,9 +681,9 @@ async function handleConfirmationPhase(
     if (!nombreParaReserva || !apellidoParaReserva || !dniParaReserva) {
       const detectedInfo = await getDetectedPatientInfo(phoneNumber)
       if (detectedInfo) {
-        if (!nombreParaReserva) nombreParaReserva = detectedInfo.patientFirstName
-        if (!apellidoParaReserva) apellidoParaReserva = detectedInfo.patientLastName
-        if (!dniParaReserva) dniParaReserva = detectedInfo.patientDNI
+        if (!nombreParaReserva) nombreParaReserva = detectedInfo.patientFirstName || ''
+        if (!apellidoParaReserva) apellidoParaReserva = detectedInfo.patientLastName || ''
+        if (!dniParaReserva) dniParaReserva = detectedInfo.patientDNI || ''
         
         logger.info('Retrieved missing patient data from detection state for reservation', {
           firstName: nombreParaReserva,
@@ -684,7 +698,7 @@ async function handleConfirmationPhase(
       logger.info('DNI still missing, fetching fresh patient data from API', { phone: phoneNumber })
       try {
         const clinicAPI = new ClinicAPI(clientId)
-        const pacienteResponse = await clinicAPI.obtenerPacientePorTelefono(phoneNumber)
+        const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
         
         if (pacienteResponse.exito && pacienteResponse.datos) {
           const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
@@ -699,7 +713,7 @@ async function handleConfirmationPhase(
           })
         }
       } catch (error) {
-        logger.error('Error fetching patient data from API', { error: String(error) })
+        logger.error('Error fetching patient data from API', error instanceof Error ? error : new Error(String(error)))
       }
     }
 
@@ -745,7 +759,7 @@ async function handleConfirmationPhase(
     }
 
     // Error en reserva
-    logger.error('Error en reserva', { error: reservaResult.error })
+    logger.error('Error en reserva', new Error(String(reservaResult.error) || 'Unknown reservation error'))
     return {
       handled: true,
       message: reservaResult.message,
