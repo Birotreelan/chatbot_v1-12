@@ -208,6 +208,48 @@ export class ClinicAPI {
   }
 
   /**
+   * Obtiene los turnos AGENDADOS de un paciente específico
+   * Este endpoint devuelve los turnos YA RESERVADOS (no los disponibles)
+   */
+  async obtenerTurnosPaciente(
+    pacienteId?: string,
+    pacienteDNI?: string,
+  ): Promise<ApiResponse<any[]>> {
+    if (!pacienteId && !pacienteDNI) {
+      return {
+        exito: false,
+        error: {
+          codigo: "PARAMETROS_INVALIDOS",
+          mensaje: "Se requiere paciente_id o dni",
+        },
+      }
+    }
+
+    const params: Record<string, any> = {}
+    if (pacienteId) params.paciente_id = pacienteId
+    if (pacienteDNI) params.dni = pacienteDNI
+
+    console.log(`📋 Obteniendo turnos agendados del paciente:`, params)
+
+    const resultado = await this.fetchProxyApi<any>("get_turnos_paciente", params)
+
+    if (resultado.exito && resultado.datos) {
+      // La API puede devolver { turnos: [...] } o directamente un array
+      const turnos = resultado.datos.turnos || resultado.datos.turnos_proximos || resultado.datos
+      return {
+        exito: true,
+        datos: Array.isArray(turnos) ? turnos : [],
+      }
+    }
+
+    return {
+      exito: resultado.exito,
+      datos: [],
+      error: resultado.error,
+    }
+  }
+
+  /**
    * Busca turnos disponibles según el criterio elegido
    */
   async buscarTurnosDisponibles(

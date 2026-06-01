@@ -231,6 +231,47 @@ export async function buscarPaciente(
   return resultado
 }
 
+/**
+ * Obtiene los turnos agendados de un paciente específico
+ * Este endpoint devuelve los turnos YA RESERVADOS del paciente (no los disponibles)
+ */
+export async function obtenerTurnosPaciente(
+  clienteId: string,
+  pacienteId?: string,
+  pacienteDNI?: string,
+): Promise<ApiResponse<any[]>> {
+  if (!pacienteId && !pacienteDNI) {
+    return {
+      exito: false,
+      error: {
+        codigo: "PARAMETROS_INVALIDOS",
+        mensaje: "Se requiere paciente_id o dni",
+      },
+    }
+  }
+
+  const params: Record<string, any> = {}
+  if (pacienteId) params.paciente_id = pacienteId
+  if (pacienteDNI) params.dni = pacienteDNI
+
+  const resultado = await fetchProxyApi<any>(clienteId, "get_turnos_paciente", params, false)
+
+  if (resultado.exito && resultado.datos) {
+    // La API puede devolver { turnos: [...] } o directamente un array
+    const turnos = resultado.datos.turnos || resultado.datos.turnos_proximos || resultado.datos
+    return {
+      exito: true,
+      datos: Array.isArray(turnos) ? turnos : [],
+    }
+  }
+
+  return {
+    exito: resultado.exito,
+    datos: [],
+    error: resultado.error,
+  }
+}
+
 // Función para obtener subespecialidades
 export async function obtenerSubespecialidades(
   clienteId: string,
