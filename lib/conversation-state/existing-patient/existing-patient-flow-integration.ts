@@ -660,7 +660,25 @@ async function handleConfirmationPhase(
     // o derivarlos de patientName como fallback (formato: "Nombres Apellido")
     let nombreParaReserva = state.patientFirstName
     let apellidoParaReserva = state.patientLastName
+    let dniParaReserva = state.patientDNI
 
+    // Si faltan datos, obtenerlos del estado de detección del paciente
+    if (!nombreParaReserva || !apellidoParaReserva || !dniParaReserva) {
+      const detectedInfo = await getDetectedPatientInfo(phoneNumber)
+      if (detectedInfo) {
+        if (!nombreParaReserva) nombreParaReserva = detectedInfo.patientFirstName
+        if (!apellidoParaReserva) apellidoParaReserva = detectedInfo.patientLastName
+        if (!dniParaReserva) dniParaReserva = detectedInfo.patientDNI
+        
+        logger.info('Retrieved missing patient data from detection state for reservation', {
+          firstName: nombreParaReserva,
+          lastName: apellidoParaReserva,
+          dni: dniParaReserva,
+        })
+      }
+    }
+
+    // Fallback: derivar nombre/apellido de patientName si aún faltan
     if (!nombreParaReserva && state.patientName) {
       const partes = state.patientName.trim().split(' ')
       if (partes.length >= 2) {
@@ -678,7 +696,7 @@ async function handleConfirmationPhase(
       {
         nombre: nombreParaReserva,
         apellido: apellidoParaReserva,
-        dni: state.patientDNI,
+        dni: dniParaReserva,
         telefono: state.patientPhone,
         email: state.patientEmail!,
         obraSocialId: state.obraSocialId,
