@@ -133,6 +133,10 @@ export async function getBookingFlowState(
     if (!redis) return null
     const data = await redis.get(getKey(phone, configId))
     if (!data) return null
+    // Upstash Redis puede devolver objeto ya parseado o string
+    if (typeof data === 'object') {
+      return data as BookingFlowState
+    }
     return JSON.parse(data as string) as BookingFlowState
   } catch {
     return null

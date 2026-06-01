@@ -91,6 +91,10 @@ export async function getTurnSelectionState(
     const data = await redis.get(key)
     if (!data) return null
 
+    // Upstash Redis puede devolver objeto ya parseado o string
+    if (typeof data === 'object') {
+      return data as TurnSelectionState
+    }
     return JSON.parse(data as string) as TurnSelectionState
   } catch (error) {
     console.error(`[TURN-SELECTION] Error obteniendo estado para ${phone}:`, error)

@@ -97,7 +97,8 @@ export async function getPostActionContext(
 
     if (!data) return null
 
-    const context = JSON.parse(data as string) as PostActionContext
+    // Upstash Redis puede devolver objeto ya parseado o string
+    const context = (typeof data === 'object' ? data : JSON.parse(data as string)) as PostActionContext
     
     logger.debug("Contexto post-acción recuperado", {
       actionType: context.actionType,
