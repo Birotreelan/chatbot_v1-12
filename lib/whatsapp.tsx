@@ -74,13 +74,13 @@ import {
   initializeExistingPatientFlow,
   handleExistingPatientMessage,
   isExistingPatientFlowActive,
-  completeExistingPatientFlow,
+  clearExistingPatientFlow,
 } from "./conversation-state/existing-patient/existing-patient-flow-integration"
 import {
   initializeNewPatientFlow,
   handleNewPatientMessage,
   isNewPatientFlowActive,
-  completeNewPatientFlow,
+  clearNewPatientFlow,
 } from "./conversation-state/new-patient/new-patient-flow-integration"
 import {
   handleContextualIntent,
@@ -1941,8 +1941,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           // Si el flujo completó (Sprint 9b/9c), limpiar
           if (detectionResult.flowCompleted) {
-            await completeExistingPatientFlow(userPhoneNumber, config.id)
-            await completeNewPatientFlow(userPhoneNumber, config.id)
+            await clearExistingPatientFlow(userPhoneNumber)
+            await clearNewPatientFlow(userPhoneNumber, config.id)
           }
 
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
