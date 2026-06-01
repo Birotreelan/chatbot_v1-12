@@ -438,9 +438,26 @@ export async function validarObraSocial(
   const resultado = await fetchProxyApi<any>(clienteId, "get_obras_sociales", { busqueda }, useCache)
 
   if (resultado.exito && resultado.datos) {
+    // La API devuelve campos en PascalCase - mapear a minusculas
+    const rawObrasSociales = resultado.datos.obras_sociales || resultado.datos.deudores || resultado.datos || []
+    
+    const obrasSocialesMapeadas = Array.isArray(rawObrasSociales) 
+      ? rawObrasSociales.map((os: any) => ({
+          id: os.Id || os.id || os.Deudor_Id || os.deudor_id,
+          nombre: os.Nombre || os.nombre || os.Descripcion || os.descripcion || os.Razon_Social || os.razon_social,
+          razon_social: os.Razon_Social || os.razon_social || os.Nombre || os.nombre,
+          permite_turnos_online: os.Permite_Turnos_Online ?? os.permite_turnos_online ?? true,
+          permite_turnos_online_texto: os.Permite_Turnos_Online_Texto || os.permite_turnos_online_texto || '',
+        }))
+      : []
+
     return {
       exito: true,
-      datos: resultado.datos,
+      datos: {
+        obras_sociales: obrasSocialesMapeadas,
+        total_encontradas: resultado.datos.total_encontradas || obrasSocialesMapeadas.length,
+        busqueda_realizada: resultado.datos.busqueda_realizada || busqueda,
+      },
     }
   }
 
