@@ -75,6 +75,7 @@ import {
   handleExistingPatientMessage,
   isExistingPatientFlowActive,
   clearExistingPatientFlow,
+  getExistingPatientFlowPhase,
 } from "./conversation-state/existing-patient/existing-patient-flow-integration"
 import {
   initializeNewPatientFlow,
@@ -1853,6 +1854,26 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await completePatientDetectionFlow(userPhoneNumber, config.id)
 
             if (detectionResult.action === 'book_new_appointment' || detectionResult.action === 'other_inquiry') {
+              // Verificar si ya hay un flujo de paciente existente activo y más avanzado
+              const existingPhase = await getExistingPatientFlowPhase(userPhoneNumber)
+              
+              // Fases más avanzadas que awaiting_sede (ya pasaron la selección de sede)
+              const advancedPhases = [
+                'awaiting_search_type', 'awaiting_professional_name', 'awaiting_especialidad',
+                'awaiting_turno_selection', 'awaiting_email', 'awaiting_confirmation'
+              ]
+              
+              if (existingPhase && advancedPhases.includes(existingPhase)) {
+                // Ya hay un flujo activo más avanzado - procesar el mensaje "1" en ese contexto
+                console.log(`[WHATSAPP] Flujo de paciente existente ya activo en fase avanzada "${existingPhase}" → procesando mensaje en ese flujo`)
+                const existingResult = await handleExistingPatientMessage(userPhoneNumber, userMessage, config.cliente_id)
+                if (existingResult?.handled && existingResult.message) {
+                  await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")
+                }
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
+              }
+              
               // Derivar a flujo de paciente existente para reservar turno
               console.log(`[WHATSAPP] Acción "${detectionResult.action}" → iniciando flujo de paciente existente`)
               const existingResult = await initializeExistingPatientFlow(
