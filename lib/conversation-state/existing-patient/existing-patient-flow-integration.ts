@@ -757,11 +757,16 @@ async function handleConfirmationPhase(
           dniParaReserva = (paciente.Nrodoc || paciente.dni || '').toString()
           if (!nombreParaReserva) nombreParaReserva = paciente.Nombres || paciente.nombres || ''
           if (!apellidoParaReserva) apellidoParaReserva = paciente.Apellido || paciente.apellido || ''
+          // Actualizar obra social en el estado si falta
+          if (!state.obraSocialId) state.obraSocialId = paciente.Deudor_Id || paciente.deudor_id || ''
+          if (!state.obraSocialNombre) state.obraSocialNombre = paciente.Deudor_Nombre || paciente.deudor_nombre || ''
           
           logger.info('Retrieved patient data from API for reservation', {
             firstName: nombreParaReserva,
             lastName: apellidoParaReserva,
             dni: dniParaReserva,
+            obraSocialId: state.obraSocialId,
+            obraSocialNombre: state.obraSocialNombre,
           })
         }
       } catch (error) {
