@@ -188,7 +188,7 @@ Te enviamos un email de confirmacion a *${patientData.email}*.
 Recorda llegar 15 minutos antes de tu turno. ¡Te esperamos!`,
       }
     } else {
-      logger.error('Error en reserva', { error: result.error })
+      logger.error('Error en reserva', new Error(result.error?.mensaje || 'Unknown error'))
 
       return {
         success: false,
@@ -197,7 +197,7 @@ Recorda llegar 15 minutos antes de tu turno. ¡Te esperamos!`,
       }
     }
   } catch (error) {
-    logger.error('Excepcion en reserva', { error: error instanceof Error ? error.message : 'Unknown' })
+    logger.error('Excepcion en reserva', error instanceof Error ? error : new Error(String(error)))
 
     return {
       success: false,

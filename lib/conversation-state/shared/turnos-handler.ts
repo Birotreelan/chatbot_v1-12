@@ -194,7 +194,7 @@ export async function searchTurnosAcumulativo(
         }
       }
     } catch (error) {
-      logger.error('Error buscando turnos en rango', { dias, error: error instanceof Error ? error.message : 'Unknown' })
+      logger.error('Error buscando turnos en rango', error instanceof Error ? error : new Error(String(error)))
     }
   }
 
