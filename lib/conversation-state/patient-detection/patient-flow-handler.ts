@@ -404,16 +404,19 @@ export async function processDNIForDisambiguation(
 
     // Normalizar campos del paciente validado
     const foundPatientId = validatedPatient.paciente_id || validatedPatient.Id || validatedPatient.id
-    // Extraer nombre y apellido por separado para reservas
+    // Extraer nombre y apellido por separado para reservas (campos de la API: Nombres, Apellido)
     const foundPatientFirstName = validatedPatient.Nombres || validatedPatient.nombres || validatedPatient.nombre || ''
     const foundPatientLastName = validatedPatient.Apellido || validatedPatient.apellido || ''
     const foundPatientName = validatedPatient.nombre || `${foundPatientFirstName} ${foundPatientLastName}`.trim()
+    // Actualizar DNI desde validatedPatient por si el original estaba vacío (campo de la API: Nrodoc)
+    const validatedPatientDNI = (validatedPatient.Nrodoc || validatedPatient.dni || foundPatientDNI || '').toString()
 
     logger.info('Patient validated via get_paciente', {
       patientId: foundPatientId,
       patientName: foundPatientName,
       patientFirstName: foundPatientFirstName,
       patientLastName: foundPatientLastName,
+      patientDNI: validatedPatientDNI,
       turnosInResponse: turnosFromResponse.length,
     })
 
@@ -426,7 +429,7 @@ export async function processDNIForDisambiguation(
         // Usar get_turnos_paciente para obtener los turnos AGENDADOS del paciente
         const turnosPacienteResponse = await clinicAPI.obtenerTurnosPaciente(
           foundPatientId,
-          foundPatientDNI
+          validatedPatientDNI
         )
 
         if (turnosPacienteResponse.exito && turnosPacienteResponse.datos) {
@@ -457,7 +460,7 @@ export async function processDNIForDisambiguation(
       patientName: foundPatientName,
       patientFirstName: foundPatientFirstName,
       patientLastName: foundPatientLastName,
-      patientDNI: foundPatientDNI,
+      patientDNI: validatedPatientDNI,
       turnos: turnos,
       detectedAt: Date.now(),
       attempts: 0,
