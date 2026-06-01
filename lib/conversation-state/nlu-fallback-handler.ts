@@ -158,6 +158,16 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
+    // Si es consulta informativa → responder con info del turno si disponible
+    if (classificationResult.intent === "consulta_informativa") {
+      const response = buildInformationalQueryResponse(appointmentContext, classificationResult)
+      return {
+        shouldHandle: true,
+        result: classificationResult,
+        response,
+      }
+    }
+
     // Si es consulta que no podemos responder → derivar a la clínica
     if (classificationResult.intent === "consulta_no_disponible") {
       const response = buildDerivationResponse(appointmentContext, classificationResult.response, escalationPhoneNumber)
@@ -470,6 +480,70 @@ ${derivacionMsg}
 Tu turno sigue confirmado para el *${fecha}* a las *${hora}* con ${profesional} en ${sede}.
 
 Si necesitás ayuda con tu turno (confirmar, cancelar o reagendar), con gusto te ayudo.`
+}
+
+/**
+ * Respuesta para consultas informativas del turno
+ * Basada en el reasoning del NLU para determinar qué información dar
+ */
+function buildInformationalQueryResponse(appointmentContext: any, classificationResult: FallbackIntentResult): string {
+  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
+  const hora = appointmentContext.appointment_time || appointmentContext.hora
+  const profesional = appointmentContext.profesional || appointmentContext.professional_name
+  const sede = appointmentContext.sede || appointmentContext.sede_name
+  const direccion = appointmentContext.direccion || appointmentContext.address || ""
+
+  // Analizar el reasoning para determinar qué tipo de información se pidió
+  const reasoning = (classificationResult.reasoning || "").toLowerCase()
+  const response = (classificationResult.response || "").toLowerCase()
+
+  // Si pregunta por dirección/ubicación
+  if (reasoning.includes("direcci") || reasoning.includes("ubicaci") || reasoning.includes("donde") ||
+      response.includes("direcci") || response.includes("ubicaci") || response.includes("donde")) {
+    if (direccion) {
+      return `Tu turno es en *${sede}*.\n\n📍 Dirección: ${direccion}\n\n¿Hay algo más en lo que pueda ayudarte?`
+    }
+    return `Tu turno es en *${sede}*. Para la dirección exacta, te recomiendo contactar directamente a la clínica.\n\n¿Hay algo más en lo que pueda ayudarte?`
+  }
+
+  // Si pregunta por hora
+  if (reasoning.includes("hora") || reasoning.includes("horario") || response.includes("hora")) {
+    return `Tu turno es a las *${hora}* el ${fecha}.\n\n¿Hay algo más en lo que pueda ayudarte?`
+  }
+
+  // Si pregunta por profesional
+  if (reasoning.includes("profes") || reasoning.includes("doctor") || reasoning.includes("medico") ||
+      reasoning.includes("médico") || reasoning.includes("quien") || reasoning.includes("quién")) {
+    return `Tu turno es con *${profesional}*.\n\n¿Hay algo más en lo que pueda ayudarte?`
+  }
+
+  // Si pregunta por fecha
+  if (reasoning.includes("fecha") || reasoning.includes("día") || reasoning.includes("dia") || reasoning.includes("cuando") || reasoning.includes("cuándo")) {
+    return `Tu turno es el *${fecha}* a las ${hora}.\n\n¿Hay algo más en lo que pueda ayudarte?`
+  }
+
+  // Si pregunta por sede
+  if (reasoning.includes("sede") || reasoning.includes("sucursal") || reasoning.includes("lugar")) {
+    if (direccion) {
+      return `Tu turno es en *${sede}*.\n\n📍 Dirección: ${direccion}\n\n¿Hay algo más en lo que pueda ayudarte?`
+    }
+    return `Tu turno es en *${sede}*.\n\n¿Hay algo más en lo que pueda ayudarte?`
+  }
+
+  // Default: dar todos los datos del turno
+  let responseText = `Acá están los datos de tu turno:\n\n`
+  responseText += `📅 *Fecha:* ${fecha}\n`
+  responseText += `🕐 *Hora:* ${hora}\n`
+  responseText += `👨‍⚕️ *Profesional:* ${profesional}\n`
+  responseText += `🏥 *Sede:* ${sede}\n`
+  
+  if (direccion) {
+    responseText += `📍 *Dirección:* ${direccion}\n`
+  }
+  
+  responseText += `\n¿Hay algo más en lo que pueda ayudarte?`
+  
+  return responseText
 }
 
 // ============================================================================
