@@ -77,11 +77,36 @@ export async function searchTurnosAcumulativo(
 
       if (result.exito && result.datos) {
         // Procesar turnos recibidos
-        const turnosRaw = Array.isArray(result.datos) ? result.datos : result.datos.turnos_disponibles || []
+        // La API devuelve: { turnos_disponibles: [{ fecha: "...", turnos: [...] }, ...] }
+        // O puede devolver directamente un array de turnos
+        let turnosRaw: any[] = []
+        
+        if (Array.isArray(result.datos)) {
+          // Respuesta directa como array
+          turnosRaw = result.datos
+        } else if (result.datos.turnos_disponibles) {
+          // Respuesta agrupada por fecha: extraer todos los turnos
+          const turnosPorFecha = result.datos.turnos_disponibles
+          if (Array.isArray(turnosPorFecha)) {
+            turnosPorFecha.forEach((grupo: any) => {
+              // Cada grupo tiene { fecha: "...", turnos: [...] }
+              if (grupo.turnos && Array.isArray(grupo.turnos)) {
+                turnosRaw.push(...grupo.turnos)
+              } else if (grupo.Id || grupo.Hora) {
+                // El grupo mismo es un turno
+                turnosRaw.push(grupo)
+              }
+            })
+          }
+        } else if (result.datos.turnos) {
+          turnosRaw = result.datos.turnos
+        }
 
+        // Mapear turnos al formato interno
+        // Los campos de la API vienen en PascalCase: Id, Fecha, Hora, Profesional_Nombre, etc.
         allTurnos = turnosRaw.map((turno: any, index: number) => ({
           numero: index + 1,
-          id: turno.Agenda_Id || turno.id || turno.Id,
+          id: turno.Id || turno.Agenda_Id || turno.id,
           fecha: turno.Fecha || turno.fecha,
           hora: turno.Hora || turno.hora,
           profesionalId: turno.Profesional_Id || turno.profesional_id,
