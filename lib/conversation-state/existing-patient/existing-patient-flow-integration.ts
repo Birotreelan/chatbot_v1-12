@@ -656,13 +656,28 @@ async function handleConfirmationPhase(
   const result = await handleConfirmationResponse(userMessage, phoneNumber, clientId)
 
   if (result.confirmed === true) {
+    // Extraer nombre y apellido: usar campos separados si existen,
+    // o derivarlos de patientName como fallback (formato: "Nombres Apellido")
+    let nombreParaReserva = state.patientFirstName
+    let apellidoParaReserva = state.patientLastName
+
+    if (!nombreParaReserva && state.patientName) {
+      const partes = state.patientName.trim().split(' ')
+      if (partes.length >= 2) {
+        apellidoParaReserva = partes[partes.length - 1]
+        nombreParaReserva = partes.slice(0, partes.length - 1).join(' ')
+      } else {
+        nombreParaReserva = state.patientName.trim()
+      }
+    }
+
     // Ejecutar reserva
     const reservaResult = await executeReservation(
       clientId,
       state.turnoSeleccionado!,
       {
-        nombre: state.patientFirstName,
-        apellido: state.patientLastName,
+        nombre: nombreParaReserva,
+        apellido: apellidoParaReserva,
         dni: state.patientDNI,
         telefono: state.patientPhone,
         email: state.patientEmail!,
