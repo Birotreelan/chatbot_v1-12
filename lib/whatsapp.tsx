@@ -1833,7 +1833,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // Paciente nuevo ingresó DNI — derivar al flujo de paciente nuevo
           const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
           console.log(`[WHATSAPP] DNI de paciente nuevo recibido, derivando a flujo nuevo`)
-          const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.id)
+          const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id)
           if (newPatientResult?.handled && newPatientResult.message) {
             await sendDirectResponse(detectionCtx, newPatientResult.message, "new_patient_flow")
             await completePatientDetectionFlow(userPhoneNumber, config.id)
@@ -1861,7 +1861,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 patientInfo?.patientName || '',
                 '',   // patientDNI — el flujo lo obtiene del estado
                 undefined,
-                config.id
+                config.cliente_id
               )
               if (existingResult?.handled && existingResult.message) {
                 await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")
