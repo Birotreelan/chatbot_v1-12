@@ -582,6 +582,30 @@ async function handleTurnoPhase(
     }
 
     // Ya tiene email, ir a confirmacion
+    // Enriquecer estado con datos frescos de la API si faltan campos clave
+    if (!state.patientFirstName || !state.patientLastName || !state.obraSocialNombre) {
+      try {
+        const clinicAPI = new ClinicAPI(clientId)
+        const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
+        if (pacienteResponse.exito && pacienteResponse.datos) {
+          const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
+          if (!state.patientFirstName) state.patientFirstName = paciente.Nombres || paciente.nombres || ''
+          if (!state.patientLastName) state.patientLastName = paciente.Apellido || paciente.apellido || ''
+          if (!state.patientDNI) state.patientDNI = String(paciente.Nrodoc || paciente.dni || '')
+          if (!state.patientEmail) state.patientEmail = paciente.Mail || paciente.mail || paciente.Email || paciente.email || ''
+          if (!state.obraSocialId) state.obraSocialId = paciente.Deudor_Id || paciente.deudor_id || ''
+          if (!state.obraSocialNombre) state.obraSocialNombre = paciente.Deudor_Nombre || paciente.deudor_nombre || ''
+          logger.info('Enriched patient data from API for confirmation', {
+            firstName: state.patientFirstName,
+            lastName: state.patientLastName,
+            obraSocialNombre: state.obraSocialNombre,
+          })
+        }
+      } catch (err) {
+        logger.error('Error enriching patient data from API', err instanceof Error ? err : new Error(String(err)))
+      }
+    }
+
     state.phase = 'awaiting_confirmation'
     await saveFlowState(phoneNumber, state)
 
@@ -624,8 +648,27 @@ async function handleEmailPhase(
 
   if (result.validatedEmail) {
     state.patientEmail = result.validatedEmail
-    state.phase = 'awaiting_confirmation'
     state.attempts = 0
+
+    // Enriquecer estado con datos frescos de la API si faltan campos clave
+    if (!state.patientFirstName || !state.patientLastName || !state.obraSocialNombre) {
+      try {
+        const clinicAPI = new ClinicAPI(clientId)
+        const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
+        if (pacienteResponse.exito && pacienteResponse.datos) {
+          const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
+          if (!state.patientFirstName) state.patientFirstName = paciente.Nombres || paciente.nombres || ''
+          if (!state.patientLastName) state.patientLastName = paciente.Apellido || paciente.apellido || ''
+          if (!state.patientDNI) state.patientDNI = String(paciente.Nrodoc || paciente.dni || '')
+          if (!state.obraSocialId) state.obraSocialId = paciente.Deudor_Id || paciente.deudor_id || ''
+          if (!state.obraSocialNombre) state.obraSocialNombre = paciente.Deudor_Nombre || paciente.deudor_nombre || ''
+        }
+      } catch (err) {
+        logger.error('Error enriching patient data from API', err instanceof Error ? err : new Error(String(err)))
+      }
+    }
+
+    state.phase = 'awaiting_confirmation'
     await saveFlowState(phoneNumber, state)
 
     return {
