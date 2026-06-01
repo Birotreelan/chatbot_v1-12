@@ -189,12 +189,13 @@ export async function startPatientDetectionFlow(
     const patientId = patient.paciente_id || patient.Id || patient.id
     const patientName = patient.nombre || patient.Nombres || `${patient.Nombres || ''} ${patient.Apellido || ''}`.trim()
     const patientDNI = patient.dni || patient.Nrodoc
-    const patientFirstName = patient.Nombres || patient.nombres || ''
-    const patientLastName = patient.Apellido || patient.apellido || ''
-    const patientEmail = patient.Mail || patient.mail || patient.Email || patient.email || ''
-    const patientCelular = patient.Celular || patient.celular || patient.Telefono || patient.telefono || ''
-    const obraSocialId = patient.Deudor_Id || patient.deudor_id || ''
-    const obraSocialNombre = patient.Deudor_Nombre || patient.deudor_nombre || ''
+    const patientFirstName = (patient.Nombres || patient.nombres || '').trim()
+    const patientLastName = (patient.Apellido || patient.apellido || '').trim()
+    const patientEmailRaw = (patient.Mail || patient.mail || patient.Email || patient.email || '').trim()
+    const patientEmail = patientEmailRaw === '-' || patientEmailRaw === 'NO USA' ? '' : patientEmailRaw
+    const patientCelular = (patient.Celular || patient.celular || patient.Telefono || patient.telefono || '').trim()
+    const obraSocialId = (patient.Deudor_Id || patient.deudor_id || '').toString().trim()
+    const obraSocialNombre = (patient.Deudor_Nombre || patient.deudor_nombre || '').toString().trim()
 
     logger.info('Patient found', {
       patientId,
@@ -421,16 +422,17 @@ export async function processDNIForDisambiguation(
     // Normalizar campos del paciente validado
     const foundPatientId = validatedPatient.paciente_id || validatedPatient.Id || validatedPatient.id
     // Extraer nombre y apellido por separado para reservas (campos de la API: Nombres, Apellido)
-    const foundPatientFirstName = validatedPatient.Nombres || validatedPatient.nombres || validatedPatient.nombre || ''
-    const foundPatientLastName = validatedPatient.Apellido || validatedPatient.apellido || ''
+    const foundPatientFirstName = (validatedPatient.Nombres || validatedPatient.nombres || validatedPatient.nombre || '').trim()
+    const foundPatientLastName = (validatedPatient.Apellido || validatedPatient.apellido || '').trim()
     const foundPatientName = validatedPatient.nombre || `${foundPatientFirstName} ${foundPatientLastName}`.trim()
     // Actualizar DNI desde validatedPatient por si el original estaba vacío (campo de la API: Nrodoc)
     const validatedPatientDNI = (validatedPatient.Nrodoc || validatedPatient.dni || foundPatientDNI || '').toString()
     // Extraer email y celular del paciente (campos de la API: Mail, Celular)
-    const validatedPatientEmail = validatedPatient.Mail && validatedPatient.Mail !== 'NO USA' 
-      ? validatedPatient.Mail 
-      : ''
-    const validatedPatientCelular = validatedPatient.Celular || validatedPatient.celular || ''
+    const validatedPatientEmailRaw = validatedPatient.Mail ? validatedPatient.Mail.trim() : ''
+    const validatedPatientEmail = validatedPatientEmailRaw === '-' || validatedPatientEmailRaw === 'NO USA' ? '' : validatedPatientEmailRaw
+    const validatedPatientCelular = (validatedPatient.Celular || validatedPatient.celular || '').trim()
+    const validatedObraSocialId = (validatedPatient.Deudor_Id || validatedPatient.deudor_id || '').toString().trim()
+    const validatedObraSocialNombre = (validatedPatient.Deudor_Nombre || validatedPatient.deudor_nombre || '').toString().trim()
 
     logger.info('Patient validated via get_paciente', {
       patientId: foundPatientId,
@@ -486,6 +488,8 @@ export async function processDNIForDisambiguation(
       patientDNI: validatedPatientDNI,
       patientEmail: validatedPatientEmail,
       patientCelular: validatedPatientCelular,
+      obraSocialId: validatedObraSocialId,
+      obraSocialNombre: validatedObraSocialNombre,
       turnos: turnos,
       detectedAt: Date.now(),
       attempts: 0,
