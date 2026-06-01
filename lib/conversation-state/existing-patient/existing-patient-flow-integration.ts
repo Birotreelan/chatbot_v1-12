@@ -753,6 +753,17 @@ export async function isExistingPatientFlowActive(phoneNumber: string): Promise<
 }
 
 /**
+ * Obtiene la fase actual del flujo (para verificar si está más avanzado que awaiting_sede)
+ */
+export async function getExistingPatientFlowPhase(phoneNumber: string): Promise<string | null> {
+  const state = await getFlowState(phoneNumber)
+  if (!state || state.phase === 'completed' || state.phase === 'abandoned') {
+    return null
+  }
+  return state.phase
+}
+
+/**
  * Limpia el flujo
  */
 export async function clearExistingPatientFlow(phoneNumber: string): Promise<void> {
