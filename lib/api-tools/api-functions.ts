@@ -236,7 +236,18 @@ export async function obtenerSubespecialidades(
   clienteId: string,
   useCache = true,
 ): Promise<ApiResponse<{ id: string; nombre: string }[]>> {
-  return fetchProxyApi<{ id: string; nombre: string }[]>(clienteId, "get_subespecialidades", {}, useCache)
+  const resultado = await fetchProxyApi<any>(clienteId, "get_subespecialidades", {}, useCache)
+
+  if (resultado.exito && resultado.datos) {
+    // La API devuelve { subespecialidades: [...] } — normalizar al array directamente
+    const subespecialidades = resultado.datos.subespecialidades || resultado.datos
+    return {
+      exito: true,
+      datos: Array.isArray(subespecialidades) ? subespecialidades : [],
+    }
+  }
+
+  return resultado
 }
 
 // Función para buscar profesionales por nombre o especialidad
