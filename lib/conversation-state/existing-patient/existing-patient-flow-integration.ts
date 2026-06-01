@@ -7,6 +7,7 @@ import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
+import { ClinicAPI } from '@/lib/clinic-api'
 
 // Importar handlers compartidos
 import {
@@ -675,6 +676,30 @@ async function handleConfirmationPhase(
           lastName: apellidoParaReserva,
           dni: dniParaReserva,
         })
+      }
+    }
+
+    // Fallback final: si aún falta el DNI, obtener datos frescos de la API usando el teléfono
+    if (!dniParaReserva) {
+      logger.info('DNI still missing, fetching fresh patient data from API', { phone: phoneNumber })
+      try {
+        const clinicAPI = new ClinicAPI(clientId)
+        const pacienteResponse = await clinicAPI.obtenerPacientePorTelefono(phoneNumber)
+        
+        if (pacienteResponse.exito && pacienteResponse.datos) {
+          const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
+          dniParaReserva = (paciente.Nrodoc || paciente.dni || '').toString()
+          if (!nombreParaReserva) nombreParaReserva = paciente.Nombres || paciente.nombres || ''
+          if (!apellidoParaReserva) apellidoParaReserva = paciente.Apellido || paciente.apellido || ''
+          
+          logger.info('Retrieved patient data from API for reservation', {
+            firstName: nombreParaReserva,
+            lastName: apellidoParaReserva,
+            dni: dniParaReserva,
+          })
+        }
+      } catch (error) {
+        logger.error('Error fetching patient data from API', { error: String(error) })
       }
     }
 
