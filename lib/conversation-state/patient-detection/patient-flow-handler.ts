@@ -196,25 +196,25 @@ export async function startPatientDetectionFlow(
     // Usar turnos de la respuesta inicial si existen, sino buscar
     let turnos: any[] = turnosFromResponse
     
-    // Si no hay turnos en la respuesta, intentar buscarlos
+    // Si no hay turnos en la respuesta, intentar buscarlos con get_turnos_paciente (turnos AGENDADOS)
     if (turnos.length === 0 && patientDNI) {
       try {
-        const dateRange = getDefaultDateRange()
-
-        const turnosResponse = await clinicAPI.obtenerTurnos(
-          dateRange.desde,
-          dateRange.hasta,
-          undefined,
+        // Usar get_turnos_paciente para obtener los turnos YA AGENDADOS del paciente
+        // NO usar obtenerTurnos que devuelve turnos DISPONIBLES para reservar
+        const turnosPacienteResponse = await clinicAPI.obtenerTurnosPaciente(
+          patientId,
           patientDNI
         )
 
-        if (turnosResponse.exito && turnosResponse.datos) {
-          turnos = Array.isArray(turnosResponse.datos)
-            ? turnosResponse.datos
-            : turnosResponse.datos.turnos || []
+        if (turnosPacienteResponse.exito && turnosPacienteResponse.datos) {
+          turnos = turnosPacienteResponse.datos
+          logger.info('Turnos agendados obtenidos via get_turnos_paciente', {
+            count: turnos.length,
+            patientId,
+          })
         }
       } catch (e) {
-        logger.warn('Error fetching turns', {
+        logger.warn('Error fetching patient scheduled turns', {
           error: String(e),
           patientId,
         })
