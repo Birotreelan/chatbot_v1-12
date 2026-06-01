@@ -79,11 +79,28 @@ export async function searchTurnosAcumulativo(
         // Procesar turnos recibidos
         // La API devuelve: { turnos_disponibles: [{ fecha: "...", turnos: [...] }, ...] }
         // O puede devolver directamente un array de turnos
+        // NOTA: obtenerTurnos() ya extrae turnos_disponibles, asi que result.datos puede ser:
+        //   - Array de grupos: [{ fecha: "...", turnos: [...] }, ...]
+        //   - Array de turnos directos: [{ Id, Hora, ... }, ...]
         let turnosRaw: any[] = []
         
         if (Array.isArray(result.datos)) {
-          // Respuesta directa como array
-          turnosRaw = result.datos
+          // Verificar si es un array de grupos (con fecha+turnos) o de turnos directos
+          const firstItem = result.datos[0]
+          if (firstItem && firstItem.turnos && Array.isArray(firstItem.turnos)) {
+            // Es un array de grupos por fecha - extraer los turnos de cada grupo
+            result.datos.forEach((grupo: any) => {
+              if (grupo.turnos && Array.isArray(grupo.turnos)) {
+                turnosRaw.push(...grupo.turnos)
+              }
+            })
+          } else if (firstItem && (firstItem.Id || firstItem.Hora || firstItem.id)) {
+            // Es un array de turnos directos
+            turnosRaw = result.datos
+          } else {
+            // Fallback: tratar como array de turnos
+            turnosRaw = result.datos
+          }
         } else if (result.datos.turnos_disponibles) {
           // Respuesta agrupada por fecha: extraer todos los turnos
           const turnosPorFecha = result.datos.turnos_disponibles
