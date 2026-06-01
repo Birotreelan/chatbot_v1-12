@@ -93,52 +93,24 @@ export async function handleTurnoSelection(
     }
   }
 
-  // Detectar numeros escritos en palabras
-  const numerosPalabras: Record<string, number> = {
-    'primer': 1, 'primera': 1, 'primero': 1, 'uno': 1, 'un': 1,
-    'segundo': 2, 'segunda': 2, 'dos': 2,
-    'tercer': 3, 'tercera': 3, 'tercero': 3, 'tres': 3,
-    'cuarto': 4, 'cuarta': 4, 'cuatro': 4,
-    'quinto': 5, 'quinta': 5, 'cinco': 5,
-    'sexto': 6, 'sexta': 6, 'seis': 6,
-    'septimo': 7, 'septima': 7, 'séptimo': 7, 'séptima': 7, 'siete': 7,
-    'octavo': 8, 'octava': 8, 'ocho': 8,
-    'noveno': 9, 'novena': 9, 'nueve': 9,
-    'decimo': 10, 'decima': 10, 'décimo': 10, 'décima': 10, 'diez': 10,
-  }
-
-  for (const [palabra, numero] of Object.entries(numerosPalabras)) {
-    if (inputNormalizado.includes(palabra)) {
-      const turnoSeleccionado = turnosOpciones.find((t) => t.numero === numero)
-      if (turnoSeleccionado) {
-        logger.info('Turno seleccionado por numero en palabras', { palabra, numero })
-        return {
-          handled: true,
-          nextPhase: 'awaiting_email',
-          selectedTurno: turnoSeleccionado,
-        }
-      }
-    }
-  }
-
-  // FALLBACK: Si es texto no reconocido, pedir numero
+  // FALLBACK: si el input contiene letras (texto en lugar de numero), indicar claramente que debe usar numero
   const esTexto = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(inputNormalizado)
 
   if (esTexto) {
-    logger.info('Seleccion de turno por texto no reconocido - sugiriendo numero', { input: userInput })
+    logger.info('Seleccion de turno por texto no reconocido - solicitando numero', { input: userInput })
     return {
       handled: true,
-      message: `No reconozco esa opcion. Por favor, indica el *numero* del turno que preferis (1-${turnosOpciones.length}).`,
+      message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *4*_`,
       nextPhase: 'awaiting_turno_selection',
     }
   }
 
-  // Input no reconocido (numero invalido)
+  // Numero fuera de rango o invalido
   logger.info('Seleccion de turno no reconocida', { input: userInput })
 
   return {
     handled: true,
-    message: `No reconozco esa opcion. Por favor, responde con el *numero* del turno que prefieras (1-${turnosOpciones.length}).`,
+    message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *4*_`,
     nextPhase: 'awaiting_turno_selection',
   }
 }
