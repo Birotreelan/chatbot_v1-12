@@ -684,7 +684,7 @@ async function handleConfirmationPhase(
       logger.info('DNI still missing, fetching fresh patient data from API', { phone: phoneNumber })
       try {
         const clinicAPI = new ClinicAPI(clientId)
-        const pacienteResponse = await clinicAPI.obtenerPacientePorTelefono(phoneNumber)
+        const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
         
         if (pacienteResponse.exito && pacienteResponse.datos) {
           const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
