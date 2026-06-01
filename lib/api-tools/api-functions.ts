@@ -310,6 +310,12 @@ export async function obtenerTurnos(
 
   if (resultado.exito && resultado.datos) {
     const turnos = resultado.datos.turnos_disponibles || resultado.datos
+    console.log('[v0] obtenerTurnos - Raw data sample:', {
+      isArray: Array.isArray(turnos),
+      firstItemKeys: Array.isArray(turnos) && turnos.length > 0 ? Object.keys(turnos[0]) : 'N/A',
+      firstItem: Array.isArray(turnos) && turnos.length > 0 ? JSON.stringify(turnos[0]).substring(0, 500) : 'N/A',
+      totalCount: Array.isArray(turnos) ? turnos.length : 'not array'
+    })
     return {
       exito: true,
       datos: turnos,

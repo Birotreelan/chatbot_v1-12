@@ -110,21 +110,44 @@ export async function searchTurnosAcumulativo(
             Profesional_Nombre: turnosRaw[0].Profesional_Nombre 
           } : null 
         })
+        
+        // Log de debug para ver TODOS los campos del primer turno
+        if (turnosRaw.length > 0) {
+          logger.info('[v0] DEBUG - Primer turno completo con TODOS los campos:', {
+            turnoCompleto: JSON.stringify(turnosRaw[0]),
+            keys: Object.keys(turnosRaw[0]),
+          })
+        }
 
         // Mapear turnos al formato interno
-        // Los campos de la API vienen en PascalCase: Id, Fecha, Hora, Profesional_Nombre, etc.
+        // Los campos de la API pueden venir en diferentes formatos:
+        // - PascalCase: Hora, Profesional_Nombre
+        // - snake_case: hora, profesional_nombre
+        // - camelCase: horaFormateada, profesionalNombre
         // Usar la longitud actual de allTurnos para asegurar numeración secuencial global
         const baseNumero = allTurnos.length
         const nuevosTurnos = turnosRaw.map((turno: any, index: number) => ({
           numero: baseNumero + index + 1,
-          id: turno.Id || turno.Agenda_Id || turno.id,
+          id: turno.Id || turno.Agenda_Id || turno.id || turno.agenda_id,
           fecha: turno.Fecha || turno.fecha,
-          hora: (turno.Hora || turno.hora || 'N/A').trim(),
-          profesionalId: turno.Profesional_Id || turno.profesional_id,
-          profesionalNombre: (turno.Profesional_Nombre || turno.profesional_nombre || turno.Profesional || 'Sin asignar').trim(),
-          especialidad: turno.Especialidad || turno.especialidad,
+          // Intentar todas las variaciones conocidas para hora
+          hora: (turno.Hora || turno.hora || turno.hora_formateada || turno.horaFormateada || turno.Hora_Turno || 'N/A').toString().trim(),
+          profesionalId: turno.Profesional_Id || turno.profesional_id || turno.ProfesionalId,
+          // Intentar todas las variaciones conocidas para nombre del profesional
+          profesionalNombre: (
+            turno.Profesional_Nombre || 
+            turno.profesional_nombre || 
+            turno.Profesional || 
+            turno.profesional || 
+            turno.nombre_profesional ||
+            turno.NombreProfesional ||
+            turno.Doctor ||
+            turno.doctor ||
+            'Sin asignar'
+          ).toString().trim(),
+          especialidad: turno.Especialidad || turno.especialidad || turno.Subespecialidad || turno.subespecialidad,
           sedeId: turno.Sede_Id || turno.sede_id || params.sedeId,
-          sedeNombre: turno.Sede_Nombre || turno.sede_nombre,
+          sedeNombre: turno.Sede_Nombre || turno.sede_nombre || turno.Centro_Nombre || turno.centro_nombre,
           duracion: turno.Duracion || turno.duracion,
         }))
         
