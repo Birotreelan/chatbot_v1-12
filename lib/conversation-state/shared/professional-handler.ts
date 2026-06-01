@@ -28,11 +28,12 @@ export async function searchProfessionals(
     }
 
     // Mapear profesionales al formato estandar con numeracion
-    const profesionalesFormateados: ProfessionalOption[] = result.datos.map((prof, index) => ({
+    // La API devuelve campos en PascalCase: Id, Nombre_Completo, Especialidad
+    const profesionalesFormateados: ProfessionalOption[] = result.datos.map((prof: any, index: number) => ({
       numero: index + 1,
-      id: prof.id,
-      nombre: prof.nombre,
-      especialidad: prof.especialidad,
+      id: prof.Id || prof.id,
+      nombre: prof.Nombre_Completo || prof.nombre_completo || prof.Nombre || prof.nombre,
+      especialidad: prof.Especialidad || prof.especialidad,
     }))
 
     return {
