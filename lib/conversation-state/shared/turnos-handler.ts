@@ -104,18 +104,24 @@ export async function searchTurnosAcumulativo(
 
         // Mapear turnos al formato interno
         // Los campos de la API vienen en PascalCase: Id, Fecha, Hora, Profesional_Nombre, etc.
-        allTurnos = turnosRaw.map((turno: any, index: number) => ({
-          numero: index + 1,
-          id: turno.Id || turno.Agenda_Id || turno.id,
-          fecha: turno.Fecha || turno.fecha,
-          hora: turno.Hora || turno.hora,
-          profesionalId: turno.Profesional_Id || turno.profesional_id,
-          profesionalNombre: turno.Profesional_Nombre || turno.profesional_nombre || turno.Profesional || 'Sin asignar',
-          especialidad: turno.Especialidad || turno.especialidad,
-          sedeId: turno.Sede_Id || turno.sede_id || params.sedeId,
-          sedeNombre: turno.Sede_Nombre || turno.sede_nombre,
-          duracion: turno.Duracion || turno.duracion,
-        }))
+        // Usar la longitud actual de allTurnos para asegurar numeración secuencial global
+        allTurnos = allTurnos.concat(
+          turnosRaw.map((turno: any) => {
+            const numero = allTurnos.length + turnosRaw.indexOf(turno) + 1
+            return {
+              numero,
+              id: turno.Id || turno.Agenda_Id || turno.id,
+              fecha: turno.Fecha || turno.fecha,
+              hora: (turno.Hora || turno.hora || 'N/A').trim(),
+              profesionalId: turno.Profesional_Id || turno.profesional_id,
+              profesionalNombre: (turno.Profesional_Nombre || turno.profesional_nombre || turno.Profesional || 'Sin asignar').trim(),
+              especialidad: turno.Especialidad || turno.especialidad,
+              sedeId: turno.Sede_Id || turno.sede_id || params.sedeId,
+              sedeNombre: turno.Sede_Nombre || turno.sede_nombre,
+              duracion: turno.Duracion || turno.duracion,
+            }
+          })
+        )
 
         rangoUtilizado = dias
 
@@ -184,7 +190,9 @@ export function buildTurnosListMessage(
     message += `*${fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1)}*\n`
 
     turnosDia.forEach((turno) => {
-      message += `  ${turno.numero}. ${turno.hora} - ${turno.profesionalNombre}`
+      const hora = turno.hora && turno.hora !== 'undefined' && turno.hora.trim() ? turno.hora.trim() : 'Horario a confirmar'
+      const profesional = turno.profesionalNombre && turno.profesionalNombre !== 'undefined' && turno.profesionalNombre.trim() ? turno.profesionalNombre.trim() : 'Profesional a confirmar'
+      message += `  ${turno.numero}. ${hora} - ${profesional}`
       if (turno.especialidad) {
         message += ` (${turno.especialidad})`
       }
