@@ -1,7 +1,8 @@
 import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { ClinicAPI } from '../../clinic-api'
-import { extractNumberSelection } from '../selection-extractor'
+import { extractSelection, createOptionsFromLabels } from '../selection-extractor'
+import { fetchSedes } from '../shared/sede-handler'
 
 /**
  * Existing Patient Flow Handler
@@ -116,26 +117,27 @@ export async function handleSedeSelection(
 
   try {
     // Obtener sedes disponibles
-    const sedesResponse = await clinicAPI.obtenerSedes()
+    const sedesResponse = await fetchSedes(clientId)
 
-    if (!sedesResponse.exito || !sedesResponse.datos) {
+    if (!sedesResponse.success || !sedesResponse.sedes) {
       logger.warn('Error getting sedes', {})
       return { handled: false, error: 'No se pudieron obtener las sedes' }
     }
 
-    const sedes = Array.isArray(sedesResponse.datos)
-      ? sedesResponse.datos
-      : sedesResponse.datos.sedes || []
+    const sedes = sedesResponse.sedes
 
     // Extraer selección numérica
-    const selection = extractNumberSelection(userMessage, sedes.length)
+    const sedeLabels = sedes.map((sede: any) => sede.nombre)
+    const sedeOptions = createOptionsFromLabels(sedeLabels)
+    const selectionResult = extractSelection(userMessage, sedeOptions)
 
-    if (selection === -1) {
+    if (!selectionResult.selected) {
       logger.info('Non-numeric input, requires NLU', {})
       return { handled: false, nextPhase: 'nlu_required' }
     }
 
-    if (selection === 0) {
+    const selectedIndex = selectionResult.selectedIndex
+    if (selectedIndex === undefined || selectedIndex < 0 || selectedIndex >= sedes.length) {
       logger.info('Invalid selection', { attempts: state.attempts + 1 })
       state.attempts += 1
       if (state.attempts > 3) {
@@ -144,7 +146,7 @@ export async function handleSedeSelection(
       return { handled: true, nextPhase: 'awaiting_sede', error: 'Selección inválida' }
     }
 
-    const selectedSede = sedes[selection - 1]
+    const selectedSede = sedes[selectedIndex]
     state.sede = selectedSede.nombre
     state.phase = 'awaiting_search_type'
     state.attempts = 0
@@ -189,14 +191,17 @@ export async function handleTurnSelection(
   }
 
   // Extraer selección numérica
-  const selection = extractNumberSelection(userMessage, state.turnos.length)
+  const turnoLabels = state.turnos.map((turno: any) => `${turno.hora || 'N/A'} - ${turno.profesional_nombre || 'Sin asignar'}`)
+  const turnoOptions = createOptionsFromLabels(turnoLabels)
+  const selectionResult = extractSelection(userMessage, turnoOptions)
 
-  if (selection === -1) {
+  if (!selectionResult.selected) {
     logger.info('Non-numeric input, requires NLU', {})
     return { handled: false, nextPhase: 'nlu_required' }
   }
 
-  if (selection === 0) {
+  const selectedIndex = selectionResult.selectedIndex
+  if (selectedIndex === undefined || selectedIndex < 0 || selectedIndex >= state.turnos.length) {
     logger.info('Invalid selection', { attempts: state.attempts + 1 })
     state.attempts += 1
     if (state.attempts > 3) {
@@ -205,7 +210,7 @@ export async function handleTurnSelection(
     return { handled: true, nextPhase: 'awaiting_turn_selection', error: 'Selección inválida' }
   }
 
-  const selectedTurno = state.turnos[selection - 1]
+  const selectedTurno = state.turnos[selectedIndex]
   state.selectedTurno = selectedTurno
   state.phase = 'awaiting_confirmation'
   state.attempts = 0
@@ -269,11 +274,53 @@ export async function handleConfirmation(
     return { handled: true, confirmed: false, nextPhase: 'initial' }
   }
 
-  // Procesamiento de confirmación (reserva)
+  // Procesamiento de confirmación (reserva) - DEPRECATED: usar executeReservation de confirmation-handler
+  /*
   if (!state.selectedTurno) {
-    logger.error('No turno selected', {})
+    logger.error('No turno selected', new Error('No turno selected'))
     return { handled: false, confirmed: false, error: 'Error: No hay turno seleccionado' }
   }
+
+  try {
+    const clinicAPI = new ClinicAPI(clientId)
+
+    // Reservar turno
+    const reservaResponse = await clinicAPI.reservarTurno(
+      state.selectedTurno.agendaId,
+      {
+        turno_id: state.selectedTurno.id,
+        paciente_id: state.patientId,
+        email: state.patientEmail,
+      }
+    )
+
+    if (!reservaResponse.exito) {
+      logger.warn('Reservation failed', { turnoId: state.selectedTurno.id })
+      return {
+        handled: true,
+        confirmed: false,
+        error: 'No se pudo reservar el turno. Intente nuevamente.',
+        nextPhase: 'awaiting_turn_selection',
+      }
+    }
+
+    state.phase = 'completed'
+    const stateKey = `${EXISTING_PATIENT_FLOW_KEY}:${phoneNumber}`
+    const redis = getRedisClient()
+    if (redis) {
+      await redis.del(stateKey)
+    }
+    return { handled: true, confirmed: true, nextPhase: 'completed' }
+  } catch (error) {
+    logger.error('Error in handleConfirmation', error instanceof Error ? error : new Error(String(error)))
+    return {
+      handled: true,
+      confirmed: false,
+      error: 'Error procesando confirmación',
+      nextPhase: 'awaiting_turn_selection',
+    }
+  }
+  */
 
   try {
     const clinicAPI = new ClinicAPI(clientId)
