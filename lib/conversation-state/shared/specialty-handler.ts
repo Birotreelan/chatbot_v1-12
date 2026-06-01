@@ -17,26 +17,15 @@ export async function fetchSpecialties(clientId: string): Promise<{
   try {
     const result = await obtenerSubespecialidades(clientId)
 
-    if (!result.exito || !result.datos) {
+    if (!result.exito || !result.datos || !Array.isArray(result.datos) || result.datos.length === 0) {
       return {
         success: false,
         error: result.error?.mensaje || 'No se encontraron especialidades disponibles',
       }
     }
 
-    // La API devuelve {subespecialidades: [...]} - extraer el array correctamente
-    const especialidadesRaw = (result.datos as any).subespecialidades || result.datos
-    
-    if (!Array.isArray(especialidadesRaw) || especialidadesRaw.length === 0) {
-      return {
-        success: false,
-        error: 'No se encontraron especialidades disponibles',
-      }
-    }
-
-    // Mapear especialidades al formato estandar con numeracion
-    // La API devuelve campos en mayuscula: Id, Nombre
-    const especialidadesFormateadas: SpecialtyOption[] = especialidadesRaw.map((esp: any, index: number) => ({
+    // obtenerSubespecialidades ya normaliza el array — mapear campos PascalCase de la API
+    const especialidadesFormateadas: SpecialtyOption[] = result.datos.map((esp: any, index: number) => ({
       numero: index + 1,
       id: esp.Id || esp.id,
       nombre: esp.Nombre || esp.nombre,
