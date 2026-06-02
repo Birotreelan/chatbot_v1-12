@@ -618,6 +618,20 @@ async function searchAndShowTurnos(
   clientId: string,
   state: NewPatientFlowState
 ): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'turnos_search_new_patient')
+  
+  logger.info('[TURNOS] Iniciando busqueda de turnos (paciente nuevo)', {
+    sedeId: state.sedeId,
+    sedeNombre: state.sedeNombre,
+    profesionalId: state.profesionalId,
+    profesionalNombre: state.profesionalNombre,
+    especialidadId: state.especialidadId,
+    especialidadNombre: state.especialidadNombre,
+    searchType: state.searchType,
+    obraSocialId: state.obraSocialId,
+    obraSocialNombre: state.obraSocialNombre,
+  })
+
   const result = await searchTurnosAcumulativo(
     clientId,
     {
@@ -629,10 +643,25 @@ async function searchAndShowTurnos(
     phone
   )
 
+  logger.info('[TURNOS] Resultado de busqueda', {
+    success: result.success,
+    turnosCount: result.turnos?.length || 0,
+    rangoUtilizado: result.rangoUtilizado,
+    error: result.error,
+  })
+
   if (!result.success || !result.turnos || result.turnos.length === 0) {
     // Guardar nombres para el mensaje ANTES de limpiar
     const mensajeProfesional = state.profesionalNombre
     const mensajeEspecialidad = state.especialidadNombre
+    
+    logger.info('[TURNOS] No se encontraron turnos - mostrando opciones alternativas', {
+      sedeNombre: state.sedeNombre,
+      profesionalNombre: mensajeProfesional,
+      especialidadNombre: mensajeEspecialidad,
+      previousPhase: state.phase,
+      newPhase: 'awaiting_search_type',
+    })
     
     // Limpiar datos del profesional/especialidad anterior para nueva busqueda
     state.profesionalId = undefined
@@ -645,9 +674,14 @@ async function searchAndShowTurnos(
     state.phase = 'awaiting_search_type'
     await saveFlowState(phone, state)
     
+    const noTurnosMessage = buildNoTurnosMessage(state.sedeNombre, mensajeProfesional, mensajeEspecialidad)
+    logger.info('[TURNOS] Mensaje enviado al usuario', {
+      messagePreview: noTurnosMessage.substring(0, 100) + '...',
+    })
+    
     return {
       handled: true,
-      message: buildNoTurnosMessage(state.sedeNombre, mensajeProfesional, mensajeEspecialidad),
+      message: noTurnosMessage,
       nextPhase: 'awaiting_search_type', // Volver a opciones de busqueda
     }
   }
@@ -655,6 +689,8 @@ async function searchAndShowTurnos(
   state.turnosOpciones = result.turnos
   state.phase = 'awaiting_turno_selection'
   await saveFlowState(phone, state)
+
+  logger.info('[TURNOS] Turnos encontrados', { count: result.turnos.length, rango: result.rangoUtilizado })
 
   const nombreCompleto = `${state.nombre} ${state.apellido}`
   return {
