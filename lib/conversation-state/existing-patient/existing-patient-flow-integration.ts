@@ -343,13 +343,20 @@ export async function handleExistingPatientMessage(
   clientId: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_message')
+  
+  console.log(`[v0] handleExistingPatientMessage INICIO - phone: ${phoneNumber}, msg: "${userMessage.substring(0, 30)}"`)
 
   const state = await getFlowState(phoneNumber)
+  
+  console.log(`[v0] handleExistingPatientMessage STATE - exists: ${!!state}, phase: ${state?.phase || 'N/A'}`)
+  
   if (!state) {
+    console.log(`[v0] handleExistingPatientMessage - NO STATE, returning handled=false`)
     return { handled: false, shouldCallOpenAI: true }
   }
 
   logger.info('Processing message', { phase: state.phase, message: userMessage.substring(0, 50) })
+  console.log(`[v0] handleExistingPatientMessage ROUTING to phase: ${state.phase}`)
 
   // Router por fase
   switch (state.phase) {
@@ -357,6 +364,7 @@ export async function handleExistingPatientMessage(
       return handleSedePhase(phoneNumber, userMessage, clientId, state)
 
     case 'awaiting_search_type':
+      console.log(`[v0] handleExistingPatientMessage - ENTERING awaiting_search_type handler`)
       return handleSearchTypePhase(phoneNumber, userMessage, clientId, state)
 
     case 'awaiting_professional_name':
@@ -379,6 +387,7 @@ export async function handleExistingPatientMessage(
 
     default:
       logger.warn('Unhandled phase', { phase: state.phase })
+      console.log(`[v0] handleExistingPatientMessage - UNHANDLED phase: ${state.phase}`)
       return { handled: false, shouldCallOpenAI: true }
   }
 }

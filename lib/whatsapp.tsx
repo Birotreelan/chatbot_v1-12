@@ -1797,14 +1797,20 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // Procesar mensaje durante detección
         let detectionResult = null
         
-        if (await isPatientDetectionFlowActive(userPhoneNumber)) {
+        // DEBUG: Ver qué flujo está activo
+        const patientDetectionActive = await isPatientDetectionFlowActive(userPhoneNumber)
+        const existingPatientActive = await isExistingPatientFlowActive(userPhoneNumber)
+        const newPatientActive = await isNewPatientFlowActive(userPhoneNumber)
+        console.log(`[v0] FLOW_DECISION - patientDetection: ${patientDetectionActive}, existingPatient: ${existingPatientActive}, newPatient: ${newPatientActive}, message: "${userMessage.substring(0, 30)}"`)
+        
+        if (patientDetectionActive) {
           // Sprint 9a: Flujo de detección inicial (menú principal, desambiguación por DNI, etc.)
           console.log(`[WHATSAPP] Procesando mensaje en flujo de detección inicial (Sprint 9a)`)
           detectionResult = await handlePatientDetectionMessage(userPhoneNumber, userMessage, config.cliente_id)
-        } else if (await isExistingPatientFlowActive(userPhoneNumber)) {
+        } else if (existingPatientActive) {
           console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente existente`)
           detectionResult = await handleExistingPatientMessage(userPhoneNumber, userMessage, config.cliente_id)
-        } else if (await isNewPatientFlowActive(userPhoneNumber)) {
+        } else if (newPatientActive) {
           console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente nuevo`)
           detectionResult = await handleNewPatientMessage(userPhoneNumber, userMessage, config.cliente_id)
         }
