@@ -1880,9 +1880,15 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 userPhoneNumber,
                 patientInfo?.patientId || '',
                 patientInfo?.patientName || '',
-                '',   // patientDNI — el flujo lo obtiene del estado
-                undefined,
-                config.cliente_id
+                patientInfo?.patientDNI || '',
+                patientInfo?.patientEmail,
+                config.cliente_id,
+                {
+                  patientFirstName: patientInfo?.patientFirstName,
+                  patientLastName: patientInfo?.patientLastName,
+                  obraSocialId: patientInfo?.obraSocialId,
+                  obraSocialNombre: patientInfo?.obraSocialNombre,
+                }
               )
               if (existingResult?.handled && existingResult.message) {
                 await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")

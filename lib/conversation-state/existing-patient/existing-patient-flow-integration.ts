@@ -219,7 +219,13 @@ export async function initializeExistingPatientFlow(
   patientName: string,
   patientDNI: string,
   patientEmail: string | undefined,
-  clientId: string
+  clientId: string,
+  additionalPatientData?: {
+    patientFirstName?: string
+    patientLastName?: string
+    obraSocialId?: string
+    obraSocialNombre?: string
+  }
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_init')
   logger.info('Initializing existing patient flow', { patientId, patientName })
@@ -233,31 +239,39 @@ export async function initializeExistingPatientFlow(
     }
   }
 
-  // Obtener datos completos del paciente desde el estado de deteccion si faltan
-  let finalPatientDNI = patientDNI
-  let finalPatientFirstName: string | undefined
-  let finalPatientLastName: string | undefined
-  let finalObraSocialId: string | undefined
-  let finalObraSocialNombre: string | undefined
+  // Usar datos pasados como parametro primero, luego intentar del estado de deteccion
+  let finalPatientDNI = patientDNI || ''
+  let finalPatientFirstName = additionalPatientData?.patientFirstName
+  let finalPatientLastName = additionalPatientData?.patientLastName
+  let finalObraSocialId = additionalPatientData?.obraSocialId
+  let finalObraSocialNombre = additionalPatientData?.obraSocialNombre
   
-  // Siempre obtener datos del estado de detección para tener la información completa
-  const detectedInfo = await getDetectedPatientInfo(phoneNumber)
-  if (detectedInfo) {
-    if (!patientDNI || patientDNI === '') {
-      finalPatientDNI = detectedInfo.patientDNI || ''
+  // Solo consultar estado de detección si faltan datos
+  if (!finalPatientDNI || !finalPatientFirstName || !finalPatientLastName || !finalObraSocialId) {
+    const detectedInfo = await getDetectedPatientInfo(phoneNumber)
+    if (detectedInfo) {
+      if (!finalPatientDNI) finalPatientDNI = detectedInfo.patientDNI || ''
+      if (!finalPatientFirstName) finalPatientFirstName = detectedInfo.patientFirstName
+      if (!finalPatientLastName) finalPatientLastName = detectedInfo.patientLastName
+      if (!finalObraSocialId) finalObraSocialId = detectedInfo.obraSocialId
+      if (!finalObraSocialNombre) finalObraSocialNombre = detectedInfo.obraSocialNombre
+      logger.info('Retrieved missing patient data from detection state', {
+        dni: finalPatientDNI,
+        firstName: finalPatientFirstName,
+        lastName: finalPatientLastName,
+        obraSocialId: finalObraSocialId,
+        obraSocialNombre: finalObraSocialNombre,
+      })
     }
-    finalPatientFirstName = detectedInfo.patientFirstName
-    finalPatientLastName = detectedInfo.patientLastName
-    finalObraSocialId = detectedInfo.obraSocialId
-    finalObraSocialNombre = detectedInfo.obraSocialNombre
-    logger.info('Retrieved patient data from detection state', {
-      dni: finalPatientDNI,
-      firstName: finalPatientFirstName,
-      lastName: finalPatientLastName,
-      obraSocialId: finalObraSocialId,
-      obraSocialNombre: finalObraSocialNombre,
-    })
   }
+  
+  logger.info('Final patient data for flow', {
+    dni: finalPatientDNI,
+    firstName: finalPatientFirstName,
+    lastName: finalPatientLastName,
+    obraSocialId: finalObraSocialId,
+    obraSocialNombre: finalObraSocialNombre,
+  })
 
   // Obtener sedes desde la API
   const sedesResult = await fetchSedes(clientId)
