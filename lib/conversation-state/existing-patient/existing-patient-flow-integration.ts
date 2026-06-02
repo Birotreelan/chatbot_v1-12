@@ -438,7 +438,20 @@ async function handleSearchTypePhase(
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'search_type_phase')
 
+  logger.info('[SEARCH_TYPE] Procesando respuesta del usuario', {
+    userMessage,
+    currentPhase: state.phase,
+    sedeNombre: state.sedeNombre,
+    previousProfesional: state.profesionalNombre,
+    previousEspecialidad: state.especialidadNombre,
+  })
+
   const result = await handleSearchTypeSelection(userMessage, phoneNumber, clientId)
+
+  logger.info('[SEARCH_TYPE] Resultado de seleccion', {
+    searchType: result.searchType,
+    message: result.message?.substring(0, 50),
+  })
 
   if (result.searchType) {
     state.searchType = result.searchType
@@ -478,11 +491,19 @@ async function handleSearchTypePhase(
 
     if (result.searchType === 'cualquier_medico') {
       // Buscar turnos sin filtro de profesional
+      logger.info('[SEARCH_TYPE] Opcion "cualquier_medico" seleccionada - buscando turnos sin filtro de profesional', {
+        sedeId: state.sedeId,
+        sedeNombre: state.sedeNombre,
+      })
       return await searchAndShowTurnos(phoneNumber, clientId, state)
     }
   }
 
   // Input no reconocido
+  logger.info('[SEARCH_TYPE] Input no reconocido', {
+    userMessage,
+    resultMessage: result.message?.substring(0, 50),
+  })
   return {
     handled: true,
     message: result.message,
@@ -606,10 +627,16 @@ async function searchAndShowTurnos(
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turnos_search')
 
-  logger.info('Searching turnos', {
+  logger.info('[TURNOS] Iniciando busqueda de turnos', {
     sedeId: state.sedeId,
+    sedeNombre: state.sedeNombre,
     profesionalId: state.profesionalId,
+    profesionalNombre: state.profesionalNombre,
     especialidadId: state.especialidadId,
+    especialidadNombre: state.especialidadNombre,
+    searchType: state.searchType,
+    patientDNI: state.patientDNI,
+    obraSocialId: state.obraSocialId,
   })
 
   const result = await searchTurnosAcumulativo(
@@ -623,10 +650,25 @@ async function searchAndShowTurnos(
     phoneNumber
   )
 
+  logger.info('[TURNOS] Resultado de busqueda', {
+    success: result.success,
+    turnosCount: result.turnos?.length || 0,
+    rangoUtilizado: result.rangoUtilizado,
+    error: result.error,
+  })
+
   if (!result.success || !result.turnos || result.turnos.length === 0) {
     // Guardar nombres para el mensaje ANTES de limpiar
     const mensajeProfesional = state.profesionalNombre
     const mensajeEspecialidad = state.especialidadNombre
+    
+    logger.info('[TURNOS] No se encontraron turnos - mostrando opciones alternativas', {
+      sedeNombre: state.sedeNombre,
+      profesionalNombre: mensajeProfesional,
+      especialidadNombre: mensajeEspecialidad,
+      previousPhase: state.phase,
+      newPhase: 'awaiting_search_type',
+    })
     
     // Limpiar datos del profesional/especialidad anterior para nueva busqueda
     state.profesionalId = undefined
@@ -639,9 +681,14 @@ async function searchAndShowTurnos(
     state.phase = 'awaiting_search_type'
     await saveFlowState(phoneNumber, state)
     
+    const noTurnosMessage = buildNoTurnosMessage(state.sedeNombre, mensajeProfesional, mensajeEspecialidad)
+    logger.info('[TURNOS] Mensaje enviado al usuario', {
+      messagePreview: noTurnosMessage.substring(0, 100) + '...',
+    })
+    
     return {
       handled: true,
-      message: buildNoTurnosMessage(state.sedeNombre, mensajeProfesional, mensajeEspecialidad),
+      message: noTurnosMessage,
       nextPhase: 'awaiting_search_type', // Volver a opciones de busqueda
     }
   }
