@@ -220,7 +220,8 @@ async function extractIntentWithOpenAI(
       return null
     }
 
-    const responseText = responseContent.text
+    // responseContent.text es un objeto { value: string, annotations: [] }, no un string directo
+    const responseText = responseContent.text.value
 
     logger.debug("Respuesta del asistente", {
       response: responseText.substring(0, 100),

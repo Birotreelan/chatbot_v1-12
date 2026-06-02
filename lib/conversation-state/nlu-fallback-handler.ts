@@ -387,6 +387,36 @@ Clasifica la intención y retorna JSON.`
 // ============================================================================
 
 /**
+ * Helper para extraer datos del turno del ChatbotData
+ * La estructura real es: { paciente, turnos: [{ fecha, hora, profesional, sede }] }
+ */
+function extractTurnoData(appointmentContext: any): {
+  fecha: string
+  hora: string
+  profesional: string
+  sede: string
+} {
+  // Si tiene array de turnos (estructura ChatbotData), usar el primero
+  if (appointmentContext?.turnos && Array.isArray(appointmentContext.turnos) && appointmentContext.turnos.length > 0) {
+    const turno = appointmentContext.turnos[0]
+    return {
+      fecha: turno.fecha_formateada || turno.fecha || '',
+      hora: turno.hora_formateada || turno.hora || '',
+      profesional: turno.profesional || '',
+      sede: turno.sede || ''
+    }
+  }
+  
+  // Fallback a propiedades directas (por compatibilidad)
+  return {
+    fecha: appointmentContext?.appointment_date || appointmentContext?.fecha || '',
+    hora: appointmentContext?.appointment_time || appointmentContext?.hora || '',
+    profesional: appointmentContext?.profesional || appointmentContext?.professional_name || '',
+    sede: appointmentContext?.sede || appointmentContext?.sede_name || ''
+  }
+}
+
+/**
  * Menú estándar de opciones (consistente con el resto del sistema)
  */
 const MENU_OPCIONES = `¿En qué te podemos ayudar?
@@ -401,12 +431,10 @@ Respondé con el número de opción que prefieras.`
  * Respuesta para confirmación directa (sin menú)
  */
 function buildConfirmationResponse(appointmentContext: any): string {
-  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
-  const hora = appointmentContext.appointment_time || appointmentContext.hora
-  const profesional = appointmentContext.profesional || appointmentContext.professional_name
-  const sede = appointmentContext.sede || appointmentContext.sede_name
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
 
-  return `Perfecto, tu confirmación de asistencia fue recibida. Te esperamos el *${fecha}* a las *${hora}* con ${profesional} en la sede ${sede}.
+  return `Perfecto, tu confirmación de asistencia fue recibida. Te esperamos el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en la sede ${sede || 'indicada'}.
 
 Si necesitás algo más, no dudes en escribirme.`
 }
@@ -416,17 +444,15 @@ Si necesitás algo más, no dudes en escribirme.`
  * Usada para: queja_frustracion, explicacion_contextual, cancelar_turno, reagendar_turno
  */
 function buildMenuResponse(appointmentContext: any, gptResponse?: string): string {
-  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
-  const hora = appointmentContext.appointment_time || appointmentContext.hora
-  const profesional = appointmentContext.profesional || appointmentContext.professional_name
-  const sede = appointmentContext.sede || appointmentContext.sede_name
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
 
   // Usar respuesta de GPT si existe, sino usar fallback
   const empaticResponse = gptResponse || "Entendemos tu situación."
 
   return `${empaticResponse}
 
-Veo que tenés un turno programado para el *${fecha}* a las *${hora}* con ${profesional} en ${sede}.
+Veo que tenés un turno programado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
 
 ${MENU_OPCIONES}`
 }
@@ -436,10 +462,8 @@ ${MENU_OPCIONES}`
  * Usada para: consulta_no_disponible (costos, pagos, cobertura, etc.)
  */
 function buildDerivationResponse(appointmentContext: any, gptResponse?: string, escalationPhoneNumber?: string): string {
-  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
-  const hora = appointmentContext.appointment_time || appointmentContext.hora
-  const profesional = appointmentContext.profesional || appointmentContext.professional_name
-  const sede = appointmentContext.sede || appointmentContext.sede_name
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
 
   // Usar respuesta de GPT si existe, sino usar fallback
   const empaticResponse = gptResponse || "Esa información no la tengo disponible en este momento."
@@ -453,7 +477,7 @@ function buildDerivationResponse(appointmentContext: any, gptResponse?: string, 
 
 ${derivacionMsg}
 
-Tu turno sigue confirmado para el *${fecha}* a las *${hora}* con ${profesional} en ${sede}.
+Tu turno sigue confirmado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
 
 Si necesitás algo más respecto al turno, no dudes en escribirme.`
 }
@@ -463,10 +487,8 @@ Si necesitás algo más respecto al turno, no dudes en escribirme.`
  * NO usa respuesta de GPT - respuesta fija para evitar cualquier riesgo
  */
 function buildMedicalDerivationResponse(appointmentContext: any, escalationPhoneNumber?: string): string {
-  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
-  const hora = appointmentContext.appointment_time || appointmentContext.hora
-  const profesional = appointmentContext.profesional || appointmentContext.professional_name
-  const sede = appointmentContext.sede || appointmentContext.sede_name
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
 
   // Número de derivación
   const derivacionMsg = escalationPhoneNumber
@@ -477,7 +499,7 @@ function buildMedicalDerivationResponse(appointmentContext: any, escalationPhone
 
 ${derivacionMsg}
 
-Tu turno sigue confirmado para el *${fecha}* a las *${hora}* con ${profesional} en ${sede}.
+Tu turno sigue confirmado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
 
 Si necesitás ayuda con tu turno (confirmar, cancelar o reagendar), con gusto te ayudo.`
 }
@@ -487,11 +509,16 @@ Si necesitás ayuda con tu turno (confirmar, cancelar o reagendar), con gusto te
  * Basada en el reasoning del NLU para determinar qué información dar
  */
 function buildInformationalQueryResponse(appointmentContext: any, classificationResult: FallbackIntentResult): string {
-  const fecha = formatDate(appointmentContext.appointment_date || appointmentContext.fecha)
-  const hora = appointmentContext.appointment_time || appointmentContext.hora
-  const profesional = appointmentContext.profesional || appointmentContext.professional_name
-  const sede = appointmentContext.sede || appointmentContext.sede_name
-  const direccion = appointmentContext.direccion || appointmentContext.address || ""
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
+  
+  // Obtener direccion del primer turno o del contexto
+  let direccion = ''
+  if (appointmentContext?.turnos && Array.isArray(appointmentContext.turnos) && appointmentContext.turnos.length > 0) {
+    direccion = appointmentContext.turnos[0].direccion || ''
+  } else {
+    direccion = appointmentContext?.direccion || appointmentContext?.address || ''
+  }
 
   // Analizar el reasoning para determinar qué tipo de información se pidió
   const reasoning = (classificationResult.reasoning || "").toLowerCase()
@@ -501,41 +528,41 @@ function buildInformationalQueryResponse(appointmentContext: any, classification
   if (reasoning.includes("direcci") || reasoning.includes("ubicaci") || reasoning.includes("donde") ||
       response.includes("direcci") || response.includes("ubicaci") || response.includes("donde")) {
     if (direccion) {
-      return `Tu turno es en *${sede}*.\n\n📍 Dirección: ${direccion}\n\n¿Hay algo más en lo que pueda ayudarte?`
+      return `Tu turno es en *${sede || 'la sede indicada'}*.\n\n📍 Dirección: ${direccion}\n\n¿Hay algo más en lo que pueda ayudarte?`
     }
-    return `Tu turno es en *${sede}*. Para la dirección exacta, te recomiendo contactar directamente a la clínica.\n\n¿Hay algo más en lo que pueda ayudarte?`
+    return `Tu turno es en *${sede || 'la sede indicada'}*. Para la dirección exacta, te recomiendo contactar directamente a la clínica.\n\n¿Hay algo más en lo que pueda ayudarte?`
   }
 
   // Si pregunta por hora
   if (reasoning.includes("hora") || reasoning.includes("horario") || response.includes("hora")) {
-    return `Tu turno es a las *${hora}* el ${fecha}.\n\n¿Hay algo más en lo que pueda ayudarte?`
+    return `Tu turno es a las *${hora || 'hora no disponible'}* el ${fechaFormateada}.\n\n¿Hay algo más en lo que pueda ayudarte?`
   }
 
   // Si pregunta por profesional
   if (reasoning.includes("profes") || reasoning.includes("doctor") || reasoning.includes("medico") ||
       reasoning.includes("médico") || reasoning.includes("quien") || reasoning.includes("quién")) {
-    return `Tu turno es con *${profesional}*.\n\n¿Hay algo más en lo que pueda ayudarte?`
+    return `Tu turno es con *${profesional || 'el profesional asignado'}*.\n\n¿Hay algo más en lo que pueda ayudarte?`
   }
 
   // Si pregunta por fecha
   if (reasoning.includes("fecha") || reasoning.includes("día") || reasoning.includes("dia") || reasoning.includes("cuando") || reasoning.includes("cuándo")) {
-    return `Tu turno es el *${fecha}* a las ${hora}.\n\n¿Hay algo más en lo que pueda ayudarte?`
+    return `Tu turno es el *${fechaFormateada}* a las ${hora || 'hora no disponible'}.\n\n¿Hay algo más en lo que pueda ayudarte?`
   }
 
   // Si pregunta por sede
   if (reasoning.includes("sede") || reasoning.includes("sucursal") || reasoning.includes("lugar")) {
     if (direccion) {
-      return `Tu turno es en *${sede}*.\n\n📍 Dirección: ${direccion}\n\n¿Hay algo más en lo que pueda ayudarte?`
+      return `Tu turno es en *${sede || 'la sede indicada'}*.\n\n📍 Dirección: ${direccion}\n\n¿Hay algo más en lo que pueda ayudarte?`
     }
-    return `Tu turno es en *${sede}*.\n\n¿Hay algo más en lo que pueda ayudarte?`
+    return `Tu turno es en *${sede || 'la sede indicada'}*.\n\n¿Hay algo más en lo que pueda ayudarte?`
   }
 
   // Default: dar todos los datos del turno
   let responseText = `Acá están los datos de tu turno:\n\n`
-  responseText += `📅 *Fecha:* ${fecha}\n`
-  responseText += `🕐 *Hora:* ${hora}\n`
-  responseText += `👨‍⚕️ *Profesional:* ${profesional}\n`
-  responseText += `🏥 *Sede:* ${sede}\n`
+  responseText += `📅 *Fecha:* ${fechaFormateada}\n`
+  responseText += `🕐 *Hora:* ${hora || 'no disponible'}\n`
+  responseText += `👨‍⚕️ *Profesional:* ${profesional || 'no disponible'}\n`
+  responseText += `🏥 *Sede:* ${sede || 'no disponible'}\n`
   
   if (direccion) {
     responseText += `📍 *Dirección:* ${direccion}\n`
