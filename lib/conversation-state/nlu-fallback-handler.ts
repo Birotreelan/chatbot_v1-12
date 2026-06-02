@@ -389,6 +389,8 @@ Clasifica la intención y retorna JSON.`
 /**
  * Helper para extraer datos del turno del ChatbotData
  * La estructura real es: { paciente, turnos: [{ fecha, hora, profesional, sede }] }
+ * IMPORTANTE: Usamos siempre fecha/hora RAW (formato ISO) en lugar de fecha_formateada/hora_formateada
+ * porque la API externa puede formatear incorrectamente (confundiendo mes/día)
  */
 function extractTurnoData(appointmentContext: any): {
   fecha: string
@@ -400,8 +402,10 @@ function extractTurnoData(appointmentContext: any): {
   if (appointmentContext?.turnos && Array.isArray(appointmentContext.turnos) && appointmentContext.turnos.length > 0) {
     const turno = appointmentContext.turnos[0]
     return {
-      fecha: turno.fecha_formateada || turno.fecha || '',
-      hora: turno.hora_formateada || turno.hora || '',
+      // SIEMPRE usar fecha raw (YYYY-MM-DD) - formatDate() lo convertirá correctamente
+      fecha: turno.fecha || turno.fecha_formateada || '',
+      // Para hora, preferir formato raw si existe, sino usar formateada
+      hora: turno.hora || turno.hora_formateada || '',
       profesional: turno.profesional || '',
       sede: turno.sede || ''
     }
@@ -409,8 +413,8 @@ function extractTurnoData(appointmentContext: any): {
   
   // Fallback a propiedades directas (por compatibilidad)
   return {
-    fecha: appointmentContext?.appointment_date || appointmentContext?.fecha || '',
-    hora: appointmentContext?.appointment_time || appointmentContext?.hora || '',
+    fecha: appointmentContext?.fecha || appointmentContext?.appointment_date || '',
+    hora: appointmentContext?.hora || appointmentContext?.appointment_time || '',
     profesional: appointmentContext?.profesional || appointmentContext?.professional_name || '',
     sede: appointmentContext?.sede || appointmentContext?.sede_name || ''
   }
