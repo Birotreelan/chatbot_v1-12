@@ -1849,9 +1849,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
 
           // Cuando el paciente seleccionó una opción del menú inicial, derivar al flujo correcto
-          // Type guard: solo PatientDetectionResult tiene action y patientInfo
-          if ('action' in detectionResult && detectionResult.action) {
-            const patientInfo = 'patientInfo' in detectionResult ? detectionResult.patientInfo : null
+          // Type guard: solo PatientDetectionResult tiene action
+          if ('action' in detectionResult && detectionResult.action && 'patientInfo' in detectionResult && detectionResult.patientInfo) {
+            const patientInfo = detectionResult.patientInfo
 
             if (detectionResult.action === 'book_new_appointment' || detectionResult.action === 'other_inquiry') {
               // Verificar si ya hay un flujo de paciente existente activo y más avanzado
@@ -1878,17 +1878,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               console.log(`[WHATSAPP] Acción "${detectionResult.action}" → iniciando flujo de paciente existente`)
               const existingResult = await initializeExistingPatientFlow(
                 userPhoneNumber,
-                patientInfo?.patientId || '',
-                patientInfo?.patientName || '',
-                patientInfo?.patientDNI || '',
-                patientInfo?.patientEmail,
-                config.cliente_id,
-                {
-                  patientFirstName: patientInfo?.patientFirstName,
-                  patientLastName: patientInfo?.patientLastName,
-                  obraSocialId: patientInfo?.obraSocialId,
-                  obraSocialNombre: patientInfo?.obraSocialNombre,
-                }
+                patientInfo.patientId || '',
+                patientInfo.patientName || '',
+                '', // DNI vendrá del estado de detección
+                undefined, // Email será ingresado por el usuario
+                config.cliente_id
+                // No pasar additionalPatientData - serán recuperados del estado de detección en initializeExistingPatientFlow
               )
               if (existingResult?.handled && existingResult.message) {
                 await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")
