@@ -579,7 +579,29 @@ function buildInformationalQueryResponse(appointmentContext: any, classification
 
 function formatDate(dateStr: string): string {
   try {
-    const date = new Date(dateStr)
+    if (!dateStr) return 'fecha no disponible'
+    
+    // Para fechas en formato YYYY-MM-DD, parsear manualmente para evitar problemas de timezone
+    // new Date("2026-06-02") se interpreta como UTC medianoche, causando errores de día
+    const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    let date: Date
+    
+    if (isoMatch) {
+      // Parsear manualmente: año, mes (0-indexed), día
+      const year = parseInt(isoMatch[1], 10)
+      const month = parseInt(isoMatch[2], 10) - 1 // Meses son 0-indexed en JS
+      const day = parseInt(isoMatch[3], 10)
+      date = new Date(year, month, day)
+    } else {
+      // Fallback para otros formatos
+      date = new Date(dateStr)
+    }
+    
+    // Verificar que la fecha sea válida
+    if (isNaN(date.getTime())) {
+      return dateStr
+    }
+    
     const options: Intl.DateTimeFormatOptions = {
       weekday: "long",
       day: "numeric",
