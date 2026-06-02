@@ -141,10 +141,9 @@ export async function searchTurnosAcumulativo(
         // - PascalCase: Hora, Profesional_Nombre
         // - snake_case: hora, profesional_nombre
         // - camelCase: horaFormateada, profesionalNombre
-        // Usar la longitud actual de allTurnos para asegurar numeración secuencial global
-        const baseNumero = allTurnos.length
+        // Numeración comienza desde 1 para cada búsqueda
         const nuevosTurnos = turnosRaw.map((turno: any, index: number) => ({
-          numero: baseNumero + index + 1,
+          numero: index + 1,
           id: turno.Id || turno.Agenda_Id || turno.id || turno.agenda_id,
           fecha: turno.Fecha || turno.fecha,
           // Intentar todas las variaciones conocidas para hora
