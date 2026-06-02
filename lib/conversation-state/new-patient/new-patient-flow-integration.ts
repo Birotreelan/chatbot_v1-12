@@ -633,6 +633,7 @@ async function searchAndShowTurnos(
     return {
       handled: true,
       message: buildNoTurnosMessage(state.sedeNombre, state.profesionalNombre, state.especialidadNombre),
+      nextPhase: 'awaiting_search_type', // Volver a opciones de busqueda
     }
   }
 
