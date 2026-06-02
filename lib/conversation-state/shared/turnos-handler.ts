@@ -262,6 +262,7 @@ export function buildTurnosListMessage(
 
 /**
  * Mensaje cuando no hay turnos disponibles
+ * Las opciones DEBEN coincidir con awaiting_search_type para mantener consistencia
  */
 export function buildNoTurnosMessage(
   sedeName?: string,
@@ -281,11 +282,11 @@ export function buildNoTurnosMessage(
   }
 
   message += ' en los proximos 60 dias.\n\n'
-  message += 'Podes intentar:\n'
-  message += '1. Elegir otro profesional\n'
-  message += '2. Elegir otra especialidad\n'
-  message += '3. Elegir otra sede\n\n'
-  message += 'Responde con el numero de la opcion que prefieras.'
+  message += 'Podes intentar con otra busqueda:\n\n'
+  message += '1. *Medico en particular* - Buscar con otro profesional\n'
+  message += '2. *Por especialidad* - Buscar en otra especialidad\n'
+  message += '3. *Cualquier medico disponible* - Ver turnos mas proximos\n\n'
+  message += 'Responde con el *numero* de la opcion que prefieras.'
 
   return message
 }

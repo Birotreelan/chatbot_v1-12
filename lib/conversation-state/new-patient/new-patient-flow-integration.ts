@@ -630,9 +630,25 @@ async function searchAndShowTurnos(
   )
 
   if (!result.success || !result.turnos || result.turnos.length === 0) {
+    // Guardar nombres para el mensaje ANTES de limpiar
+    const mensajeProfesional = state.profesionalNombre
+    const mensajeEspecialidad = state.especialidadNombre
+    
+    // Limpiar datos del profesional/especialidad anterior para nueva busqueda
+    state.profesionalId = undefined
+    state.profesionalNombre = undefined
+    state.especialidadId = undefined
+    state.especialidadNombre = undefined
+    state.profesionalesOpciones = undefined
+    state.especialidadesOpciones = undefined
+    state.turnosOpciones = undefined
+    state.phase = 'awaiting_search_type'
+    await saveFlowState(phone, state)
+    
     return {
       handled: true,
-      message: buildNoTurnosMessage(state.sedeNombre, state.profesionalNombre, state.especialidadNombre),
+      message: buildNoTurnosMessage(state.sedeNombre, mensajeProfesional, mensajeEspecialidad),
+      nextPhase: 'awaiting_search_type', // Volver a opciones de busqueda
     }
   }
 
