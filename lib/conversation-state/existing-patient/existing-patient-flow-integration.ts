@@ -159,16 +159,15 @@ async function enrichPatientDataFromAPI(
     if (pacienteResponse.exito && pacienteResponse.datos) {
       let paciente: Record<string, unknown> | null = null
       
-      // Manejar caso de pacientes_multiples: filtrar por DNI o email si tenemos esa info
+      // Manejar caso de pacientes_multiples: filtrar SOLO por DNI
       if (pacienteResponse.datos.warning === 'pacientes_multiples' && Array.isArray(pacienteResponse.datos.pacientes)) {
         const pacientes = pacienteResponse.datos.pacientes
-        logger.info('Multiple patients found when enriching, filtering by available data', { 
+        logger.info('Multiple patients found when enriching, filtering by DNI only', { 
           totalPacientes: pacientes.length,
-          stateDNI: state.patientDNI,
-          stateEmail: state.patientEmail
+          stateDNI: state.patientDNI
         })
         
-        // Intentar filtrar por DNI si lo tenemos en el estado
+        // Filtrar SOLO por DNI - no usar email ni fallback
         if (state.patientDNI) {
           const foundByDNI = pacientes.find((p: Record<string, unknown>) => 
             String(p.Nrodoc || p.nrodoc || p.dni || '').trim() === state.patientDNI.trim()
@@ -176,28 +175,11 @@ async function enrichPatientDataFromAPI(
           if (foundByDNI) {
             paciente = foundByDNI as Record<string, unknown>
             logger.info('Found patient by DNI for enrichment', { dni: state.patientDNI })
+          } else {
+            logger.warn('Could not find patient by DNI in multiple patients list', { dni: state.patientDNI })
           }
-        }
-        
-        // Si no encontramos por DNI, intentar por email
-        if (!paciente && state.patientEmail) {
-          const emailNormalizado = state.patientEmail.toLowerCase().trim()
-          const foundByEmail = pacientes.find((p: Record<string, unknown>) => {
-            const pacEmail = String(p.Mail || p.mail || p.Email || p.email || '').toLowerCase().trim()
-            return pacEmail && pacEmail !== '-' && pacEmail === emailNormalizado
-          })
-          if (foundByEmail) {
-            paciente = foundByEmail as Record<string, unknown>
-            logger.info('Found patient by email for enrichment', { email: state.patientEmail })
-          }
-        }
-        
-        // Si aún no encontramos, usar el primer paciente con Id válido
-        if (!paciente) {
-          paciente = pacientes.find((p: Record<string, unknown>) => p.Id) as Record<string, unknown> || null
-          if (paciente) {
-            logger.warn('Using first valid patient as fallback for enrichment', { pacienteId: paciente?.Id })
-          }
+        } else {
+          logger.warn('Cannot filter multiple patients without DNI in state')
         }
       } else {
         // Caso normal: un solo paciente
@@ -830,16 +812,15 @@ async function handleConfirmationPhase(
         if (pacienteResponse.exito && pacienteResponse.datos) {
           let paciente: Record<string, unknown> | null = null
           
-          // Manejar caso de pacientes_multiples: filtrar por DNI o email si tenemos esa info
+          // Manejar caso de pacientes_multiples: filtrar SOLO por DNI
           if (pacienteResponse.datos.warning === 'pacientes_multiples' && Array.isArray(pacienteResponse.datos.pacientes)) {
             const pacientes = pacienteResponse.datos.pacientes
-            logger.info('Multiple patients found, filtering by available data', { 
+            logger.info('Multiple patients found, filtering by DNI only', { 
               totalPacientes: pacientes.length,
-              stateDNI: state.patientDNI,
-              stateEmail: state.patientEmail
+              stateDNI: state.patientDNI
             })
             
-            // Intentar filtrar por DNI si lo tenemos en el estado
+            // Filtrar SOLO por DNI - no usar email ni fallback
             if (state.patientDNI) {
               const foundByDNI = pacientes.find((p: Record<string, unknown>) => 
                 String(p.Nrodoc || p.nrodoc || p.dni || '').trim() === state.patientDNI.trim()
@@ -847,28 +828,11 @@ async function handleConfirmationPhase(
               if (foundByDNI) {
                 paciente = foundByDNI as Record<string, unknown>
                 logger.info('Found patient by DNI', { dni: state.patientDNI })
+              } else {
+                logger.warn('Could not find patient by DNI in multiple patients list', { dni: state.patientDNI })
               }
-            }
-            
-            // Si no encontramos por DNI, intentar por email
-            if (!paciente && state.patientEmail) {
-              const emailNormalizado = state.patientEmail.toLowerCase().trim()
-              const foundByEmail = pacientes.find((p: Record<string, unknown>) => {
-                const pacEmail = String(p.Mail || p.mail || p.Email || p.email || '').toLowerCase().trim()
-                return pacEmail && pacEmail !== '-' && pacEmail === emailNormalizado
-              })
-              if (foundByEmail) {
-                paciente = foundByEmail as Record<string, unknown>
-                logger.info('Found patient by email', { email: state.patientEmail })
-              }
-            }
-            
-            // Si aún no encontramos, usar el primer paciente con Id válido
-            if (!paciente) {
-              paciente = pacientes.find((p: Record<string, unknown>) => p.Id) as Record<string, unknown> || null
-              if (paciente) {
-                logger.warn('Using first valid patient as fallback', { pacienteId: paciente?.Id })
-              }
+            } else {
+              logger.warn('Cannot filter multiple patients without DNI in state')
             }
           } else {
             // Caso normal: un solo paciente
