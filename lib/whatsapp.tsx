@@ -1849,8 +1849,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
 
           // Cuando el paciente seleccionó una opción del menú inicial, derivar al flujo correcto
-          if (detectionResult.action) {
-            const patientInfo = detectionResult.patientInfo
+          // Type guard: solo PatientDetectionResult tiene action y patientInfo
+          if ('action' in detectionResult && detectionResult.action) {
+            const patientInfo = 'patientInfo' in detectionResult ? detectionResult.patientInfo : null
 
             if (detectionResult.action === 'book_new_appointment' || detectionResult.action === 'other_inquiry') {
               // Verificar si ya hay un flujo de paciente existente activo y más avanzado
