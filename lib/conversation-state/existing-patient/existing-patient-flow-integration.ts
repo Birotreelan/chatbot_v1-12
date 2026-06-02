@@ -159,15 +159,16 @@ async function enrichPatientDataFromAPI(
     if (pacienteResponse.exito && pacienteResponse.datos) {
       let paciente: Record<string, unknown> | null = null
       
-      // Manejar caso de pacientes_multiples: filtrar SOLO por DNI
+      // Manejar caso de pacientes_multiples: filtrar por DNI o por patientId
       if (pacienteResponse.datos.warning === 'pacientes_multiples' && Array.isArray(pacienteResponse.datos.pacientes)) {
         const pacientes = pacienteResponse.datos.pacientes
-        logger.info('Multiple patients found when enriching, filtering by DNI only', { 
+        logger.info('Multiple patients found when enriching', { 
           totalPacientes: pacientes.length,
-          stateDNI: state.patientDNI
+          stateDNI: state.patientDNI,
+          statePatientId: state.patientId
         })
         
-        // Filtrar SOLO por DNI - no usar email ni fallback
+        // Intentar filtrar por DNI primero
         if (state.patientDNI) {
           const foundByDNI = pacientes.find((p: Record<string, unknown>) => 
             String(p.Nrodoc || p.nrodoc || p.dni || '').trim() === state.patientDNI.trim()
@@ -178,8 +179,23 @@ async function enrichPatientDataFromAPI(
           } else {
             logger.warn('Could not find patient by DNI in multiple patients list', { dni: state.patientDNI })
           }
-        } else {
-          logger.warn('Cannot filter multiple patients without DNI in state')
+        }
+        
+        // Si no se encontró por DNI, intentar filtrar por patientId
+        if (!paciente && state.patientId) {
+          const foundById = pacientes.find((p: Record<string, unknown>) => 
+            String(p.Id || p.id || '').trim() === state.patientId.trim()
+          )
+          if (foundById) {
+            paciente = foundById as Record<string, unknown>
+            logger.info('Found patient by patientId for enrichment', { patientId: state.patientId })
+          } else {
+            logger.warn('Could not find patient by patientId in multiple patients list', { patientId: state.patientId })
+          }
+        }
+        
+        if (!paciente) {
+          logger.warn('Cannot identify patient from multiple patients list (no DNI or patientId match)')
         }
       } else {
         // Caso normal: un solo paciente
