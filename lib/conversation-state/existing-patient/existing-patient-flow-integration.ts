@@ -144,6 +144,91 @@ async function saveFlowState(phoneNumber: string, state: ExistingPatientFlowStat
 }
 
 /**
+ * Helper para enriquecer datos del paciente desde la API, manejando el caso de pacientes_multiples
+ */
+async function enrichPatientDataFromAPI(
+  state: ExistingPatientFlowState,
+  phoneNumber: string,
+  clientId: string,
+  logger: ReturnType<typeof createConversationLogger>
+): Promise<void> {
+  try {
+    const clinicAPI = new ClinicAPI(clientId)
+    const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
+    
+    if (pacienteResponse.exito && pacienteResponse.datos) {
+      let paciente: Record<string, unknown> | null = null
+      
+      // Manejar caso de pacientes_multiples: filtrar por DNI o email si tenemos esa info
+      if (pacienteResponse.datos.warning === 'pacientes_multiples' && Array.isArray(pacienteResponse.datos.pacientes)) {
+        const pacientes = pacienteResponse.datos.pacientes
+        logger.info('Multiple patients found when enriching, filtering by available data', { 
+          totalPacientes: pacientes.length,
+          stateDNI: state.patientDNI,
+          stateEmail: state.patientEmail
+        })
+        
+        // Intentar filtrar por DNI si lo tenemos en el estado
+        if (state.patientDNI) {
+          const foundByDNI = pacientes.find((p: Record<string, unknown>) => 
+            String(p.Nrodoc || p.nrodoc || p.dni || '').trim() === state.patientDNI.trim()
+          )
+          if (foundByDNI) {
+            paciente = foundByDNI as Record<string, unknown>
+            logger.info('Found patient by DNI for enrichment', { dni: state.patientDNI })
+          }
+        }
+        
+        // Si no encontramos por DNI, intentar por email
+        if (!paciente && state.patientEmail) {
+          const emailNormalizado = state.patientEmail.toLowerCase().trim()
+          const foundByEmail = pacientes.find((p: Record<string, unknown>) => {
+            const pacEmail = String(p.Mail || p.mail || p.Email || p.email || '').toLowerCase().trim()
+            return pacEmail && pacEmail !== '-' && pacEmail === emailNormalizado
+          })
+          if (foundByEmail) {
+            paciente = foundByEmail as Record<string, unknown>
+            logger.info('Found patient by email for enrichment', { email: state.patientEmail })
+          }
+        }
+        
+        // Si aún no encontramos, usar el primer paciente con Id válido
+        if (!paciente) {
+          paciente = pacientes.find((p: Record<string, unknown>) => p.Id) as Record<string, unknown> || null
+          if (paciente) {
+            logger.warn('Using first valid patient as fallback for enrichment', { pacienteId: paciente?.Id })
+          }
+        }
+      } else {
+        // Caso normal: un solo paciente
+        paciente = (pacienteResponse.datos.paciente || pacienteResponse.datos) as Record<string, unknown>
+      }
+      
+      if (paciente) {
+        if (!state.patientFirstName) state.patientFirstName = String(paciente.Nombres || paciente.nombres || '').trim()
+        if (!state.patientLastName) state.patientLastName = String(paciente.Apellido || paciente.apellido || '').trim()
+        if (!state.patientDNI) state.patientDNI = String(paciente.Nrodoc || paciente.dni || '').trim()
+        if (!state.patientEmail) state.patientEmail = String(paciente.Mail || paciente.mail || paciente.Email || paciente.email || '').trim()
+        if (state.patientEmail === '-') state.patientEmail = ''
+        if (!state.obraSocialId) state.obraSocialId = String(paciente.Deudor_Id || paciente.deudor_id || '')
+        if (!state.obraSocialNombre) state.obraSocialNombre = String(paciente.Deudor_Nombre || paciente.deudor_nombre || '')
+        
+        logger.info('Enriched patient data from API', {
+          firstName: state.patientFirstName,
+          lastName: state.patientLastName,
+          dni: state.patientDNI,
+          obraSocialNombre: state.obraSocialNombre,
+        })
+      } else {
+        logger.warn('Could not find matching patient in API response for enrichment')
+      }
+    }
+  } catch (err) {
+    logger.error('Error enriching patient data from API', err instanceof Error ? err : new Error(String(err)))
+  }
+}
+
+/**
  * Inicializa el flujo de paciente existente
  */
 export async function initializeExistingPatientFlow(
@@ -598,27 +683,9 @@ async function handleTurnoPhase(
 
     // Ya tiene email, ir a confirmacion
     // Enriquecer estado con datos frescos de la API si faltan campos clave
-    if (!state.patientFirstName || !state.patientLastName || !state.obraSocialNombre) {
-      try {
-        const clinicAPI = new ClinicAPI(clientId)
-        const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
-        if (pacienteResponse.exito && pacienteResponse.datos) {
-          const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
-          if (!state.patientFirstName) state.patientFirstName = paciente.Nombres || paciente.nombres || ''
-          if (!state.patientLastName) state.patientLastName = paciente.Apellido || paciente.apellido || ''
-          if (!state.patientDNI) state.patientDNI = String(paciente.Nrodoc || paciente.dni || '')
-          if (!state.patientEmail) state.patientEmail = paciente.Mail || paciente.mail || paciente.Email || paciente.email || ''
-          if (!state.obraSocialId) state.obraSocialId = paciente.Deudor_Id || paciente.deudor_id || ''
-          if (!state.obraSocialNombre) state.obraSocialNombre = paciente.Deudor_Nombre || paciente.deudor_nombre || ''
-          logger.info('Enriched patient data from API for confirmation', {
-            firstName: state.patientFirstName,
-            lastName: state.patientLastName,
-            obraSocialNombre: state.obraSocialNombre,
-          })
-        }
-      } catch (err) {
-        logger.error('Error enriching patient data from API', err instanceof Error ? err : new Error(String(err)))
-      }
+    if (!state.patientFirstName || !state.patientLastName || !state.obraSocialNombre || !state.patientDNI) {
+      const logger = createConversationLogger(phoneNumber, clientId, 'turno_phase_enrichment')
+      await enrichPatientDataFromAPI(state, phoneNumber, clientId, logger)
     }
 
     state.phase = 'awaiting_confirmation'
@@ -666,21 +733,9 @@ async function handleEmailPhase(
     state.attempts = 0
 
     // Enriquecer estado con datos frescos de la API si faltan campos clave
-    if (!state.patientFirstName || !state.patientLastName || !state.obraSocialNombre) {
-      try {
-        const clinicAPI = new ClinicAPI(clientId)
-        const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
-        if (pacienteResponse.exito && pacienteResponse.datos) {
-          const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
-          if (!state.patientFirstName) state.patientFirstName = paciente.Nombres || paciente.nombres || ''
-          if (!state.patientLastName) state.patientLastName = paciente.Apellido || paciente.apellido || ''
-          if (!state.patientDNI) state.patientDNI = String(paciente.Nrodoc || paciente.dni || '')
-          if (!state.obraSocialId) state.obraSocialId = paciente.Deudor_Id || paciente.deudor_id || ''
-          if (!state.obraSocialNombre) state.obraSocialNombre = paciente.Deudor_Nombre || paciente.deudor_nombre || ''
-        }
-      } catch (err) {
-        logger.error('Error enriching patient data from API', err instanceof Error ? err : new Error(String(err)))
-      }
+    if (!state.patientFirstName || !state.patientLastName || !state.obraSocialNombre || !state.patientDNI) {
+      const logger = createConversationLogger(phoneNumber, clientId, 'email_phase_enrichment')
+      await enrichPatientDataFromAPI(state, phoneNumber, clientId, logger)
     }
 
     state.phase = 'awaiting_confirmation'
@@ -760,29 +815,84 @@ async function handleConfirmationPhase(
       }
     }
 
-    // Fallback final: si aún falta el DNI, obtener datos frescos de la API usando el teléfono
-    if (!dniParaReserva) {
-      logger.info('DNI still missing, fetching fresh patient data from API', { phone: phoneNumber })
+    // Fallback final: si aún falta el DNI o datos del paciente, obtener datos frescos de la API usando el teléfono
+    if (!dniParaReserva || !nombreParaReserva || !apellidoParaReserva) {
+      logger.info('Patient data missing, fetching fresh patient data from API', { 
+        phone: phoneNumber,
+        dniMissing: !dniParaReserva,
+        nombreMissing: !nombreParaReserva,
+        apellidoMissing: !apellidoParaReserva
+      })
       try {
         const clinicAPI = new ClinicAPI(clientId)
         const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
         
         if (pacienteResponse.exito && pacienteResponse.datos) {
-          const paciente = pacienteResponse.datos.paciente || pacienteResponse.datos
-          dniParaReserva = (paciente.Nrodoc || paciente.dni || '').toString()
-          if (!nombreParaReserva) nombreParaReserva = paciente.Nombres || paciente.nombres || ''
-          if (!apellidoParaReserva) apellidoParaReserva = paciente.Apellido || paciente.apellido || ''
-          // Actualizar obra social en el estado si falta
-          if (!state.obraSocialId) state.obraSocialId = paciente.Deudor_Id || paciente.deudor_id || ''
-          if (!state.obraSocialNombre) state.obraSocialNombre = paciente.Deudor_Nombre || paciente.deudor_nombre || ''
+          let paciente: Record<string, unknown> | null = null
           
-          logger.info('Retrieved patient data from API for reservation', {
-            firstName: nombreParaReserva,
-            lastName: apellidoParaReserva,
-            dni: dniParaReserva,
-            obraSocialId: state.obraSocialId,
-            obraSocialNombre: state.obraSocialNombre,
-          })
+          // Manejar caso de pacientes_multiples: filtrar por DNI o email si tenemos esa info
+          if (pacienteResponse.datos.warning === 'pacientes_multiples' && Array.isArray(pacienteResponse.datos.pacientes)) {
+            const pacientes = pacienteResponse.datos.pacientes
+            logger.info('Multiple patients found, filtering by available data', { 
+              totalPacientes: pacientes.length,
+              stateDNI: state.patientDNI,
+              stateEmail: state.patientEmail
+            })
+            
+            // Intentar filtrar por DNI si lo tenemos en el estado
+            if (state.patientDNI) {
+              const foundByDNI = pacientes.find((p: Record<string, unknown>) => 
+                String(p.Nrodoc || p.nrodoc || p.dni || '').trim() === state.patientDNI.trim()
+              )
+              if (foundByDNI) {
+                paciente = foundByDNI as Record<string, unknown>
+                logger.info('Found patient by DNI', { dni: state.patientDNI })
+              }
+            }
+            
+            // Si no encontramos por DNI, intentar por email
+            if (!paciente && state.patientEmail) {
+              const emailNormalizado = state.patientEmail.toLowerCase().trim()
+              const foundByEmail = pacientes.find((p: Record<string, unknown>) => {
+                const pacEmail = String(p.Mail || p.mail || p.Email || p.email || '').toLowerCase().trim()
+                return pacEmail && pacEmail !== '-' && pacEmail === emailNormalizado
+              })
+              if (foundByEmail) {
+                paciente = foundByEmail as Record<string, unknown>
+                logger.info('Found patient by email', { email: state.patientEmail })
+              }
+            }
+            
+            // Si aún no encontramos, usar el primer paciente con Id válido
+            if (!paciente) {
+              paciente = pacientes.find((p: Record<string, unknown>) => p.Id) as Record<string, unknown> || null
+              if (paciente) {
+                logger.warn('Using first valid patient as fallback', { pacienteId: paciente?.Id })
+              }
+            }
+          } else {
+            // Caso normal: un solo paciente
+            paciente = (pacienteResponse.datos.paciente || pacienteResponse.datos) as Record<string, unknown>
+          }
+          
+          if (paciente) {
+            if (!dniParaReserva) dniParaReserva = String(paciente.Nrodoc || paciente.dni || '').trim()
+            if (!nombreParaReserva) nombreParaReserva = String(paciente.Nombres || paciente.nombres || '').trim()
+            if (!apellidoParaReserva) apellidoParaReserva = String(paciente.Apellido || paciente.apellido || '').trim()
+            // Actualizar obra social en el estado si falta
+            if (!state.obraSocialId) state.obraSocialId = String(paciente.Deudor_Id || paciente.deudor_id || '')
+            if (!state.obraSocialNombre) state.obraSocialNombre = String(paciente.Deudor_Nombre || paciente.deudor_nombre || '')
+            
+            logger.info('Retrieved patient data from API for reservation', {
+              firstName: nombreParaReserva,
+              lastName: apellidoParaReserva,
+              dni: dniParaReserva,
+              obraSocialId: state.obraSocialId,
+              obraSocialNombre: state.obraSocialNombre,
+            })
+          } else {
+            logger.warn('Could not find matching patient in API response')
+          }
         }
       } catch (error) {
         logger.error('Error fetching patient data from API', error instanceof Error ? error : new Error(String(error)))
