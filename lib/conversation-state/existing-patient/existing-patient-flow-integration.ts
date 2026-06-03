@@ -701,7 +701,7 @@ async function searchAndShowTurnos(
 
   return {
     handled: true,
-    message: buildTurnosListMessage(result.turnos, state.patientName, state.sedeNombre),
+    message: buildTurnosListMessage(result.turnos, state.patientName, state.sedeNombre, state.profesionalNombre, result.rangoUtilizado),
     nextPhase: 'awaiting_turno_selection',
   }
 }

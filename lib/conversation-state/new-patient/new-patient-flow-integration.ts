@@ -782,7 +782,7 @@ async function searchAndShowTurnos(
   const nombreCompleto = `${state.nombre} ${state.apellido}`
   return {
     handled: true,
-    message: buildTurnosListMessage(result.turnos, nombreCompleto, state.sedeNombre),
+    message: buildTurnosListMessage(result.turnos, nombreCompleto, state.sedeNombre, state.profesionalNombre, result.rangoUtilizado),
   }
 }
 

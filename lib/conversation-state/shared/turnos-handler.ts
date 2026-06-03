@@ -212,13 +212,36 @@ export async function searchTurnosAcumulativo(
 }
 
 /**
+ * Formatea el nombre del profesional para mostrarlo legible
+ * Convierte "ELIAS, Mohamed" a "Elias Mohamed"
+ */
+function formatProfesionalName(nombre: string): string {
+  if (!nombre) return ''
+  
+  // Si tiene formato "APELLIDO, Nombre"
+  if (nombre.includes(',')) {
+    const [apellido, nombreProf] = nombre.split(',').map(s => s.trim())
+    const apellidoFormateado = apellido.charAt(0).toUpperCase() + apellido.slice(1).toLowerCase()
+    const nombreFormateado = nombreProf ? nombreProf.charAt(0).toUpperCase() + nombreProf.slice(1).toLowerCase() : ''
+    return `${apellidoFormateado} ${nombreFormateado}`.trim()
+  }
+  
+  // Si no tiene coma, capitalizar cada palabra
+  return nombre.split(' ').map(word => 
+    word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+  ).join(' ')
+}
+
+/**
  * Construye el mensaje con la lista de turnos disponibles
  * Agrupa por fecha para mejor legibilidad
  */
 export function buildTurnosListMessage(
   turnos: TurnoOption[],
   patientName?: string,
-  sedeName?: string
+  sedeName?: string,
+  profesionalNombre?: string,
+  rangoUtilizado?: number
 ): string {
   let message = ''
 
@@ -230,6 +253,12 @@ export function buildTurnosListMessage(
   message += `encontre ${turnos.length} turno${turnos.length > 1 ? 's' : ''} disponible${turnos.length > 1 ? 's' : ''}`
   if (sedeName) {
     message += ` en *${sedeName}*`
+  }
+  if (profesionalNombre) {
+    message += ` con *${formatProfesionalName(profesionalNombre)}*`
+  }
+  if (rangoUtilizado) {
+    message += ` para los proximos ${rangoUtilizado} dias`
   }
   message += `:\n\n`
 
