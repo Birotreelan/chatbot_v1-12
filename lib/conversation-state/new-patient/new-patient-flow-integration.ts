@@ -248,7 +248,7 @@ export async function handleNewPatientMessage(
       return handleSpecialtyPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_turno_selection':
-      return handleTurnoPhase(phone, userMessage, clientId, state)
+      return handleTurnoPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_email':
       return handleEmailPhase(phone, userMessage, clientId, state)
@@ -777,13 +777,28 @@ async function handleTurnoPhase(
   phone: string,
   userMessage: string,
   clientId: string,
-  state: NewPatientFlowState
+  state: NewPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<NewPatientResult> {
   if (!state.turnosOpciones) {
     return { handled: false, shouldCallOpenAI: true }
   }
 
-  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phone, clientId)
+  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phone, clientId, state.searchType)
+
+  // Si solicito rebusqueda con cualquier medico
+  if (result.requestedRebusqueda) {
+    state.searchType = 'cualquier_medico'
+    state.profesionalId = undefined
+    state.profesionalNombre = undefined
+    state.especialidadId = undefined
+    state.especialidadNombre = undefined
+    state.turnosOpciones = undefined
+    await saveFlowState(phone, state)
+    
+    // Iniciar busqueda con cualquier medico
+    return await searchAndShowTurnos(phone, clientId, state, escalationPhoneNumber)
+  }
 
   if (result.selectedTurno) {
     state.turnoSeleccionado = result.selectedTurno

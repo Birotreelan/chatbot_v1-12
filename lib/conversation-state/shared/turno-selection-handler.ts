@@ -4,7 +4,7 @@
  */
 
 import { createConversationLogger } from '../logger'
-import type { TurnoOption, HandlerResult } from './types'
+import type { TurnoOption, HandlerResult, SearchType } from './types'
 
 /**
  * Formatea fecha para mostrar al usuario (formato argentino)
@@ -19,6 +19,49 @@ function formatDateForDisplay(dateStr: string): string {
 }
 
 /**
+ * Construye el mensaje de seleccion invalida con lista de turnos y opcion de rebusqueda
+ */
+export function buildInvalidSelectionMessage(
+  turnosOpciones: TurnoOption[],
+  searchType?: SearchType
+): string {
+  let message = `No encontre esa opcion entre las disponibles.\n\n`
+  
+  // Agrupar turnos por fecha
+  const turnosPorFecha: Record<string, TurnoOption[]> = {}
+  turnosOpciones.forEach((turno) => {
+    if (!turnosPorFecha[turno.fecha]) {
+      turnosPorFecha[turno.fecha] = []
+    }
+    turnosPorFecha[turno.fecha].push(turno)
+  })
+
+  // Construir mensaje agrupado por fecha
+  Object.entries(turnosPorFecha).forEach(([fecha, turnosDia]) => {
+    const fechaFormateada = formatDateForDisplay(fecha)
+    message += `*${fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1)}*\n`
+
+    turnosDia.forEach((turno) => {
+      const hora = turno.hora && turno.hora !== 'undefined' && turno.hora.trim() ? turno.hora.trim() : 'Horario a confirmar'
+      const profesional = turno.profesionalNombre && turno.profesionalNombre !== 'undefined' && turno.profesionalNombre.trim() ? turno.profesionalNombre.trim() : 'Profesional a confirmar'
+      message += `  ${turno.numero}. ${hora} - ${profesional}\n`
+    })
+    message += '\n'
+  })
+
+  // Agregar opcion extra al final (N+1)
+  const opcionExtra = turnosOpciones.length + 1
+  if (searchType === 'cualquier_medico') {
+    message += `*${opcionExtra}. Buscar mas turnos*\n\n`
+  } else {
+    message += `*${opcionExtra}. Buscar con cualquier medico disponible*\n\n`
+  }
+  
+  message += `Responde con el *numero* de la opcion que prefieras.`
+  return message
+}
+
+/**
  * Maneja la seleccion de turno por parte del usuario
  * IMPORTANTE: Mapea por campo 'numero', NO por indice de array
  */
@@ -26,8 +69,9 @@ export async function handleTurnoSelection(
   userInput: string,
   turnosOpciones: TurnoOption[],
   phoneNumber: string,
-  clientId: string
-): Promise<HandlerResult & { selectedTurno?: TurnoOption }> {
+  clientId: string,
+  searchType?: SearchType
+): Promise<HandlerResult & { selectedTurno?: TurnoOption; requestedRebusqueda?: boolean; noMoreTurnos?: boolean }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turno_selection')
 
   // Normalizar input
@@ -38,6 +82,28 @@ export async function handleTurnoSelection(
 
   if (numeroMatch) {
     const numero = parseInt(numeroMatch[0], 10)
+    
+    // Verificar si eligio la opcion extra (N+1 = rebusqueda)
+    const opcionExtra = turnosOpciones.length + 1
+    if (numero === opcionExtra) {
+      logger.info('Usuario solicito rebusqueda', { searchType })
+      
+      if (searchType === 'cualquier_medico') {
+        // Para cualquier_medico, no hay mas opciones - mostrar mensaje final
+        return {
+          handled: true,
+          noMoreTurnos: true,
+          message: `Lo siento, los turnos que te he mostrado son todos los disponibles en este momento.\n\nResponde con el *numero* del turno que prefieras o podes consultarme mas adelante cuando haya mas disponibilidad.`,
+          nextPhase: 'awaiting_turno_selection',
+        }
+      } else {
+        // Para medico_particular o especialidad, permitir buscar con cualquier medico
+        return {
+          handled: true,
+          requestedRebusqueda: true,
+        }
+      }
+    }
 
     // CRITICO: Buscar turno por campo 'numero', NO por indice
     const turnoSeleccionado = turnosOpciones.find((t) => t.numero === numero)
@@ -62,11 +128,12 @@ export async function handleTurnoSelection(
       logger.info('Numero de turno fuera de rango', {
         numeroInput: numero,
         rangoValido: `1-${turnosOpciones.length}`,
+        opcionExtra,
       })
 
       return {
         handled: true,
-        message: `Ese numero no corresponde a ninguno de los turnos mostrados. Por favor, responde con un numero del *1 al ${turnosOpciones.length}*.`,
+        message: buildInvalidSelectionMessage(turnosOpciones, searchType),
         nextPhase: 'awaiting_turno_selection',
       }
     }
@@ -100,7 +167,7 @@ export async function handleTurnoSelection(
     logger.info('Seleccion de turno por texto no reconocido - solicitando numero', { input: userInput })
     return {
       handled: true,
-      message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *4*_`,
+      message: buildInvalidSelectionMessage(turnosOpciones, searchType),
       nextPhase: 'awaiting_turno_selection',
     }
   }
@@ -110,7 +177,7 @@ export async function handleTurnoSelection(
 
   return {
     handled: true,
-    message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *4*_`,
+    message: buildInvalidSelectionMessage(turnosOpciones, searchType),
     nextPhase: 'awaiting_turno_selection',
   }
 }
