@@ -357,16 +357,16 @@ export async function handleExistingPatientMessage(
       return handleSedePhase(phoneNumber, userMessage, clientId, state)
 
     case 'awaiting_search_type':
-      return handleSearchTypePhase(phoneNumber, userMessage, clientId, state)
+      return handleSearchTypePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_professional_name':
-      return handleProfessionalNamePhase(phoneNumber, userMessage, clientId, state)
+      return handleProfessionalNamePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_professional_selection':
-      return handleProfessionalSelectionPhase(phoneNumber, userMessage, clientId, state)
+      return handleProfessionalSelectionPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_specialty_selection':
-      return handleSpecialtyPhase(phoneNumber, userMessage, clientId, state)
+      return handleSpecialtyPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_turno_selection':
       return handleTurnoPhase(phoneNumber, userMessage, clientId, state)
@@ -434,7 +434,8 @@ async function handleSearchTypePhase(
   phoneNumber: string,
   userMessage: string,
   clientId: string,
-  state: ExistingPatientFlowState
+  state: ExistingPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'search_type_phase')
 
@@ -518,7 +519,8 @@ async function handleProfessionalNamePhase(
   phoneNumber: string,
   userMessage: string,
   clientId: string,
-  state: ExistingPatientFlowState
+  state: ExistingPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'professional_name_phase')
 
@@ -562,7 +564,8 @@ async function handleProfessionalSelectionPhase(
   phoneNumber: string,
   userMessage: string,
   clientId: string,
-  state: ExistingPatientFlowState
+  state: ExistingPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   if (!state.profesionalesOpciones) {
     return { handled: false, shouldCallOpenAI: true }
@@ -593,7 +596,8 @@ async function handleSpecialtyPhase(
   phoneNumber: string,
   userMessage: string,
   clientId: string,
-  state: ExistingPatientFlowState
+  state: ExistingPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   if (!state.especialidadesOpciones) {
     return { handled: false, shouldCallOpenAI: true }
