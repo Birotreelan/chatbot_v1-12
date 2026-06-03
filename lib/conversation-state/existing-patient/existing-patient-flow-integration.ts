@@ -495,7 +495,7 @@ async function handleSearchTypePhase(
         sedeId: state.sedeId,
         sedeNombre: state.sedeNombre,
       })
-      return await searchAndShowTurnos(phoneNumber, clientId, state)
+      return await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
     }
   }
 
@@ -534,7 +534,7 @@ async function handleProfessionalNamePhase(
       state.phase = 'awaiting_turno_selection'
       await saveFlowState(phoneNumber, state)
 
-      return await searchAndShowTurnos(phoneNumber, clientId, state)
+      return await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
     }
 
     // Multiples profesionales, mostrar lista
@@ -576,7 +576,7 @@ async function handleProfessionalSelectionPhase(
     state.attempts = 0
     await saveFlowState(phoneNumber, state)
 
-    return await searchAndShowTurnos(phoneNumber, clientId, state)
+    return await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
   }
 
   return {
@@ -607,7 +607,7 @@ async function handleSpecialtyPhase(
     state.attempts = 0
     await saveFlowState(phoneNumber, state)
 
-    return await searchAndShowTurnos(phoneNumber, clientId, state)
+    return await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
   }
 
   return {
@@ -623,7 +623,8 @@ async function handleSpecialtyPhase(
 async function searchAndShowTurnos(
   phoneNumber: string,
   clientId: string,
-  state: ExistingPatientFlowState
+  state: ExistingPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turnos_search')
 
