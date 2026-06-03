@@ -236,16 +236,16 @@ export async function handleNewPatientMessage(
       return handleSedePhase(phone, userMessage, clientId, state)
 
     case 'awaiting_search_type':
-      return handleSearchTypePhase(phone, userMessage, clientId, state)
+      return handleSearchTypePhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_professional_name':
-      return handleProfessionalNamePhase(phone, userMessage, clientId, state)
+      return handleProfessionalNamePhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_professional_selection':
-      return handleProfessionalSelectionPhase(phone, userMessage, clientId, state)
+      return handleProfessionalSelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_specialty_selection':
-      return handleSpecialtyPhase(phone, userMessage, clientId, state)
+      return handleSpecialtyPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_turno_selection':
       return handleTurnoPhase(phone, userMessage, clientId, state)
@@ -555,7 +555,8 @@ async function handleSearchTypePhase(
   phone: string,
   userMessage: string,
   clientId: string,
-  state: NewPatientFlowState
+  state: NewPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<NewPatientResult> {
   const result = await handleSearchTypeSelection(userMessage, phone, clientId)
 
@@ -609,7 +610,8 @@ async function handleProfessionalNamePhase(
   phone: string,
   userMessage: string,
   clientId: string,
-  state: NewPatientFlowState
+  state: NewPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<NewPatientResult> {
   const result = await handleProfessionalNameInput(userMessage, clientId, phone)
 
@@ -645,7 +647,8 @@ async function handleProfessionalSelectionPhase(
   phone: string,
   userMessage: string,
   clientId: string,
-  state: NewPatientFlowState
+  state: NewPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<NewPatientResult> {
   if (!state.profesionalesOpciones) {
     return { handled: false, shouldCallOpenAI: true }
