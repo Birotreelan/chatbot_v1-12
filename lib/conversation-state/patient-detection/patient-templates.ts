@@ -187,15 +187,48 @@ function buildMultipleTurnosGreeting(
 }
 
 /**
- * Saludo para paciente NO identificado (no encontrado por telefono)
- * Se solicita DNI para continuar
+ * Saludo para PACIENTE NO identificado (no encontrado por telefono)
+ * Se solicita intención: turno o consulta
  */
 export function buildNewPatientGreeting(
   clinicName: string = DEFAULT_CLINIC_NAME
 ): string {
   return (
     `*¡Bienvenido a ${clinicName}!*\n\n` +
-    `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +
+    `Soy Iris, tu asistente virtual de inteligencia artificial.\n\n` +
+    `Por favor indicame, ¿cuál es el motivo de tu contacto?\n\n` +
+    `1- Solicitar un turno médico\n` +
+    `2- Realizar otra consulta\n\n` +
+    `Respondé con el número de opción que prefieras.`
+  )
+}
+
+/**
+ * Mensaje cuando el usuario elige "Realizar otra consulta" (opción 2)
+ */
+export function buildOtherInquiryMessage(
+  escalationPhoneNumber?: string,
+  clinicName: string = DEFAULT_CLINIC_NAME
+): string {
+  let message = `Este canal de WhatsApp es exclusivo para la gestión de turnos médicos.\n\n`
+  
+  if (escalationPhoneNumber) {
+    message += `Para otro tipo de consultas, por favor comunicate telefonicamente al *${escalationPhoneNumber}*.\n\n`
+  } else {
+    message += `Para otro tipo de consultas, por favor comunicate con nosotros directamente.\n\n`
+  }
+  
+  message += `Si en algún momento necesitás gestionar un turno, escribime y con gusto te ayudo.`
+  
+  return message
+}
+
+/**
+ * Mensaje cuando el usuario elige "Solicitar un turno médico" (opción 1)
+ */
+export function buildTurnoIntentConfirmedMessage(): string {
+  return (
+    `Perfecto, te voy a ayudar con tu turno.\n\n` +
     `Para continuar, por favor *indicame tu DNI*.`
   )
 }
