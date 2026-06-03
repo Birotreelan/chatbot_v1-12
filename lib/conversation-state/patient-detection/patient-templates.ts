@@ -194,9 +194,9 @@ export function buildNewPatientGreeting(
   clinicName: string = DEFAULT_CLINIC_NAME
 ): string {
   return (
-    `¡Bienvenido a ${clinicName}!\n\n` +
+    `*¡Bienvenido a ${clinicName}!*\n\n` +
     `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +
-    `Para continuar, por favor indicame tu DNI.`
+    `Para continuar, por favor *indicame tu DNI*.`
   )
 }
 
@@ -209,9 +209,9 @@ export function buildMultiplePatientGreeting(
   clinicName: string = DEFAULT_CLINIC_NAME
 ): string {
   return (
-    `¡Bienvenido a ${clinicName}!\n\n` +
+    `*¡Bienvenido a ${clinicName}!*\n\n` +
     `Veo que este número está asociado a más de un paciente. ` +
-    `Para poder ayudarte mejor, por favor indicame tu DNI (7 u 8 dígitos) ` +
+    `Para poder ayudarte mejor, por favor *indicame tu DNI* (7 u 8 dígitos) ` +
     `para identificar correctamente tu información.`
   )
 }
