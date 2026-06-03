@@ -199,7 +199,7 @@ export function buildNewPatientGreeting(
     `Por favor indicame, ¿cuál es el motivo de tu contacto?\n\n` +
     `1- Solicitar un turno médico\n` +
     `2- Realizar otra consulta\n\n` +
-    `Respondé con el número de opción que prefieras.`
+    `Respondé con el *número* de opción que prefieras.`
   )
 }
 
