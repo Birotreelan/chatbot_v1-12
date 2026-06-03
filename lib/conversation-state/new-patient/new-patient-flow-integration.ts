@@ -18,6 +18,7 @@ import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { validarObraSocial } from '@/lib/api-tools/api-functions'
+import { ClinicAPI } from '@/lib/clinic-api'
 
 // Importar handlers compartidos
 import {
@@ -748,6 +749,8 @@ async function searchAndShowTurnos(
       especialidadNombre: mensajeEspecialidad,
       previousPhase: state.phase,
       newPhase: 'awaiting_search_type',
+      searchType: state.searchType,
+      infoSinTurnos: result.infoSinTurnos ? 'present' : 'absent',
     })
     
     // Limpiar datos del profesional/especialidad anterior para nueva busqueda
@@ -761,7 +764,26 @@ async function searchAndShowTurnos(
     state.phase = 'awaiting_search_type'
     await saveFlowState(phone, state)
     
-    const noTurnosMessage = buildNoTurnosMessage(state.sedeNombre, mensajeProfesional, mensajeEspecialidad)
+    // Obtener el número de escalación usando clinicAPI
+    let escalationPhoneNumber: string | undefined
+    try {
+      const clinicAPI = new ClinicAPI(clientId)
+      const configResponse = await clinicAPI.configuracion_clinica()
+      if (configResponse.exito && configResponse.datos) {
+        escalationPhoneNumber = configResponse.datos.escalationPhoneNumber || configResponse.datos.escalation_phone_number
+      }
+    } catch (e) {
+      logger.error('[TURNOS] Error obteniendo configuracion', e)
+    }
+    
+    const noTurnosMessage = buildNoTurnosMessage(
+      state.sedeNombre,
+      mensajeProfesional,
+      mensajeEspecialidad,
+      state.searchType,
+      result.infoSinTurnos,
+      escalationPhoneNumber
+    )
     logger.info('[TURNOS] Mensaje enviado al usuario', {
       messagePreview: noTurnosMessage.substring(0, 100) + '...',
     })
