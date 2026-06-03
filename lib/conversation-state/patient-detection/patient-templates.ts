@@ -105,7 +105,7 @@ function buildExistingPatientNoTurnosGreeting(
   const firstName = getFirstName(patientName)
 
   return (
-    `${firstName}, ¡bienvenido de nuevo a ${clinicName}!\n\n` +
+    `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n` +
     `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +
     `Veo que actualmente no tenés turnos agendados. ¿En qué te puedo ayudar?\n\n` +
     `1- Solicitar turno médico\n` +
@@ -131,7 +131,7 @@ function buildSingleTurnoGreeting(
   const estado = (turno.Estado || turno.estado || '').toLowerCase()
   const estaConfirmado = estado === 'confirmado'
 
-  let mensaje = `${firstName}, ¡bienvenido de nuevo a ${clinicName}!\n\n`
+  let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
 
   if (estaConfirmado) {
@@ -161,7 +161,7 @@ function buildMultipleTurnosGreeting(
   turnos: any[],
   clinicName: string
 ): string {
-  let mensaje = `${firstName}, ¡bienvenido de nuevo a ${clinicName}!\n\n`
+  let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
   mensaje += `*Veo que tenés ${turnos.length} turnos médicos agendados:*\n\n`
 
