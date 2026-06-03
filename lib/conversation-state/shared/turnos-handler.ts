@@ -147,7 +147,7 @@ export async function searchTurnosAcumulativo(
           id: turno.Id || turno.Agenda_Id || turno.id || turno.agenda_id,
           fecha: turno.Fecha || turno.fecha,
           // Intentar todas las variaciones conocidas para hora
-          hora: (turno.Hora || turno.hora || turno.hora_formateada || turno.horaFormateada || turno.Hora_Turno || 'N/A').toString().trim(),
+          hora: (turno.Hora || turno.hora || turno.hora_formateada || turno.horaFormateada || turno.Hora_Turno || 'N/A').toString().trim().substring(0, 5),
           profesionalId: turno.Profesional_Id || turno.profesional_id || turno.ProfesionalId,
           // Intentar todas las variaciones conocidas para nombre del profesional
           profesionalNombre: (
