@@ -6,7 +6,7 @@
 import { createConversationLogger } from '../logger'
 import { obtenerTurnos } from '../../api-tools/api-functions'
 import type { TurnoOption, HandlerResult } from './types'
-import { TURNOS_SEARCH_RANGES, MIN_TURNOS_TO_SHOW } from './types'
+import { TURNOS_SEARCH_RANGES, MIN_TURNOS_TO_SHOW, MIN_DIAS_VARIEDAD } from './types'
 
 /**
  * Formatea fecha para la API (YYYY-MM-DD)
@@ -28,6 +28,14 @@ function formatDateForDisplay(dateStr: string): string {
   const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
   
   return `${diasSemana[date.getDay()]} ${parseInt(day)} de ${meses[date.getMonth()]}`
+}
+
+/**
+ * Cuenta la cantidad de dias unicos en un array de turnos
+ */
+function countUniqueDays(turnos: TurnoOption[]): number {
+  const diasUnicos = new Set(turnos.map(t => t.fecha))
+  return diasUnicos.size
 }
 
 /**
@@ -193,13 +201,28 @@ export async function searchTurnosAcumulativo(
 
         rangoUtilizado = dias
 
-        // Si tenemos suficientes turnos, terminar
-        if (allTurnos.length >= MIN_TURNOS_TO_SHOW) {
+        // Contar dias unicos
+        const diasUnicos = countUniqueDays(allTurnos)
+
+        // Si tenemos suficientes turnos Y suficiente variedad de dias, terminar
+        // O si ya estamos en el ultimo rango, aceptar lo que hay
+        if ((allTurnos.length >= MIN_TURNOS_TO_SHOW && diasUnicos >= MIN_DIAS_VARIEDAD) || dias === 60) {
           logger.info('Suficientes turnos encontrados', {
             total: allTurnos.length,
+            diasUnicos,
             rango: dias,
           })
           break
+        }
+        
+        // Si tenemos turnos pero no suficiente variedad, seguir buscando
+        if (allTurnos.length >= MIN_TURNOS_TO_SHOW && diasUnicos < MIN_DIAS_VARIEDAD) {
+          logger.info('Turnos encontrados pero poca variedad de dias, expandiendo busqueda', {
+            total: allTurnos.length,
+            diasUnicos,
+            minDiasRequeridos: MIN_DIAS_VARIEDAD,
+            rango: dias,
+          })
         }
       }
     } catch (error) {

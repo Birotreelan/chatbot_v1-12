@@ -214,7 +214,7 @@ export function buildOtherInquiryMessage(
   let message = `Este canal de WhatsApp es exclusivo para la gestión de turnos médicos.\n\n`
   
   if (escalationPhoneNumber) {
-    message += `Para otro tipo de consultas, por favor escribinos por WhatsApp al *${escalationPhoneNumber}*.\n\n`
+    message += `Para otro tipo de consultas, por favor contactanos al *${escalationPhoneNumber}*.\n\n`
   } else {
     message += `Para otro tipo de consultas, por favor comunicate con nosotros directamente.\n\n`
   }

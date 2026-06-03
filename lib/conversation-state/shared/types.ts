@@ -143,3 +143,4 @@ export interface HandlerResult {
 // Configuracion de rangos de busqueda de turnos
 export const TURNOS_SEARCH_RANGES = [7, 14, 21, 28, 35, 42, 49, 56, 60]
 export const MIN_TURNOS_TO_SHOW = 8
+export const MIN_DIAS_VARIEDAD = 3 // Minimo de dias diferentes para mostrar resultados
