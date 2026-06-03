@@ -66,6 +66,7 @@ import type {
   TurnoOption,
   FlowPhase,
   ObraSocialValidada,
+  ObraSocialOption,
 } from '../shared/types'
 
 // Constantes
@@ -74,7 +75,7 @@ const NEW_PATIENT_FLOW_TTL = 86400 // 24 horas
 
 // Estado del flujo de paciente nuevo
 export interface NewPatientFlowState {
-  phase: FlowPhase | 'awaiting_name' | 'awaiting_obra_social'
+  phase: FlowPhase | 'awaiting_name' | 'awaiting_obra_social' | 'awaiting_obra_social_selection'
   dni: string
   phone: string
   
@@ -86,6 +87,7 @@ export interface NewPatientFlowState {
   obraSocialId?: string
   obraSocialNombre?: string
   obraSocialValidada: boolean
+  obraSocialOpciones?: ObraSocialOption[]
   
   // Sede
   sedeId?: string
@@ -226,6 +228,9 @@ export async function handleNewPatientMessage(
     case 'awaiting_obra_social':
       return handleObraSocialPhase(phone, userMessage, clientId, state)
 
+    case 'awaiting_obra_social_selection':
+      return handleObraSocialSelectionPhase(phone, userMessage, clientId, state)
+
     case 'awaiting_sede':
       return handleSedePhase(phone, userMessage, clientId, state)
 
@@ -359,17 +364,30 @@ async function handleObraSocialPhase(
       return await transitionToSedes(phone, clientId, state)
     }
 
-    // Multiples resultados - mostrar opciones
-    const opciones = result.datos.obras_sociales.slice(0, 5)
+    // Multiples resultados - mostrar opciones y cambiar fase
+    const opciones: ObraSocialOption[] = result.datos.obras_sociales.slice(0, 5).map((os, i) => ({
+      numero: i + 1,
+      id: os.id,
+      nombre: os.nombre,
+      razonSocial: os.razon_social,
+    }))
+    
     let mensaje = `Encontre varias opciones para "${input}":\n\n`
-    opciones.forEach((os, i) => {
-      mensaje += `${i + 1}. ${os.nombre}\n`
+    opciones.forEach((os) => {
+      mensaje += `${os.numero}. ${os.nombre}\n`
     })
     mensaje += `\nResponde con el *numero* de tu obra social.`
 
-    // Guardar opciones temporalmente
-    state.lastInvalidInput = JSON.stringify(opciones)
+    // Guardar opciones y cambiar fase a seleccion
+    state.obraSocialOpciones = opciones
+    state.phase = 'awaiting_obra_social_selection'
+    state.attempts = 0
     await saveFlowState(phone, state)
+    
+    logger.info('Multiples obras sociales encontradas, esperando seleccion', { 
+      count: opciones.length,
+      opciones: opciones.map(o => o.nombre)
+    })
 
     return {
       handled: true,
@@ -385,6 +403,75 @@ async function handleObraSocialPhase(
       message: 'Ocurrio un error al validar tu obra social. Por favor, intenta nuevamente.',
     }
   }
+}
+
+/**
+ * Fase: Seleccion de obra social de opciones mostradas
+ */
+async function handleObraSocialSelectionPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'obra_social_selection_phase')
+
+  if (!state.obraSocialOpciones || state.obraSocialOpciones.length === 0) {
+    // No hay opciones guardadas, volver a pedir obra social
+    state.phase = 'awaiting_obra_social'
+    await saveFlowState(phone, state)
+    return {
+      handled: true,
+      message: 'Por favor, escribi el nombre de tu *obra social o prepaga*.\n\nSi no tenes cobertura, escribi *Particular*.',
+    }
+  }
+
+  const input = userMessage.trim()
+  
+  // Intentar extraer numero de la respuesta
+  const numMatch = input.match(/^(\d+)$/)
+  if (numMatch) {
+    const selectedNum = parseInt(numMatch[1], 10)
+    const selectedOption = state.obraSocialOpciones.find(o => o.numero === selectedNum)
+    
+    if (selectedOption) {
+      state.obraSocialId = selectedOption.id
+      state.obraSocialNombre = selectedOption.nombre
+      state.obraSocialValidada = true
+      state.obraSocialOpciones = undefined // Limpiar opciones
+      state.attempts = 0
+      await saveFlowState(phone, state)
+      
+      logger.info('Obra social seleccionada por numero', { 
+        numero: selectedNum, 
+        id: selectedOption.id, 
+        nombre: selectedOption.nombre 
+      })
+      
+      // Siguiente paso: obtener sedes
+      return await transitionToSedes(phone, clientId, state)
+    }
+    
+    // Numero fuera de rango
+    state.attempts += 1
+    await saveFlowState(phone, state)
+    
+    const maxOption = state.obraSocialOpciones.length
+    return {
+      handled: true,
+      message: `No encontre la opcion ${selectedNum}. Por favor, responde con un numero del 1 al ${maxOption}.`,
+    }
+  }
+  
+  // No es un numero - el usuario puede estar escribiendo otro nombre de obra social
+  // Volver a la fase de obra social para procesar como nueva busqueda
+  logger.info('Input no numerico en seleccion de obra social, procesando como nueva busqueda', { input })
+  state.phase = 'awaiting_obra_social'
+  state.obraSocialOpciones = undefined
+  await saveFlowState(phone, state)
+  
+  // Re-procesar el mensaje como si fuera una nueva busqueda de obra social
+  return handleObraSocialPhase(phone, userMessage, clientId, state)
 }
 
 /**

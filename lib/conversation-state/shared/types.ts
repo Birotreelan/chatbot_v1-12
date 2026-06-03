@@ -52,6 +52,14 @@ export interface ObraSocialValidada {
   permiteTurnosOnline: boolean
 }
 
+// Opciones de obra social para seleccion
+export interface ObraSocialOption {
+  numero: number
+  id: string
+  nombre: string
+  razonSocial?: string
+}
+
 // Tipo de busqueda
 export type SearchType = 'medico_particular' | 'especialidad' | 'cualquier_medico'
 
@@ -60,6 +68,7 @@ export type FlowPhase =
   | 'awaiting_dni'
   | 'awaiting_name'
   | 'awaiting_obra_social'
+  | 'awaiting_obra_social_selection'
   | 'awaiting_sede'
   | 'awaiting_search_type'
   | 'awaiting_professional_name'
