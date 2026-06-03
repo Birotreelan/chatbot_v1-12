@@ -622,9 +622,10 @@ export async function processPatientDetectionMessage(
         3: 'book_new_appointment',
       }
     } else {
-      // Paciente SIN turnos: 1-Solicitar turno (único opción mostrada)
+      // Paciente SIN turnos: 1-Solicitar turno, 2-Otra consulta
       actionMap = {
         1: 'book_new_appointment',
+        2: 'other_inquiry_intent',
       }
     }
     

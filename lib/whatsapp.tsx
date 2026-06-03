@@ -1906,6 +1906,19 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           if ('action' in detectionResult && detectionResult.action && 'patientInfo' in detectionResult && detectionResult.patientInfo) {
             const patientInfo = detectionResult.patientInfo
 
+            if (detectionResult.action === 'other_inquiry_intent') {
+              // Paciente existente sin turnos eligió "Realizar otra consulta" → derivar a teléfono
+              console.log(`[WHATSAPP] Paciente existente eligió "otra consulta" → derivando a teléfono`)
+              const escalationPhone = config.escalationPhoneNumber || 'nuestro equipo'
+              const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
+                m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
+              )
+              await sendDirectResponse(detectionCtx, otherInquiryMessage, "other_inquiry_existing_patient")
+              await completePatientDetectionFlow(userPhoneNumber, config.id)
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
             if (detectionResult.action === 'book_new_appointment' || detectionResult.action === 'other_inquiry') {
               // Verificar si ya hay un flujo de paciente existente activo y más avanzado
               const existingPhase = await getExistingPatientFlowPhase(userPhoneNumber)
