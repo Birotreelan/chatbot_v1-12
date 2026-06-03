@@ -218,7 +218,9 @@ export async function searchTurnosAcumulativo(
 export function buildTurnosListMessage(
   turnos: TurnoOption[],
   patientName?: string,
-  sedeName?: string
+  sedeName?: string,
+  profesionalNombre?: string,
+  rangoUtilizado?: number
 ): string {
   let message = ''
 
@@ -230,6 +232,12 @@ export function buildTurnosListMessage(
   message += `encontre ${turnos.length} turno${turnos.length > 1 ? 's' : ''} disponible${turnos.length > 1 ? 's' : ''}`
   if (sedeName) {
     message += ` en *${sedeName}*`
+  }
+  if (profesionalNombre) {
+    message += ` con *${profesionalNombre}*`
+  }
+  if (rangoUtilizado) {
+    message += ` para los proximos ${rangoUtilizado} dias`
   }
   message += `:\n\n`
 
