@@ -8,6 +8,19 @@ import { obtenerTodasLasSedes } from '../../api-tools/api-functions'
 import type { SedeOption, HandlerResult, SharedFlowState } from './types'
 
 /**
+ * Convierte un texto a Title Case (CamelCase de palabras)
+ * Ejemplo: "SALUD OCULAR CALLAO" → "Salud Ocular Callao"
+ */
+function toTitleCase(text: string): string {
+  if (!text) return text
+  return text
+    .toLowerCase()
+    .split(' ')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+/**
  * Obtiene las sedes desde la API y las formatea
  */
 export async function fetchSedes(clientId: string): Promise<{
@@ -75,10 +88,12 @@ export function buildSedesMessage(
 
   // Listar sedes con formato completo
   sedes.forEach((sede) => {
-    let sedeInfo = `${sede.numero}. *${sede.nombre}*`
+    let sedeInfo = `${sede.numero}. *${toTitleCase(sede.nombre)}*`
 
     // Agregar ubicacion si esta disponible
-    const ubicacionParts = [sede.domicilio, sede.localidad, sede.provincia].filter(Boolean)
+    const ubicacionParts = [sede.domicilio, sede.localidad, sede.provincia]
+      .filter(Boolean)
+      .map(toTitleCase)
     if (ubicacionParts.length > 0) {
       sedeInfo += `\n   Ubicacion: ${ubicacionParts.join(', ')}`
     }
