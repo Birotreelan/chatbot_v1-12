@@ -47,6 +47,7 @@ export async function searchTurnosAcumulativo(
   success: boolean
   turnos?: TurnoOption[]
   rangoUtilizado?: number
+  infoSinTurnos?: any
   error?: string
 }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turnos_search')
@@ -54,6 +55,7 @@ export async function searchTurnosAcumulativo(
   const today = new Date()
   let allTurnos: TurnoOption[] = []
   let rangoUtilizado = 0
+  let infoSinTurnos: any = undefined
 
   // Iterar por rangos hasta encontrar suficientes turnos
   for (const dias of TURNOS_SEARCH_RANGES) {
@@ -76,6 +78,11 @@ export async function searchTurnosAcumulativo(
       )
 
       if (result.exito && result.datos) {
+        // Capturar info_sin_turnos si existe (cuando no hay turnos pero hay profesionales solo por telefono)
+        if (result.datos.info_sin_turnos) {
+          infoSinTurnos = result.datos.info_sin_turnos
+        }
+        
         // Procesar turnos recibidos
         // La API devuelve: { turnos_disponibles: [{ fecha: "...", turnos: [...] }, ...] }
         // O puede devolver directamente un array de turnos
@@ -200,6 +207,7 @@ export async function searchTurnosAcumulativo(
   if (allTurnos.length === 0) {
     return {
       success: false,
+      infoSinTurnos,
       error: 'No se encontraron turnos disponibles en los proximos 60 dias',
     }
   }
@@ -208,6 +216,7 @@ export async function searchTurnosAcumulativo(
     success: true,
     turnos: allTurnos,
     rangoUtilizado,
+    infoSinTurnos,
   }
 }
 
@@ -269,14 +278,31 @@ export function buildTurnosListMessage(
 
 /**
  * Mensaje cuando no hay turnos disponibles
+ * Versiones diferentes segun el tipo de busqueda
  * Las opciones DEBEN coincidir con awaiting_search_type para mantener consistencia
  */
 export function buildNoTurnosMessage(
   sedeName?: string,
   profesionalName?: string,
-  especialidadName?: string
+  especialidadName?: string,
+  searchType?: string,
+  infoSinTurnos?: any,
+  escalationPhoneNumber?: string
 ): string {
-  let message = 'No encontre turnos disponibles'
+  let message = ''
+
+  // Si la busqueda fue "Cualquier medico disponible" (tipo 3) y hay info de profesionales solo por telefono
+  if (searchType === 'cualquier_medico' && infoSinTurnos?.profesionales_disponibles_solo_telefono && infoSinTurnos.profesionales_disponibles_solo_telefono.length > 0) {
+    message += `No encontre turnos disponibles para agendar online en *${sedeName || 'esta sede'}*.\n\n`
+    message += `Sin embargo, hay profesionales con turnos disponibles para tu obra social que solo se pueden reservar por telefono.\n\n`
+    if (escalationPhoneNumber) {
+      message += `Para agendar tu turno, comunicate al: *${escalationPhoneNumber}*`
+    }
+    return message
+  }
+
+  // Mensaje estándar para búsquedas tipo 1 o 2, o cuando no hay info de profesionales por teléfono
+  message += 'No encontre turnos disponibles'
 
   if (profesionalName) {
     message += ` con *${profesionalName}*`
