@@ -351,15 +351,18 @@ export async function obtenerTurnos(
 
   if (resultado.exito && resultado.datos) {
     const turnos = resultado.datos.turnos_disponibles || resultado.datos
+    const infoSinTurnos = resultado.datos.info_sin_turnos
     console.log('[v0] obtenerTurnos - Raw data sample:', {
       isArray: Array.isArray(turnos),
       firstItemKeys: Array.isArray(turnos) && turnos.length > 0 ? Object.keys(turnos[0]) : 'N/A',
       firstItem: Array.isArray(turnos) && turnos.length > 0 ? JSON.stringify(turnos[0]).substring(0, 500) : 'N/A',
-      totalCount: Array.isArray(turnos) ? turnos.length : 'not array'
+      totalCount: Array.isArray(turnos) ? turnos.length : 'not array',
+      hasInfoSinTurnos: !!infoSinTurnos
     })
     return {
       exito: true,
       datos: turnos,
+      info_sin_turnos: infoSinTurnos,
     }
   }
 

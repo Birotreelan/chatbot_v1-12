@@ -79,7 +79,10 @@ export async function searchTurnosAcumulativo(
 
       if (result.exito && result.datos) {
         // Capturar info_sin_turnos si existe (cuando no hay turnos pero hay profesionales solo por telefono)
-        if (result.datos.info_sin_turnos) {
+        // Puede venir en result.info_sin_turnos (desde obtenerTurnos modificado) o en result.datos.info_sin_turnos
+        if (result.info_sin_turnos) {
+          infoSinTurnos = result.info_sin_turnos
+        } else if (result.datos.info_sin_turnos) {
           infoSinTurnos = result.datos.info_sin_turnos
         }
         
