@@ -108,8 +108,9 @@ function buildExistingPatientNoTurnosGreeting(
     `${firstName}, ¡bienvenido de nuevo a ${clinicName}!\n\n` +
     `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +
     `Veo que actualmente no tenés turnos agendados. ¿En qué te puedo ayudar?\n\n` +
-    `1- Solicitar turno médico.\n\n` +
-    `Por favor, respondé con el número de opción que prefieras.`
+    `1- Solicitar turno médico\n` +
+    `2- Realizar otra consulta\n\n` +
+    `Por favor, respondé con el *número* de opción que prefieras.`
   )
 }
 
