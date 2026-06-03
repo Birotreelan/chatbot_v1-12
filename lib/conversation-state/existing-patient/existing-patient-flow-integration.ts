@@ -7,7 +7,6 @@ import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
-import { ClinicAPI } from '@/lib/clinic-api'
 
 // Importar handlers compartidos
 import {
@@ -340,7 +339,8 @@ export async function initializeExistingPatientFlow(
 export async function handleExistingPatientMessage(
   phoneNumber: string,
   userMessage: string,
-  clientId: string
+  clientId: string,
+  escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_message')
 
@@ -682,18 +682,6 @@ async function searchAndShowTurnos(
     state.turnosOpciones = undefined
     state.phase = 'awaiting_search_type'
     await saveFlowState(phoneNumber, state)
-    
-    // Obtener el número de escalación usando clinicAPI
-    let escalationPhoneNumber: string | undefined
-    try {
-      const clinicAPI = new ClinicAPI(clientId)
-      const configResponse = await clinicAPI.configuracion_clinica()
-      if (configResponse.exito && configResponse.datos) {
-        escalationPhoneNumber = configResponse.datos.escalationPhoneNumber || configResponse.datos.escalation_phone_number
-      }
-    } catch (e) {
-      logger.error('[TURNOS] Error obteniendo configuracion', e)
-    }
     
     const noTurnosMessage = buildNoTurnosMessage(
       state.sedeNombre,
