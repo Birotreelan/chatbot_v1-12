@@ -43,8 +43,6 @@ export function buildConfirmationMessage(
   message += `Apellido: ${patientData?.apellido || ''}\n\n`
   message += `Nombre: ${patientData?.nombre || ''}\n\n`
   message += `DNI: ${patientData?.dni || ''}\n\n`
-  message += `Celular: ${patientData?.telefono || ''}\n\n`
-  message += `Mail: ${patientData?.email || ''}\n\n`
   message += `Obra Social: ${obraSocialNombre || ''}\n\n`
 
   message += `**DATOS DEL TURNO:**\n\n`

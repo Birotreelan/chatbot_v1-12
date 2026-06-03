@@ -803,16 +803,25 @@ async function handleTurnoPhase(
 
   if (result.selectedTurno) {
     state.turnoSeleccionado = result.selectedTurno
-    state.phase = 'awaiting_email' // Email siempre es obligatorio para paciente nuevo
+    state.phase = 'awaiting_confirmation'
     state.attempts = 0
     await saveFlowState(phone, state)
 
-    const turnoMsg = buildTurnoSelectedMessage(result.selectedTurno)
-    const emailMsg = buildEmailRequestMessage()
-
+    const nombreCompleto = `${state.nombre} ${state.apellido}`
     return {
       handled: true,
-      message: `${turnoMsg}\n\n${emailMsg}`,
+      message: buildConfirmationMessage(
+        result.selectedTurno,
+        nombreCompleto,
+        state.sedeNombre,
+        state.obraSocialNombre,
+        {
+          apellido: state.apellido,
+          nombre: state.nombre,
+          dni: state.dni,
+          telefono: state.telefono,
+        }
+      ),
     }
   }
 

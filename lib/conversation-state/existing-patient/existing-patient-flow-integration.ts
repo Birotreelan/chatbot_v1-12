@@ -725,22 +725,6 @@ async function handleTurnoPhase(
     state.turnoSeleccionado = result.selectedTurno
     state.attempts = 0
 
-    // Verificar si necesita email
-    if (shouldRequestEmail(state.patientEmail)) {
-      state.phase = 'awaiting_email'
-      await saveFlowState(phoneNumber, state)
-
-      const turnoMsg = buildTurnoSelectedMessage(result.selectedTurno)
-      const emailMsg = buildEmailRequestMessage()
-
-      return {
-        handled: true,
-        message: `${turnoMsg}\n\n${emailMsg}`,
-        nextPhase: 'awaiting_email',
-      }
-    }
-
-    // Ya tiene email, ir a confirmacion
     // Enriquecer estado con datos frescos de la API si faltan campos clave
     if (!state.patientFirstName || !state.patientLastName || !state.obraSocialNombre || !state.patientDNI) {
       const logger = createConversationLogger(phoneNumber, clientId, 'turno_phase_enrichment')
