@@ -298,9 +298,11 @@ export function buildNoTurnosMessage(
   if (searchType === 'cualquier_medico' && infoSinTurnos?.profesionales_disponibles_solo_telefono && infoSinTurnos.profesionales_disponibles_solo_telefono.length > 0) {
     message += `No encontre turnos disponibles para agendar online en *${sedeName || 'esta sede'}*.\n\n`
     message += `Sin embargo, hay profesionales con turnos disponibles para tu obra social que solo se pueden reservar por telefono.\n\n`
+    message += `Para agendar tu turno, comunicate directamente con la clinica`
     if (escalationPhoneNumber) {
-      message += `Para agendar tu turno, comunicate al: *${escalationPhoneNumber}*`
+      message += ` al: *${escalationPhoneNumber}*`
     }
+    message += `.`
     return message
   }
 
