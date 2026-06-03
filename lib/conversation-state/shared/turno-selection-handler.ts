@@ -54,7 +54,7 @@ export async function handleTurnoSelection(
 
       return {
         handled: true,
-        nextPhase: 'awaiting_email', // Siguiente paso: verificar/solicitar email
+        nextPhase: 'awaiting_confirmation',
         selectedTurno: turnoSeleccionado,
       }
     } else {
@@ -87,7 +87,7 @@ export async function handleTurnoSelection(
 
       return {
         handled: true,
-        nextPhase: 'awaiting_email',
+        nextPhase: 'awaiting_confirmation',
         selectedTurno: turnoByHora,
       }
     }
