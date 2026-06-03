@@ -18,7 +18,6 @@ import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { validarObraSocial } from '@/lib/api-tools/api-functions'
-import { ClinicAPI } from '@/lib/clinic-api'
 
 // Importar handlers compartidos
 import {
@@ -210,7 +209,8 @@ export async function initializeNewPatientFlow(
 export async function handleNewPatientMessage(
   phone: string,
   userMessage: string,
-  clientId: string
+  clientId: string,
+  escalationPhoneNumber?: string
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'new_patient_message')
 
@@ -592,7 +592,7 @@ async function handleSearchTypePhase(
     }
 
     if (result.searchType === 'cualquier_medico') {
-      return await searchAndShowTurnos(phone, clientId, state)
+      return await searchAndShowTurnos(phone, clientId, state, escalationPhoneNumber)
     }
   }
 
@@ -620,7 +620,7 @@ async function handleProfessionalNamePhase(
       state.profesionalId = result.profesionales[0].id
       state.profesionalNombre = result.profesionales[0].nombre
       await saveFlowState(phone, state)
-      return await searchAndShowTurnos(phone, clientId, state)
+      return await searchAndShowTurnos(phone, clientId, state, escalationPhoneNumber)
     }
 
     state.phase = 'awaiting_professional_selection'
@@ -659,37 +659,7 @@ async function handleProfessionalSelectionPhase(
     state.attempts = 0
     await saveFlowState(phone, state)
 
-    return await searchAndShowTurnos(phone, clientId, state)
-  }
-
-  return {
-    handled: true,
-    message: result.message,
-  }
-}
-
-/**
- * Fase: Seleccion de especialidad
- */
-async function handleSpecialtyPhase(
-  phone: string,
-  userMessage: string,
-  clientId: string,
-  state: NewPatientFlowState
-): Promise<NewPatientResult> {
-  if (!state.especialidadesOpciones) {
-    return { handled: false, shouldCallOpenAI: true }
-  }
-
-  const result = await handleSpecialtySelection(userMessage, state.especialidadesOpciones, phone, clientId)
-
-  if (result.selectedSpecialty) {
-    state.especialidadId = result.selectedSpecialty.id
-    state.especialidadNombre = result.selectedSpecialty.nombre
-    state.attempts = 0
-    await saveFlowState(phone, state)
-
-    return await searchAndShowTurnos(phone, clientId, state)
+    return await searchAndShowTurnos(phone, clientId, state, escalationPhoneNumber)
   }
 
   return {
@@ -704,7 +674,8 @@ async function handleSpecialtyPhase(
 async function searchAndShowTurnos(
   phone: string,
   clientId: string,
-  state: NewPatientFlowState
+  state: NewPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'turnos_search_new_patient')
   
@@ -763,18 +734,6 @@ async function searchAndShowTurnos(
     state.turnosOpciones = undefined
     state.phase = 'awaiting_search_type'
     await saveFlowState(phone, state)
-    
-    // Obtener el número de escalación usando clinicAPI
-    let escalationPhoneNumber: string | undefined
-    try {
-      const clinicAPI = new ClinicAPI(clientId)
-      const configResponse = await clinicAPI.configuracion_clinica()
-      if (configResponse.exito && configResponse.datos) {
-        escalationPhoneNumber = configResponse.datos.escalationPhoneNumber || configResponse.datos.escalation_phone_number
-      }
-    } catch (e) {
-      logger.error('[TURNOS] Error obteniendo configuracion', e)
-    }
     
     const noTurnosMessage = buildNoTurnosMessage(
       state.sedeNombre,
