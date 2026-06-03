@@ -33,7 +33,7 @@ function getDefaultDateRange(): { desde: string; hasta: string } {
  * Tipos internos del flujo
  */
 interface PatientDetectionState {
-  phase: 'awaiting_initial_response' | 'awaiting_dni_for_disambiguation' | 'awaiting_action_selection' | 'completed'
+  phase: 'awaiting_contact_intent' | 'awaiting_initial_response' | 'awaiting_dni_for_disambiguation' | 'awaiting_action_selection' | 'completed'
   patientPhone: string
   patientId?: string
   patientName?: string
@@ -89,7 +89,7 @@ export async function startPatientDetectionFlow(
 
       // Crear estado para paciente nuevo
       const newPatientState: PatientDetectionState = {
-        phase: 'awaiting_initial_response',
+        phase: 'awaiting_contact_intent',
         patientPhone: phoneNumber,
         detectedAt: Date.now(),
         attempts: 1,
@@ -575,7 +575,40 @@ export async function processPatientDetectionMessage(
   })
 
   // Mapear acciones según fase
-  if (state.phase === 'awaiting_action_selection') {
+  if (state.phase === 'awaiting_contact_intent') {
+    // NUEVA FASE: Paciente nuevo selecciona: 1-Turno, 2-Consulta
+    const intentMap: Record<number, string> = {
+      1: 'book_appointment_intent', // Usuario quiere agendar turno
+      2: 'other_inquiry_intent',     // Usuario quiere hacer otra consulta
+    }
+
+    logger.info('Contact intent selection detected', {
+      selection,
+      mappedAction: intentMap[selection] || 'none',
+    })
+
+    const action = intentMap[selection]
+
+    if (action) {
+      // Actualizar fase según la intención
+      if (action === 'book_appointment_intent') {
+        // Usuario quiere turno: pasar a solicitar DNI
+        state.phase = 'awaiting_initial_response'
+        await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+      } else if (action === 'other_inquiry_intent') {
+        // Usuario quiere consulta: marcar como completado y devolver esa acción
+        state.phase = 'completed'
+        await redis.setex(stateKey, 3600, JSON.stringify(state)) // 1 hora
+      }
+
+      return {
+        handled: true,
+        action,
+        nextPhase: 'contact_intent_processed',
+        data: {},
+      }
+    }
+  } else if (state.phase === 'awaiting_action_selection') {
     // El mapeo depende de si el paciente tiene turnos o no
     const hasTurnos = state.turnos && state.turnos.length > 0
     

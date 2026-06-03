@@ -17,6 +17,8 @@ import {
   buildInvalidSelectionMessage,
   buildDetectionErrorMessage,
   buildTurnosSummary,
+  buildOtherInquiryMessage,
+  buildTurnoIntentConfirmedMessage,
 } from './patient-templates'
 import { extractIntent, mapIntentToAction } from './intent-extractor'
 
@@ -166,6 +168,18 @@ export async function handlePatientDetectionMessage(
   if (!state) {
     logger.warn('No state found despite flow being active', {})
     return { handled: false, shouldCallOpenAI: true }
+  }
+
+  // --- Fase: Selección de intención de contacto (paciente nuevo — turno vs consulta) ---
+  if (state.phase === 'awaiting_contact_intent') {
+    logger.info('Processing contact intent selection', {})
+    // Delegar a whatsapp.tsx para procesar con clienteId disponible
+    return {
+      handled: false,
+      shouldCallOpenAI: false,
+      action: 'contact_intent_pending',
+      patientInfo: { isNewPatient: true },
+    }
   }
 
   // --- Fase: Espera de DNI para desambiguar múltiples pacientes ---
