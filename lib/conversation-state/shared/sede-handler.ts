@@ -64,11 +64,11 @@ export function buildSedesMessage(
   // Encabezado personalizado
   if (patientName) {
     const primerNombre = patientName.split(' ')[0]
-    message += `Hola ${primerNombre}, `
+    message += `Gracias, ${primerNombre}. `
   }
 
   if (obraSocial) {
-    message += `tu cobertura es *${obraSocial}*.\n\n`
+    message += `Tu cobertura es *${obraSocial}*.\n\n`
   }
 
   message += `Para continuar, selecciona la sede donde queres atenderte:\n\n`
