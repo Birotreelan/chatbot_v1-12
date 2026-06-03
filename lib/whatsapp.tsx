@@ -1,4 +1,4 @@
-import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId } from "@/lib/db"
+import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId, clearAllConversationStates } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
 import { getAssistantResponse } from "@/lib/openai-tools"
@@ -1281,10 +1281,22 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       try {
         console.log(`[WHATSAPP] Procesando comando de reset para el usuario ${userPhoneNumber}`)
 
+        // 1. Resetear el thread de OpenAI
         const resetResult = await resetThreadForUser(userPhoneNumber, config.id)
         console.log(`[WHATSAPP] ✅ Thread reseteado exitosamente`)
         console.log(`[WHATSAPP] - Nuevo thread ID: ${resetResult.threadId}`)
         console.log(`[WHATSAPP] - isNewThread: ${resetResult.isNewThread}`)
+
+        // 2. Limpiar TODOS los estados de conversación en Redis
+        const clearResult = await clearAllConversationStates(userPhoneNumber, config.id)
+        console.log(`[WHATSAPP] ✅ Estados de conversación limpiados`)
+        console.log(`[WHATSAPP] - Keys limpiadas: ${clearResult.clearedKeys.length}`)
+        if (clearResult.clearedKeys.length > 0) {
+          console.log(`[WHATSAPP] - Detalle: ${clearResult.clearedKeys.join(', ')}`)
+        }
+        if (clearResult.errors.length > 0) {
+          console.warn(`[WHATSAPP] ⚠️ Errores al limpiar: ${clearResult.errors.join(', ')}`)
+        }
 
         // Enviar mensaje de confirmación
         await sendWhatsAppMessage(

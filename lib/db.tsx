@@ -752,6 +752,84 @@ export async function resetThreadForUser(
   )
 }
 
+/**
+ * Limpia TODOS los estados de conversación almacenados en Redis para un usuario.
+ * Esta función debe llamarse junto con resetThreadForUser para un reset completo.
+ * 
+ * Estados que se limpian:
+ * - conv_context: Contexto de conversación general
+ * - turn_selection: Selección de turnos  
+ * - reschedule_flow: Flujo de reagendamiento
+ * - post-action: Contexto post-acción
+ * - patient_detection_state: Estado de detección de paciente
+ * - new_patient_flow: Flujo de nuevo paciente
+ * - dni_awaiting: Estado de espera de DNI
+ * - booking_flow: Flujo de reserva
+ * - existing_patient_flow: Flujo de paciente existente
+ * - appointment_context: Contexto de cita
+ * - appointment_flow: Estado de flujo de cita
+ */
+export async function clearAllConversationStates(
+  phoneNumber: string,
+  configId: string
+): Promise<{ clearedKeys: string[], errors: string[] }> {
+  const normalizedPhone = normalizePhoneNumber(phoneNumber)
+  const redisClient = getRedisClient()
+  
+  const clearedKeys: string[] = []
+  const errors: string[] = []
+  
+  if (!redisClient) {
+    console.warn("[DB] Redis no disponible para limpiar estados de conversación")
+    return { clearedKeys, errors: ["Redis no disponible"] }
+  }
+  
+  console.log(`[DB] 🧹 Iniciando limpieza de TODOS los estados para ${normalizedPhone}`)
+  
+  // Lista de todas las keys que debemos limpiar
+  // Formato: algunos usan configId:phone, otros usan solo phone
+  const keysToDelete = [
+    // Con formato configId:phone
+    `conv_context:${configId}:${normalizedPhone}`,
+    `turn_selection:${configId}:${normalizedPhone}`,
+    `reschedule_flow:${configId}:${normalizedPhone}`,
+    `post-action:${configId}:${normalizedPhone}`,
+    `dni_awaiting:${configId}:${normalizedPhone}`,
+    `booking_flow:${configId}:${normalizedPhone}`,
+    `appointment_context:${configId}:${normalizedPhone}`,
+    `appointment_flow:${configId}:${normalizedPhone}`,
+    
+    // Con formato solo phone (sin configId)
+    `patient_detection_state:${normalizedPhone}`,
+    `new_patient_flow:${normalizedPhone}`,
+    `existing_patient_flow:${normalizedPhone}`,
+  ]
+  
+  // Limpiar cada key
+  for (const key of keysToDelete) {
+    try {
+      const deleted = await redisClient.del(key)
+      if (deleted > 0) {
+        clearedKeys.push(key)
+        console.log(`[DB] ✅ Estado limpiado: ${key}`)
+      }
+    } catch (error) {
+      const errorMsg = `Error limpiando ${key}: ${(error as Error).message}`
+      errors.push(errorMsg)
+      console.error(`[DB] ❌ ${errorMsg}`)
+    }
+  }
+  
+  console.log(`[DB] 🧹 Limpieza completada:`)
+  console.log(`[DB]   - Keys limpiadas: ${clearedKeys.length}`)
+  console.log(`[DB]   - Errores: ${errors.length}`)
+  if (clearedKeys.length > 0) {
+    console.log(`[DB]   - Detalle: ${clearedKeys.join(', ')}`)
+  }
+  
+  return { clearedKeys, errors }
+}
+
 // Obtener todos los threads
 export async function getAllThreads(): Promise<ThreadInfo[]> {
   const redisClient = getRedisClient()
