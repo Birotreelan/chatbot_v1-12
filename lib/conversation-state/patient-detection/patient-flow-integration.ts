@@ -8,6 +8,7 @@ import {
   clearPatientDetectionFlow,
   processDNIForDisambiguation,
   getPatientDetectionState,
+  updatePatientDetectionPhase,
 } from './patient-flow-handler'
 import {
   buildExistingPatientGreeting,
@@ -511,4 +512,4 @@ export async function handleDNIForMultiplePatients(
 }
 
 // Re-export functions from handler so they can be imported from this module
-export { isPatientDetectionFlowActive, getDetectedPatientInfo, clearPatientDetectionFlow } from './patient-flow-handler'
+export { isPatientDetectionFlowActive, getDetectedPatientInfo, clearPatientDetectionFlow, updatePatientDetectionPhase } from './patient-flow-handler'

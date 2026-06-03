@@ -716,6 +716,26 @@ export async function clearPatientDetectionFlow(
 }
 
 /**
+ * Actualiza la fase del flujo de detección de paciente
+ */
+export async function updatePatientDetectionPhase(
+  phoneNumber: string,
+  newPhase: 'awaiting_contact_intent' | 'awaiting_initial_response' | 'awaiting_dni_for_disambiguation' | 'awaiting_action_selection' | 'completed'
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+
+  const stateKey = `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`
+  const state = await getPatientDetectionState(phoneNumber)
+  
+  if (!state) return false
+
+  state.phase = newPhase
+  await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+  return true
+}
+
+/**
  * Obtiene información del paciente detectado
  */
 export async function getDetectedPatientInfo(phoneNumber: string): Promise<{

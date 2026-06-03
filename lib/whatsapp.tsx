@@ -69,6 +69,7 @@ import {
   shouldUsePatientDetection,
   completePatientDetectionFlow,
   isPatientDetectionFlowActive,
+  updatePatientDetectionPhase,
 } from "./conversation-state/patient-detection/patient-flow-integration"
 import {
   initializeExistingPatientFlow,
@@ -1862,6 +1863,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           if (selection === 1) {
             // Opción 1: Solicitar turno — cambiar fase a awaiting_initial_response (pedir DNI)
+            await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_initial_response')
             const turnoConfirmMessage = await import('./conversation-state/patient-detection/patient-templates').then(
               m => m.buildTurnoIntentConfirmedMessage()
             )
