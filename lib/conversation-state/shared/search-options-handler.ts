@@ -7,10 +7,23 @@ import { createConversationLogger } from '../logger'
 import type { SearchType, HandlerResult } from './types'
 
 /**
+ * Convierte un texto a Title Case (CamelCase de palabras)
+ */
+function toTitleCase(text: string): string {
+  if (!text) return text
+  return text
+    .toLowerCase()
+    .split(' ')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+/**
  * Construye el mensaje de opciones de busqueda
  */
 export function buildSearchOptionsMessage(sedeName: string): string {
-  return `Perfecto, elegiste *${sedeName}*.
+  const formattedSedeName = toTitleCase(sedeName)
+  return `Perfecto, elegiste *${formattedSedeName}*.
 
 Ahora decime, como te gustaria buscar tu turno?
 
