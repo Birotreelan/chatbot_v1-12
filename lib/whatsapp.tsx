@@ -1807,23 +1807,21 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // INTERCEPTAR FLUJOS ACTIVOS: Detección inicial, Paciente Existente o Nuevo (Sprint 9a-c)
     // ============================================================================
     if (message.type === "text") {
-      // Verificar si hay algún flujo activo de Sprint 9a, 9b o 9c
+      // Verificar si hay algún flujo activo de Sprint 9a, 9b, 9c o Sprint 30
+      // IMPORTANTE: Verificar flujo multiusuario PRIMERO, antes de detección
+      const isMultiPatientActive = await isMultiPatientFlowActive(userPhoneNumber)
       const isDetectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
                                await isExistingPatientFlowActive(userPhoneNumber) ||
                                await isNewPatientFlowActive(userPhoneNumber)
       
-      if (isDetectionActive) {
+      if (isMultiPatientActive || isDetectionActive) {
         const detectionFlags = await getEffectiveFeatureFlags(config.id)
         
         // Procesar mensaje durante detección
         let detectionResult = null
         
-        if (await isPatientDetectionFlowActive(userPhoneNumber)) {
-          // Sprint 9a: Flujo de detección inicial (menú principal, desambiguación por DNI, etc.)
-          console.log(`[WHATSAPP] Procesando mensaje en flujo de detección inicial (Sprint 9a)`)
-          detectionResult = await handlePatientDetectionMessage(userPhoneNumber, userMessage, config.cliente_id)
-        } else if (await isMultiPatientFlowActive(userPhoneNumber)) {
-          // Sprint 30: Flujo multiusuario (familiar)
+        if (isMultiPatientActive) {
+          // Sprint 30: Flujo multiusuario (familiar) - VERIFICAR PRIMERO
           console.log(`[WHATSAPP] Procesando mensaje en flujo multiusuario (familiar)`)
           
           const multiPatientState = await getTargetPatientInfo(userPhoneNumber)
@@ -1892,6 +1890,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               return
             }
           }
+        } else if (await isPatientDetectionFlowActive(userPhoneNumber)) {
+          // Sprint 9a: Flujo de detección inicial (menú principal, desambiguación por DNI, etc.)
+          console.log(`[WHATSAPP] Procesando mensaje en flujo de detección inicial (Sprint 9a)`)
+          detectionResult = await handlePatientDetectionMessage(userPhoneNumber, userMessage, config.cliente_id)
         } else if (await isExistingPatientFlowActive(userPhoneNumber)) {
           console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente existente`)
           detectionResult = await handleExistingPatientMessage(
