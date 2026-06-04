@@ -1844,13 +1844,14 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               if (dniResult.action === 'patient_found' && dniResult.patientInfo) {
                 const existingResult = await initializeExistingPatientFlow(
                   userPhoneNumber,
-                  dniResult.patientInfo.patientId,
+                  dniResult.patientInfo.patientId || '',
                   dniResult.patientInfo.patientName || '',
                   dniResult.patientInfo.patientDNI || '',
                   undefined,
                   config.cliente_id,
                   undefined,
-                  config.escalationPhoneNumber
+                  config.escalationPhoneNumber,
+                  true // isMultiPatientFlow = true
                 )
                 if (existingResult?.handled && existingResult.message) {
                   await sendDirectResponse({ phoneNumberId: value.metadata.phone_number_id, accessToken: config.accessToken, userPhoneNumber, configId: config.id }, existingResult.message, "existing_patient_flow")

@@ -172,7 +172,7 @@ export async function handleTargetDNIInput(
       state.targetPatientDNI = dniOnly
       state.targetPatientName = pacienteNombre
       state.targetPatientId = pacienteId
-      state.phase = 'completed'
+      state.phase = 'completed' // Marcar como completado pero NO limpiar aún
 
       await saveFlowState(phoneNumber, state)
 
