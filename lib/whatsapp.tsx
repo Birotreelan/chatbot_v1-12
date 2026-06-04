@@ -1761,28 +1761,28 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     }
   }
   
-  // ============================================================================
-  // NEW: INTERCEPTAR DETECCION INICIAL DE PACIENTE (Sin recordatorio previo)
+    // ============================================================================
+    // NEW: INTERCEPTAR DETECCION INICIAL DE PACIENTE (Sin recordatorio previo)
     // Sprint 9a-c: Nuevo flujo deterministico de deteccion e intake
     // ============================================================================
     if (message.type === "text") {
-      const detectionFlags = await getEffectiveFeatureFlags(config.id)
-      
-      // Verificar si debe usar detección de paciente
-      const hasPendingReminder = false // TODO: Verificar si hay recordatorio pendiente en el contexto
-      const shouldDetect = await shouldUsePatientDetection(userPhoneNumber, config.id, hasPendingReminder)
-      
-      if (detectionFlags.directPatientDetection && shouldDetect) {
-        console.log(`[WHATSAPP] 🔍 Iniciando detección de paciente para ${userPhoneNumber}`)
-        
-        // Primero verificar si ya hay un flujo de detección activo (Sprint 9a, 9b o 9c)
-        const detectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
+      // Verificar PRIMERO si hay flujo activo (el orden de prioridad debe ser correcto)
+      // Esto evita reinicializar detección si ya hay un flujo en curso
+      const isMultiPatientActive = await isMultiPatientFlowActive(userPhoneNumber)
+      const isDetectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
                                await isExistingPatientFlowActive(userPhoneNumber) || 
                                await isNewPatientFlowActive(userPhoneNumber)
+      
+      // Solo inicializar si NO hay flujo activo
+      if (!isMultiPatientActive && !isDetectionActive) {
+        const detectionFlags = await getEffectiveFeatureFlags(config.id)
+        const hasPendingReminder = false // TODO: Verificar si hay recordatorio pendiente en el contexto
+        const shouldDetect = await shouldUsePatientDetection(userPhoneNumber, config.cliente_id, hasPendingReminder)
         
-        if (!detectionActive) {
-          // No hay flujo activo, iniciar detección
-          // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
+        if (detectionFlags.directPatientDetection && shouldDetect) {
+          console.log(`[WHATSAPP] 🔍 Iniciando detección de paciente para ${userPhoneNumber}`)
+          
+          // Inicializar detección
           const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
           
           if (detectionResult.handled) {
