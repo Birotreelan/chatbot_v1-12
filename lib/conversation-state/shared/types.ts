@@ -58,6 +58,7 @@ export interface ObraSocialOption {
   id: string
   nombre: string
   razonSocial?: string
+  permite_turnos_online?: boolean // 🆕 AGREGAR CAMPO PARA VALIDAR TURNOS ONLINE
 }
 
 // Tipo de busqueda
