@@ -356,7 +356,7 @@ async function handleObraSocialPhase(
       
       // 🆕 VALIDAR SI PERMITE TURNOS ONLINE
       if (obraSocial.permite_turnos_online === false) {
-        const numeroDerivacion = process.env.ESCALATION_PHONE_NUMBER || '[NÚMERO DE DERIVACIÓN]'
+        const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
         logger.warn('Obra social no permite turnos online', { 
           obraSocialId: obraSocial.id, 
           nombre: obraSocial.nombre 
@@ -456,7 +456,7 @@ async function handleObraSocialSelectionPhase(
     if (selectedOption) {
       // 🆕 VALIDAR SI PERMITE TURNOS ONLINE
       if (selectedOption.permite_turnos_online === false) {
-        const numeroDerivacion = process.env.ESCALATION_PHONE_NUMBER || '[NÚMERO DE DERIVACIÓN]'
+        const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
         logger.warn('Obra social seleccionada no permite turnos online', { 
           id: selectedOption.id, 
           nombre: selectedOption.nombre 

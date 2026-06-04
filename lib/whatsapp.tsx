@@ -1948,8 +1948,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 patientInfo.patientName || '',
                 '', // DNI vendrá del estado de detección
                 undefined, // Email será ingresado por el usuario
-                config.cliente_id
+                config.cliente_id,
                 // No pasar additionalPatientData - serán recuperados del estado de detección en initializeExistingPatientFlow
+                undefined,
+                config.escalationPhoneNumber
               )
               if (existingResult?.handled && existingResult.message) {
                 await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")

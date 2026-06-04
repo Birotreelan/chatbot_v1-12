@@ -241,7 +241,8 @@ export async function initializeExistingPatientFlow(
     patientLastName?: string
     obraSocialId?: string
     obraSocialNombre?: string
-  }
+  },
+  escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_init')
   logger.info('Initializing existing patient flow', { patientId, patientName })
@@ -298,7 +299,7 @@ export async function initializeExistingPatientFlow(
         const obraSocial = obraSocialValidation.datos.obras_sociales[0]
         
         if (obraSocial.permite_turnos_online === false) {
-          const numeroDerivacion = process.env.ESCALATION_PHONE_NUMBER || '[NÚMERO DE DERIVACIÓN]'
+          const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
           logger.warn('Obra social de paciente existente no permite turnos online', {
             obraSocialId: finalObraSocialId,
             obraSocialNombre: finalObraSocialNombre,
