@@ -172,7 +172,8 @@ export async function handleTargetDNIInput(
       state.targetPatientDNI = dniOnly
       state.targetPatientName = pacienteNombre
       state.targetPatientId = pacienteId
-      state.phase = 'completed' // Marcar como completado pero NO limpiar aún
+      // NO marcar como 'completed' aquí - dejar que whatsapp.tsx maneje la transición
+      // state.phase será limpiado por clearMultiPatientFlow() después de transicionar
 
       await saveFlowState(phoneNumber, state)
 
