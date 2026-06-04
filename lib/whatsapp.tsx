@@ -72,14 +72,6 @@ import {
   updatePatientDetectionPhase,
 } from "./conversation-state/patient-detection/patient-flow-integration"
 import {
-  initializeMultiPatientFlow,
-  handleTargetDNIInput,
-  handleTargetNameInput,
-  isMultiPatientFlowActive,
-  getTargetPatientInfo,
-  clearMultiPatientFlow,
-} from "./conversation-state/shared/multi-patient-handler"
-import {
   initializeExistingPatientFlow,
   handleExistingPatientMessage,
   isExistingPatientFlowActive,
@@ -1761,28 +1753,28 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     }
   }
   
-    // ============================================================================
-    // NEW: INTERCEPTAR DETECCION INICIAL DE PACIENTE (Sin recordatorio previo)
+  // ============================================================================
+  // NEW: INTERCEPTAR DETECCION INICIAL DE PACIENTE (Sin recordatorio previo)
     // Sprint 9a-c: Nuevo flujo deterministico de deteccion e intake
     // ============================================================================
     if (message.type === "text") {
-      // Verificar PRIMERO si hay flujo activo (el orden de prioridad debe ser correcto)
-      // Esto evita reinicializar detección si ya hay un flujo en curso
-      const isMultiPatientActive = await isMultiPatientFlowActive(userPhoneNumber)
-      const isDetectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
+      const detectionFlags = await getEffectiveFeatureFlags(config.id)
+      
+      // Verificar si debe usar detección de paciente
+      const hasPendingReminder = false // TODO: Verificar si hay recordatorio pendiente en el contexto
+      const shouldDetect = await shouldUsePatientDetection(userPhoneNumber, config.id, hasPendingReminder)
+      
+      if (detectionFlags.directPatientDetection && shouldDetect) {
+        console.log(`[WHATSAPP] 🔍 Iniciando detección de paciente para ${userPhoneNumber}`)
+        
+        // Primero verificar si ya hay un flujo de detección activo (Sprint 9a, 9b o 9c)
+        const detectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
                                await isExistingPatientFlowActive(userPhoneNumber) || 
                                await isNewPatientFlowActive(userPhoneNumber)
-      
-      // Solo inicializar si NO hay flujo activo
-      if (!isMultiPatientActive && !isDetectionActive) {
-        const detectionFlags = await getEffectiveFeatureFlags(config.id)
-        const hasPendingReminder = false // TODO: Verificar si hay recordatorio pendiente en el contexto
-        const shouldDetect = await shouldUsePatientDetection(userPhoneNumber, config.cliente_id, hasPendingReminder)
         
-        if (detectionFlags.directPatientDetection && shouldDetect) {
-          console.log(`[WHATSAPP] 🔍 Iniciando detección de paciente para ${userPhoneNumber}`)
-          
-          // Inicializar detección
+        if (!detectionActive) {
+          // No hay flujo activo, iniciar detección
+          // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
           const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
           
           if (detectionResult.handled) {
@@ -1807,91 +1799,18 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // INTERCEPTAR FLUJOS ACTIVOS: Detección inicial, Paciente Existente o Nuevo (Sprint 9a-c)
     // ============================================================================
     if (message.type === "text") {
-      // Verificar si hay algún flujo activo de Sprint 9a, 9b, 9c o Sprint 30
-      // IMPORTANTE: Verificar flujo multiusuario PRIMERO, antes de detección
-      const isMultiPatientActive = await isMultiPatientFlowActive(userPhoneNumber)
+      // Verificar si hay algún flujo activo de Sprint 9a, 9b o 9c
       const isDetectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
                                await isExistingPatientFlowActive(userPhoneNumber) ||
                                await isNewPatientFlowActive(userPhoneNumber)
       
-      if (isMultiPatientActive || isDetectionActive) {
+      if (isDetectionActive) {
         const detectionFlags = await getEffectiveFeatureFlags(config.id)
         
         // Procesar mensaje durante detección
         let detectionResult = null
         
-        if (isMultiPatientActive) {
-          // Sprint 30: Flujo multiusuario (familiar) - VERIFICAR PRIMERO
-          console.log(`[WHATSAPP] Procesando mensaje en flujo multiusuario (familiar)`)
-          
-          const multiPatientState = await getTargetPatientInfo(userPhoneNumber)
-          if (!multiPatientState) {
-            console.log(`[WHATSAPP] Estado del flujo multiusuario no encontrado`)
-            detectionResult = { handled: false, shouldCallOpenAI: true }
-          } else if (multiPatientState.phase === 'awaiting_target_dni') {
-            // Usuario está ingresando el DNI del familiar
-            const dniResult = await handleTargetDNIInput(
-              userPhoneNumber,
-              userMessage,
-              config.cliente_id,
-              config.id
-            )
-            
-            if (dniResult.handled && dniResult.message) {
-              await sendDirectResponse({ phoneNumberId: value.metadata.phone_number_id, accessToken: config.accessToken, userPhoneNumber, configId: config.id }, dniResult.message, "multi_patient_dni")
-              
-              // Si encontró paciente, continuar al flujo de paciente existente
-              if (dniResult.action === 'patient_found' && dniResult.patientInfo) {
-                const existingResult = await initializeExistingPatientFlow(
-                  userPhoneNumber,
-                  dniResult.patientInfo.patientId || '',
-                  dniResult.patientInfo.patientName || '',
-                  dniResult.patientInfo.patientDNI || '',
-                  undefined,
-                  config.cliente_id,
-                  undefined,
-                  config.escalationPhoneNumber,
-                  true // isMultiPatientFlow = true
-                )
-                if (existingResult?.handled && existingResult.message) {
-                  await sendDirectResponse({ phoneNumberId: value.metadata.phone_number_id, accessToken: config.accessToken, userPhoneNumber, configId: config.id }, existingResult.message, "existing_patient_flow")
-                }
-                await clearMultiPatientFlow(userPhoneNumber)
-              }
-              
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
-            }
-          } else if (multiPatientState.phase === 'awaiting_target_name') {
-            // Usuario está ingresando el nombre del familiar (paciente nuevo)
-            const nameResult = await handleTargetNameInput(
-              userPhoneNumber,
-              userMessage,
-              config.cliente_id,
-              config.id
-            )
-            
-            if (nameResult.handled && nameResult.message) {
-              await sendDirectResponse({ phoneNumberId: value.metadata.phone_number_id, accessToken: config.accessToken, userPhoneNumber, configId: config.id }, nameResult.message, "multi_patient_name")
-              
-              // Si completó el nombre, continuar al flujo de paciente nuevo
-              if (nameResult.patientInfo) {
-                const newPatientResult = await initializeNewPatientFlow(
-                  nameResult.patientInfo.patientDNI || '',
-                  userPhoneNumber,
-                  config.cliente_id
-                )
-                if (newPatientResult?.handled && newPatientResult.message) {
-                  await sendDirectResponse({ phoneNumberId: value.metadata.phone_number_id, accessToken: config.accessToken, userPhoneNumber, configId: config.id }, newPatientResult.message, "new_patient_flow")
-                }
-                await clearMultiPatientFlow(userPhoneNumber)
-              }
-              
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
-            }
-          }
-        } else if (await isPatientDetectionFlowActive(userPhoneNumber)) {
+        if (await isPatientDetectionFlowActive(userPhoneNumber)) {
           // Sprint 9a: Flujo de detección inicial (menú principal, desambiguación por DNI, etc.)
           console.log(`[WHATSAPP] Procesando mensaje en flujo de detección inicial (Sprint 9a)`)
           detectionResult = await handlePatientDetectionMessage(userPhoneNumber, userMessage, config.cliente_id)
@@ -2015,28 +1934,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
               )
               await sendDirectResponse(detectionCtx, otherInquiryMessage, "other_inquiry_existing_patient")
-              await completePatientDetectionFlow(userPhoneNumber, config.id)
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
-            }
-
-            if (detectionResult.action === 'book_family_appointment') {
-              // Usuario seleccionó opción 3 "Solicitar turno para un familiar"
-              console.log(`[WHATSAPP] Usuario seleccionó "turno para un familiar" → iniciando flujo multiusuario`)
-              
-              // Inicializar flujo de familiar
-              const multiPatientResult = await initializeMultiPatientFlow(
-                userPhoneNumber,
-                patientInfo.patientName,
-                patientInfo.patientDNI,
-                patientInfo.patientId
-              )
-              
-              if (multiPatientResult?.message) {
-                await sendDirectResponse(detectionCtx, multiPatientResult.message, "multi_patient_flow")
-              }
-              
-              // Limpiar detección pero mantener contexto de solicitante
               await completePatientDetectionFlow(userPhoneNumber, config.id)
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
