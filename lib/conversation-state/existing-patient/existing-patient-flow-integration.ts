@@ -20,6 +20,7 @@ import {
   buildSearchOptionsMessage,
   handleSearchTypeSelection,
   buildProfessionalNameRequestMessage,
+  type SearchOptionsConfig,
 } from '../shared/search-options-handler'
 import {
   fetchSpecialties,
@@ -372,7 +373,8 @@ export async function handleExistingPatientMessage(
   phoneNumber: string,
   userMessage: string,
   clientId: string,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  searchOptionsConfig?: SearchOptionsConfig
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_message')
 
@@ -386,10 +388,10 @@ export async function handleExistingPatientMessage(
   // Router por fase
   switch (state.phase) {
     case 'awaiting_sede':
-      return handleSedePhase(phoneNumber, userMessage, clientId, state)
+      return handleSedePhase(phoneNumber, userMessage, clientId, state, searchOptionsConfig)
 
     case 'awaiting_search_type':
-      return handleSearchTypePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
+      return handleSearchTypePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
 
     case 'awaiting_professional_name':
       return handleProfessionalNamePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
@@ -422,7 +424,8 @@ async function handleSedePhase(
   phoneNumber: string,
   userMessage: string,
   clientId: string,
-  state: ExistingPatientFlowState
+  state: ExistingPatientFlowState,
+  searchOptionsConfig?: SearchOptionsConfig
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'sede_phase')
 
@@ -443,7 +446,7 @@ async function handleSedePhase(
 
     return {
       handled: true,
-      message: buildSearchOptionsMessage(state.sedeNombre),
+      message: buildSearchOptionsMessage(state.sedeNombre, searchOptionsConfig),
       nextPhase: 'awaiting_search_type',
     }
   }
@@ -467,7 +470,8 @@ async function handleSearchTypePhase(
   userMessage: string,
   clientId: string,
   state: ExistingPatientFlowState,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  searchOptionsConfig?: SearchOptionsConfig
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'search_type_phase')
 
@@ -479,7 +483,7 @@ async function handleSearchTypePhase(
     previousEspecialidad: state.especialidadNombre,
   })
 
-  const result = await handleSearchTypeSelection(userMessage, phoneNumber, clientId)
+  const result = await handleSearchTypeSelection(userMessage, phoneNumber, clientId, searchOptionsConfig)
 
   logger.info('[SEARCH_TYPE] Resultado de seleccion', {
     searchType: result.searchType,

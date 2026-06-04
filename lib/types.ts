@@ -18,6 +18,11 @@ export interface WhatsAppConfig {
   proxy?: string
   escalationPhoneNumber?: string
 
+  // Configuración de opciones de búsqueda disponibles para pacientes
+  enableSearchByProfessional?: boolean
+  enableSearchBySpecialty?: boolean
+  enableSearchByAnyDoctor?: boolean
+
   healthStatus?: "AVAILABLE" | "LIMITED" | "BLOCKED"
   lastHealthCheck?: string
   healthCheckError?: string
