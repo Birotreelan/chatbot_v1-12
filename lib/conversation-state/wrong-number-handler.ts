@@ -134,15 +134,29 @@ export function mightBeWrongNumber(message: string): boolean {
 /**
  * Construye la respuesta de disculpa para numero equivocado
  * Siguiendo el template del asst_router
+ * 
+ * @param hasRecentReminder - Si hubo un recordatorio reciente (para contextualizar el mensaje)
  */
-function buildWrongNumberResponse(): string {
+function buildWrongNumberResponse(hasRecentReminder: boolean = false): string {
   const timeGreeting = getTimeBasedGreeting()
   
-  return `Disculpa la molestia. Parece que el recordatorio fue dirigido a un numero equivocado. Vamos a revisar nuestros registros para evitar contactarte nuevamente por este turno.
+  if (hasRecentReminder) {
+    // Contexto: El usuario está respondiendo a un recordatorio
+    return `Disculpa la molestia. Parece que el recordatorio fue dirigido a un número equivocado. Vamos a revisar nuestros registros para evitar contactarte nuevamente por este turno.
 
-Si necesitas gestionar un turno propio en otro momento, podes escribirnos por este mismo canal indicando tu DNI y con gusto te ayudamos.
+Si necesitas gestionar un turno propio en otro momento, podés escribirnos por este mismo canal indicando tu DNI y con gusto te ayudamos.
 
 ${timeGreeting}`
+  } else {
+    // Contexto: El usuario contactó directamente diciendo que no es la persona registrada
+    // Oferecemos la opción de agendar para sí mismo o para otra persona
+    return `Ah, entendido. ¿Para quién deseas agendar un turno entonces?
+
+1. Para ti mismo/a
+2. Para otra persona
+
+Respondé con el número de opción.`
+  }
 }
 
 /**
@@ -233,12 +247,12 @@ export async function detectWrongNumberPreFlow(
 
   // Paso 1: Verificar patron claro (alta confianza)
   if (isWrongNumberPattern(message)) {
-    logger.info("Numero equivocado detectado por patron", { message })
+    logger.info("Numero equivocado detectado por patron", { message, hasRecentReminder })
     
     // Marcar usuario como "persona equivocada"
     await setWrongPersonState(userPhone, configId)
     
-    const response = buildWrongNumberResponse()
+    const response = buildWrongNumberResponse(hasRecentReminder)
     return { 
       isWrongNumber: true, 
       response,
