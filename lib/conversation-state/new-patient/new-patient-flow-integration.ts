@@ -235,7 +235,7 @@ export async function handleNewPatientMessage(
       return handleObraSocialSelectionPhase(phone, userMessage, clientId, state)
 
     case 'awaiting_sede':
-      return handleSedePhase(phone, userMessage, clientId, state)
+      return handleSedePhase(phone, userMessage, clientId, state, searchOptionsConfig)
 
     case 'awaiting_search_type':
       return handleSearchTypePhase(phone, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
@@ -554,7 +554,8 @@ async function handleSedePhase(
   phone: string,
   userMessage: string,
   clientId: string,
-  state: NewPatientFlowState
+  state: NewPatientFlowState,
+  searchOptionsConfig?: SearchOptionsConfig
 ): Promise<NewPatientResult> {
   if (!state.sedesOpciones || state.sedesOpciones.length === 0) {
     return { handled: false, shouldCallOpenAI: true }
