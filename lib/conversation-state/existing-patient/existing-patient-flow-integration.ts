@@ -243,21 +243,17 @@ export async function initializeExistingPatientFlow(
     obraSocialId?: string
     obraSocialNombre?: string
   },
-  escalationPhoneNumber?: string,
-  isMultiPatientFlow: boolean = false
+  escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_init')
-  logger.info('Initializing existing patient flow', { patientId, patientName, isMultiPatientFlow })
+  logger.info('Initializing existing patient flow', { patientId, patientName })
 
-  // Si es desde flujo multiusuario (familiar), saltear la verificación de flag
-  if (!isMultiPatientFlow) {
-    const flags = await getEffectiveFeatureFlags(clientId)
-    if (!flags.directPacienteExistente) {
-      return {
-        handled: false,
-        shouldCallOpenAI: true,
-        openAIContext: 'Use route_to_pacienteExistente',
-      }
+  const flags = await getEffectiveFeatureFlags(clientId)
+  if (!flags.directPacienteExistente) {
+    return {
+      handled: false,
+      shouldCallOpenAI: true,
+      openAIContext: 'Use route_to_pacienteExistente',
     }
   }
 

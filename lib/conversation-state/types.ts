@@ -84,13 +84,6 @@ export type ConversationPhase =
   | "new_patient_awaiting_confirmation"
   | "new_patient_completed"
 
-  // Flujo de familiar (Sprint 30)
-  | "family_patient_awaiting_dni"
-  | "family_patient_awaiting_name"
-  | "family_patient_found"
-  | "family_patient_new_creating"
-  | "family_patient_completed"
-
 /**
  * Contexto de la conversación guardado en Redis
  * Incluye tanto los datos del usuario como el estado actual
