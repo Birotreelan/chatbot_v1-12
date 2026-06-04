@@ -30,6 +30,7 @@ import {
   buildSearchOptionsMessage,
   handleSearchTypeSelection,
   buildProfessionalNameRequestMessage,
+  type SearchOptionsConfig,
 } from '../shared/search-options-handler'
 import {
   fetchSpecialties,
@@ -210,7 +211,8 @@ export async function handleNewPatientMessage(
   phone: string,
   userMessage: string,
   clientId: string,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  searchOptionsConfig?: SearchOptionsConfig
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'new_patient_message')
 
@@ -236,7 +238,7 @@ export async function handleNewPatientMessage(
       return handleSedePhase(phone, userMessage, clientId, state)
 
     case 'awaiting_search_type':
-      return handleSearchTypePhase(phone, userMessage, clientId, state, escalationPhoneNumber)
+      return handleSearchTypePhase(phone, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
 
     case 'awaiting_professional_name':
       return handleProfessionalNamePhase(phone, userMessage, clientId, state, escalationPhoneNumber)
@@ -569,7 +571,7 @@ async function handleSedePhase(
 
     return {
       handled: true,
-      message: buildSearchOptionsMessage(state.sedeNombre),
+      message: buildSearchOptionsMessage(state.sedeNombre, searchOptionsConfig),
     }
   }
 
@@ -590,9 +592,10 @@ async function handleSearchTypePhase(
   userMessage: string,
   clientId: string,
   state: NewPatientFlowState,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  searchOptionsConfig?: SearchOptionsConfig
 ): Promise<NewPatientResult> {
-  const result = await handleSearchTypeSelection(userMessage, phone, clientId)
+  const result = await handleSearchTypeSelection(userMessage, phone, clientId, searchOptionsConfig)
 
   if (result.searchType) {
     state.searchType = result.searchType

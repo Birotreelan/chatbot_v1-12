@@ -1816,10 +1816,30 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           detectionResult = await handlePatientDetectionMessage(userPhoneNumber, userMessage, config.cliente_id)
         } else if (await isExistingPatientFlowActive(userPhoneNumber)) {
           console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente existente`)
-          detectionResult = await handleExistingPatientMessage(userPhoneNumber, userMessage, config.cliente_id, config.escalationPhoneNumber)
+          detectionResult = await handleExistingPatientMessage(
+            userPhoneNumber,
+            userMessage,
+            config.cliente_id,
+            config.escalationPhoneNumber,
+            {
+              enableSearchByProfessional: config.enableSearchByProfessional !== false,
+              enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
+              enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+            }
+          )
         } else if (await isNewPatientFlowActive(userPhoneNumber)) {
           console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente nuevo`)
-          detectionResult = await handleNewPatientMessage(userPhoneNumber, userMessage, config.cliente_id, config.escalationPhoneNumber)
+          detectionResult = await handleNewPatientMessage(
+            userPhoneNumber,
+            userMessage,
+            config.cliente_id,
+            config.escalationPhoneNumber,
+            {
+              enableSearchByProfessional: config.enableSearchByProfessional !== false,
+              enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
+              enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+            }
+          )
         }
         
         const detectionCtx: DirectResponseContext = {
@@ -1932,7 +1952,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               if (existingPhase && advancedPhases.includes(existingPhase)) {
                 // Ya hay un flujo activo más avanzado - procesar el mensaje "1" en ese contexto
                 console.log(`[WHATSAPP] Flujo de paciente existente ya activo en fase avanzada "${existingPhase}" → procesando mensaje en ese flujo`)
-                const existingResult = await handleExistingPatientMessage(userPhoneNumber, userMessage, config.cliente_id, config.escalationPhoneNumber)
+                const existingResult = await handleExistingPatientMessage(
+                  userPhoneNumber,
+                  userMessage,
+                  config.cliente_id,
+                  config.escalationPhoneNumber,
+                  {
+                    enableSearchByProfessional: config.enableSearchByProfessional !== false,
+                    enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
+                    enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+                  }
+                )
                 if (existingResult?.handled && existingResult.message) {
                   await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")
                 }

@@ -69,6 +69,9 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     widgetTheme: "light",
     widgetFloatingButtonText: "Obtené tu turno con nuestro asistente virtual",
     widgetShowFloatingText: true,
+    enableSearchByProfessional: true,
+    enableSearchBySpecialty: true,
+    enableSearchByAnyDoctor: true,
     ...config,
   })
 
@@ -156,6 +159,16 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
 
     if (formData.widgetSecondaryColor && !hexColorRegex.test(formData.widgetSecondaryColor)) {
       newErrors.widgetSecondaryColor = "Debe ser un color hexadecimal válido (ej: #f0f9ff)"
+    }
+
+    // Validar que al menos una opción de búsqueda esté habilitada
+    const hasAnySearchOption = 
+      formData.enableSearchByProfessional !== false ||
+      formData.enableSearchBySpecialty !== false ||
+      formData.enableSearchByAnyDoctor !== false
+
+    if (!hasAnySearchOption) {
+      newErrors.searchOptions = "Debe habilitar al menos una opción de búsqueda de turnos"
     }
 
     setErrors(newErrors)
@@ -270,6 +283,75 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 <p className="text-sm text-muted-foreground">
                   Número de teléfono para derivar cuando el chatbot no pueda responder
                 </p>
+              </div>
+
+              <Separator className="my-4" />
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="text-base font-semibold">Opciones de Búsqueda de Turnos</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Selecciona qué opciones de búsqueda se mostrarán a los pacientes. Al menos una debe estar habilitada.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 pl-0">
+                  <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                    <Switch
+                      id="enableSearchByProfessional"
+                      checked={formData.enableSearchByProfessional !== false}
+                      onCheckedChange={(checked) => updateFormData("enableSearchByProfessional", checked)}
+                    />
+                    <div className="flex-1">
+                      <Label htmlFor="enableSearchByProfessional" className="text-sm font-medium">
+                        Médico en particular
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Permite buscar por nombre específico del profesional
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                    <Switch
+                      id="enableSearchBySpecialty"
+                      checked={formData.enableSearchBySpecialty !== false}
+                      onCheckedChange={(checked) => updateFormData("enableSearchBySpecialty", checked)}
+                    />
+                    <div className="flex-1">
+                      <Label htmlFor="enableSearchBySpecialty" className="text-sm font-medium">
+                        Por especialidad
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Permite elegir una especialidad y ver profesionales disponibles
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                    <Switch
+                      id="enableSearchByAnyDoctor"
+                      checked={formData.enableSearchByAnyDoctor !== false}
+                      onCheckedChange={(checked) => updateFormData("enableSearchByAnyDoctor", checked)}
+                    />
+                    <div className="flex-1">
+                      <Label htmlFor="enableSearchByAnyDoctor" className="text-sm font-medium">
+                        Cualquier médico disponible
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Muestra los próximos turnos disponibles sin importar el profesional
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {errors.searchOptions && (
+                  <Alert className="border-red-500 bg-red-50">
+                    <AlertDescription className="text-red-700">{errors.searchOptions}</AlertDescription>
+                  </Alert>
+                )}
               </div>
 
               <div className="flex items-center space-x-2">

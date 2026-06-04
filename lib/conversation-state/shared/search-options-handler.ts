@@ -6,6 +6,12 @@
 import { createConversationLogger } from '../logger'
 import type { SearchType, HandlerResult } from './types'
 
+export interface SearchOptionsConfig {
+  enableSearchByProfessional?: boolean
+  enableSearchBySpecialty?: boolean
+  enableSearchByAnyDoctor?: boolean
+}
+
 /**
  * Convierte un texto a Title Case (CamelCase de palabras)
  */
@@ -19,17 +25,68 @@ function toTitleCase(text: string): string {
 }
 
 /**
+ * Construye las opciones disponibles basado en la configuración
+ */
+function getAvailableOptions(config?: SearchOptionsConfig): Array<{ number: number; key: string; label: string; description: string }> {
+  // Default: todas las opciones habilitadas
+  const enableByProfessional = config?.enableSearchByProfessional !== false
+  const enableBySpecialty = config?.enableSearchBySpecialty !== false
+  const enableByAnyDoctor = config?.enableSearchByAnyDoctor !== false
+
+  const allOptions = [
+    {
+      number: 1,
+      key: 'medico_particular',
+      label: 'Medico en particular',
+      description: 'Si ya sabes con que profesional queres atenderte',
+    },
+    {
+      number: 2,
+      key: 'especialidad',
+      label: 'Por especialidad',
+      description: 'Para elegir una especialidad y ver los profesionales disponibles',
+    },
+    {
+      number: 3,
+      key: 'cualquier_medico',
+      label: 'Cualquier medico disponible',
+      description: 'Para ver los turnos mas proximos sin importar el profesional',
+    },
+  ]
+
+  // Filtrar según configuración
+  let availableOptions = allOptions.filter((opt) => {
+    if (opt.number === 1) return enableByProfessional
+    if (opt.number === 2) return enableBySpecialty
+    if (opt.number === 3) return enableByAnyDoctor
+    return true
+  })
+
+  // Renumerar opciones (1, 2, 3, etc.)
+  availableOptions = availableOptions.map((opt, index) => ({
+    ...opt,
+    number: index + 1,
+  }))
+
+  return availableOptions
+}
+
+/**
  * Construye el mensaje de opciones de busqueda
  */
-export function buildSearchOptionsMessage(sedeName: string): string {
+export function buildSearchOptionsMessage(sedeName: string, config?: SearchOptionsConfig): string {
   const formattedSedeName = toTitleCase(sedeName)
+  const availableOptions = getAvailableOptions(config)
+
+  const optionsText = availableOptions
+    .map((opt) => `${opt.number}. *${opt.label}* - ${opt.description}`)
+    .join('\n')
+
   return `Perfecto, elegiste *${formattedSedeName}*.
 
 Ahora decime, como te gustaria buscar tu turno?
 
-1. *Medico en particular* - Si ya sabes con que profesional queres atenderte
-2. *Por especialidad* - Para elegir una especialidad y ver los profesionales disponibles
-3. *Cualquier medico disponible* - Para ver los turnos mas proximos sin importar el profesional
+${optionsText}
 
 Responde con el *numero* de la opcion que prefieras.`
 }
@@ -40,15 +97,35 @@ Responde con el *numero* de la opcion que prefieras.`
 export async function handleSearchTypeSelection(
   userInput: string,
   phoneNumber: string,
-  clientId: string
+  clientId: string,
+  config?: SearchOptionsConfig
 ): Promise<HandlerResult & { searchType?: SearchType }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'search_type_selection')
+  const availableOptions = getAvailableOptions(config)
 
   // Normalizar input
   const inputNormalizado = userInput.trim().toLowerCase()
 
   // Detectar opcion por numero
-  if (inputNormalizado === '1' || inputNormalizado.includes('particular') || inputNormalizado.includes('medico en particular')) {
+  const optionByNumber = availableOptions.find((opt) => opt.number.toString() === inputNormalizado)
+  if (optionByNumber) {
+    logger.info(`Tipo de busqueda: ${optionByNumber.key}`, {})
+    
+    const nextPhases: Record<string, string> = {
+      'medico_particular': 'awaiting_professional_name',
+      'especialidad': 'awaiting_specialty_selection',
+      'cualquier_medico': 'awaiting_turno_selection',
+    }
+
+    return {
+      handled: true,
+      nextPhase: nextPhases[optionByNumber.key] || 'awaiting_turno_selection',
+      searchType: optionByNumber.key as SearchType,
+    }
+  }
+
+  // Detectar por keywords
+  if (inputNormalizado.includes('particular') || inputNormalizado.includes('medico en particular')) {
     logger.info('Tipo de busqueda: medico_particular', {})
     return {
       handled: true,
@@ -57,7 +134,7 @@ export async function handleSearchTypeSelection(
     }
   }
 
-  if (inputNormalizado === '2' || inputNormalizado.includes('especialidad')) {
+  if (inputNormalizado.includes('especialidad')) {
     logger.info('Tipo de busqueda: especialidad', {})
     return {
       handled: true,
@@ -66,7 +143,7 @@ export async function handleSearchTypeSelection(
     }
   }
 
-  if (inputNormalizado === '3' || inputNormalizado.includes('cualquier') || inputNormalizado.includes('disponible')) {
+  if (inputNormalizado.includes('cualquier') || inputNormalizado.includes('disponible')) {
     logger.info('Tipo de busqueda: cualquier_medico', {})
     return {
       handled: true,
@@ -75,16 +152,18 @@ export async function handleSearchTypeSelection(
     }
   }
 
-  // Input invalido
+  // Input invalido - mostrar opciones disponibles
   logger.info('Tipo de busqueda no reconocido', { input: userInput })
+
+  const optionsText = availableOptions
+    .map((opt) => `${opt.number}. ${opt.label}`)
+    .join('\n')
 
   return {
     handled: true,
-    message: `No reconozco esa opcion. Por favor, responde con *1*, *2* o *3*:
+    message: `No reconozco esa opcion. Por favor, responde con el numero de la opcion:
 
-1. Medico en particular
-2. Por especialidad
-3. Cualquier medico disponible`,
+${optionsText}`,
     nextPhase: 'awaiting_search_type',
   }
 }
