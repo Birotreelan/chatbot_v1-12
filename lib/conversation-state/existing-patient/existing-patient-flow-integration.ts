@@ -7,6 +7,7 @@ import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
+import { validarObraSocial } from '@/lib/api-tools/api-functions' // 🆕 IMPORT PARA VALIDAR OBRA SOCIAL
 
 // Importar handlers compartidos
 import {
@@ -287,6 +288,36 @@ export async function initializeExistingPatientFlow(
     obraSocialId: finalObraSocialId,
     obraSocialNombre: finalObraSocialNombre,
   })
+
+  // 🆕 VALIDAR SI LA OBRA SOCIAL PERMITE TURNOS ONLINE
+  if (finalObraSocialNombre) {
+    try {
+      const obraSocialValidation = await validarObraSocial(clientId, finalObraSocialNombre)
+      
+      if (obraSocialValidation.exito && obraSocialValidation.datos.obras_sociales.length > 0) {
+        const obraSocial = obraSocialValidation.datos.obras_sociales[0]
+        
+        if (obraSocial.permite_turnos_online === false) {
+          const numeroDerivacion = process.env.ESCALATION_PHONE_NUMBER || '[NÚMERO DE DERIVACIÓN]'
+          logger.warn('Obra social de paciente existente no permite turnos online', {
+            obraSocialId: finalObraSocialId,
+            obraSocialNombre: finalObraSocialNombre,
+          })
+          
+          return {
+            handled: true,
+            message: `Hola ${finalPatientFirstName}. Lamentablemente, tu obra social (${finalObraSocialNombre}) no está habilitada para agendar turnos por este medio.
+
+Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+            action: 'obra_social_no_permite_turnos_online',
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn('Error validating obra social for existing patient', error as Error)
+      // Continuar aunque falle la validación
+    }
+  }
 
   // Obtener sedes desde la API
   const sedesResult = await fetchSedes(clientId)

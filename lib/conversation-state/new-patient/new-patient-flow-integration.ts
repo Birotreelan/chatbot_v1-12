@@ -353,6 +353,23 @@ async function handleObraSocialPhase(
     // Una sola obra social encontrada
     if (result.datos.total_encontradas === 1) {
       const obraSocial = result.datos.obras_sociales[0]
+      
+      // 🆕 VALIDAR SI PERMITE TURNOS ONLINE
+      if (obraSocial.permite_turnos_online === false) {
+        const numeroDerivacion = process.env.ESCALATION_PHONE_NUMBER || '[NÚMERO DE DERIVACIÓN]'
+        logger.warn('Obra social no permite turnos online', { 
+          obraSocialId: obraSocial.id, 
+          nombre: obraSocial.nombre 
+        })
+        
+        return {
+          handled: true,
+          message: `Gracias ${state.patientFirstName}. Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.
+
+Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+        }
+      }
+      
       state.obraSocialId = obraSocial.id
       state.obraSocialNombre = obraSocial.nombre
       state.obraSocialValidada = true
@@ -371,6 +388,7 @@ async function handleObraSocialPhase(
       id: os.id,
       nombre: os.nombre,
       razonSocial: os.razon_social,
+      permite_turnos_online: os.permite_turnos_online, // 🆕 AGREGAR CAMPO
     }))
     
     let mensaje = `Encontre varias opciones para "${input}":\n\n`
@@ -436,6 +454,22 @@ async function handleObraSocialSelectionPhase(
     const selectedOption = state.obraSocialOpciones.find(o => o.numero === selectedNum)
     
     if (selectedOption) {
+      // 🆕 VALIDAR SI PERMITE TURNOS ONLINE
+      if (selectedOption.permite_turnos_online === false) {
+        const numeroDerivacion = process.env.ESCALATION_PHONE_NUMBER || '[NÚMERO DE DERIVACIÓN]'
+        logger.warn('Obra social seleccionada no permite turnos online', { 
+          id: selectedOption.id, 
+          nombre: selectedOption.nombre 
+        })
+        
+        return {
+          handled: true,
+          message: `Gracias ${state.patientFirstName}. Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.
+
+Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+        }
+      }
+      
       state.obraSocialId = selectedOption.id
       state.obraSocialNombre = selectedOption.nombre
       state.obraSocialValidada = true
