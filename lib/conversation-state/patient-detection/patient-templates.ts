@@ -108,8 +108,9 @@ function buildExistingPatientNoTurnosGreeting(
     `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n` +
     `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +
     `Veo que actualmente no tenés turnos agendados. ¿En qué te puedo ayudar?\n\n` +
-    `1- Solicitar turno médico\n` +
-    `2- Realizar otra consulta\n\n` +
+    `1. Solicitar turno médico\n` +
+    `2. Realizar otra consulta\n` +
+    `3. Solicitar turno para un familiar\n\n` +
     `Por favor, respondé con el *número* de opción que prefieras.`
   )
 }
@@ -137,15 +138,17 @@ function buildSingleTurnoGreeting(
   if (estaConfirmado) {
     mensaje += `*Veo que ya tenés un turno médico agendado y con la asistencia confirmada para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
     mensaje += `¿En qué te podemos ayudar?\n\n`
-    mensaje += `1- Confirmar asistencia al turno médico (ya confirmado)\n`
-    mensaje += `2- Cancelar el turno médico confirmado\n`
-    mensaje += `3- Solicitar otro turno médico\n\n`
+    mensaje += `1. Confirmar asistencia al turno médico (ya confirmado)\n`
+    mensaje += `2. Cancelar el turno médico confirmado\n`
+    mensaje += `3. Solicitar otro turno médico\n`
+    mensaje += `4. Solicitar turno para un familiar\n\n`
   } else {
     mensaje += `*Veo que ya tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
     mensaje += `¿En qué te podemos ayudar?\n\n`
-    mensaje += `1- Confirmar asistencia al turno médico\n`
-    mensaje += `2- Cancelar turno médico\n`
-    mensaje += `3- Solicitar otro turno médico\n\n`
+    mensaje += `1. Confirmar asistencia al turno médico\n`
+    mensaje += `2. Cancelar turno médico\n`
+    mensaje += `3. Solicitar otro turno médico\n`
+    mensaje += `4. Solicitar turno para un familiar\n\n`
   }
 
   mensaje += `Respondé con el número de opción que prefieras.`
@@ -179,9 +182,10 @@ function buildMultipleTurnosGreeting(
   })
 
   mensaje += `¿En qué te podemos ayudar?\n\n`
-  mensaje += `1- Confirmar asistencia a un turno\n`
-  mensaje += `2- Cancelar un turno\n`
-  mensaje += `3- Solicitar otro turno médico\n\n`
+  mensaje += `1. Confirmar asistencia a un turno\n`
+  mensaje += `2. Cancelar un turno\n`
+  mensaje += `3. Solicitar otro turno médico\n`
+  mensaje += `4. Solicitar turno para un familiar\n\n`
   mensaje += `Respondé con el número de opción que prefieras.`
 
   return mensaje
@@ -197,10 +201,52 @@ export function buildNewPatientGreeting(
   return (
     `*¡Bienvenido a ${clinicName}!*\n\n` +
     `Soy Iris, tu asistente virtual de inteligencia artificial.\n\n` +
-    `Por favor indicame, ¿cuál es el motivo de tu contacto?\n\n` +
-    `1- Solicitar un turno médico\n` +
-    `2- Realizar otra consulta\n\n` +
+    `¿En qué te puedo ayudar?\n\n` +
+    `1. Solicitar un turno médico\n` +
+    `2. Realizar otra consulta\n` +
+    `3. Solicitar turno para un familiar\n\n` +
     `Respondé con el *número* de opción que prefieras.`
+  )
+}
+
+/**
+ * Mensaje cuando el usuario elige "Solicitar turno para un familiar" (opción 3/4)
+ */
+export function buildFamilyAppointmentStartMessage(): string {
+  return (
+    `Perfecto, te voy a ayudar con la solicitud de turno para un familiar.\n\n` +
+    `Para continuar, por favor indicame el *DNI* de la persona que solicitará el turno.`
+  )
+}
+
+/**
+ * Mensaje cuando se encontró al familiar en el sistema
+ */
+export function buildFamilyPatientFoundMessage(patientName: string, patientDNI: string): string {
+  const firstName = getFirstName(patientName)
+  return (
+    `Perfecto, encontré a *${firstName}* (DNI ${patientDNI}) en nuestro sistema.\n\n` +
+    `¿Qué obra social tiene?`
+  )
+}
+
+/**
+ * Mensaje cuando el familiar NO está en el sistema (paciente nuevo)
+ */
+export function buildFamilyNewPatientMessage(): string {
+  return (
+    `Perfecto, ya he validado el DNI. Lo agendaremos como paciente nuevo.\n\n` +
+    `Para registrarlo y agendar un turno, necesito algunos datos.\n\n` +
+    `Por favor, *nombre y apellido* de la persona que solicitará el turno.`
+  )
+}
+
+/**
+ * Mensaje cuando el DNI del familiar no es válido
+ */
+export function buildFamilyInvalidDNIMessage(): string {
+  return (
+    `El DNI ingresado no parece válido. Por favor indicame el DNI (7 u 8 dígitos) sin puntos ni espacios.`
   )
 }
 

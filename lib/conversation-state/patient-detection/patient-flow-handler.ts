@@ -615,17 +615,19 @@ export async function processPatientDetectionMessage(
     let actionMap: Record<number, string>
     
     if (hasTurnos) {
-      // Paciente con turnos: 1-Confirmar, 2-Cancelar, 3-Nuevo turno
+      // Paciente con turnos: 1-Confirmar, 2-Cancelar, 3-Nuevo turno, 4-Turno para familiar
       actionMap = {
         1: 'confirm_appointment',
         2: 'cancel_appointment',
         3: 'book_new_appointment',
+        4: 'book_family_appointment',
       }
     } else {
-      // Paciente SIN turnos: 1-Solicitar turno, 2-Otra consulta
+      // Paciente SIN turnos: 1-Solicitar turno, 2-Otra consulta, 3-Turno para familiar
       actionMap = {
         1: 'book_new_appointment',
         2: 'other_inquiry_intent',
+        3: 'book_family_appointment',
       }
     }
     

@@ -43,6 +43,14 @@ import { detectInformationalQueryPreFlow } from "./conversation-state/informatio
 import { detectPostActionContextPreFlow, savePostActionContext } from "./conversation-state/post-action-context"
 import { detectNLUFallbackPreFlow } from "./conversation-state/nlu-fallback-handler"
 import {
+  initializeMultiPatientFlow,
+  handleTargetDNIInput,
+  handleTargetNameInput,
+  isMultiPatientFlowActive,
+  getTargetPatientInfo,
+  clearMultiPatientFlow,
+} from "./conversation-state/shared/multi-patient-handler"
+import {
   handleTurnSelectionIfPending,
   buildInvalidSelectionMessage,
   buildTurnSelectedMessage,
@@ -1799,6 +1807,90 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // INTERCEPTAR FLUJOS ACTIVOS: Detección inicial, Paciente Existente o Nuevo (Sprint 9a-c)
     // ============================================================================
     if (message.type === "text") {
+      // Sprint 30: Verificar si hay flujo multiusuario activo PRIMERO
+      const isMultiPatientActive = await isMultiPatientFlowActive(userPhoneNumber)
+      
+      if (isMultiPatientActive) {
+        console.log(`[WHATSAPP] Procesando mensaje en flujo multiusuario (familiar)`)
+        const multiPatientState = await getTargetPatientInfo(userPhoneNumber)
+        
+        const detectionCtx: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+        }
+        
+        if (multiPatientState?.phase === 'awaiting_target_dni') {
+          // Procesar DNI del familiar
+          const dniResult = await handleTargetDNIInput(
+            userPhoneNumber,
+            userMessage,
+            config.cliente_id,
+            config.id
+          )
+          
+          if (dniResult.handled && dniResult.message) {
+            await sendDirectResponse(detectionCtx, dniResult.message, "multi_patient_dni")
+            
+            // Si se encontró paciente existente, iniciar flujo de paciente existente
+            if (dniResult.action === 'patient_found' && dniResult.patientInfo) {
+              console.log(`[WHATSAPP] Familiar encontrado → iniciando flujo de paciente existente`)
+              const existingResult = await initializeExistingPatientFlow(
+                userPhoneNumber,
+                dniResult.patientInfo.patientId || '',
+                dniResult.patientInfo.patientName || '',
+                dniResult.patientInfo.patientDNI || '',
+                undefined,
+                config.cliente_id,
+                undefined,
+                config.escalationPhoneNumber
+              )
+              if (existingResult?.handled && existingResult.message) {
+                await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")
+              }
+              await clearMultiPatientFlow(userPhoneNumber)
+            }
+            // Si es paciente nuevo, el flujo continúa esperando el nombre
+          }
+          
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        } else if (multiPatientState?.phase === 'awaiting_target_name') {
+          // Procesar nombre del familiar
+          const nameResult = await handleTargetNameInput(
+            userPhoneNumber,
+            userMessage,
+            config.cliente_id,
+            config.id
+          )
+          
+          if (nameResult.handled && nameResult.message) {
+            await sendDirectResponse(detectionCtx, nameResult.message, "multi_patient_name")
+            
+            // Si se capturó el nombre, iniciar flujo de paciente nuevo
+            if (nameResult.action === 'name_captured' && nameResult.patientInfo) {
+              console.log(`[WHATSAPP] Nombre del familiar capturado → iniciando flujo de paciente nuevo`)
+              const newPatientResult = await initializeNewPatientFlow(
+                userPhoneNumber,
+                config.cliente_id,
+                config.escalationPhoneNumber,
+                nameResult.patientInfo.patientName,
+                nameResult.patientInfo.patientDNI
+              )
+              if (newPatientResult?.handled && newPatientResult.message) {
+                await sendDirectResponse(detectionCtx, newPatientResult.message, "new_patient_flow")
+              }
+              await clearMultiPatientFlow(userPhoneNumber)
+            }
+          }
+          
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+      }
+      
       // Verificar si hay algún flujo activo de Sprint 9a, 9b o 9c
       const isDetectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
                                await isExistingPatientFlowActive(userPhoneNumber) ||
@@ -1934,6 +2026,24 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
               )
               await sendDirectResponse(detectionCtx, otherInquiryMessage, "other_inquiry_existing_patient")
+              await completePatientDetectionFlow(userPhoneNumber, config.id)
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            // Sprint 30: Manejo de "Solicitar turno para un familiar"
+            if (detectionResult.action === 'book_family_appointment') {
+              console.log(`[WHATSAPP] Paciente eligió "turno para familiar" → iniciando flujo multiusuario`)
+              const multiPatientResult = await initializeMultiPatientFlow(
+                userPhoneNumber,
+                patientInfo.patientName,
+                patientInfo.patientDNI,
+                patientInfo.patientId
+              )
+              if (multiPatientResult?.message) {
+                await sendDirectResponse(detectionCtx, multiPatientResult.message, "multi_patient_flow")
+              }
+              // Completar flujo de detección pero mantener contexto del solicitante
               await completePatientDetectionFlow(userPhoneNumber, config.id)
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
