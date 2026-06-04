@@ -1770,7 +1770,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       
       // Verificar si debe usar detección de paciente
       const hasPendingReminder = false // TODO: Verificar si hay recordatorio pendiente en el contexto
-      const shouldDetect = await shouldUsePatientDetection(userPhoneNumber, config.id, hasPendingReminder)
+      const shouldDetect = await shouldUsePatientDetection(userPhoneNumber, config.cliente_id, hasPendingReminder)
       
       if (detectionFlags.directPatientDetection && shouldDetect) {
         console.log(`[WHATSAPP] 🔍 Iniciando detección de paciente para ${userPhoneNumber}`)
