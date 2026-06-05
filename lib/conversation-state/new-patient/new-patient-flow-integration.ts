@@ -18,6 +18,7 @@ import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { validarObraSocial } from '@/lib/api-tools/api-functions'
+import { getFirstName } from '@/lib/utils/name-utils'
 
 // Importar handlers compartidos
 import {
@@ -366,7 +367,7 @@ async function handleObraSocialPhase(
         
         return {
           handled: true,
-          message: `Gracias ${state.patientFirstName}. Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.
+          message: `Gracias ${getFirstName(state.patientFirstName || state.nombre || '')}. Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.
 
 Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
         }

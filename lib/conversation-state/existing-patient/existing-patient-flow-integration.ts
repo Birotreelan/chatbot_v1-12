@@ -8,6 +8,7 @@ import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
 import { validarObraSocial } from '@/lib/api-tools/api-functions' // 🆕 IMPORT PARA VALIDAR OBRA SOCIAL
+import { getFirstName } from '@/lib/utils/name-utils'
 
 // Importar handlers compartidos
 import {
@@ -308,7 +309,7 @@ export async function initializeExistingPatientFlow(
           
           return {
             handled: true,
-            message: `Hola ${finalPatientFirstName}. Lamentablemente, tu obra social (${finalObraSocialNombre}) no está habilitada para agendar turnos por este medio.
+            message: `Hola ${getFirstName(finalPatientFirstName)}. Lamentablemente, tu obra social (${finalObraSocialNombre}) no está habilitada para agendar turnos por este medio.
 
 Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
             action: 'obra_social_no_permite_turnos_online',
@@ -353,7 +354,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
   await saveFlowState(phoneNumber, state)
 
   // Construir mensaje de bienvenida + sedes
-  const primerNombre = patientName.split(' ')[0]
+  const primerNombre = getFirstName(patientName)
   const welcomeMessage = `Hola ${primerNombre}, te ayudo a agendar un nuevo turno.`
   const sedesMessage = buildSedesMessage(sedesResult.sedes)
 

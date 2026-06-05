@@ -7,38 +7,26 @@
 
 import type { ChatbotData, ChatbotDataTurno } from "./appointment-flow-state"
 import { getTimeBasedGreeting } from "./utils/date-utils"
+import { getFirstName, formatName } from "./utils/name-utils"
 
 // ============================================================================
 // HELPERS DE FORMATO
 // ============================================================================
 
 /**
- * Formatea el nombre del paciente (capitalizado)
+ * Formatea el nombre del paciente (capitalizado, primer nombre)
  */
 function formatPatientName(chatbotData: ChatbotData): string {
   const nombres = chatbotData.paciente.nombres || ""
-  const apellido = chatbotData.paciente.apellido || ""
-  
-  // Tomar solo el primer nombre
-  const primerNombre = nombres.split(" ")[0]
-  
-  // Capitalizar: ROSA -> Rosa
-  return primerNombre.charAt(0).toUpperCase() + primerNombre.slice(1).toLowerCase()
+  return getFirstName(nombres)
 }
 
 /**
- * Formatea el nombre del profesional (Dra./Dr. + capitalizado)
+ * Formatea el nombre del profesional (capitalizado)
  */
 function formatProfessionalName(turno: ChatbotDataTurno): string {
   const nombre = turno.profesional || ""
-  
-  // Capitalizar cada palabra
-  const capitalized = nombre
-    .split(" ")
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ")
-  
-  return capitalized
+  return formatName(nombre)
 }
 
 /**
