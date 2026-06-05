@@ -1,11 +1,12 @@
 import { ExistingPatientFlowState } from './existing-patient-flow-handler'
+import { formatName, getFirstName } from '@/lib/utils/name-utils'
 
 /**
  * Mensajes para el flujo de paciente existente
  */
 
 export function buildWelcomeMessage(patientName: string): string {
-  return `Hola ${patientName}, te ayudaré a agendar un nuevo turno. ¿Por dónde comenzamos?`
+  return `Hola ${getFirstName(patientName)}, te ayudaré a agendar un nuevo turno. ¿Por dónde comenzamos?`
 }
 
 export function buildEmailRequestMessage(): string {
@@ -19,21 +20,12 @@ export function buildInvalidEmailMessage(attempt: number): string {
   return `El email sigue siendo inválido. Intenta nuevamente (ej: tu.email@dominio.com):`
 }
 
-function toTitleCase(text: string): string {
-  if (!text) return text
-  return text
-    .toLowerCase()
-    .split(' ')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
-}
-
 export function buildSedeSelectionMessage(sedes: any[]): string {
   let message = `Para continuar, necesito que selecciones la sede donde queres atenderte:\n\n`
 
   sedes.forEach((sede, index) => {
     // Usar nombre completo y agregar direccion si esta disponible
-    const nombre = toTitleCase(sede.nombre || sede.Nombre_Completo || 'Sede sin nombre')
+    const nombre = formatName(sede.nombre || sede.Nombre_Completo || 'Sede sin nombre')
     const domicilio = sede.domicilio || sede.Domicilio || ''
     const localidad = sede.localidad || sede.Localidad || ''
     const provincia = sede.provincia || sede.Provincia || ''
@@ -43,7 +35,7 @@ export function buildSedeSelectionMessage(sedes: any[]): string {
     // Agregar ubicacion si esta disponible
     const ubicacionParts = [domicilio, localidad, provincia]
       .filter(Boolean)
-      .map(toTitleCase)
+      .map(formatName)
     if (ubicacionParts.length > 0) {
       sedeInfo += `, ubicada en ${ubicacionParts.join(', ')}`
     }

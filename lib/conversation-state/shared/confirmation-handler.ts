@@ -4,6 +4,7 @@
 
 import { createConversationLogger } from '../logger'
 import { reservarTurno } from '../../api-tools/api-functions'
+import { getFirstName } from '../../utils/name-utils'
 import type { TurnoOption, HandlerResult, SharedFlowState } from './types'
 
 /**
@@ -35,7 +36,7 @@ export function buildConfirmationMessage(
   }
 ): string {
   const fechaFormateada = formatDateForDisplay(turno.fecha)
-  const primerNombre = patientName.split(' ')[0]
+  const primerNombre = getFirstName(patientName)
 
   let message = `${primerNombre}, para confirmar tu reserva necesito verificar los datos:\n\n`
 

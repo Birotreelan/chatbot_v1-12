@@ -7,6 +7,7 @@
 
 import type { ChatbotData, ChatbotDataTurno } from "../../appointment-flow-state"
 import type { DetectedIntent } from "./contextual-intent-handler"
+import { getFirstName } from "../../utils/name-utils"
 
 // ============================================================================
 // TIPOS
@@ -26,8 +27,7 @@ interface ResponseTemplates {
 
 function formatPatientName(chatbotData: ChatbotData): string {
   const nombres = chatbotData.paciente?.nombres || ""
-  const primerNombre = nombres.split(" ")[0]
-  return primerNombre.charAt(0).toUpperCase() + primerNombre.slice(1).toLowerCase()
+  return getFirstName(nombres)
 }
 
 function getDayOfWeek(fechaISO: string): string {

@@ -8,14 +8,14 @@
 import type { ChatbotData } from "../appointment-flow-state"
 import type { TurnoDisponible, RescheduleFlowState } from "./reschedule-flow-handler"
 import { getTimeBasedGreeting } from "../utils/date-utils"
+import { getFirstName } from "../utils/name-utils"
 
 // ============================================================================
 // HELPERS DE FORMATO (reutilizados de direct-response-templates.ts)
 // ============================================================================
 
 function formatPatientName(nombres: string): string {
-  const primerNombre = nombres.split(" ")[0]
-  return primerNombre.charAt(0).toUpperCase() + primerNombre.slice(1).toLowerCase()
+  return getFirstName(nombres)
 }
 
 function getDayOfWeek(fechaISO: string): string {
