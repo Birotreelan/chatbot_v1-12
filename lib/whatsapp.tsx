@@ -1865,9 +1865,25 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
         if (detectionResult?.action === 'contact_intent_pending') {
           // Paciente nuevo seleccionó su intención: turno (1) o consulta (2)
-          const intentSelection = userMessage.trim().match(/^[1-2]$/)
-          
-          if (!intentSelection) {
+          // Detectar selección por número O por texto natural
+          const { detectMenuOption, NEW_PATIENT_MENU } = await import('./conversation-state/patient-detection/menu-option-detector')
+
+          let selection: number | null = null
+
+          // Capa 1: número directo
+          const numMatch = userMessage.trim().match(/^[1-2]$/)
+          if (numMatch) {
+            selection = parseInt(numMatch[0], 10)
+          } else {
+            // Capa 2: detección por texto natural (keywords)
+            const menuResult = await detectMenuOption(userMessage, NEW_PATIENT_MENU, userPhoneNumber)
+            if (menuResult.detected && menuResult.selectedOption) {
+              selection = menuResult.selectedOption
+              console.log(`[WHATSAPP] Intención detectada por texto: opción ${selection} (confidence: ${menuResult.confidence})`)
+            }
+          }
+
+          if (!selection) {
             console.log(`[WHATSAPP] Selección de intención inválida: ${userMessage}`)
             await sendDirectResponse(
               detectionCtx,
@@ -1878,7 +1894,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             return
           }
 
-          const selection = parseInt(intentSelection[0], 10)
           console.log(`[WHATSAPP] Intención seleccionada: ${selection === 1 ? 'Turno' : 'Consulta'}`)
 
           if (selection === 1) {
@@ -1892,7 +1907,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             return
           } else if (selection === 2) {
             // Opción 2: Consulta — derivar teléfono y terminar flujo
-            const escalationPhone = config.escalationPhoneNumber || 'nuestro equipo'
             const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
               m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
             )
