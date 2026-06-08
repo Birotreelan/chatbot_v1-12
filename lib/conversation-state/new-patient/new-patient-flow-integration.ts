@@ -18,6 +18,7 @@ import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { validarObraSocial } from '@/lib/api-tools/api-functions'
+import { extractSelection } from '../selection-extractor'
 import { getFirstName } from '@/lib/utils/name-utils'
 
 // Importar handlers compartidos
@@ -449,11 +450,18 @@ async function handleObraSocialSelectionPhase(
   }
 
   const input = userMessage.trim()
-  
-  // Intentar extraer numero de la respuesta
-  const numMatch = input.match(/^(\d+)$/)
-  if (numMatch) {
-    const selectedNum = parseInt(numMatch[1], 10)
+
+  // Intentar extraer seleccion usando extractSelection (soporta "uno", "primero", "1", etc.)
+  const selectionOptions = state.obraSocialOpciones.map((o) => ({
+    index: o.numero - 1, // 0-based
+    label: o.nombre,
+  }))
+  const selectionResult = extractSelection(input, selectionOptions)
+  const selectedNum = (selectionResult.selected && selectionResult.selectedIndex !== undefined)
+    ? selectionResult.selectedIndex + 1  // volver a 1-based para buscar por o.numero
+    : null
+
+  if (selectedNum !== null) {
     const selectedOption = state.obraSocialOpciones.find(o => o.numero === selectedNum)
     
     if (selectedOption) {
