@@ -338,7 +338,7 @@ async function getFarewellState(
 /**
  * Guarda el estado de despedida en Redis (TTL 1 hora)
  */
-async function setFarewellState(
+export async function setFarewellState(
   userPhone: string,
   configId: string,
   state: FarewellState
@@ -541,12 +541,21 @@ export async function detectFarewellPreFlow(
 ): Promise<{ isFarewell: boolean; response?: string }> {
   const logger = createConversationLogger(userPhone, configId, "farewell-preflow")
 
+  // Helper interno para construir respuesta y persistir estado en Redis
+  const buildAndPersistFarewell = async (): Promise<{ isFarewell: true; response: string }> => {
+    const response = buildSimpleFarewellResponse()
+    await setFarewellState(userPhone, configId, {
+      farewell_sent: true,
+      farewell_sent_at: new Date().toISOString(),
+      last_farewell_mode: "A",
+    })
+    return { isFarewell: true, response }
+  }
+
   // Paso 1: Verificar patrón puro (0ms latencia)
   if (isPureFarewellPattern(message)) {
     logger.info("Despedida pura detectada por patrón", { message })
-    
-    const response = buildSimpleFarewellResponse()
-    return { isFarewell: true, response }
+    return buildAndPersistFarewell()
   }
 
   // Paso 2: Si no parece despedida en absoluto, salir rápido
@@ -566,8 +575,7 @@ export async function detectFarewellPreFlow(
     })
 
     if (classification.intent === "despedida_pura" && classification.confidence >= 0.70) {
-      const response = buildSimpleFarewellResponse()
-      return { isFarewell: true, response }
+      return buildAndPersistFarewell()
     }
 
     // consulta_con_cortesia u otro = no es despedida, continuar flujo normal
@@ -577,8 +585,7 @@ export async function detectFarewellPreFlow(
   // Sin NLU, usar fallback por reglas
   const fallback = classifyFarewellByRules(message)
   if (fallback.intent === "despedida_pura" && fallback.confidence >= 0.75) {
-    const response = buildSimpleFarewellResponse()
-    return { isFarewell: true, response }
+    return buildAndPersistFarewell()
   }
 
   return { isFarewell: false }
