@@ -62,6 +62,92 @@ export function buildInvalidSelectionMessage(
 }
 
 /**
+ * Mapa de ordinales en español a su valor numerico
+ */
+const ORDINALES_ES: Record<string, number> = {
+  primero: 1, primera: 1, uno: 1,
+  segundo: 2, segunda: 2, dos: 2,
+  tercero: 3, tercera: 3, tres: 3,
+  cuarto: 4, cuarta: 4, cuatro: 4,
+  quinto: 5, quinta: 5, cinco: 5,
+  sexto: 6, sexta: 6, seis: 6,
+  septimo: 7, septima: 7, siete: 7,
+  octavo: 8, octava: 8, ocho: 8,
+  noveno: 9, novena: 9, nueve: 9,
+  decimo: 10, decima: 10, diez: 10,
+  once: 11, doce: 12, trece: 13,
+  catorce: 14, quince: 15, dieciseis: 16,
+  diecisiete: 17, dieciocho: 18, diecinueve: 19,
+  veinte: 20, veintiuno: 21, veintidos: 22,
+  veintitres: 23, veinticuatro: 24, veinticinco: 25,
+}
+
+/**
+ * Normaliza texto eliminando tildes para comparacion
+ */
+function normalizarTexto(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+}
+
+/**
+ * Intenta resolver el input de texto a un numero de turno.
+ * Estrategias (en orden de prioridad):
+ * 1. Ordinal en español ("tercero" → 3)
+ * 2. Nombre de profesional parcial ("moreira" → primero de Moreira)
+ * 3. Nombre de dia ("lunes" → primero del lunes)
+ * 4. Hora expresada en texto ("las diez" / "10 y media")
+ * Retorna el numero del turno encontrado o null si no puede resolverlo.
+ */
+function resolverTextoATurno(input: string, turnosOpciones: TurnoOption[]): TurnoOption | null {
+  const inputNorm = normalizarTexto(input)
+
+  // 1. Ordinal en español
+  for (const [ordinal, numero] of Object.entries(ORDINALES_ES)) {
+    // Coincidencia exacta o como palabra completa dentro del input
+    const regex = new RegExp(`\\b${ordinal}\\b`)
+    if (regex.test(inputNorm)) {
+      const turno = turnosOpciones.find((t) => t.numero === numero)
+      if (turno) return turno
+    }
+  }
+
+  // 2. Nombre de profesional (apellido o nombre parcial)
+  const turnosPorProfesional = turnosOpciones.filter((t) => {
+    const profNorm = normalizarTexto(t.profesionalNombre || '')
+    // Busca si alguna palabra del input aparece en el nombre del profesional
+    return inputNorm.split(/\s+/).some((palabra) => palabra.length >= 3 && profNorm.includes(palabra))
+  })
+  if (turnosPorProfesional.length === 1) {
+    // Unico profesional que coincide → selecciona ese turno
+    return turnosPorProfesional[0]
+  }
+
+  // 3. Dia de la semana
+  const diasSemana: Record<string, number> = {
+    domingo: 0, lunes: 1, martes: 2, miercoles: 3,
+    jueves: 4, viernes: 5, sabado: 6,
+  }
+  for (const [dia, diaN] of Object.entries(diasSemana)) {
+    if (inputNorm.includes(dia)) {
+      const turnosDia = turnosOpciones.filter((t) => {
+        const [year, month, day] = t.fecha.split('-')
+        const fecha = new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
+        return fecha.getDay() === diaN
+      })
+      // Solo resuelve si hay exactamente uno para no ambiguar
+      if (turnosDia.length === 1) return turnosDia[0]
+      break
+    }
+  }
+
+  return null
+}
+
+/**
  * Maneja la seleccion de turno por parte del usuario
  * IMPORTANTE: Mapea por campo 'numero', NO por indice de array
  */
@@ -160,10 +246,25 @@ export async function handleTurnoSelection(
     }
   }
 
-  // FALLBACK: si el input contiene letras (texto en lugar de numero), indicar claramente que debe usar numero
+  // FALLBACK: si el input contiene letras, intentar resolver por texto (ordinales, profesional, dia)
   const esTexto = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(inputNormalizado)
 
   if (esTexto) {
+    const turnoResuelto = resolverTextoATurno(userInput, turnosOpciones)
+
+    if (turnoResuelto) {
+      logger.info('Turno resuelto por texto', {
+        input: userInput,
+        turnoNumero: turnoResuelto.numero,
+        agendaId: turnoResuelto.id,
+      })
+      return {
+        handled: true,
+        nextPhase: 'awaiting_confirmation',
+        selectedTurno: turnoResuelto,
+      }
+    }
+
     logger.info('Seleccion de turno por texto no reconocido - solicitando numero', { input: userInput })
     return {
       handled: true,
