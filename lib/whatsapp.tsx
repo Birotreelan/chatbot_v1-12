@@ -666,7 +666,9 @@ export async function handleMessage(value: any) {
       }
     }
 
-    const activeSession = await getActiveSessionByPhone(config.id, userPhoneNumber)
+    // Los comandos admin (tree *) siempre bypasean el gate de sesión de soporte
+    const isAdminCommand = userMessage.toLowerCase().startsWith("tree ")
+    const activeSession = isAdminCommand ? null : await getActiveSessionByPhone(config.id, userPhoneNumber)
 
     if (activeSession) {
       console.log(`[WHATSAPP] 🆘 Usuario tiene sesión de soporte activa: ${activeSession.id} (${activeSession.status})`)
