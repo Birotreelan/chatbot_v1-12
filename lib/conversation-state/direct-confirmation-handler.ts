@@ -15,7 +15,6 @@ import { createConversationLogger } from "./logger"
 import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
 import { isWithinTemplateWindow } from "@/lib/appointment-stats"
-import { detectConfirmationOrCancellationOptionSelection } from "./option-detection-handler"
 
 // ID del asistente NLU para confirmación/cancelación
 // Configurado con el system prompt: route_to_direct_action_nlu.md
@@ -337,11 +336,6 @@ export interface DirectActionResult {
  * Detecta si el mensaje es una confirmación/cancelación directa
  * ANTES de iniciar la detección de paciente.
  * 
- * Flujo de detección (3 capas):
- * 1. CAPA MEJORADA: Option Detection (texto parcial, ordinal, fuzzy matching)
- * 2. CAPA PURA: Patrones regex (alta confianza, 0ms latencia)
- * 3. CAPA NLU: Asistente para casos ambiguos
- * 
  * Requisitos para activarse:
  * 1. Debe existir un appointmentContext reciente (ventana 24h)
  * 2. El mensaje debe coincidir con patrones de confirmación/cancelación
@@ -372,37 +366,12 @@ export async function detectDirectConfirmationPreFlow(
     return { detected: false }
   }
 
-  logger.info("Contexto de cita encontrado, verificando detección", {
+  logger.info("Contexto de cita encontrado, verificando patrones", {
     message,
     appointmentId: appointmentContext.appointment_id,
   })
 
-  // ========================================================================
-  // CAPA MEJORADA: Option Detection (Fuzzy + Ordinal + Texto)
-  // ========================================================================
-  const optionDetectionResult = detectConfirmationOrCancellationOptionSelection(
-    message,
-    userPhone,
-    configId
-  )
-
-  if (optionDetectionResult.action) {
-    logger.info("Opción de menú detectada (CAPA MEJORADA)", {
-      message,
-      action: optionDetectionResult.action,
-      reason: optionDetectionResult.reason,
-    })
-
-    return {
-      detected: true,
-      action: optionDetectionResult.action,
-      appointmentContext,
-    }
-  }
-
-  // ========================================================================
-  // CAPA PURA: Patrones Regex (0ms latencia)
-  // ========================================================================
+  // Paso 2: Verificar patrones PUROS (0ms latencia)
   if (isDirectConfirmationPattern(message)) {
     logger.info("Confirmación PURA detectada por patrón", { message })
     return {
@@ -421,7 +390,7 @@ export async function detectDirectConfirmationPreFlow(
     }
   }
 
-  // Paso 4: Si no parece confirmación ni cancelación, salir rápido
+  // Paso 3: Si no parece confirmación ni cancelación, salir rápido
   const mightConfirm = mightBeConfirmation(message)
   const mightCancel = mightBeCancellation(message)
   
@@ -430,9 +399,7 @@ export async function detectDirectConfirmationPreFlow(
     return { detected: false }
   }
 
-  // ========================================================================
-  // CAPA NLU: Asistente para casos ambiguos
-  // ========================================================================
+  // Paso 4: Caso ambiguo - usar NLU si está habilitado
   if (useNLU) {
     logger.info("Caso ambiguo, usando NLU", { 
       message,
