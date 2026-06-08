@@ -90,8 +90,8 @@ export async function handleConfirmationResponse(
     return {
       handled: true,
       confirmed: false,
-      message: 'Entendido. Volvamos al inicio para que puedas elegir otro turno o cambiar tus datos.',
-      nextPhase: 'abandoned',
+      message: buildModifyDataMenu(),
+      nextPhase: 'awaiting_modify_selection',
     }
   }
 
@@ -180,4 +180,45 @@ Importante: Esta solicitud debe ser aprobada por la clínica para que el turno t
  */
 export function buildCancellationMessage(): string {
   return 'La reserva ha sido cancelada. Si necesitas agendar un turno en otro momento, estoy para ayudarte.'
+}
+
+/**
+ * Menu de seleccion de dato a modificar
+ */
+export function buildModifyDataMenu(): string {
+  return `Entendido. ¿Que dato deseas modificar?\n\n1 - Modificar Nombre y Apellido\n2 - Modificar DNI\n3 - Modificar Obra Social\n4 - Modificar turno`
+}
+
+/**
+ * Tipos de modificacion posibles
+ */
+export type ModifyDataOption = 'nombre' | 'dni' | 'obra_social' | 'turno' | null
+
+/**
+ * Detecta cual opcion del menu de modificacion eligio el usuario
+ */
+export function detectModifyDataOption(userInput: string): ModifyDataOption {
+  const input = userInput.trim().toLowerCase()
+
+  // Opcion 1 - Nombre y Apellido
+  if (/^1$/.test(input) || input.includes('nombre') || input.includes('apellido')) {
+    return 'nombre'
+  }
+
+  // Opcion 2 - DNI
+  if (/^2$/.test(input) || input.includes('dni') || input.includes('documento')) {
+    return 'dni'
+  }
+
+  // Opcion 3 - Obra Social
+  if (/^3$/.test(input) || input.includes('obra') || input.includes('social') || input.includes('prepaga') || input.includes('cobertura')) {
+    return 'obra_social'
+  }
+
+  // Opcion 4 - Turno
+  if (/^4$/.test(input) || input.includes('turno') || input.includes('fecha') || input.includes('hora') || input.includes('profesional') || input.includes('sede') || input.includes('reagendar')) {
+    return 'turno'
+  }
+
+  return null
 }

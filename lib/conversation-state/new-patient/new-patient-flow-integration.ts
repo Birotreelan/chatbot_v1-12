@@ -61,6 +61,8 @@ import {
   buildConfirmationMessage,
   handleConfirmationResponse,
   executeReservation,
+  buildModifyDataMenu,
+  detectModifyDataOption,
 } from '../shared/confirmation-handler'
 import type {
   SedeOption,
@@ -259,6 +261,18 @@ export async function handleNewPatientMessage(
 
     case 'awaiting_confirmation':
       return handleConfirmationPhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_modify_selection':
+      return handleModifySelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
+
+    case 'awaiting_modify_nombre':
+      return handleModifyNombrePhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_modify_dni':
+      return handleModifyDniPhase(phone, userMessage, clientId, state)
+
+    case 'awaiting_modify_obra_social':
+      return handleModifyObraSocialPhase(phone, userMessage, clientId, state)
 
     default:
       logger.warn('Unhandled phase', { phase: state.phase })
@@ -984,6 +998,15 @@ async function handleConfirmationPhase(
     }
   }
 
+  if (result.confirmed === false && result.nextPhase === 'awaiting_modify_selection') {
+    state.phase = 'awaiting_modify_selection'
+    await saveFlowState(phone, state)
+    return {
+      handled: true,
+      message: result.message,
+    }
+  }
+
   if (result.confirmed === false && result.nextPhase === 'abandoned') {
     await clearNewPatientFlow(phone, clientId)
     return {
@@ -996,6 +1019,228 @@ async function handleConfirmationPhase(
     handled: true,
     message: result.message,
   }
+}
+
+/**
+ * Fase: Modificar Nombre y Apellido (paciente nuevo)
+ */
+async function handleModifyNombrePhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'modify_nombre_phase')
+
+  const input = userMessage.trim()
+  const parts = input.split(/\s+/)
+
+  if (parts.length < 2) {
+    return {
+      handled: true,
+      message: `Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*`,
+    }
+  }
+
+  const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
+  state.nombre = capitalize(parts[0])
+  state.apellido = parts.slice(1).map(capitalize).join(' ')
+  state.phase = 'awaiting_confirmation'
+  await saveFlowState(phone, state)
+
+  logger.info('Nombre updated', { nombre: state.nombre, apellido: state.apellido })
+
+  const nombreCompleto = `${state.nombre} ${state.apellido}`
+  return {
+    handled: true,
+    message: buildConfirmationMessage(
+      state.turnoSeleccionado!,
+      nombreCompleto,
+      state.sedeNombre,
+      state.obraSocialNombre,
+      { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email }
+    ),
+  }
+}
+
+/**
+ * Fase: Modificar DNI (paciente nuevo)
+ */
+async function handleModifyDniPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'modify_dni_phase')
+
+  const input = userMessage.trim().replace(/[.\s-]/g, '')
+
+  if (!/^\d{7,9}$/.test(input)) {
+    return {
+      handled: true,
+      message: `El DNI ingresado no es valido. Por favor, escribi solo numeros (sin puntos ni espacios).`,
+    }
+  }
+
+  state.dni = input
+  state.phase = 'awaiting_confirmation'
+  await saveFlowState(phone, state)
+
+  logger.info('DNI updated', { dni: input })
+
+  const nombreCompleto = `${state.nombre} ${state.apellido}`
+  return {
+    handled: true,
+    message: buildConfirmationMessage(
+      state.turnoSeleccionado!,
+      nombreCompleto,
+      state.sedeNombre,
+      state.obraSocialNombre,
+      { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email }
+    ),
+  }
+}
+
+/**
+ * Fase: Modificar Obra Social (paciente nuevo)
+ */
+async function handleModifyObraSocialPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'modify_obra_social_phase')
+
+  const input = userMessage.trim()
+
+  try {
+    const result = await validarObraSocial(clientId, input)
+
+    if (!result.exito || !result.datos || result.datos.total_encontradas === 0) {
+      return {
+        handled: true,
+        message: `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de tu obra social e intenta nuevamente.\n\nSi no tenes cobertura, escribi *Particular*.`,
+      }
+    }
+
+    const obraSocial = result.datos.obras_sociales[0]
+    state.obraSocialId = obraSocial.id
+    state.obraSocialNombre = obraSocial.nombre
+    state.obraSocialValidada = true
+    state.phase = 'awaiting_confirmation'
+    await saveFlowState(phone, state)
+
+    logger.info('Obra social updated', { obraSocialNombre: obraSocial.nombre })
+
+    const nombreCompleto = `${state.nombre} ${state.apellido}`
+    return {
+      handled: true,
+      message: buildConfirmationMessage(
+        state.turnoSeleccionado!,
+        nombreCompleto,
+        state.sedeNombre,
+        state.obraSocialNombre,
+        { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email }
+      ),
+    }
+  } catch (error) {
+    logger.error('Error validating obra social', error as Error)
+    return {
+      handled: true,
+      message: `Ocurrio un error al validar tu obra social. Por favor, intenta nuevamente.`,
+    }
+  }
+}
+
+/**
+ * Fase: Seleccion de dato a modificar (paciente nuevo)
+ */
+async function handleModifySelectionPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState,
+  escalationPhoneNumber?: string,
+  searchOptionsConfig?: SearchOptionsConfig
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'modify_selection_phase')
+
+  const option = detectModifyDataOption(userMessage)
+
+  if (!option) {
+    return {
+      handled: true,
+      message: `No entendi tu respuesta. Por favor, responde con el numero de la opcion:\n\n${buildModifyDataMenu()}`,
+    }
+  }
+
+  logger.info('Modify option selected', { option })
+
+  if (option === 'nombre') {
+    state.phase = 'awaiting_modify_nombre'
+    await saveFlowState(phone, state)
+    return {
+      handled: true,
+      message: `Por favor, escribi tu *nombre y apellido completo* corregido.`,
+    }
+  }
+
+  if (option === 'dni') {
+    state.phase = 'awaiting_modify_dni'
+    await saveFlowState(phone, state)
+    return {
+      handled: true,
+      message: `Por favor, escribi tu *DNI* corregido (solo numeros, sin puntos ni espacios).`,
+    }
+  }
+
+  if (option === 'obra_social') {
+    state.phase = 'awaiting_modify_obra_social'
+    await saveFlowState(phone, state)
+    return {
+      handled: true,
+      message: `Por favor, escribi el nombre de tu *obra social o prepaga*.\n\nSi no tenes cobertura, escribi *Particular*.`,
+    }
+  }
+
+  if (option === 'turno') {
+    // Reiniciar desde sede conservando datos del paciente
+    const sedesResult = await fetchSedes(clientId)
+    if (!sedesResult.success || !sedesResult.sedes) {
+      return {
+        handled: true,
+        message: buildSedesErrorMessage(),
+      }
+    }
+
+    state.sedesOpciones = sedesResult.sedes
+    state.sedeId = undefined
+    state.sedeNombre = undefined
+    state.searchType = undefined
+    state.profesionalId = undefined
+    state.profesionalNombre = undefined
+    state.profesionalesOpciones = undefined
+    state.especialidadId = undefined
+    state.especialidadNombre = undefined
+    state.especialidadesOpciones = undefined
+    state.turnosOpciones = undefined
+    state.turnoSeleccionado = undefined
+    state.phase = 'awaiting_sede'
+    state.attempts = 0
+    await saveFlowState(phone, state)
+
+    logger.info('Restarting from sede for turno modification', {})
+
+    const nombreCompleto = `${state.nombre} ${state.apellido}`
+    return {
+      handled: true,
+      message: buildSedesMessage(sedesResult.sedes, nombreCompleto, state.obraSocialNombre),
+    }
+  }
+
+  return { handled: false }
 }
 
 /**
