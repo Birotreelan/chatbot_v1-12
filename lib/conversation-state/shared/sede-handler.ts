@@ -5,6 +5,7 @@
 
 import { createConversationLogger } from '../logger'
 import { obtenerTodasLasSedes } from '../../api-tools/api-functions'
+import { extractSelection } from '../selection-extractor'
 import type { SedeOption, HandlerResult, SharedFlowState } from './types'
 
 /**
@@ -116,21 +117,20 @@ export async function handleSedeSelection(
 ): Promise<HandlerResult & { selectedSede?: SedeOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'sede_selection')
 
-  // Normalizar input
-  const inputNormalizado = userInput.trim().toLowerCase()
+  // Usar extractSelection para detectar: numeros, palabras (uno/dos), ordinales (primero/segundo), nombre fuzzy
+  const selectionOptions = sedesOpciones.map((s) => ({
+    index: s.numero - 1, // 0-based index para extractSelection
+    label: s.nombre,
+  }))
 
-  // Intentar extraer numero
-  const numeroMatch = inputNormalizado.match(/^\d+$/)
+  const result = extractSelection(userInput, selectionOptions)
 
-  if (numeroMatch) {
-    const numero = parseInt(numeroMatch[0], 10)
-
-    // Buscar sede por numero (NO por indice)
-    const sedeSeleccionada = sedesOpciones.find((s) => s.numero === numero)
+  if (result.selected && result.selectedIndex !== undefined) {
+    const sedeSeleccionada = sedesOpciones[result.selectedIndex]
 
     if (sedeSeleccionada) {
-      logger.info('Sede seleccionada por numero', {
-        numero,
+      logger.info('Sede seleccionada', {
+        matchType: result.matchType,
         sedeId: sedeSeleccionada.id,
         sedeName: sedeSeleccionada.nombre,
       })
@@ -143,43 +143,12 @@ export async function handleSedeSelection(
     }
   }
 
-  // Si no es un numero valido, intentar match por nombre
-  const sedeByName = sedesOpciones.find((s) =>
-    s.nombre.toLowerCase().includes(inputNormalizado) ||
-    inputNormalizado.includes(s.nombre.toLowerCase())
-  )
-
-  if (sedeByName) {
-    logger.info('Sede seleccionada por nombre', {
-      sedeId: sedeByName.id,
-      sedeName: sedeByName.nombre,
-    })
-
-    return {
-      handled: true,
-      nextPhase: 'awaiting_search_type',
-      selectedSede: sedeByName,
-    }
-  }
-
-  // FALLBACK: si el input contiene letras (texto en lugar de numero), indicar claramente que debe usar numero
-  const esTexto = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(inputNormalizado)
-
-  if (esTexto) {
-    logger.info('Seleccion de sede por texto no reconocido - solicitando numero', { input: userInput })
-    return {
-      handled: true,
-      message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *3*_`,
-      nextPhase: 'awaiting_sede',
-    }
-  }
-
-  // Numero fuera de rango o invalido
-  logger.info('Seleccion de sede invalida', { input: userInput })
+  // Sin coincidencia
+  logger.info('Seleccion de sede no reconocida', { input: userInput, matchType: result.matchType })
 
   return {
     handled: true,
-    message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *3*_`,
+    message: `No he encontrado la opcion que elegiste. Por favor ingresa el numero de la sede que prefieras.\n\n_Ejemplo: *1*_`,
     nextPhase: 'awaiting_sede',
   }
 }
