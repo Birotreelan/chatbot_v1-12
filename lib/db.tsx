@@ -798,6 +798,10 @@ export async function clearAllConversationStates(
     `booking_flow:${configId}:${normalizedPhone}`,
     `appointment_context:${configId}:${normalizedPhone}`,
     `appointment_flow:${configId}:${normalizedPhone}`,
+    // Sprint 34: estado de despedida (farewell-handler)
+    `farewell:${configId}:${normalizedPhone}`,
+    // Sprint 30: persona equivocada (wrong-number-handler)
+    `wrong_person:${configId}:${normalizedPhone}`,
     
     // Con formato solo phone (sin configId)
     `patient_detection_state:${normalizedPhone}`,
