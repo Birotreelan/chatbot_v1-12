@@ -4,6 +4,7 @@
 
 import { createConversationLogger } from '../logger'
 import { obtenerSubespecialidades } from '../../api-tools/api-functions'
+import { extractSelection } from '../selection-extractor'
 import type { SpecialtyOption, HandlerResult } from './types'
 
 /**
@@ -69,21 +70,20 @@ export async function handleSpecialtySelection(
 ): Promise<HandlerResult & { selectedSpecialty?: SpecialtyOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'specialty_selection')
 
-  // Normalizar input
-  const inputNormalizado = userInput.trim().toLowerCase()
+  // Usar extractSelection para detectar: numeros, palabras (uno/dos), ordinales (primero/segundo), nombre fuzzy
+  const selectionOptions = especialidadesOpciones.map((e) => ({
+    index: e.numero - 1, // 0-based index para extractSelection
+    label: e.nombre,
+  }))
 
-  // Intentar extraer numero
-  const numeroMatch = inputNormalizado.match(/^\d+$/)
+  const result = extractSelection(userInput, selectionOptions)
 
-  if (numeroMatch) {
-    const numero = parseInt(numeroMatch[0], 10)
-
-    // Buscar especialidad por numero (NO por indice)
-    const especialidadSeleccionada = especialidadesOpciones.find((e) => e.numero === numero)
+  if (result.selected && result.selectedIndex !== undefined) {
+    const especialidadSeleccionada = especialidadesOpciones[result.selectedIndex]
 
     if (especialidadSeleccionada) {
-      logger.info('Especialidad seleccionada por numero', {
-        numero,
+      logger.info('Especialidad seleccionada', {
+        matchType: result.matchType,
         especialidadId: especialidadSeleccionada.id,
         especialidadNombre: especialidadSeleccionada.nombre,
       })
@@ -96,43 +96,12 @@ export async function handleSpecialtySelection(
     }
   }
 
-  // Intentar match por nombre
-  const especialidadByName = especialidadesOpciones.find((e) =>
-    e.nombre.toLowerCase().includes(inputNormalizado) ||
-    inputNormalizado.includes(e.nombre.toLowerCase())
-  )
-
-  if (especialidadByName) {
-    logger.info('Especialidad seleccionada por nombre', {
-      especialidadId: especialidadByName.id,
-      especialidadNombre: especialidadByName.nombre,
-    })
-
-    return {
-      handled: true,
-      nextPhase: 'awaiting_turno_selection',
-      selectedSpecialty: especialidadByName,
-    }
-  }
-
-  // FALLBACK: si el input contiene letras (texto en lugar de numero), indicar claramente que debe usar numero
-  const esTexto = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(inputNormalizado)
-
-  if (esTexto) {
-    logger.info('Seleccion de especialidad por texto no reconocido - solicitando numero', { input: userInput })
-    return {
-      handled: true,
-      message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *2*_`,
-      nextPhase: 'awaiting_specialty_selection',
-    }
-  }
-
-  // Numero fuera de rango o invalido
-  logger.info('Seleccion de especialidad invalida', { input: userInput })
+  // Sin coincidencia
+  logger.info('Seleccion de especialidad no reconocida', { input: userInput, matchType: result.matchType })
 
   return {
     handled: true,
-    message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *2*_`,
+    message: `No he encontrado la opcion que elegiste. Por favor ingresa el numero de la especialidad que necesitas.\n\n_Ejemplo: *2*_`,
     nextPhase: 'awaiting_specialty_selection',
   }
 }

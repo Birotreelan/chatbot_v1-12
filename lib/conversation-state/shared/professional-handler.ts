@@ -4,6 +4,7 @@
 
 import { createConversationLogger } from '../logger'
 import { buscarProfesionales } from '../../api-tools/api-functions'
+import { extractSelection } from '../selection-extractor'
 import type { ProfessionalOption, HandlerResult } from './types'
 
 /**
@@ -88,21 +89,20 @@ export async function handleProfessionalSelection(
 ): Promise<HandlerResult & { selectedProfessional?: ProfessionalOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'professional_selection')
 
-  // Normalizar input
-  const inputNormalizado = userInput.trim().toLowerCase()
+  // Usar extractSelection para detectar: numeros, palabras (uno/dos), ordinales (primero/segundo), nombre fuzzy
+  const selectionOptions = profesionalesOpciones.map((p) => ({
+    index: p.numero - 1, // 0-based index para extractSelection
+    label: p.nombre,
+  }))
 
-  // Intentar extraer numero
-  const numeroMatch = inputNormalizado.match(/^\d+$/)
+  const result = extractSelection(userInput, selectionOptions)
 
-  if (numeroMatch) {
-    const numero = parseInt(numeroMatch[0], 10)
-
-    // Buscar profesional por numero (NO por indice)
-    const profesionalSeleccionado = profesionalesOpciones.find((p) => p.numero === numero)
+  if (result.selected && result.selectedIndex !== undefined) {
+    const profesionalSeleccionado = profesionalesOpciones[result.selectedIndex]
 
     if (profesionalSeleccionado) {
-      logger.info('Profesional seleccionado por numero', {
-        numero,
+      logger.info('Profesional seleccionado', {
+        matchType: result.matchType,
         profesionalId: profesionalSeleccionado.id,
         profesionalNombre: profesionalSeleccionado.nombre,
       })
@@ -115,43 +115,12 @@ export async function handleProfessionalSelection(
     }
   }
 
-  // Intentar match por nombre
-  const profesionalByName = profesionalesOpciones.find((p) =>
-    p.nombre.toLowerCase().includes(inputNormalizado) ||
-    inputNormalizado.includes(p.nombre.toLowerCase())
-  )
-
-  if (profesionalByName) {
-    logger.info('Profesional seleccionado por nombre', {
-      profesionalId: profesionalByName.id,
-      profesionalNombre: profesionalByName.nombre,
-    })
-
-    return {
-      handled: true,
-      nextPhase: 'awaiting_turno_selection',
-      selectedProfessional: profesionalByName,
-    }
-  }
-
-  // FALLBACK: si el input contiene letras (texto en lugar de numero), indicar claramente que debe usar numero
-  const esTexto = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(inputNormalizado)
-
-  if (esTexto) {
-    logger.info('Seleccion de profesional por texto no reconocido - solicitando numero', { input: userInput })
-    return {
-      handled: true,
-      message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *1*_`,
-      nextPhase: 'awaiting_professional_selection',
-    }
-  }
-
-  // Numero fuera de rango o invalido
-  logger.info('Seleccion de profesional invalida', { input: userInput })
+  // Sin coincidencia
+  logger.info('Seleccion de profesional no reconocida', { input: userInput, matchType: result.matchType })
 
   return {
     handled: true,
-    message: `No he encontrado la opcion que elegiste. Por favor ingresa numericamente la opcion que deseas.\n\n_Ejemplo: *1*_`,
+    message: `No he encontrado la opcion que elegiste. Por favor ingresa el numero del profesional que prefieras.\n\n_Ejemplo: *1*_`,
     nextPhase: 'awaiting_professional_selection',
   }
 }
