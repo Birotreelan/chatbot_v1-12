@@ -1,6 +1,13 @@
 import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { ClinicAPI } from '../../clinic-api'
+import {
+  detectMenuOption,
+  NEW_PATIENT_MENU,
+  EXISTING_PATIENT_NO_TURNOS_MENU,
+  EXISTING_PATIENT_SINGLE_TURNO_MENU,
+  EXISTING_PATIENT_MULTIPLE_TURNOS_MENU,
+} from './menu-option-detector'
 
 /**
  * Patient Detection Flow Handler
@@ -557,113 +564,227 @@ export async function processPatientDetectionMessage(
   // Detectar selección numérica (1-4)
   const numMatch = userMessage.trim().match(/^[1-4]$/)
 
-  if (!numMatch) {
-    logger.info('Non-numeric input, requires NLU', {
-      message: userMessage.substring(0, 50),
-    })
-    return {
-      handled: false,
-      nextPhase: 'nlu_required',
-    }
-  }
+  if (numMatch) {
+    // ========================================================================
+    // CAPA 1: Detección numérica pura (0ms latencia)
+    // ========================================================================
+    const selection = parseInt(numMatch[0], 10)
 
-  const selection = parseInt(numMatch[0], 10)
-
-  logger.info('Numeric selection detected', {
-    selection,
-    phase: state.phase,
-  })
-
-  // Mapear acciones según fase
-  if (state.phase === 'awaiting_contact_intent') {
-    // NUEVA FASE: Paciente nuevo selecciona: 1-Turno, 2-Consulta
-    const intentMap: Record<number, string> = {
-      1: 'book_appointment_intent', // Usuario quiere agendar turno
-      2: 'other_inquiry_intent',     // Usuario quiere hacer otra consulta
-    }
-
-    logger.info('Contact intent selection detected', {
+    logger.info('Numeric selection detected', {
       selection,
-      mappedAction: intentMap[selection] || 'none',
+      phase: state.phase,
     })
 
-    const action = intentMap[selection]
+    // Mapear acciones según fase
+    if (state.phase === 'awaiting_contact_intent') {
+      // NUEVA FASE: Paciente nuevo selecciona: 1-Turno, 2-Consulta
+      const intentMap: Record<number, string> = {
+        1: 'book_appointment_intent', // Usuario quiere agendar turno
+        2: 'other_inquiry_intent',     // Usuario quiere hacer otra consulta
+      }
 
-    if (action) {
-      // Actualizar fase según la intención
-      if (action === 'book_appointment_intent') {
-        // Usuario quiere turno: pasar a solicitar DNI
-        state.phase = 'awaiting_initial_response'
-        await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
-      } else if (action === 'other_inquiry_intent') {
-        // Usuario quiere consulta: marcar como completado y devolver esa acción
+      logger.info('Contact intent selection detected', {
+        selection,
+        mappedAction: intentMap[selection] || 'none',
+      })
+
+      const action = intentMap[selection]
+
+      if (action) {
+        // Actualizar fase según la intención
+        if (action === 'book_appointment_intent') {
+          // Usuario quiere turno: pasar a solicitar DNI
+          state.phase = 'awaiting_initial_response'
+          await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+        } else if (action === 'other_inquiry_intent') {
+          // Usuario quiere consulta: marcar como completado y devolver esa acción
+          state.phase = 'completed'
+          await redis.setex(stateKey, 3600, JSON.stringify(state)) // 1 hora
+        }
+
+        return {
+          handled: true,
+          action,
+          nextPhase: 'contact_intent_processed',
+          data: {},
+        }
+      }
+    } else if (state.phase === 'awaiting_action_selection') {
+      // El mapeo depende de si el paciente tiene turnos o no
+      const hasTurnos = state.turnos && state.turnos.length > 0
+
+      let actionMap: Record<number, string>
+
+      if (hasTurnos) {
+        // Paciente con turnos: 1-Confirmar, 2-Cancelar, 3-Nuevo turno
+        actionMap = {
+          1: 'confirm_appointment',
+          2: 'cancel_appointment',
+          3: 'book_new_appointment',
+        }
+      } else {
+        // Paciente SIN turnos: 1-Solicitar turno, 2-Otra consulta
+        actionMap = {
+          1: 'book_new_appointment',
+          2: 'other_inquiry_intent',
+        }
+      }
+
+      logger.info('Action map selected', {
+        hasTurnos,
+        selection,
+        mappedAction: actionMap[selection] || 'none',
+      })
+
+      const action = actionMap[selection]
+
+      if (action) {
+        // Marcar flujo como completado
         state.phase = 'completed'
         await redis.setex(stateKey, 3600, JSON.stringify(state)) // 1 hora
-      }
 
+        return {
+          handled: true,
+          action,
+          nextPhase: 'action_processing',
+          data: {
+            patientId: state.patientId,
+            patientName: state.patientName,
+            turnos: state.turnos,
+          },
+        }
+      }
+    } else if (state.phase === 'awaiting_initial_response') {
+      // Paciente nuevo: solo solicitar DNI, no procesamos números aquí
       return {
-        handled: true,
-        action,
-        nextPhase: 'contact_intent_processed',
-        data: {},
+        handled: false,
+        nextPhase: 'nlu_required',
       }
-    }
-  } else if (state.phase === 'awaiting_action_selection') {
-    // El mapeo depende de si el paciente tiene turnos o no
-    const hasTurnos = state.turnos && state.turnos.length > 0
-    
-    let actionMap: Record<number, string>
-    
-    if (hasTurnos) {
-      // Paciente con turnos: 1-Confirmar, 2-Cancelar, 3-Nuevo turno
-      actionMap = {
-        1: 'confirm_appointment',
-        2: 'cancel_appointment',
-        3: 'book_new_appointment',
-      }
-    } else {
-      // Paciente SIN turnos: 1-Solicitar turno, 2-Otra consulta
-      actionMap = {
-        1: 'book_new_appointment',
-        2: 'other_inquiry_intent',
-      }
-    }
-    
-    logger.info('Action map selected', {
-      hasTurnos,
-      selection,
-      mappedAction: actionMap[selection] || 'none',
-    })
-
-    const action = actionMap[selection]
-
-    if (action) {
-      // Marcar flujo como completado
-      state.phase = 'completed'
-      await redis.setex(stateKey, 3600, JSON.stringify(state)) // 1 hora
-
-      return {
-        handled: true,
-        action,
-        nextPhase: 'action_processing',
-        data: {
-          patientId: state.patientId,
-          patientName: state.patientName,
-          turnos: state.turnos,
-        },
-      }
-    }
-  } else if (state.phase === 'awaiting_initial_response') {
-    // Paciente nuevo: solo solicitar DNI, no procesamos números aquí
-    return {
-      handled: false,
-      nextPhase: 'nlu_required',
     }
   }
+
+  // ========================================================================
+  // CAPA 2: Detección de opciones por texto natural (< 1ms latencia)
+  // ========================================================================
+  try {
+    let menuOptions = EXISTING_PATIENT_NO_TURNOS_MENU
+
+    // Determinar qué menú se está mostrando según la fase
+    if (state.phase === 'awaiting_contact_intent') {
+      menuOptions = NEW_PATIENT_MENU
+    } else if (state.phase === 'awaiting_action_selection') {
+      const hasTurnos = state.turnos && state.turnos.length > 0
+      if (hasTurnos && state.turnos.length === 1) {
+        menuOptions = EXISTING_PATIENT_SINGLE_TURNO_MENU
+      } else if (hasTurnos && state.turnos.length > 1) {
+        menuOptions = EXISTING_PATIENT_MULTIPLE_TURNOS_MENU
+      } else {
+        menuOptions = EXISTING_PATIENT_NO_TURNOS_MENU
+      }
+    }
+
+    logger.info('Attempting menu option detection', {
+      phase: state.phase,
+      menuSize: menuOptions.length,
+      message: userMessage.substring(0, 50),
+    })
+
+    const detectionResult = await detectMenuOption(userMessage, menuOptions, phoneNumber)
+
+    if (detectionResult.detected && detectionResult.confidence >= 0.70) {
+      logger.info('Menu option detected by text matching', {
+        selectedOption: detectionResult.selectedOption,
+        confidence: detectionResult.confidence,
+        reasoning: detectionResult.reasoning,
+      })
+
+      // Procesar la opción seleccionada
+      const selectedOptionNumber = detectionResult.selectedOption
+
+      if (state.phase === 'awaiting_contact_intent') {
+        const intentMap: Record<number, string> = {
+          1: 'book_appointment_intent',
+          2: 'other_inquiry_intent',
+        }
+
+        const action = intentMap[selectedOptionNumber || 0]
+
+        if (action) {
+          if (action === 'book_appointment_intent') {
+            state.phase = 'awaiting_initial_response'
+            await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+          } else if (action === 'other_inquiry_intent') {
+            state.phase = 'completed'
+            await redis.setex(stateKey, 3600, JSON.stringify(state))
+          }
+
+          return {
+            handled: true,
+            action,
+            nextPhase: 'contact_intent_processed',
+            data: {},
+          }
+        }
+      } else if (state.phase === 'awaiting_action_selection') {
+        const hasTurnos = state.turnos && state.turnos.length > 0
+
+        let actionMap: Record<number, string>
+
+        if (hasTurnos) {
+          actionMap = {
+            1: 'confirm_appointment',
+            2: 'cancel_appointment',
+            3: 'book_new_appointment',
+          }
+        } else {
+          actionMap = {
+            1: 'book_new_appointment',
+            2: 'other_inquiry_intent',
+          }
+        }
+
+        const action = actionMap[selectedOptionNumber || 0]
+
+        if (action) {
+          state.phase = 'completed'
+          await redis.setex(stateKey, 3600, JSON.stringify(state))
+
+          return {
+            handled: true,
+            action,
+            nextPhase: 'action_processing',
+            data: {
+              patientId: state.patientId,
+              patientName: state.patientName,
+              turnos: state.turnos,
+            },
+          }
+        }
+      }
+    } else if (detectionResult.confidence > 0 && detectionResult.confidence < 0.70) {
+      logger.info('Menu option detected but confidence too low', {
+        selectedOption: detectionResult.selectedOption,
+        confidence: detectionResult.confidence,
+        reasoning: detectionResult.reasoning,
+      })
+    }
+  } catch (error) {
+    logger.warn('Error during menu option detection', {
+      error: String(error),
+    })
+    // Continuar con NLU fallback
+  }
+
+  // ========================================================================
+  // CAPA 3: NLU Fallback (requiere llamada a Claude/OpenAI)
+  // ========================================================================
+  logger.info('Menu option detection failed, requiring NLU', {
+    message: userMessage.substring(0, 50),
+  })
 
   return {
     handled: false,
-    nextPhase: 'invalid_selection',
+    nextPhase: 'nlu_required',
   }
 }
 
