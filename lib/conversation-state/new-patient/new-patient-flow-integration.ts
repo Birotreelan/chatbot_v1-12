@@ -236,7 +236,7 @@ export async function handleNewPatientMessage(
       return handleObraSocialPhase(phone, userMessage, clientId, state)
 
     case 'awaiting_obra_social_selection':
-      return handleObraSocialSelectionPhase(phone, userMessage, clientId, state)
+      return handleObraSocialSelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_sede':
       return handleSedePhase(phone, userMessage, clientId, state, searchOptionsConfig)
@@ -449,7 +449,8 @@ async function handleObraSocialSelectionPhase(
   phone: string,
   userMessage: string,
   clientId: string,
-  state: NewPatientFlowState
+  state: NewPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'obra_social_selection_phase')
 
