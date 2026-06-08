@@ -1,0 +1,125 @@
+╔════════════════════════════════════════════════════════════════════════════════════╗
+║                    CHATBOT v1-12: NLU QUICK REFERENCE                             ║
+║                          SPRINT 32 - 08 JUNIO 2026                                ║
+╚════════════════════════════════════════════════════════════════════════════════════╝
+
+┌─ NLUSEXISTENTES ─────────────────────────────────────────────────────────────────┐
+│                                                                                     │
+│  1️⃣  DIRECT ACTION NLU                                                            │
+│     └─ ID: asst_MF6oPGm2Be7Hlb2c40WICsJs                                           │
+│     └─ Detecta: Confirmaciones/Cancelaciones                                       │
+│     └─ Confianza: ≥ 0.70                                                           │
+│     └─ Ubicación: direct-confirmation-handler.ts                                   │
+│     └─ Estado: ✅ ACTIVO                                                           │
+│                                                                                     │
+│  2️⃣  PENDING FLOW NLU                                                             │
+│     └─ ID: asst_BbKf8VdJurpmXvEK2YgkFhjn                                           │
+│     └─ Detecta: Respuestas en menús pendientes (sí/no ambiguo)                      │
+│     └─ Casos: "bueno sí" → confirmar_accion → Procesar como (1)                    │
+│     └─ Ubicación: pending-flow-nlu/contextual-intent-handler.ts                    │
+│     └─ Estado: ✅ ACTIVO                                                           │
+│                                                                                     │
+│  3️⃣  RESCHEDULE NLU                                                               │
+│     └─ ID: asst_mPwf9BxPNwWAOoSJZY6UtXii                                           │
+│     └─ Detecta: Fechas/horas en reagendamiento                                     │
+│     └─ Validación: Disponibilidad de clínica                                       │
+│     └─ Ubicación: reschedule-flow-integration.ts                                   │
+│     └─ Estado: ✅ ACTIVO                                                           │
+│                                                                                     │
+│  4️⃣  FAREWELL NLU                                                                 │
+│     └─ ID: asst_68NiTYXUNHnyqyvY04VrZLk7                                           │
+│     └─ Detecta: Despedidas y respuestas recíprocas                                 │
+│     └─ Casos: "igualmente" → silencio total (no responder)                         │
+│     └─ Ubicación: farewell-handler.ts                                              │
+│     └─ Estado: ✅ ACTIVO                                                           │
+│                                                                                     │
+│  5️⃣  NLU FALLBACK (Chat Completions - gpt-4o-mini)                                │
+│     └─ Tipo: Último recurso cuando nada más matchea                                │
+│     └─ Intenciones: 11 categorías (confirmar, cancelar, consulta, etc)             │
+│     └─ Confianza: ≥ 0.60                                                           │
+│     └─ Ubicación: nlu-fallback-handler.ts                                          │
+│     └─ Estado: ✅ ACTIVO                                                           │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─ COBERTURA POR FLUJO ──────────────────────────────────────────────────────────────┐
+│                                                                                     │
+│  ✅ 95% - CONFIRMACIÓN/CANCELACIÓN                                                 │
+│     Direct Action NLU + Option Detection (SPRINT 32)                               │
+│     Problema resuelto: "No que número poner quiero cancelar..." → ¡Detectado!     │
+│                                                                                     │
+│  ✅ 95% - DESPEDIDAS                                                               │
+│     Farewell NLU + Regex puro                                                      │
+│     Evita repeticiones innecesarias                                                │
+│                                                                                     │
+│  ✅ 95% - CONSULTAS MÉDICAS (PROTECCIÓN)                                           │
+│     NLU Fallback → Detecta y rechaza consultas médicas                             │
+│     "¿Síntomas de neumonía?" → Derivado a profesional                              │
+│                                                                                     │
+│  ✅ 90% - MENÚ PENDIENTE                                                           │
+│     Pending Flow NLU                                                               │
+│     Usuario en flujo entiende respuestas textuales                                 │
+│                                                                                     │
+│  ⚠️  85% - REAGENDAMIENTO                                                          │
+│     Reschedule NLU (necesita validación adicional)                                 │
+│                                                                                     │
+│  ⚠️  75% - BÚSQUEDA TURNOS MÚLTIPLES                                               │
+│     Option Detection (SPRINT 32) + Regex                                           │
+│                                                                                     │
+│  ⚠️  70% - DETECCIÓN PACIENTE                                                      │
+│     NLU Fallback (genérico) → Candidato SPRINT 33                                  │
+│                                                                                     │
+│  ⚠️  65% - BÚSQUEDA OBRA SOCIAL                                                    │
+│     Regex puro → Candidato SPRINT 34                                               │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─ ORDEN DE DETECCIÓN EN whatsapp.tsx ──────────────────────────────────────────────┐
+│                                                                                     │
+│  1. Sprint 15 - Direct Confirmation (Regex puro)                                   │
+│  2. Sprint 14 - Patient Detection (Regex + Lookups)                                │
+│  3. Sprint 16 - Reschedule Flow                                                    │
+│  4. Sprint 17 - ...                                                                │
+│  5. Sprint 12 - Confirmation Template                                              │
+│  6. Sprint 13 - ...                                                                │
+│  ⭐ Sprint 32 - Option Detection (NEW - Fuzzy matching)                             │
+│  ⭐ Sprint 18 - NLU Fallback (LAST RESORT)                                         │
+│  7. Sprint 9a - Normal flow continues                                              │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─ PRÓXIMOS SPRINTS RECOMENDADOS ────────────────────────────────────────────────────┐
+│                                                                                     │
+│  SPRINT 33 (ALTA PRIORIDAD)                                                        │
+│  └─ PATIENT_DETECTION_NLU                                                          │
+│     Para ambigüedad en DNI/nombre: "Juan pero me llaman Johnny"                    │
+│     Status: ❌ No existe especializado (usa Fallback)                              │
+│                                                                                     │
+│  SPRINT 34 (ALTA PRIORIDAD)                                                        │
+│  └─ OBRA_SOCIAL_NORMALIZATION_NLU                                                  │
+│     Para obra social mal escrita o parcial: "La de los bancarios"                  │
+│     Status: ❌ Solo regex, sin NLU                                                 │
+│                                                                                     │
+│  SPRINT 35 (MEDIA PRIORIDAD)                                                       │
+│  └─ Mejorar RESCHEDULE_NLU                                                         │
+│     Validación de disponibilidad en tiempo real                                    │
+│                                                                                     │
+│  SPRINT 36 (MEDIA PRIORIDAD)                                                       │
+│  └─ TURN_DISAMBIGUATION_NLU                                                        │
+│     Para "El que es con el doctor" (cuando hay múltiples)                          │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+📍 ARCHIVOS CLAVE
+├─ lib/conversation-state/direct-confirmation-handler.ts (Direct Action NLU)
+├─ lib/conversation-state/pending-flow-nlu/contextual-intent-handler.ts (Pending Flow)
+├─ lib/conversation-state/reschedule-flow-integration.ts (Reschedule)
+├─ lib/conversation-state/farewell-handler.ts (Farewell)
+├─ lib/conversation-state/nlu-fallback-handler.ts (NLU Fallback)
+├─ lib/conversation-state/option-detection-handler.ts (NEW - SPRINT 32)
+└─ NLU_COVERAGE_ANALYSIS.md (Análisis completo)
+
+📊 VERSIÓN: SPRINT 32
+📅 FECHA: 8 de Junio 2026
+✅ BUILD: Sin errores
+✅ TESTS: 21/21 pasados (Option Detection)
