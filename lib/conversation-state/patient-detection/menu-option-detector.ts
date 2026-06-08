@@ -1,10 +1,9 @@
-import { getAssistantResponse } from '../../openai'
 import { createConversationLogger } from '../logger'
 
 /**
  * Menu Option Detector - Detecta opciones de menú a partir de texto libre
  * Para el flujo inicial de detección de pacientes
- * Usa OpenAI Assistants en lugar de Claude
+ * VERSIÓN SIMPLIFICADA: Solo keyword matching (sin NLU)
  */
 
 export interface MenuOption {
@@ -28,12 +27,12 @@ export const NEW_PATIENT_MENU: MenuOption[] = [
   {
     index: 1,
     label: 'Solicitar un turno médico',
-    keywords: ['turno', 'cita', 'citsación', 'agendar', 'reserva', 'appointment', 'médico', 'doctor'],
+    keywords: ['turno', 'cita', 'agendar', 'reserva', 'appointment', 'médico', 'doctor', 'consulta médica'],
   },
   {
     index: 2,
     label: 'Realizar otra consulta',
-    keywords: ['consulta', 'pregunta', 'información', 'info', 'duda', 'ayuda', 'soporte', 'help'],
+    keywords: ['consulta', 'pregunta', 'información', 'info', 'duda', 'ayuda', 'soporte', 'help', 'otra'],
   },
 ]
 
@@ -60,17 +59,17 @@ export const EXISTING_PATIENT_SINGLE_TURNO_MENU: MenuOption[] = [
   {
     index: 1,
     label: 'Confirmar asistencia al turno médico',
-    keywords: ['confirmar', 'si', 'voy', 'asistencia', 'confirm', 'yes', 'iré'],
+    keywords: ['confirmar', 'si', 'voy', 'asistencia', 'confirm', 'yes', 'iré', 'voy a ir', 'listo'],
   },
   {
     index: 2,
     label: 'Cancelar turno médico',
-    keywords: ['cancelar', 'no', 'no voy', 'cancel', 'cancelo', 'no puedo'],
+    keywords: ['cancelar', 'no', 'no voy', 'cancel', 'cancelo', 'no puedo', 'no puedo ir'],
   },
   {
     index: 3,
     label: 'Solicitar otro turno médico',
-    keywords: ['otro', 'nuevo', 'turno', 'agendar', 'otro turno', 'another'],
+    keywords: ['otro', 'nuevo', 'turno', 'agendar', 'otro turno', 'another', 'más turnos'],
   },
 ]
 
@@ -95,12 +94,9 @@ export const EXISTING_PATIENT_MULTIPLE_TURNOS_MENU: MenuOption[] = [
   },
 ]
 
-// ID del Asistente NLU de OpenAI para detección de opciones
-const MENU_OPTION_NLU_ASSISTANT_ID = 'asst_EJewdsboIdYEnjVyxZsoSCvk'
-
 /**
  * Detecta qué opción seleccionó el usuario a partir de texto libre
- * Usa 2 estrategias: keyword matching + NLU (OpenAI Assistant)
+ * Usa SOLO keyword matching para máxima confiabilidad y velocidad
  *
  * @param userMessage Mensaje del usuario
  * @param menuOptions Opciones disponibles del menú
@@ -114,39 +110,34 @@ export async function detectMenuOption(
 ): Promise<DetectionResult> {
   const logger = createConversationLogger(phoneNumber, '', 'menu-option-detection')
 
-  // Estrategia 1: Keyword matching simple (0ms latencia)
+  // Keyword matching simple (< 1ms latencia)
   const keywordMatch = detectByKeywords(userMessage, menuOptions)
-  if (keywordMatch.detected && keywordMatch.confidence >= 0.85) {
+  
+  if (keywordMatch.detected && keywordMatch.confidence >= 0.60) {
     logger.info('Menu option detected by keywords', {
       selectedOption: keywordMatch.selectedOption,
       confidence: keywordMatch.confidence,
+      message: userMessage.substring(0, 50),
     })
     return keywordMatch
   }
 
-  // Estrategia 2: NLU con OpenAI (200ms latencia)
-  try {
-    const nluResult = await detectWithNLU(userMessage, menuOptions, phoneNumber)
-    if (nluResult.detected && nluResult.confidence >= 0.70) {
-      logger.info('Menu option detected by NLU', {
-        selectedOption: nluResult.selectedOption,
-        confidence: nluResult.confidence,
-      })
-      return nluResult
-    }
-  } catch (error) {
-    logger.warn('NLU detection failed, falling back to keyword match', {
-      error: String(error),
-    })
-  }
+  logger.info('Menu option NOT detected', {
+    message: userMessage.substring(0, 50),
+    confidence: keywordMatch.confidence,
+  })
 
-  // Retornar keyword match con confianza baja o no detectado
-  return keywordMatch
+  // No detectado - retornar con confidence 0
+  return {
+    detected: false,
+    confidence: 0,
+    reasoning: 'No keywords matched with sufficient confidence',
+  }
 }
 
 /**
  * Detecta opciones usando keyword matching
- * Rápido (0ms), pero con falsos negativos en texto natural
+ * Rápido (< 1ms), altamente confiable
  */
 function detectByKeywords(
   userMessage: string,
@@ -160,7 +151,7 @@ function detectByKeywords(
   for (const option of menuOptions) {
     let matches = 0
     for (const keyword of option.keywords) {
-      // Buscar palabra clave completa o como substring
+      // Buscar palabra clave como palabra completa o substring
       if (normalizedMessage.includes(keyword)) {
         matches++
       }
@@ -174,7 +165,8 @@ function detectByKeywords(
   }
 
   if (bestMatch) {
-    const confidence = Math.min(0.95, 0.5 + bestMatch.matches * 0.15)
+    // Confianza: base 0.60 + 0.20 por cada keyword matching
+    const confidence = Math.min(0.95, 0.60 + bestMatch.matches * 0.15)
     return {
       detected: true,
       selectedOption: bestMatch.option.index,
@@ -188,73 +180,4 @@ function detectByKeywords(
     confidence: 0,
     reasoning: 'No keywords matched',
   }
-}
-
-/**
- * Detecta opciones usando OpenAI Assistants NLU
- * Más preciso pero más lento (200ms)
- */
-async function detectWithNLU(
-  userMessage: string,
-  menuOptions: MenuOption[],
-  phoneNumber: string
-): Promise<DetectionResult> {
-  const logger = createConversationLogger(phoneNumber, '', 'menu-option-nlu')
-
-  try {
-    // Preparar el mensaje para el asistente
-    const assistantMessage = buildNLUMessage(userMessage, menuOptions)
-
-    // Crear o reutilizar thread
-    const threadId = ''  // getAssistantResponse maneja la creación automática
-
-    // Llamar al asistente NLU
-    const response = await getAssistantResponse(threadId, assistantMessage, MENU_OPTION_NLU_ASSISTANT_ID)
-
-    logger.debug('OpenAI NLU response', {
-      response: response.substring(0, 100),
-    })
-
-    // Parsear JSON de respuesta
-    const result = JSON.parse(response)
-
-    if (result.selected_option && result.confidence >= 0.70) {
-      return {
-        detected: true,
-        selectedOption: result.selected_option,
-        confidence: result.confidence,
-        reasoning: result.reasoning || 'OpenAI NLU detection',
-      }
-    }
-
-    return {
-      detected: false,
-      confidence: result.confidence || 0,
-      reasoning: result.reasoning || 'OpenAI NLU confidence too low',
-    }
-  } catch (error) {
-    logger.error('NLU detection failed', error as Error)
-    throw new Error(`NLU detection failed: ${String(error)}`)
-  }
-}
-
-/**
- * Construye el mensaje para el asistente NLU de OpenAI
- */
-function buildNLUMessage(userMessage: string, menuOptions: MenuOption[]): string {
-  const optionsText = menuOptions
-    .map((opt) => `${opt.index}. ${opt.label}`)
-    .join('\n')
-
-  return `Menú disponible:
-${optionsText}
-
-El usuario dice: "${userMessage}"
-
-Responde con JSON indicando qué opción seleccionó:
-{
-  "selected_option": 1,
-  "confidence": 0.95,
-  "reasoning": "Razón breve"
-}`
 }

@@ -691,7 +691,7 @@ export async function processPatientDetectionMessage(
 
     const detectionResult = await detectMenuOption(userMessage, menuOptions, phoneNumber)
 
-    if (detectionResult.detected && detectionResult.confidence >= 0.70) {
+    if (detectionResult.detected && detectionResult.confidence >= 0.60) {
       logger.info('Menu option detected by text matching', {
         selectedOption: detectionResult.selectedOption,
         confidence: detectionResult.confidence,
