@@ -556,6 +556,21 @@ export async function handleMessage(value: any) {
     // Esto permite responder directamente sin pasar por OpenAI
     // ============================================================================
     if (message.type === "text" || message.type === "button") {
+      // Verificar si hay un flujo pendiente activo antes de invocar el handler,
+      // para guardar el mensaje del usuario PRIMERO y así preservar el orden correcto
+      // en el monitor de conversaciones (usuario → bot, no bot → usuario).
+      const pendingFlowState = await getFlowState(userPhoneNumber, config.id)
+      if (pendingFlowState) {
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: userMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
+      }
+
       const flowResult = await handlePendingFlowResponse(
         userMessage,
         userPhoneNumber,
@@ -567,15 +582,7 @@ export async function handleMessage(value: any) {
       // Si fue true, la respuesta fue manejada completamente
       if (flowResult === true) {
         console.log(`[WHATSAPP] Mensaje manejado por flujo directo, no se pasa a OpenAI`)
-        // Guardar el mensaje del usuario antes de salir (el bot ya guardó su respuesta)
-        await saveConversationMessage({
-          id: nanoid(),
-          role: "user",
-          content: userMessage,
-          timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
-          configId: config.id,
-        })
+        // El mensaje del usuario ya fue guardado antes de llamar a handlePendingFlowResponse
         return
       }
       
@@ -583,15 +590,7 @@ export async function handleMessage(value: any) {
       if (flowResult && typeof flowResult === 'object' && flowResult.type === 'route_to_reagendamiento') {
         console.log(`[WHATSAPP] Detectado reagendamiento - haciendo switch al asistente de reagendamiento`)
         
-        // Guardar el mensaje del usuario (eligió reagendar)
-        await saveConversationMessage({
-          id: nanoid(),
-          role: "user",
-          content: userMessage,
-          timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
-          configId: config.id,
-        })
+        // El mensaje del usuario ya fue guardado antes de llamar a handlePendingFlowResponse
         
         // Obtener el thread actual y el run ID para pasarlos a handleAssistantSwitch
         const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
