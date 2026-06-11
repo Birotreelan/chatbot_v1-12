@@ -348,7 +348,7 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
 
         {/* Patient panel column */}
         <div className="w-56 shrink-0 border-l p-3 overflow-y-auto">
-          <MonitorPatientPanel configId={configId} phoneNumber={phoneNumber} />
+          <MonitorPatientPanel key={phoneNumber} configId={configId} phoneNumber={phoneNumber} />
         </div>
 
       </div>{/* end two-column layout */}
