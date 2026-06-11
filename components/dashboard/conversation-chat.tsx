@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { format } from "date-fns"
+import { format, isToday, isYesterday, isSameDay } from "date-fns"
 import { es } from "date-fns/locale"
 import { User, Bot, Pause, Play, Send, Loader2 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -167,6 +167,12 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
 
+  function formatDateLabel(date: Date): string {
+    if (isToday(date)) return "Hoy"
+    if (isYesterday(date)) return "Ayer"
+    return format(date, "EEEE d 'de' MMMM 'de' yyyy", { locale: es })
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -218,54 +224,87 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
             <p className="text-muted-foreground">No hay mensajes en esta conversación</p>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}
-            >
-              {message.role === "assistant" && (
-                <Avatar className="h-8 w-8 flex-shrink-0">
-                  <AvatarFallback className="bg-primary text-primary-foreground">
-                    <Bot className="h-4 w-4" />
-                  </AvatarFallback>
-                </Avatar>
-              )}
-              <div
-                className={cn(
-                  "max-w-[70%] rounded-lg p-3",
-                  message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+          messages.map((message, index) => {
+            const currentDate = (() => {
+              try {
+                const d = new Date(message.timestamp)
+                return isNaN(d.getTime()) ? null : d
+              } catch {
+                return null
+              }
+            })()
+
+            const prevDate = (() => {
+              if (index === 0) return null
+              try {
+                const d = new Date(messages[index - 1].timestamp)
+                return isNaN(d.getTime()) ? null : d
+              } catch {
+                return null
+              }
+            })()
+
+            const showDateSeparator =
+              currentDate !== null &&
+              (prevDate === null || !isSameDay(currentDate, prevDate))
+
+            return (
+              <div key={message.id}>
+                {showDateSeparator && currentDate && (
+                  <div className="flex items-center gap-3 my-4">
+                    <div className="flex-1 h-px bg-border" />
+                    <span className="text-xs text-muted-foreground font-medium px-2 py-0.5 rounded-full bg-muted capitalize whitespace-nowrap">
+                      {formatDateLabel(currentDate)}
+                    </span>
+                    <div className="flex-1 h-px bg-border" />
+                  </div>
                 )}
-              >
-                <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-                <p
-                  className={cn(
-                    "text-xs mt-1",
-                    message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground",
-                  )}
+                <div
+                  className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}
                 >
-                  {(() => {
-                    try {
-                      if (!message.timestamp) return "--:--"
-
-                      const date = new Date(message.timestamp)
-                      if (isNaN(date.getTime())) return "--:--"
-
-                      return format(date, "HH:mm", { locale: es })
-                    } catch (error) {
-                      return "--:--"
-                    }
-                  })()}
-                </p>
+                  {message.role === "assistant" && (
+                    <Avatar className="h-8 w-8 flex-shrink-0">
+                      <AvatarFallback className="bg-primary text-primary-foreground">
+                        <Bot className="h-4 w-4" />
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
+                  <div
+                    className={cn(
+                      "max-w-[70%] rounded-lg p-3",
+                      message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+                    )}
+                  >
+                    <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                    <p
+                      className={cn(
+                        "text-xs mt-1",
+                        message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground",
+                      )}
+                    >
+                      {(() => {
+                        try {
+                          if (!message.timestamp) return "--:--"
+                          const date = new Date(message.timestamp)
+                          if (isNaN(date.getTime())) return "--:--"
+                          return format(date, "HH:mm", { locale: es })
+                        } catch {
+                          return "--:--"
+                        }
+                      })()}
+                    </p>
+                  </div>
+                  {message.role === "user" && (
+                    <Avatar className="h-8 w-8 flex-shrink-0">
+                      <AvatarFallback className="bg-muted">
+                        <User className="h-4 w-4" />
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
+                </div>
               </div>
-              {message.role === "user" && (
-                <Avatar className="h-8 w-8 flex-shrink-0">
-                  <AvatarFallback className="bg-muted">
-                    <User className="h-4 w-4" />
-                  </AvatarFallback>
-                </Avatar>
-              )}
-            </div>
-          ))
+            )
+          })
         )}
         <div ref={messagesEndRef} />
       </div>

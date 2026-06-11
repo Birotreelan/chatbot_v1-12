@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import type { HumanSupportMessage } from "@/lib/types"
-import { formatDistanceToNow } from "date-fns"
+import { formatDistanceToNow, isToday, isYesterday, isSameDay, format } from "date-fns"
 import { es } from "date-fns/locale"
 import { Bot, User, UserCheck } from "lucide-react"
 
@@ -18,6 +18,12 @@ export function MessageList({ messages }: MessageListProps) {
     // Auto-scroll al último mensaje
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+
+  function formatDateLabel(date: Date): string {
+    if (isToday(date)) return "Hoy"
+    if (isYesterday(date)) return "Ayer"
+    return format(date, "EEEE d 'de' MMMM 'de' yyyy", { locale: es })
+  }
 
   if (messages.length === 0) {
     return (
@@ -39,8 +45,41 @@ export function MessageList({ messages }: MessageListProps) {
           locale: es,
         })
 
+        const currentDate = (() => {
+          try {
+            const d = new Date(message.timestamp)
+            return isNaN(d.getTime()) ? null : d
+          } catch {
+            return null
+          }
+        })()
+
+        const prevDate = (() => {
+          if (index === 0) return null
+          try {
+            const d = new Date(messages[index - 1].timestamp)
+            return isNaN(d.getTime()) ? null : d
+          } catch {
+            return null
+          }
+        })()
+
+        const showDateSeparator =
+          currentDate !== null &&
+          (prevDate === null || !isSameDay(currentDate, prevDate))
+
         return (
-          <div key={index} className={`flex ${isUser ? "justify-start" : "justify-end"}`}>
+          <div key={index}>
+            {showDateSeparator && currentDate && (
+              <div className="flex items-center gap-2 my-3">
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-xs text-muted-foreground font-medium px-2 py-0.5 rounded-full bg-background border capitalize whitespace-nowrap">
+                  {formatDateLabel(currentDate)}
+                </span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+            )}
+            <div className={`flex ${isUser ? "justify-start" : "justify-end"}`}>
             <div
               className={`max-w-[75%] rounded-lg px-2.5 py-2 ${
                 isUser
@@ -79,6 +118,7 @@ export function MessageList({ messages }: MessageListProps) {
               </div>
               <p className="text-xs leading-relaxed whitespace-pre-wrap">{message.content}</p>
             </div>
+          </div>
           </div>
         )
       })}
