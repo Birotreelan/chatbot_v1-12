@@ -1727,49 +1727,25 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         }
         
         await sendDirectResponse(nluCtx, nluFallbackResult.response, "nlu_fallback_response")
-
-        const nluIntent = nluFallbackResult.result?.intent
-
-        // Intenciones que muestran el menú 1/2/3 → persistir flowState para que
-        // handlePendingFlowResponse pueda interceptar la respuesta del usuario.
-        const MENU_INTENTS = ["cancelar_turno", "reagendar_turno", "queja_frustracion", "explicacion_contextual"]
-        if (nluIntent && MENU_INTENTS.includes(nluIntent) && appointmentData) {
-          await setFlowState(userPhoneNumber, config.id, {
-            type: "awaiting_cancel_confirmation",
-            createdAt: new Date().toISOString(),
-            turnoIndex: 0,
-          })
-          console.log(`[WHATSAPP] ✅ NLU fallback (${nluIntent}): flowState 'awaiting_cancel_confirmation' guardado para ${userPhoneNumber}`)
+        
+        // Si fue confirmación, actualizar stats
+        if (nluFallbackResult.result?.intent === "confirmar_asistencia" && appointmentData) {
+          await trackAppointmentEvent(config.cliente_id, userPhoneNumber, "direct_confirm", appointmentData.appointment_id)
         }
-
-        // Confirmación directa → guardar postActionContext para mensajes contextuales posteriores
-        // (ej: "No voy a poder ir porque está con fiebre" después de confirmar)
-        if (nluIntent === "confirmar_asistencia" && appointmentData) {
-          const turno = appointmentData.turnos?.[0]
-          if (turno) {
-            await savePostActionContext(userPhoneNumber, config.id, {
+        
+        // Si fue cancelación, marcar como confirmación para el flujo de cancelación
+        if (nluFallbackResult.result?.intent === "cancelar_turno") {
+          // Establecer flowState para esperar la doble confirmación de cancelación
+          if (appointmentData?.appointment_id) {
+            await setFlowState(userPhoneNumber, config.id, {
+              state: "awaiting_cancel_confirmation",
+              appointmentId: String(appointmentData.appointment_id),
+              patientName: appointmentData.pacient_name || "Paciente",
               timestamp: Date.now(),
-              actionType: "confirmation",
-              turno: {
-                fecha: turno.fecha,
-                hora: turno.hora,
-                profesional: turno.profesional || "",
-                profesional_id: turno.profesional_id?.toString(),
-                sede: turno.sede || "",
-                sede_id: appointmentData.sede_id?.toString(),
-                direccion: turno.direccion,
-              },
-              paciente: {
-                nombres: appointmentData.paciente?.nombres || "",
-                apellido: appointmentData.paciente?.apellido || "",
-                dni: appointmentData.paciente?.dni,
-                telefono: userPhoneNumber,
-              },
             })
-            console.log(`[WHATSAPP] ✅ NLU fallback (confirmar_asistencia): postActionContext guardado para ${userPhoneNumber}`)
           }
         }
-
+        
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
         return
       }
