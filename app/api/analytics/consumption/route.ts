@@ -143,7 +143,7 @@ export async function GET(request: NextRequest) {
 
     // Intentar primero conversation analytics (es lo más importante para costos)
     const messagingFields = `analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${messagingGranularity}).phone_numbers([])`
-    const messagingUrl = `https://graph.facebook.com/v21.0/${config.wabaId}?fields=${messagingFields}&access_token=${config.accessToken}`
+    const messagingUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${messagingFields}&access_token=${config.accessToken}`
 
     console.log("[v0 Analytics] =================================")
     console.log("[v0 Analytics] Consultando Messaging Analytics primero para obtener el número de teléfono...")
@@ -184,7 +184,7 @@ export async function GET(request: NextRequest) {
       ? `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers(${phoneNumber})`
       : `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity})`
 
-    const conversationUrl = `https://graph.facebook.com/v21.0/${config.wabaId}?fields=${conversationFields}&access_token=${config.accessToken}`
+    const conversationUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${conversationFields}&access_token=${config.accessToken}`
 
     console.log("[v0 Analytics] =================================")
     console.log("[v0 Analytics] Consultando Conversation Analytics...")

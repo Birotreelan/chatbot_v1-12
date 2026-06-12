@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     console.log(`[TEMPLATES-API] Obteniendo plantillas para WABA ID: ${wabaId}`)
 
     // Llamada real a la API de WhatsApp Business
-    const response = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates`, {
+    const response = await fetch(`https://graph.facebook.com/v18.0/${wabaId}/message_templates`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${accessToken}`,
