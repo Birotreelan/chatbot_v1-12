@@ -14,7 +14,7 @@ export async function downloadWhatsAppMedia(mediaId: string, accessToken: string
   console.log(`[AUDIO] Descargando media de WhatsApp: ${mediaId}`)
 
   // Step 1: Get the media URL
-  const mediaInfoUrl = `https://graph.facebook.com/v17.0/${mediaId}`
+  const mediaInfoUrl = `https://graph.facebook.com/v21.0/${mediaId}`
   const urlResponse = await fetch(mediaInfoUrl, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
