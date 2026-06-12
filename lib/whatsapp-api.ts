@@ -53,7 +53,7 @@ export async function sendWhatsAppMessage(
 
     const normalizedPhone = normalizePhoneNumber(to)
 
-    const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
+    const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`
     console.log("[v0] [WHATSAPP_API] URL:", url)
 
     const payload = {
@@ -102,7 +102,7 @@ export async function sendWhatsAppTemplate(
     console.log("[v0] [WHATSAPP_API] sendWhatsAppTemplate - accessToken:", accessToken)
     const normalizedPhone = normalizePhoneNumber(to)
 
-    const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
+    const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`
 
     let templateData = template
     if (typeof template === "string") {
@@ -153,7 +153,7 @@ export async function checkWhatsAppHealth(
   errors?: any[]
 }> {
   try {
-    const url = `https://graph.facebook.com/v17.0/${phoneNumberId}`
+    const url = `https://graph.facebook.com/v21.0/${phoneNumberId}`
 
     const response = await fetch(url, {
       method: "GET",
@@ -163,7 +163,15 @@ export async function checkWhatsAppHealth(
     })
 
     if (!response.ok) {
-      const error = await response.json()
+      // Defensivo: Meta puede responder con HTML en lugar de JSON cuando el token es inválido
+      const contentType = response.headers.get("content-type") || ""
+      let error: any
+      if (contentType.includes("application/json")) {
+        error = await response.json()
+      } else {
+        const text = await response.text()
+        error = { message: `HTTP ${response.status}: respuesta no-JSON recibida`, raw: text.slice(0, 200) }
+      }
       console.error("[WHATSAPP_API] Error verificando health:", error)
 
       // Analizar el tipo de error
