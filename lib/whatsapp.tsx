@@ -249,7 +249,6 @@ async function handlePendingFlowResponse(
   if (flowState.type === 'awaiting_cancel_confirmation') {
     // Usuario responde a "1- Si, cancelar" / "2- No, mantener"
     if (isConfirmCancelResponse(userMessage)) {
-      console.log(`[WHATSAPP-DIRECT] Usuario confirma cancelacion`)
       
       // Llamar al proxy para ejecutar la cancelacion
       try {
@@ -501,7 +500,6 @@ export async function handleMessage(value: any) {
     // Verificar si el mensaje ya ha sido procesado
     const messageId = message.id
     if (await isMessageProcessed(messageId)) {
-      console.log(`[WHATSAPP] ⚠️ Mensaje duplicado detectado: ${messageId}, ignorando`)
       return
     }
 
@@ -1093,7 +1091,6 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
           }
 
           if (errorType === "ALREADY_CONFIRMED") {
-            console.log(`[WHATSAPP] ✅ ALREADY_CONFIRMED detectado - tratando como éxito`)
 
             if (config.cliente_id) {
               await trackAppointmentEvent({
@@ -1104,7 +1101,6 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
                 templateSentAt: templateSentAt || undefined,
                 metadata: { proxyResponse },
               })
-              console.log(`[WHATSAPP] Evento de confirmación registrado (ya estaba confirmado) para cliente ${config.cliente_id}`)
             }
           }
 
@@ -1514,7 +1510,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       const farewellFlags = await getEffectiveFeatureFlags(config.id)
       
       if (farewellFlags.directFarewellDetection) {
-        console.log(`[WHATSAPP] 👋 Verificando despedida pre-flujo para ${userPhoneNumber}`)
         
         const farewellResult = await detectFarewellPreFlow(
           userMessage,
@@ -1524,7 +1519,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         )
         
         if (farewellResult.isFarewell && farewellResult.response) {
-          console.log(`[WHATSAPP] ✅ Despedida detectada, respondiendo sin iniciar flujo`)
           
           const farewellCtx: DirectResponseContext = {
             phoneNumberId: value.metadata.phone_number_id,
@@ -1550,7 +1544,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       const wrongNumberFlags = await getEffectiveFeatureFlags(config.id)
       
       if (wrongNumberFlags.directWrongNumberDetection) {
-        console.log(`[WHATSAPP] 📞 Verificando numero equivocado para ${userPhoneNumber}`)
         
         // Verificar si hubo recordatorio reciente (ventana de 24h)
         let hasRecentReminder = false
@@ -1567,7 +1560,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         )
         
         if (wrongNumberResult.isWrongNumber && wrongNumberResult.response) {
-          console.log(`[WHATSAPP] ✅ Numero equivocado detectado, respondiendo con disculpa`)
           
           const wrongNumberCtx: DirectResponseContext = {
             phoneNumberId: value.metadata.phone_number_id,
@@ -1594,7 +1586,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     const nluFallbackFlags = await getEffectiveFeatureFlags(config.id)
     
     if (nluFallbackFlags.nluFallbackRouter) {
-      console.log(`[WHATSAPP] 🧠 Verificando NLU fallback router para ${userPhoneNumber}`)
       
       // Obtener el appointmentContext si existe
       const appointmentData = await getAppointmentContext(userPhoneNumber, config.id)
@@ -1609,7 +1600,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       )
       
       if (nluFallbackResult.shouldHandle && nluFallbackResult.response) {
-        console.log(`[WHATSAPP] ✅ NLU fallback detectó intención: ${nluFallbackResult.result?.intent}, respondiendo`)
         
         const nluCtx: DirectResponseContext = {
           phoneNumberId: value.metadata.phone_number_id,
@@ -1657,7 +1647,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       const shouldDetect = await shouldUsePatientDetection(userPhoneNumber, config.id, hasPendingReminder)
       
       if (detectionFlags.directPatientDetection && shouldDetect) {
-        console.log(`[WHATSAPP] 🔍 Iniciando detección de paciente para ${userPhoneNumber}`)
         
         // Primero verificar si ya hay un flujo de detección activo (Sprint 9a, 9b o 9c)
         const detectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
@@ -1670,7 +1659,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
           
           if (detectionResult.handled) {
-            console.log(`[WHATSAPP] ✅ Detección iniciada, enviando mensaje`)
             const detectionCtx: DirectResponseContext = {
               phoneNumberId: value.metadata.phone_number_id,
               accessToken: config.accessToken,
@@ -1711,10 +1699,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         
         if (await isPatientDetectionFlowActive(userPhoneNumber)) {
           // Sprint 9a: Flujo de detección inicial (menú principal, desambiguación por DNI, etc.)
-          console.log(`[WHATSAPP] Procesando mensaje en flujo de detección inicial (Sprint 9a)`)
           detectionResult = await handlePatientDetectionMessage(userPhoneNumber, userMessage, config.cliente_id)
         } else if (await isExistingPatientFlowActive(userPhoneNumber)) {
-          console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente existente`)
           detectionResult = await handleExistingPatientMessage(
             userPhoneNumber,
             userMessage,
@@ -1727,7 +1713,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             }
           )
         } else if (await isNewPatientFlowActive(userPhoneNumber)) {
-          console.log(`[WHATSAPP] Procesando mensaje en flujo de paciente nuevo`)
           detectionResult = await handleNewPatientMessage(
             userPhoneNumber,
             userMessage,
@@ -1778,12 +1763,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             const menuResult = await detectMenuOption(userMessage, NEW_PATIENT_MENU, userPhoneNumber)
             if (menuResult.detected && menuResult.selectedOption) {
               selection = menuResult.selectedOption
-              console.log(`[WHATSAPP] Intención detectada por texto: opción ${selection} (confidence: ${menuResult.confidence})`)
             }
           }
 
           if (!selection) {
-            console.log(`[WHATSAPP] Selección de intención inválida: ${userMessage}`)
             await sendDirectResponse(
               detectionCtx,
               'Por favor, respondé con 1 o 2 según tu intención.',
@@ -1793,7 +1776,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             return
           }
 
-          console.log(`[WHATSAPP] Intención seleccionada: ${selection === 1 ? 'Turno' : 'Consulta'}`)
 
           if (selection === 1) {
             // Opción 1: Solicitar turno — cambiar fase a awaiting_initial_response (pedir DNI)
@@ -1819,7 +1801,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         if (detectionResult?.action === 'new_patient_dni_pending') {
           // Paciente nuevo ingresó DNI — derivar al flujo de paciente nuevo
           const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
-          console.log(`[WHATSAPP] DNI de paciente nuevo recibido, derivando a flujo nuevo`)
           const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id)
           if (newPatientResult?.handled && newPatientResult.message) {
             await sendDirectResponse(detectionCtx, newPatientResult.message, "new_patient_flow")
@@ -1841,7 +1822,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
             if (detectionResult.action === 'other_inquiry_intent') {
               // Paciente existente sin turnos eligió "Realizar otra consulta" → derivar a teléfono
-              console.log(`[WHATSAPP] Paciente existente eligió "otra consulta" → derivando a teléfono`)
               const escalationPhone = config.escalationPhoneNumber || 'nuestro equipo'
               const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
                 m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
@@ -1864,7 +1844,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               
               if (existingPhase && advancedPhases.includes(existingPhase)) {
                 // Ya hay un flujo activo más avanzado - procesar el mensaje "1" en ese contexto
-                console.log(`[WHATSAPP] Flujo de paciente existente ya activo en fase avanzada "${existingPhase}" → procesando mensaje en ese flujo`)
                 const existingResult = await handleExistingPatientMessage(
                   userPhoneNumber,
                   userMessage,
@@ -1884,7 +1863,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               }
               
               // Derivar a flujo de paciente existente para reservar turno
-              console.log(`[WHATSAPP] Acción "${detectionResult.action}" → iniciando flujo de paciente existente`)
               const existingResult = await initializeExistingPatientFlow(
                 userPhoneNumber,
                 patientInfo.patientId || '',
@@ -1904,7 +1882,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               await completePatientDetectionFlow(userPhoneNumber, config.id)
             } else if (detectionResult.action === 'confirm_appointment' || detectionResult.action === 'cancel_appointment') {
               // Sprint 9a: Manejar confirmación/cancelación directamente con los turnos del paciente detectado
-              console.log(`[WHATSAPP] Acción "${detectionResult.action}" → iniciando flujo directo`)
               
               // Verificar que tenemos turnos del paciente
               if (patientInfo?.turnos && patientInfo.turnos.length > 0) {
@@ -1942,7 +1919,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 
                 if (detectionResult.action === 'confirm_appointment') {
                   // Confirmar asistencia directamente
-                  console.log(`[WHATSAPP] Confirmando turno directamente`)
                   const confirmMsg = buildConfirmationMessage(chatbotData, 0)
                   await sendDirectResponse(detectionCtx, confirmMsg, "confirm_flow")
                   
@@ -1955,7 +1931,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   })
                 } else {
                   // Cancelación: mostrar doble confirmación
-                  console.log(`[WHATSAPP] Iniciando flujo de cancelación con doble confirmación`)
                   
                   // Setear estado de flujo para esperar confirmación
                   await setFlowState(userPhoneNumber, config.id, {
@@ -1970,7 +1945,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 }
               } else {
                 // Sin turnos - no debería pasar, pero por seguridad derivar a OpenAI
-                console.log(`[WHATSAPP] Acción "${detectionResult.action}" sin turnos → derivando a OpenAI`)
               }
             }
           }
@@ -2143,7 +2117,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     }
 
     // Encolar el mensaje para procesamiento secuencial por usuario
-    console.log(`[WHATSAPP] Encolando mensaje para usuario ${userPhoneNumber}`)
     await enqueueUserMessage(userPhoneNumber, {
       userMessage,
       messageType: message.type,
@@ -2153,7 +2126,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       audioMimeType,
     })
 
-    console.log(`[WHATSAPP] Mensaje encolado exitosamente para usuario ${userPhoneNumber}`)
   } catch (error) {
     console.error("[WHATSAPP] Error al procesar el mensaje:", (error as Error).message)
   }
@@ -2171,22 +2143,17 @@ export async function processIndividualMessage(
   routeToReagendamiento?: boolean,
   functionArgs?: any,
 ) {
-  console.log(
-    `[WHATSAPP] Procesando mensaje individual para usuario ${userPhoneNumber}: "${userMessage}" (tipo: ${messageType})${audioId ? ` [audioId: ${audioId}]` : ""}`,
-  )
 
   try {
     // ============================================================================
     // MANEJO ESPECIAL PARA REAGENDAMIENTO (FLUJO DETERMINISTICO)
     // ============================================================================
     if (routeToReagendamiento && functionArgs) {
-      console.log(`[WHATSAPP] 🔄 Iniciando flujo de reagendamiento DETERMINISTICO`)
 
       // Verificar feature flag para usar flujo determinístico
       const rescheduleFlags = await getFeatureFlagsForReschedule(config.id)
       
       if (rescheduleFlags.directReagendamiento) {
-        console.log(`[WHATSAPP] Flag directReagendamiento ON - Usando flujo determinístico`)
         
         try {
           // Obtener turnos disponibles del mismo profesional y sede
@@ -2196,12 +2163,6 @@ export async function processIndividualMessage(
           const turnoData = functionArgs.turno_cancelado
           const pacienteData = functionArgs.paciente
           
-          console.log(`[WHATSAPP] Datos del turno cancelado para reagendamiento:`, {
-            profesional_id: turnoData.profesional_id,
-            sede_id: turnoData.sede_id,
-            profesional: turnoData.profesional,
-            sede: turnoData.sede,
-          })
           
           // Verificar que tenemos los IDs necesarios
           if (!turnoData.profesional_id || !turnoData.sede_id) {
@@ -2210,7 +2171,6 @@ export async function processIndividualMessage(
               sede_id: turnoData.sede_id,
             })
             // Fallback al flujo legacy de OpenAI
-            console.log(`[WHATSAPP] Fallback a OpenAI por falta de IDs`)
           } else {
             // Calcular rango de fechas (próximos 14 días)
             const today = new Date()
@@ -2219,7 +2179,6 @@ export async function processIndividualMessage(
             const formatDate = (date: Date) => date.toISOString().split("T")[0]
             const rangoFechas = `${formatDate(today)} a ${formatDate(futureDate)}`
             
-            console.log(`[WHATSAPP] Buscando turnos con rango: ${rangoFechas}`)
             
             // Buscar turnos disponibles para el mismo profesional
             // Firma: buscarTurnosDisponibles(rangoFechas, profesional, especialidad, profesionalId, clienteId, sedeId, ...)
@@ -2232,7 +2191,6 @@ export async function processIndividualMessage(
               turnoData.sede_id,     // sedeId
             )
             
-            console.log(`[WHATSAPP] Turnos disponibles encontrados:`, turnosResponse.datos?.length || 0)
             
             // Extraer turnos del response (puede venir en datos.turnos_disponibles o datos directamente)
             const turnosDisponibles = turnosResponse.exito 
@@ -2255,14 +2213,12 @@ export async function processIndividualMessage(
               )
               
               if (result.handled) {
-                console.log(`[WHATSAPP] Flujo de reagendamiento iniciado exitosamente`)
                 await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                 return
               }
             }
             
             // Si no hay turnos disponibles, informar al usuario
-            console.log(`[WHATSAPP] No hay turnos disponibles para reagendar`)
             await sendWhatsAppMessage(
               phoneNumberId,
               config.accessToken,
@@ -2276,14 +2232,12 @@ export async function processIndividualMessage(
         } catch (error) {
           console.error(`[WHATSAPP] Error en flujo determinístico de reagendamiento:`, (error as Error).message)
           // Fallback al flujo de OpenAI si hay error
-          console.log(`[WHATSAPP] Fallback a OpenAI por error en flujo determinístico`)
         }
       }
       
       // ========================================================================
       // FLUJO LEGACY (OpenAI) - Se usa si flag OFF o como fallback
       // ========================================================================
-      console.log(`[WHATSAPP] Usando flujo de reagendamiento con OpenAI (legacy)`)
 
       try {
         const openai = new (await import("openai")).default({
@@ -2292,9 +2246,7 @@ export async function processIndividualMessage(
 
         // Obtener el thread actual (puede no existir si el usuario llegó por template)
         const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
-        console.log(`[WHATSAPP] Thread previo: ${threadInfo?.threadId || 'ninguno (usuario por template)'}`)
 
-        console.log(`[WHATSAPP] Creando nuevo thread para asistente de reagendamiento...`)
 
         const newThread = await openai.beta.threads.create({
           metadata: {
@@ -2304,7 +2256,6 @@ export async function processIndividualMessage(
           },
         })
 
-        console.log(`[WHATSAPP] Nuevo thread creado: ${newThread.id}`)
 
         // Actualizar en base de datos
         const { updateThreadId } = await import("./db")
@@ -2336,7 +2287,6 @@ ${JSON.stringify(functionArgs, null, 2)}`
           content: systemBlock,
         })
 
-        console.log(`[WHATSAPP] Mensaje de sistema enviado al nuevo thread`)
 
         // Trackear inicio de reagendamiento
         if (config.cliente_id) {
@@ -2385,7 +2335,6 @@ ${JSON.stringify(functionArgs, null, 2)}`
     // procesar el mensaje con el handler determinístico
     const rescheduleActive = await isRescheduleFlowActive(userPhoneNumber, config.id)
     if (rescheduleActive) {
-      console.log(`[WHATSAPP] Usuario en flujo de reagendamiento activo - procesando deterministicamente`)
       
       const rescheduleResult = await processRescheduleMessage(
         userMessage,
@@ -2397,7 +2346,6 @@ ${JSON.stringify(functionArgs, null, 2)}`
       )
       
       if (rescheduleResult.handled) {
-        console.log(`[WHATSAPP] Mensaje procesado por flujo de reagendamiento determinístico`)
         // Guardar el mensaje del usuario antes de salir
         await saveConversationMessage({
           id: nanoid(),
@@ -2413,7 +2361,6 @@ ${JSON.stringify(functionArgs, null, 2)}`
       
       // Si necesita fallback a OpenAI para NLU
       if (rescheduleResult.fallbackToOpenAI && rescheduleResult.fallbackContext) {
-        console.log(`[WHATSAPP] Fallback a OpenAI NLU para interpretar: ${rescheduleResult.fallbackContext.type}`)
         // TODO: Implementar llamada a asistente NLU (RESCHEDULE_NLU_ASSISTANT_ID)
         // Por ahora, continuar con flujo normal
       }
@@ -2423,18 +2370,15 @@ ${JSON.stringify(functionArgs, null, 2)}`
     // PROCESAMIENTO NORMAL DE MENSAJES
     // ============================================================================
     if (messageType === "audio" && audioId) {
-      console.log(`[WHATSAPP] 🎤 Procesando mensaje de audio, iniciando transcripcion...`)
 
       try {
         const transcription = await transcribeWhatsAppAudio(audioId, config.accessToken, audioMimeType)
 
         if (transcription && transcription.trim()) {
-          console.log(`[WHATSAPP] 🎤 Audio transcrito exitosamente: "${transcription.substring(0, 100)}..."`)
           // Use the transcription as the user message
           userMessage = transcription
           // Continue processing as a normal text message
         } else {
-          console.log(`[WHATSAPP] 🎤 Transcripcion vacia, enviando mensaje de error`)
           const errorMessage =
             "Lo siento, no pude entender el audio que enviaste. ¿Podrías intentar nuevamente o enviar tu mensaje por escrito?"
 
@@ -2475,7 +2419,6 @@ ${JSON.stringify(functionArgs, null, 2)}`
     }
 
     if (messageType === "sticker" || messageType === "reaction") {
-      console.log(`[WHATSAPP] �� Tipo de mensaje ${messageType} ignorado sin respuesta`)
       // Update stats - message received but not processed
       await updateWhatsAppStats(config.id, { messagesReceived: 1 })
       return // Exit early, don't process or respond
@@ -2484,11 +2427,8 @@ ${JSON.stringify(functionArgs, null, 2)}`
     // Obtener o crear un thread para este usuario
     let threadResult
     try {
-      console.log(`[WHATSAPP] Obteniendo thread para usuario ${userPhoneNumber} y config ${config.id}`)
       threadResult = await getThreadForUser(userPhoneNumber, config.id)
-      console.log(`[WHATSAPP] Thread obtenido: ${threadResult.threadId}, isNewThread: ${threadResult.isNewThread}`)
       if (threadResult.assistantId) {
-        console.log(`[WHATSAPP] 🤖 Thread tiene asistente personalizado: ${threadResult.assistantId}`)
       }
     } catch (error) {
       console.error("[WHATSAPP] Error al obtener thread ID:", (error as Error).message)
@@ -2506,7 +2446,6 @@ ${JSON.stringify(functionArgs, null, 2)}`
           configId: config.id,
           messageType: "error",
         })
-        console.log(`[WHATSAPP] 💾 Mensaje de error de thread guardado en conversación`)
       } catch (saveError) {
         console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
       }
@@ -2543,27 +2482,16 @@ PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDer
 ${userMessage}`
     }
 
-    console.log(`[WHATSAPP] Mensaje preparado para OpenAI:`, messageToSend)
 
     const assistantToUse = threadResult.assistantId || config.whatsappAssistantId
     if (threadResult.assistantId) {
-      console.log(`[WHATSAPP] ✨ Usando asistente del thread: ${assistantToUse}`)
     } else {
-      console.log(`[WHATSAPP] 🔵 Usando asistente por defecto: ${assistantToUse}`)
     }
 
     // Obtener respuesta del asistente
     try {
-      console.log(`[v0] 📞 Antes de llamar getAssistantResponse:`, {
-        userPhoneNumber,
-        threadId: threadResult.threadId,
-        phoneNumberId,
-        assistantId: assistantToUse,
-      })
-      console.log(`[WHATSAPP] Llamando a getAssistantResponse...`)
       await getAssistantResponse(threadResult.threadId, messageToSend, phoneNumberId, assistantToUse, userPhoneNumber)
 
-      console.log(`[WHATSAPP] getAssistantResponse completado exitosamente`)
 
       // Actualizar estadísticas - mensaje procesado
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -2576,14 +2504,12 @@ ${userMessage}`
       // Si el error es 404 (thread no encontrado), intentar crear uno nuevo
       if ((error as any).status === 404 && (error as any).error?.type === "invalid_request_error") {
         try {
-          console.log("[WHATSAPP] Thread no encontrado, creando uno nuevo...")
           // Crear un nuevo thread directamente con OpenAI
           const openai = new (await import("openai")).default({
             apiKey: process.env.OPENAI_API_KEY,
           })
 
           const newThread = await openai.beta.threads.create()
-          console.log(`[WHATSAPP] Nuevo thread creado: ${newThread.id}`)
 
           // Actualizar en la base de datos
           const key = `thread:${userPhoneNumber}:${config.id}`
@@ -2603,13 +2529,6 @@ ${userMessage}`
             await redisClient.set(key, JSON.stringify(threadInfo))
           }
 
-          console.log(`[WHATSAPP] Reintentando con nuevo thread...`)
-          console.log(`[v0] 📞 Antes de reintentar con nuevo thread:`, {
-            userPhoneNumber,
-            newThreadId: newThread.id,
-            phoneNumberId,
-            assistantId: config.whatsappAssistantId,
-          })
           await getAssistantResponse(
             newThread.id,
             messageToSend,
@@ -2618,7 +2537,6 @@ ${userMessage}`
             userPhoneNumber,
           )
 
-          console.log(`[WHATSAPP] getAssistantResponse completado exitosamente con nuevo thread`)
 
           // Actualizar estadísticas - mensaje procesado
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -2638,7 +2556,6 @@ ${userMessage}`
               configId: config.id,
               messageType: "error",
             })
-            console.log(`[WHATSAPP] 💾 Mensaje de error de reintento guardado en conversación`)
           } catch (saveError) {
             console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, (saveError as Error).message)
           }
@@ -2664,7 +2581,6 @@ ${userMessage}`
               configId: config.id,
               messageType: "error",
             })
-          console.log(`[WHATSAPP] 💾 Mensaje de error general guardado en conversación`)
         } catch (saveError) {
           console.error(`[WHATSAPP] �� Error guardando mensaje de error:`, saveError)
         }
@@ -2678,7 +2594,6 @@ ${userMessage}`
       }
     }
 
-    console.log(`[WHATSAPP] Procesamiento individual completado para usuario ${userPhoneNumber}`)
   } catch (error) {
     console.error(`[WHATSAPP] Error al procesar mensaje individual para usuario ${userPhoneNumber}:`, (error as Error).message)
 
@@ -2695,7 +2610,6 @@ ${userMessage}`
           configId: config.id,
           messageType: "error",
         })
-      console.log(`[WHATSAPP] 💾 Mensaje de error catch guardado en conversación`)
     } catch (saveError) {
       console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, saveError)
     }
