@@ -1784,10 +1784,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // INTERCEPTAR FLUJOS ACTIVOS: Detección inicial, Paciente Existente o Nuevo (Sprint 9a-c)
     // ============================================================================
     if (message.type === "text") {
+      // Si hay un booking flow activo (Sprint 6-8), tiene prioridad sobre el flujo de paciente nuevo.
+      // El booking flow se procesa más adelante (línea ~2083) con handleBookingSelectionIfPending.
+      // Evitamos que new_patient_flow intercepte mensajes que le pertenecen al booking flow.
+      const activeBookingState = await getBookingFlowState(userPhoneNumber, config.id)
+      const bookingFlowHasActiveStep = !!activeBookingState?.step
+
       // Verificar si hay algún flujo activo de Sprint 9a, 9b o 9c
+      // Si el booking flow tiene un paso activo, excluir new_patient_flow de la intercepción
       const isDetectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
                                await isExistingPatientFlowActive(userPhoneNumber) ||
-                               await isNewPatientFlowActive(userPhoneNumber)
+                               (!bookingFlowHasActiveStep && await isNewPatientFlowActive(userPhoneNumber))
       
       if (isDetectionActive) {
         const detectionFlags = await getEffectiveFeatureFlags(config.id)
