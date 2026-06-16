@@ -691,18 +691,7 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
         throw new Error(`Submit tool outputs failed: ${submitResponse.status} ${errorText}`)
       }
 
-      console.log(`[OPENAI] 📤 Resultados enviados a OpenAI`)
 
-      console.log(`[OPENAI] 📤 ===== ENVIANDO A OPENAI =====`)
-      console.log(`[OPENAI] 📤 Cantidad de tool outputs: ${toolOutputs.length}`)
-      toolOutputs.forEach((output, index) => {
-        console.log(`[OPENAI] 📤 Tool Output ${index + 1}:`)
-        console.log(`[OPENAI] 📤   - tool_call_id: ${output.tool_call_id}`)
-        console.log(`[OPENAI] 📤   - output (${output.output.length} chars):`)
-        console.log(`[OPENAI] 📤   ${output.output}`)
-      })
-      console.log(`[OPENAI] 📤 ===== FIN DATOS ENVIADOS =====`)
-      // </CHANGE>
 
       // Continuar procesando
       await processWebRunOnly(openai, threadId, runId, clienteId)
@@ -715,8 +704,6 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
 // Función para obtener obras sociales
 export async function obtenerObrasSociales(clienteId: string): Promise<string> {
   try {
-    console.log(`[TOOLS] 🏥 Obteniendo obras sociales para cliente: ${clienteId}`)
-
     const baseUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
     if (!baseUrl) {
       return "Error: URL de API no configurada"
@@ -739,11 +726,9 @@ export async function obtenerObrasSociales(clienteId: string): Promise<string> {
     }
 
     const data = await response.json()
-    console.log(`[TOOLS] ✅ Obras sociales obtenidas: ${data.obras_sociales?.length || 0}`)
-
     return JSON.stringify(data)
   } catch (error) {
-    console.error("[TOOLS] ❌ Error obteniendo obras sociales:", error)
+    console.error("[TOOLS] Error obteniendo obras sociales:", error)
     return "Error al obtener obras sociales"
   }
 }
@@ -751,10 +736,6 @@ export async function obtenerObrasSociales(clienteId: string): Promise<string> {
 // Función para reservar turno
 export async function reservarTurno(clienteId: string, turnoId: string, pacienteDatos: any): Promise<string> {
   try {
-    console.log(`[TOOLS] 📝 Reservando turno ${turnoId} para cliente: ${clienteId}`)
-    console.log(`[TOOLS] 📋 Datos del paciente:`, JSON.stringify(pacienteDatos, null, 2))
-    console.log(`[TOOLS] 🔑 turnoId recibido:`, turnoId)
-
     const baseUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
     if (!baseUrl) {
       return JSON.stringify({
@@ -786,8 +767,6 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
       ...(pacienteDatos.comentarios && { Comentarios: pacienteDatos.comentarios }),
     }
 
-    console.log(`[TOOLS] 📤 Request body completo:`, JSON.stringify(requestBody, null, 2))
-
     const response = await fetch(baseUrl, {
       method: "POST",
       headers: {
@@ -799,7 +778,7 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error(`[TOOLS] ❌ Error HTTP ${response.status}:`, errorText)
+      console.error(`[TOOLS] Error HTTP ${response.status} en reservarTurno:`, errorText)
       return JSON.stringify({
         exito: false,
         error: `Error HTTP: ${response.status} - ${errorText}`,
@@ -807,19 +786,16 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
     }
 
     const data = await response.json()
-    console.log(`[TOOLS] 📥 Respuesta completa del proxy:`, JSON.stringify(data, null, 2))
 
     if (data.error) {
-      console.error(`[TOOLS] ❌ Error del proxy:`, data.error)
       return JSON.stringify({
         exito: false,
         error: data.error,
-        mensaje: "Error al reservar el turno. Por favor, intenta nuevamente o contacta a la cl��nica.",
+        mensaje: "Error al reservar el turno. Por favor, intenta nuevamente o contacta a la clínica.",
       })
     }
 
     if (data.success === false) {
-      console.error(`[TOOLS] ❌ Reserva fallida:`, data)
       return JSON.stringify({
         exito: false,
         error: data.message || data.error || "Error desconocido",
@@ -827,15 +803,10 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
       })
     }
 
-        console.log(`[TOOLS] ✅ Turno reservado exitosamente, registrando estadística`)
         try {
-          // Verificar si hay una cancelación pendiente (dentro de las últimas 12h)
           const phoneNumber = pacienteDatos.telefono || "unknown"
           const isPendingReschedule = await checkAndClearPendingReschedule(clienteId, phoneNumber)
-          
-          // Si hay cancelación pendiente, es un reagendamiento real. Si no, es un turno nuevo.
           const eventType = isPendingReschedule ? "rescheduled" : "new_appointment"
-          console.log(`[TOOLS] 📊 Tipo de evento detectado: ${eventType} (pending reschedule: ${isPendingReschedule})`)
           
           await trackAppointmentEvent({
             clienteId: clienteId,
@@ -847,10 +818,8 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
               paciente: pacienteDatos,
             },
           })
-          console.log(`[TOOLS] 📊 Estadística registrada para cliente ${clienteId}: ${eventType}`)
         } catch (statsError) {
-          console.error(`[TOOLS] ⚠️ Error al registrar estadística:`, statsError)
-          // No fallamos la reserva por error de estadísticas
+          console.error(`[TOOLS] Error al registrar estadística de reserva:`, statsError)
     }
 
     return JSON.stringify({
@@ -859,7 +828,7 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
       mensaje: "Turno reservado correctamente",
     })
   } catch (error) {
-    console.error("[TOOLS] ❌ Error reservando turno:", error)
+    console.error("[TOOLS] Error reservando turno:", error)
     return JSON.stringify({
       exito: false,
       error: error instanceof Error ? error.message : "Error desconocido",
@@ -871,20 +840,15 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
 // Función para obtener datos de sede (nueva herramienta)
 export async function obtenerDatosSedeHerramienta(clienteId: string, sedeId: string): Promise<string> {
   try {
-    console.log(`[TOOLS] 🏥 Obteniendo datos de sede: ${sedeId} para cliente: ${clienteId}`)
-
     const sedeData = await obtenerDatosSede(clienteId, sedeId)
 
     if (sedeData && sedeData.success && sedeData.sede) {
-      const datosFormateados = formatearDatosSede(sedeData.sede)
-      console.log(`[TOOLS] ✅ Datos de sede obtenidos: ${sedeData.sede.Nombre_Completo}`)
-      return datosFormateados
+      return formatearDatosSede(sedeData.sede)
     } else {
-      console.log(`[TOOLS] ⚠️ No se pudieron obtener datos de sede`)
       return "No se pudieron obtener los datos de la sede solicitada"
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error obteniendo datos de sede:", error)
+    console.error("[TOOLS] Error obteniendo datos de sede:", error)
     return "Error al obtener los datos de la sede"
   }
 }
@@ -892,12 +856,9 @@ export async function obtenerDatosSedeHerramienta(clienteId: string, sedeId: str
 // Nueva función para obtener listado de todas las sedes
 export async function obtenerSedesHerramienta(clienteId: string): Promise<string> {
   try {
-    console.log(`[TOOLS] 🏥 Obteniendo listado de sedes para cliente: ${clienteId}`)
-
     const resultado = await obtenerTodasLasSedes(clienteId)
 
     if (resultado.success && resultado.sedes && Array.isArray(resultado.sedes)) {
-      console.log(`[TOOLS] ✅ Sedes obtenidas: ${resultado.sedes.length}`)
       return JSON.stringify({
         exito: true,
         sedes: resultado.sedes,
@@ -905,14 +866,13 @@ export async function obtenerSedesHerramienta(clienteId: string): Promise<string
         mensaje: `Se encontraron ${resultado.sedes.length} sedes.`,
       })
     } else {
-      console.log(`[TOOLS] ⚠️ No se encontraron sedes.`)
       return JSON.stringify({
         exito: false,
         mensaje: resultado.error || "No se encontraron sedes disponibles.",
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error obteniendo sedes:", error)
+    console.error("[TOOLS] Error obteniendo sedes:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error al obtener las sedes.",
@@ -923,13 +883,9 @@ export async function obtenerSedesHerramienta(clienteId: string): Promise<string
 // Función para validar DNI
 export async function validarDni(clienteId: string, dni: string): Promise<string> {
   try {
-    console.log(`[TOOLS] 🔍 Validando DNI: ${dni} para cliente: ${clienteId}`)
-
     const resultado = await buscarPaciente(clienteId, { dni })
 
     if (resultado.exito && resultado.datos) {
-      console.log(`[TOOLS] ✅ DNI validado exitosamente: ${dni}`)
-
       const response: any = {
         exito: true,
         paciente: resultado.datos,
@@ -939,28 +895,24 @@ export async function validarDni(clienteId: string, dni: string): Promise<string
       // Agregar turnos_proximos si existen
       if ((resultado as any).turnosProximos && (resultado as any).turnosProximos.length > 0) {
         response.turnos_proximos = (resultado as any).turnosProximos
-        console.log(`[TOOLS] 📅 Turnos próximos encontrados: ${(resultado as any).turnosProximos.length}`)
       } else {
         response.turnos_proximos = []
-        console.log(`[TOOLS] 📅 No hay turnos próximos`)
       }
 
       // Agregar es_primera_vez si existe
       if ((resultado as any).esPrimeraVez !== undefined && (resultado as any).esPrimeraVez !== null) {
         response.es_primera_vez = (resultado as any).esPrimeraVez
-        console.log(`[TOOLS] 🆕 Es primera vez: ${(resultado as any).esPrimeraVez}`)
       }
 
       return JSON.stringify(response)
     } else {
-      console.log(`[TOOLS] ⚠️ DNI no encontrado: ${dni}`)
       return JSON.stringify({
         exito: false,
         mensaje: resultado.error?.mensaje || "No se encontró un paciente con ese DNI",
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error validando DNI:", error)
+    console.error("[TOOLS] Error validando DNI:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error al validar el DNI",
@@ -971,12 +923,9 @@ export async function validarDni(clienteId: string, dni: string): Promise<string
 // Función para validar teléfono
 export async function validarTelefono(clienteId: string, telefono: string): Promise<string> {
   try {
-    console.log(`[TOOLS] 📱 Validando teléfono: ${telefono} para cliente: ${clienteId}`)
-
     const resultado = await buscarPaciente(clienteId, { telefono })
 
     if (resultado.exito && resultado.datos) {
-      console.log(`[TOOLS] ✅ Teléfono validado exitosamente: ${telefono}`)
       const response: any = {
         exito: true,
         paciente: resultado.datos,
@@ -986,19 +935,17 @@ export async function validarTelefono(clienteId: string, telefono: string): Prom
       // Add turnos_proximos if available
       if ((resultado as any).turnosProximos && (resultado as any).turnosProximos.length > 0) {
         response.turnos_proximos = (resultado as any).turnosProximos
-        console.log(`[TOOLS] 📅 Turnos próximos encontrados: ${(resultado as any).turnosProximos.length}`)
       }
 
       return JSON.stringify(response)
     } else {
-      console.log(`[TOOLS] ⚠️ Teléfono no encontrado: ${telefono}`)
       return JSON.stringify({
         exito: false,
         mensaje: resultado.error?.mensaje || "No se encontró un paciente con ese número de teléfono",
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error validando teléfono:", error)
+    console.error("[TOOLS] Error validando teléfono:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error al validar el número de teléfono",
@@ -1009,12 +956,9 @@ export async function validarTelefono(clienteId: string, telefono: string): Prom
 // Función para buscar profesionales
 export async function buscarProfesionalesHerramienta(clienteId: string, busqueda: string): Promise<string> {
   try {
-    console.log(`[TOOLS] 👨‍⚕️ Buscando profesionales: "${busqueda}" para cliente: ${clienteId}`)
-
     const resultado = await buscarProfesionales(clienteId, busqueda)
 
     if (resultado.exito && resultado.datos && Array.isArray(resultado.datos)) {
-      console.log(`[TOOLS] ✅ Profesionales encontrados: ${resultado.datos.length}`)
       return JSON.stringify({
         exito: true,
         profesionales: resultado.datos,
@@ -1022,14 +966,13 @@ export async function buscarProfesionalesHerramienta(clienteId: string, busqueda
         mensaje: `Se encontraron ${resultado.datos.length} profesionales`,
       })
     } else {
-      console.log(`[TOOLS] ⚠️ No se encontraron profesionales para: "${busqueda}"`)
       return JSON.stringify({
         exito: false,
         mensaje: resultado.error?.mensaje || "No se encontraron profesionales con ese criterio de búsqueda",
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error buscando profesionales:", error)
+    console.error("[TOOLS] Error buscando profesionales:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error al buscar profesionales",
@@ -1040,15 +983,12 @@ export async function buscarProfesionalesHerramienta(clienteId: string, busqueda
 // Función para obtener subespecialidades
 export async function obtenerSubespecialidadesHerramienta(clienteId: string): Promise<string> {
   try {
-    console.log(`[TOOLS] 🏥 Obteniendo subespecialidades para cliente: ${clienteId}`)
-
     const resultado = await obtenerSubespecialidades(clienteId)
 
     if (resultado.exito && resultado.datos) {
       const especialidades = resultado.datos.subespecialidades || resultado.datos
 
       if (Array.isArray(especialidades)) {
-        console.log(`[TOOLS] ✅ Subespecialidades obtenidas: ${especialidades.length}`)
         return JSON.stringify({
           exito: true,
           especialidades: especialidades,
@@ -1056,21 +996,19 @@ export async function obtenerSubespecialidadesHerramienta(clienteId: string): Pr
           mensaje: `Se encontraron ${especialidades.length} especialidades`,
         })
       } else {
-        console.log(`[TOOLS] ⚠️ Datos no son un array:`, resultado.datos)
         return JSON.stringify({
           exito: false,
           mensaje: "Formato de respuesta inesperado",
         })
       }
     } else {
-      console.log(`[TOOLS] ⚠️ No se encontraron subespecialidades`)
       return JSON.stringify({
         exito: false,
         mensaje: resultado.error?.mensaje || "No se encontraron especialidades disponibles",
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error obteniendo subespecialidades:", error)
+    console.error("[TOOLS] Error obteniendo subespecialidades:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error al obtener las especialidades",
@@ -1098,13 +1036,7 @@ export async function buscarTurnosDisponiblesHerramienta(
 
       const formatDate = (date: Date) => date.toISOString().split("T")[0]
       rangoFechas = `${formatDate(today)} a ${formatDate(nextWeek)}`
-
-      console.log(`[TOOLS] 📅 No se proporcionó rango de fechas, usando por defecto: ${rangoFechas}`)
     }
-
-    console.log(
-      `[TOOLS] 🔍 Buscando turnos disponibles: rango=${rangoFechas}, profesional=${profesional}, especialidad=${especialidad}, profesional_id=${profesionalId}, sede_id=${sedeId}, paciente_dni=${pacienteDNI}, subespecialidad_id=${subespecialidadId}, obra_social_id=${obraSocialId}`,
-    )
 
     const resultado = await buscarTurnosDisponibles(
       rangoFechas,
@@ -1120,7 +1052,6 @@ export async function buscarTurnosDisponiblesHerramienta(
 
     if (resultado.exito && resultado.datos) {
       if (resultado.datos.multiple) {
-        console.log(`[TOOLS] ⚠️ Múltiples profesionales encontrados: ${resultado.datos.profesionales.length}`)
         return JSON.stringify({
           exito: true,
           multiple: true,
@@ -1130,7 +1061,6 @@ export async function buscarTurnosDisponiblesHerramienta(
       }
 
       if (Array.isArray(resultado.datos)) {
-        console.log(`[TOOLS] ✅ Turnos encontrados: ${resultado.datos.length}`)
         return JSON.stringify({
           exito: true,
           turnos: resultado.datos,
@@ -1144,14 +1074,13 @@ export async function buscarTurnosDisponiblesHerramienta(
         datos: resultado.datos,
       })
     } else {
-      console.log(`[TOOLS] ⚠️ No se encontraron turnos disponibles`)
       return JSON.stringify({
         exito: false,
         mensaje: resultado.error?.mensaje || "No se encontraron turnos disponibles para los criterios especificados",
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error buscando turnos disponibles:", error)
+    console.error("[TOOLS] Error buscando turnos disponibles:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error al buscar turnos disponibles",
@@ -1162,21 +1091,10 @@ export async function buscarTurnosDisponiblesHerramienta(
 // Función para validar obra social
 export async function validarObraSocialHerramienta(clienteId: string, busqueda: string): Promise<string> {
   try {
-    console.log(`[TOOLS] 🏥 Validando obra social: "${busqueda}" para cliente: ${clienteId}`)
-    console.log(`[TOOLS-DEBUG] 🔍 clienteId details:`, {
-      clienteId,
-      clienteIdEmpty: !clienteId || clienteId.length === 0,
-      clienteIdType: typeof clienteId,
-      clienteIdLength: clienteId?.length || 0,
-      isConfigId: clienteId?.length === 17,  // configId tiene 17 chars
-    })
-
     const resultado = await validarObraSocial(clienteId, busqueda)
 
     if (resultado.exito && resultado.datos) {
       const { obras_sociales, total_encontradas, busqueda_realizada } = resultado.datos
-
-      console.log(`[TOOLS] ✅ Obras sociales encontradas: ${total_encontradas}`)
 
       return JSON.stringify({
         exito: true,
@@ -1186,14 +1104,13 @@ export async function validarObraSocialHerramienta(clienteId: string, busqueda: 
         mensaje: `Se encontraron ${total_encontradas} obras sociales que coinciden con "${busqueda_realizada}"`,
       })
     } else {
-      console.log(`[TOOLS] ⚠️ No se encontraron obras sociales para: "${busqueda}"`)
       return JSON.stringify({
         exito: false,
         mensaje: resultado.error?.mensaje || `No se encontraron obras sociales que coincidan con "${busqueda}"`,
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error validando obra social:", error)
+    console.error("[TOOLS] Error validando obra social:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error al validar la obra social",
@@ -1209,8 +1126,6 @@ export async function registrarEventoCitaHerramienta(
   motivo?: string,
 ): Promise<string> {
   try {
-    console.log(`[TOOLS] 📅 Registrando evento "${evento}" para turno ${turnoId} (cliente: ${clienteId})`)
-
     // Validar entrada
     if (!evento || !turnoId) {
       return JSON.stringify({
@@ -1228,21 +1143,20 @@ export async function registrarEventoCitaHerramienta(
     })
 
     if (resultado.success) {
-      console.log(`[TOOLS] ✅ Evento "${evento}" registrado exitosamente para turno ${turnoId}`)
       return JSON.stringify({
         exito: true,
         mensaje: `Evento "${evento}" registrado correctamente.`,
         data: resultado.data,
       })
     } else {
-      console.error(`[TOOLS] ❌ Error al registrar evento "${evento}" para turno ${turnoId}:`, resultado.error)
+      console.error(`[TOOLS] Error al registrar evento "${evento}" para turno ${turnoId}:`, resultado.error)
       return JSON.stringify({
         exito: false,
         mensaje: resultado.error?.message || "No se pudo registrar el evento de la cita.",
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error inesperado en registrarEventoCitaHerramienta:", error)
+    console.error("[TOOLS] Error en registrarEventoCitaHerramienta:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error interno al registrar el evento de la cita.",
@@ -1258,10 +1172,6 @@ export async function cancelarTurnoHerramienta(
   pacienteDatos: { dni: string; telefono: string }, // Added as required
 ): Promise<string> {
   try {
-    console.log(`[TOOLS] ❌ Cancelando turno para fecha: ${fecha} cliente: ${clienteId}`)
-    console.log(`[TOOLS] 📝 Motivo: ${motivo}`)
-    console.log(`[TOOLS] 👤 Datos del paciente:`, pacienteDatos)
-
     // Validar parámetros requeridos
     if (!fecha) {
       return JSON.stringify({
@@ -1294,8 +1204,6 @@ export async function cancelarTurnoHerramienta(
 
     // Manejar respuesta con el nuevo formato de la API
     if (resultado.success) {
-      console.log(`[TOOLS] ✅ Turno(s) cancelado(s) exitosamente para fecha ${fecha}`)
-
       // Formatear respuesta para OpenAI
       const response: any = {
         exito: true,
@@ -1315,7 +1223,6 @@ export async function cancelarTurnoHerramienta(
 
       return JSON.stringify(response)
     } else {
-      console.error(`[TOOLS] ❌ Error al cancelar turno para fecha ${fecha}:`, resultado)
       return JSON.stringify({
         exito: false,
         fecha: resultado.fecha,
@@ -1324,7 +1231,7 @@ export async function cancelarTurnoHerramienta(
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error inesperado en cancelarTurnoHerramienta:", error)
+    console.error("[TOOLS] Error en cancelarTurnoHerramienta:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error interno al cancelar el turno.",
@@ -1339,9 +1246,6 @@ export async function confirmarTurnoHerramienta(
   pacienteDatos: { dni: string; telefono: string }, // Changed from { turno_id: string; paciente_datos: any }
 ): Promise<string> {
   try {
-    console.log(`[TOOLS] ✅ Confirmando turno para fecha: ${fecha} para cliente: ${clienteId}`)
-    if (pacienteDatos) console.log(`[TOOLS] 👤 Datos del paciente:`, pacienteDatos)
-
     // Validar entrada
     if (!fecha) {
       return JSON.stringify({
@@ -1364,14 +1268,12 @@ export async function confirmarTurnoHerramienta(
     })
 
     if (resultado.exito || resultado.success) {
-      console.log(`[TOOLS] ✅ Turno del ${fecha} confirmado exitosamente.`)
       return JSON.stringify({
         exito: true,
         mensaje: resultado.mensaje || "Tu turno ha sido confirmado correctamente.",
         data: resultado.datos || resultado.data,
       })
     } else {
-      console.error(`[TOOLS] ❌ Error al confirmar turno del ${fecha}:`, resultado.error)
       return JSON.stringify({
         exito: false,
         mensaje:
@@ -1379,7 +1281,7 @@ export async function confirmarTurnoHerramienta(
       })
     }
   } catch (error) {
-    console.error("[TOOLS] ❌ Error inesperado en confirmarTurnoHerramienta:", error)
+    console.error("[TOOLS] Error en confirmarTurnoHerramienta:", error)
     return JSON.stringify({
       exito: false,
       mensaje: "Error interno al confirmar el turno.",
@@ -1518,8 +1420,6 @@ async function cancelRunAndWait(threadId: string, runId: string): Promise<boolea
   const startTime = Date.now()
 
   try {
-    console.log(`[OPENAI] 🛑 Cancelando run ${runId}`)
-
     // Solicitar cancelación
     const cancelResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}/cancel`, {
       method: "POST",
