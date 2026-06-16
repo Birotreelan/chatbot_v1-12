@@ -88,8 +88,7 @@ import {
   handleContextualIntent,
   type ContextualIntentResult,
 } from "./conversation-state/pending-flow-nlu/contextual-intent-handler"
-// Import dynamic handleAssistantSwitch
-let handleAssistantSwitch: any = null
+
 
 // Función para extraer el contenido del mensaje según su tipo
 function extractMessageContent(message: any): { content: string; audioId?: string; audioMimeType?: string } {
@@ -586,36 +585,24 @@ export async function handleMessage(value: any) {
         return
       }
       
-      // Si fue un objeto especial (reagendamiento), hacer el switch
+      // Si fue un objeto especial (reagendamiento), iniciar el flujo directamente
       if (flowResult && typeof flowResult === 'object' && flowResult.type === 'route_to_reagendamiento') {
-        console.log(`[WHATSAPP] Detectado reagendamiento - haciendo switch al asistente de reagendamiento`)
-        
-        // El mensaje del usuario ya fue guardado antes de llamar a handlePendingFlowResponse
-        
-        // Obtener el thread actual y el run ID para pasarlos a handleAssistantSwitch
-        const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
-        if (!threadInfo || !threadInfo.threadId) {
-          console.error(`[WHATSAPP] No se encontró thread para hacer el switch a reagendamiento`)
-          // Fallback: enviar mensaje de error
-          await sendWhatsAppMessage(
-            value.metadata.phone_number_id,
-            config.accessToken,
-            userPhoneNumber,
-            "Lo siento, hubo un error al iniciar el proceso de reagendamiento. Por favor, intenta nuevamente."
-          )
-          return
-        }
+        console.log(`[WHATSAPP] Detectado route_to_reagendamiento - iniciando flujo de reagendamiento`)
 
         try {
-          // Importar handleAssistantSwitch dinámicamente
-          if (!handleAssistantSwitch) {
-            const openaiTools = await import("./openai-tools")
-            // handleAssistantSwitch es una función interna no exportada, acceder a través del módulo
-            // Tenemos que llamar directamente dentro de processIndividualMessage
+          // Preparar los argumentos con los datos del turno cancelado
+          const turno = flowResult.chatbotData.turnos[flowResult.turnoIndex]
+          if (!turno) {
+            console.error(`[WHATSAPP] No se encontró turno en índice ${flowResult.turnoIndex}`)
+            await sendWhatsAppMessage(
+              value.metadata.phone_number_id,
+              config.accessToken,
+              userPhoneNumber,
+              "Lo siento, hubo un error al iniciar el proceso de reagendamiento. Por favor, intentá nuevamente."
+            )
+            return
           }
 
-          // Preparar los argumentos para route_to_reagendamiento con los datos del turno
-          const turno = flowResult.chatbotData.turnos[flowResult.turnoIndex]
           const functionArgs = {
             paciente: {
               nombres: flowResult.chatbotData.paciente.nombres,
@@ -635,9 +622,9 @@ export async function handleMessage(value: any) {
             },
           }
 
-          console.log(`[WHATSAPP] Encolando mensaje de reagendamiento con datos de turno cancelado`)
+          console.log(`[WHATSAPP] Encolando mensaje de reagendamiento | paciente: ${flowResult.chatbotData.paciente.nombres} | profesional_id: ${turno.profesional_id} | sede_id: ${flowResult.chatbotData.sede_id}`)
 
-          // Encolar el mensaje con información especial de reagendamiento
+          // Encolar el mensaje con flag especial - processIndividualMessage maneja el thread
           await enqueueUserMessage(userPhoneNumber, {
             userMessage: `[SISTEMA_REAGENDAMIENTO]${JSON.stringify(functionArgs)}[/SISTEMA_REAGENDAMIENTO]`,
             messageType: "text",
@@ -645,20 +632,19 @@ export async function handleMessage(value: any) {
             config,
             audioId: undefined,
             audioMimeType: undefined,
-            routeToReagendamiento: true, // Flag especial para processIndividualMessage
-            functionArgs, // Datos a pasar al asistente de reagendamiento
+            routeToReagendamiento: true,
+            functionArgs,
           })
 
           console.log(`[WHATSAPP] Mensaje de reagendamiento encolado exitosamente`)
           return
         } catch (error) {
-          console.error(`[WHATSAPP] Error en flujo de reagendamiento:`, (error as Error).message)
-          // Fallback: enviar mensaje de error
+          console.error(`[WHATSAPP] Error preparando flujo de reagendamiento:`, (error as Error).message)
           await sendWhatsAppMessage(
             value.metadata.phone_number_id,
             config.accessToken,
             userPhoneNumber,
-            "Lo siento, hubo un error al iniciar el proceso de reagendamiento. Por favor, intenta nuevamente."
+            "Lo siento, hubo un error al iniciar el proceso de reagendamiento. Por favor, intentá nuevamente."
           )
           return
         }
@@ -2390,27 +2376,17 @@ export async function processIndividualMessage(
           apiKey: process.env.OPENAI_API_KEY,
         })
 
-        // Obtener el thread actual
+        // Obtener el thread actual (puede no existir si el usuario llegó por template)
         const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
-        if (!threadInfo || !threadInfo.threadId) {
-          console.error(`[WHATSAPP] No se encontró thread para reagendamiento`)
-          await sendWhatsAppMessage(
-            phoneNumberId,
-            config.accessToken,
-            userPhoneNumber,
-            "Lo siento, hubo un error al procesar tu solicitud. Por favor, intenta nuevamente."
-          )
-          await updateWhatsAppStats(config.id, { errors: 1 })
-          return
-        }
+        console.log(`[WHATSAPP] Thread previo: ${threadInfo?.threadId || 'ninguno (usuario por template)'}`)
 
         console.log(`[WHATSAPP] Creando nuevo thread para asistente de reagendamiento...`)
 
         const newThread = await openai.beta.threads.create({
           metadata: {
             name: `whatsapp-${userPhoneNumber}-${config.id}`,
-            previousThread: threadInfo.threadId,
-            reason: "assistant_switch",
+            previousThread: threadInfo?.threadId || "none",
+            reason: "assistant_switch_reagendamiento",
           },
         })
 
