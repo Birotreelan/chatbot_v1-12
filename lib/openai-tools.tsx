@@ -351,46 +351,30 @@ function truncateToolResponse(response: any, maxLength = 1000): any {
   const responseStr = JSON.stringify(response)
   const originalLength = responseStr.length
 
-  console.log(`[OPENAI] 📊 Respuesta ORIGINAL completa (${originalLength} chars):`)
-  console.log(`[OPENAI] 📊 ${responseStr}`)
-
   if (responseStr.length <= maxLength) {
-    console.log(`[OPENAI] ✅ Respuesta NO truncada, se envía completa a OpenAI`)
     return response
   }
-
-  console.log(`[OPENAI] ✂️ Truncando respuesta: ${originalLength} → ${maxLength} chars`)
 
   // Si es un objeto con datos, truncar los datos
   if (response.exito && response.datos) {
     if (Array.isArray(response.datos)) {
-      const originalCount = response.datos.length
       const truncatedData = response.datos.slice(0, 40)
-      const truncatedResponse = {
+      return {
         ...response,
         datos: truncatedData,
         _truncated: true,
         _originalLength: response.datos.length,
       }
-
-      console.log(`[OPENAI] ✂️ Array truncado: ${originalCount} → ${truncatedData.length} elementos`)
-      console.log(`[OPENAI] 📤 Respuesta TRUNCADA que se envía a OpenAI:`)
-      console.log(`[OPENAI] 📤 ${JSON.stringify(truncatedResponse)}`)
-      return truncatedResponse
     }
   }
 
   // Fallback: truncar el string completo
-  const truncatedString = responseStr.substring(0, maxLength - 100) + "... [TRUNCADO]"
-  const fallbackResponse = {
+  return {
     exito: response.exito || false,
-    datos: truncatedString,
+    datos: responseStr.substring(0, maxLength - 100) + "... [TRUNCADO]",
     _truncated: true,
     _originalLength: originalLength,
   }
-  console.log(`[OPENAI] 📤 Respuesta TRUNCADA (fallback) que se envía a OpenAI:`)
-  console.log(`[OPENAI] 📤 ${JSON.stringify(fallbackResponse)}`)
-  return fallbackResponse
 }
 
 // Detectar si una función es de routing (comienza con route_to_)
@@ -410,41 +394,26 @@ async function handleAssistantSwitch(
   clienteId: string,
   userPhoneNumber: string, // Added for updating thread mapping
 ): Promise<{ switchedAssistant: boolean; assistantId?: string; newThreadId?: string }> {
-  console.log(`[OPENAI-SWITCH] 🔀 Detectada función de routing: ${functionName}`)
-
   try {
     const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
     if (!config) {
-      console.error(`[OPENAI-SWITCH] ❌ No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
+      console.error(`[OPENAI-SWITCH] No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
       return { switchedAssistant: false }
     }
 
     const newAssistantId = getAssistantIdByFunction(config, functionName)
 
     if (!newAssistantId) {
-      console.log(`[OPENAI-SWITCH] ⚠️ No se encontró asistente configurado para la función: ${functionName}`)
-      console.log(`[OPENAI-SWITCH] ℹ️Continuing without switching`)
+      console.warn(`[OPENAI-SWITCH] No se encontró asistente configurado para la función: ${functionName}`)
       return { switchedAssistant: false }
     }
 
-    console.log(`[OPENAI-SWITCH] ✅ Asistente encontrado: ${newAssistantId}`)
-
     // Trackear inicio de proceso de reagendamiento si es route_to_reagendamiento
     if (functionName === "route_to_reagendamiento") {
-      console.log(`[OPENAI-SWITCH] 📊 Trackeando inicio de proceso de reagendamiento para ${userPhoneNumber}`)
       await trackRescheduleStarted(clienteId, userPhoneNumber)
     }
 
-    console.log(`[OPENAI-SWITCH] 🛑 Cancelando run original: ${oldRunId}`)
-    const cancelled = await cancelRunAndWait(oldThreadId, oldRunId)
-    if (cancelled) {
-      console.log(`[OPENAI-SWITCH] ✅ Run original cancelado exitosamente`)
-    } else {
-      console.log(`[OPENAI-SWITCH] ⚠️ No se pudo cancelar run original, Continuando de todas formas...`)
-    }
-
-    console.log(`[OPENAI-SWITCH] 🔄 Creando NUEVO thread para el asistente especializado...`)
-    console.log(`[OPENAI-SWITCH] 📋 Argumentos recibidos:`, JSON.stringify(functionArgs, null, 2))
+    await cancelRunAndWait(oldThreadId, oldRunId)
 
     const newThread = await openai.beta.threads.create({
       metadata: {
@@ -454,10 +423,9 @@ async function handleAssistantSwitch(
         assistantId: newAssistantId,
       },
     })
-    console.log(`[OPENAI-SWITCH] ✨ Nuevo thread creado: ${newThread.id}`)
 
     await updateThreadId(userPhoneNumber, config.id, newThread.id, newAssistantId)
-    console.log(`[OPENAI-SWITCH] 💾 Thread y AssistantId actualizados en base de datos para usuario ${userPhoneNumber}`)
+    console.info(`[OPENAI-SWITCH] Switch ${functionName}: ${oldThreadId} -> ${newThread.id} (assistant: ${newAssistantId})`)
 
     const { getArgentinaDateTime } = await import("@/lib/utils/date-utils") // import moved here
     const fechaHora = getArgentinaDateTime()
@@ -480,27 +448,19 @@ ${JSON.stringify(functionArgs, null, 2)}`
       content: systemBlock,
     })
 
-    console.log(`[OPENAI-SWITCH] 📤 Mensaje inicial enviado al nuevo thread (con datos de sistema)`)
-
     const newRun = await openai.beta.threads.runs.create(newThread.id, {
       assistant_id: newAssistantId,
     })
 
-    console.log(`[OPENAI-SWITCH] 🏃 Nuevo run creado con asistente ${newAssistantId}: ${newRun.id}`)
-
-    console.log(`[OPENAI-SWITCH] 🔄 Procesando el nuevo run...`)
     await processRunWithCorrectFlow(
       openai,
       newThread.id,
       newRun.id,
-      accessToken, // ✅ Fixed: Now passing accessToken as 4th parameter
-      phoneNumberId, // ✅ Fixed: Now passing phoneNumberId as 5th parameter
+      accessToken,
+      phoneNumberId,
       clienteId,
-      userPhoneNumber, // Pass user phone number
+      userPhoneNumber,
     )
-    console.log(`[OPENAI-SWITCH] ✅ Procesamiento del nuevo run completado`)
-
-    console.log(`[OPENAI-SWITCH] ✅ Switch completado - control transferido al nuevo asistente`)
 
     return {
       switchedAssistant: true,
@@ -508,7 +468,7 @@ ${JSON.stringify(functionArgs, null, 2)}`
       newThreadId: newThread.id,
     }
   } catch (error) {
-    console.error(`[OPENAI-SWITCH] ❌ Error en handleAssistantSwitch:`, error)
+    console.error(`[OPENAI-SWITCH] Error en handleAssistantSwitch:`, error)
     return {
       switchedAssistant: false,
     }
@@ -516,7 +476,7 @@ ${JSON.stringify(functionArgs, null, 2)}`
 }
 // Implementación directa de todas las funciones
 export async function executeOpenAITool(toolName: string, args: any, clienteId: string) {
-  console.log(`[OPENAI-TOOLS] Ejecutando tool: ${toolName} con args:`, args)
+
 
   try {
     switch (toolName) {
@@ -567,13 +527,6 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
         return await obtenerObrasSociales(clienteId)
 
       case "reservar_turno":
-        console.log(`[OPENAI-TOOLS] 🔍 DEBUG reservar_turno:`)
-        console.log(`[OPENAI-TOOLS] 🔍 args completo:`, JSON.stringify(args, null, 2))
-        console.log(`[OPENAI-TOOLS] 🔍 args.agendaId:`, args.agendaId)
-        console.log(`[OPENAI-TOOLS] 🔍 args.dni:`, args.dni)
-        console.log(`[OPENAI-TOOLS] 🔍 args.nombre:`, args.nombre)
-        console.log(`[OPENAI-TOOLS] 🔍 clienteId:`, clienteId)
-
         if (args.agendaId) {
           const pacienteDatos = {
             dni: args.dni,
@@ -584,15 +537,8 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
             deudorId: args.obra_social_id,
             deudorNombre: args.obra_social,
           }
-          console.log(`[OPENAI-TOOLS] 🔍 pacienteDatos construido:`, JSON.stringify(pacienteDatos, null, 2))
-          console.log(`[OPENAI-TOOLS] 🔍 Llamando reservarTurno con:`)
-          console.log(`[OPENAI-TOOLS] 🔍   - clienteId: ${clienteId}`)
-          console.log(`[OPENAI-TOOLS] 🔍   - agendaId: ${args.agendaId}`)
-          console.log(`[OPENAI-TOOLS] 🔍   - pacienteDatos:`, pacienteDatos)
-
           return await reservarTurno(clienteId, args.agendaId, pacienteDatos)
         } else {
-          console.log(`[OPENAI-TOOLS] 🔍 Usando formato antiguo (turno_id)`)
           return await reservarTurno(clienteId, args.turno_id, args.paciente_datos)
         }
 
@@ -608,7 +554,6 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
       case "route_to_turnos_assistant":
       case "route_to_pacienteNuevo_SinCualquierMedico":
       case "route_to_pacienteExistente_SinCualquierMedico":
-        console.log(`[OPENAI-TOOLS] 🔀 Iniciando switch de asistente para: ${toolName}`)
         // Retornar el resultado del switch de asistente directamente
         // The following arguments are not needed for the initial call to executeOpenAITool,
         // but they are required by handleAssistantSwitch. We will pass dummy values or null.
@@ -635,7 +580,6 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
         )
 
       case "request_human_support":
-        console.log(`[OPENAI-TOOLS] 🆘 Solicitud de soporte humano recibida`)
         // Este caso se maneja de forma especial en executeToolCall
         // donde tenemos acceso a phoneNumber, threadId, etc.
         return {
@@ -664,8 +608,6 @@ export async function processWebOnlyMessage(
   assistantId: string,
   clienteId: string,
 ): Promise<string> {
-  console.log(`[OPENAI] 🌐 Procesando mensaje web (NO WhatsApp)`)
-
   const openai = getOpenAIClient()
 
   try {
@@ -700,10 +642,9 @@ export async function processWebOnlyMessage(
       }
     }
 
-    console.log(`[OPENAI] ✅ Respuesta web obtenida (${messageContent.length} chars)`)
     return messageContent
   } catch (error) {
-    console.error("[OPENAI] ❌ Error web:", error)
+    console.error("[OPENAI] Error processWebOnlyMessage:", error)
     throw error
   }
 }

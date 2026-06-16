@@ -146,7 +146,7 @@ async function markMessageAsProcessed(messageId: string): Promise<void> {
     const key = `processed_message:${messageId}`
     // Guardar por 24 horas (86400 segundos)
     await redisClient.set(key, "1", { ex: 86400 })
-    console.log(`[WHATSAPP] Mensaje ${messageId} marcado como procesado`)
+
   } catch (error) {
     console.error("[WHATSAPP] Error marcando mensaje como procesado:", error)
   }
@@ -486,7 +486,7 @@ async function handlePendingFlowResponse(
 
 // Modificar la función handleMessage para usar la cola por usuario
 export async function handleMessage(value: any) {
-  console.log("[WHATSAPP] Iniciando handleMessage con datos:", JSON.stringify(value, null, 2))
+
 
   try {
     // Verificar si hay mensajes
@@ -515,21 +515,18 @@ export async function handleMessage(value: any) {
     const audioId = extractedContent.audioId
     const audioMimeType = extractedContent.audioMimeType
 
-    console.log(`[WHATSAPP] Procesando mensaje de ${userPhoneNumber}: "${userMessage}" (tipo: ${message.type})${audioId ? ` [audioId: ${audioId}]` : ""}`)
+    console.info(`[WHATSAPP] Mensaje de ${userPhoneNumber}: "${userMessage.substring(0, 50)}${userMessage.length > 50 ? '...' : ''}" (${message.type})`)
 
     // Ignorar stickers, reacciones e iconos (mensajes de texto compuestos únicamente por emojis)
     if (message.type === "sticker" || message.type === "reaction") {
-      console.log(`[WHATSAPP] Ignorando mensaje de tipo "${message.type}" de ${userPhoneNumber}`)
       return
     }
 
     if (message.type === "text" && userMessage && /^[\p{Emoji}\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u.test(userMessage.trim()) && !/\w/.test(userMessage)) {
-      console.log(`[WHATSAPP] Ignorando mensaje de texto con solo emojis/iconos de ${userPhoneNumber}: "${userMessage}"`)
       return
     }
 
     // Obtener la configuración de WhatsApp
-    console.log(`[WHATSAPP] Buscando configuración para phone_number_id: ${value.metadata.phone_number_id}`)
     const config = await getWhatsAppConfigByPhoneId(value.metadata.phone_number_id)
 
     if (!config) {

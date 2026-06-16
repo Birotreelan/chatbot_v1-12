@@ -55,8 +55,7 @@ export class ConversationLogger {
       message,
       metadata,
     }
-    console.log(formatLog(entry))
-    // TODO: Enviar a servicio de logging centralizado si está configurado
+    console.debug(formatLog(entry))
   }
 
   info(message: string, metadata?: Record<string, any>) {
@@ -69,7 +68,7 @@ export class ConversationLogger {
       message,
       metadata,
     }
-    console.log(formatLog(entry))
+    console.info(formatLog(entry))
   }
 
   warn(message: string, metadata?: Record<string, any>) {
