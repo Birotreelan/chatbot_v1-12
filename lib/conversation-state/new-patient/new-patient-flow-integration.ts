@@ -734,6 +734,37 @@ async function handleProfessionalSelectionPhase(
 }
 
 /**
+ * Fase: Seleccion de especialidad
+ */
+async function handleSpecialtyPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState,
+  escalationPhoneNumber?: string
+): Promise<NewPatientResult> {
+  if (!state.especialidadesOpciones) {
+    return { handled: false, shouldCallOpenAI: true }
+  }
+
+  const result = await handleSpecialtySelection(userMessage, state.especialidadesOpciones, phone, clientId)
+
+  if (result.selectedSpecialty) {
+    state.especialidadId = result.selectedSpecialty.id
+    state.especialidadNombre = result.selectedSpecialty.nombre
+    state.attempts = 0
+    await saveFlowState(phone, state)
+
+    return await searchAndShowTurnos(phone, clientId, state, escalationPhoneNumber)
+  }
+
+  return {
+    handled: true,
+    message: result.message,
+  }
+}
+
+/**
  * Busca turnos y los muestra
  */
 async function searchAndShowTurnos(
