@@ -26,23 +26,17 @@ export async function getClientFeatureFlags(configId: string): Promise<FeatureFl
 
     if (cached) {
       // Upstash REST client auto-deserializa JSON — si ya es objeto, no hacer JSON.parse
-      const flags = (typeof cached === "string" ? JSON.parse(cached) : cached) as FeatureFlags
-      console.debug(`[FEATURE-FLAGS] ✓ Flags específicos cargados para ${configId}`, { flags })
-      return flags
+      return (typeof cached === "string" ? JSON.parse(cached) : cached) as FeatureFlags
     }
 
     // No hay flags específicos - buscar flags GLOBALES
-    console.debug(`[FEATURE-FLAGS] No hay flags específicos para ${configId}, buscando GLOBALES`)
     const globalKey = `${FEATURE_FLAGS_PREFIX}__global__`
     const globalCached = await redis.get(globalKey)
     
     if (globalCached) {
-      const globalFlags = (typeof globalCached === "string" ? JSON.parse(globalCached) : globalCached) as FeatureFlags
-      console.debug(`[FEATURE-FLAGS] ✓ Usando flags GLOBALES para ${configId}`, { globalFlags })
-      return globalFlags
+      return (typeof globalCached === "string" ? JSON.parse(globalCached) : globalCached) as FeatureFlags
     }
 
-    console.debug(`[FEATURE-FLAGS] No hay flags globales, usando defaults para ${configId}`)
     return DEFAULT_FEATURE_FLAGS
   } catch (error) {
     console.error(`[FEATURE-FLAGS] Error obteniendo flags para ${configId}:`, error)
@@ -146,25 +140,15 @@ const GLOBAL_FLAGS_KEY = `${FEATURE_FLAGS_PREFIX}__global__`
 export async function getGlobalFeatureFlags(): Promise<FeatureFlags> {
   try {
     const redis = getRedisClient()
-    if (!redis) {
-      console.log("[v0] getGlobalFeatureFlags - Redis no disponible")
-      return DEFAULT_FEATURE_FLAGS
-    }
+    if (!redis) return DEFAULT_FEATURE_FLAGS
 
-    console.log("[v0] getGlobalFeatureFlags - leyendo clave:", GLOBAL_FLAGS_KEY)
     const cached = await redis.get(GLOBAL_FLAGS_KEY)
-    console.log("[v0] getGlobalFeatureFlags - valor crudo de Redis:", cached, "tipo:", typeof cached)
-    
     if (cached) {
-      // Upstash REST client auto-deserializa JSON — si ya es objeto, no hacer JSON.parse
-      const parsed = (typeof cached === "string" ? JSON.parse(cached) : cached) as FeatureFlags
-      console.log("[v0] getGlobalFeatureFlags - parseado:", JSON.stringify(parsed))
-      return parsed
+      return (typeof cached === "string" ? JSON.parse(cached) : cached) as FeatureFlags
     }
-    console.log("[v0] getGlobalFeatureFlags - no hay cache, devolviendo defaults")
     return DEFAULT_FEATURE_FLAGS
   } catch (err) {
-    console.log("[v0] getGlobalFeatureFlags - ERROR:", err)
+    console.error("[FEATURE-FLAGS] Error obteniendo flags globales:", err)
     return DEFAULT_FEATURE_FLAGS
   }
 }
@@ -176,17 +160,11 @@ export async function setGlobalFeatureFlags(flags: Partial<FeatureFlags>): Promi
   const redis = getRedisClient()
   if (!redis) throw new Error("Redis no disponible")
 
-  console.log("[v0] setGlobalFeatureFlags - flags recibidos:", JSON.stringify(flags))
   const current = await getGlobalFeatureFlags()
-  console.log("[v0] setGlobalFeatureFlags - current antes de merge:", JSON.stringify(current))
   const updated = { ...current, ...flags }
-  console.log("[v0] setGlobalFeatureFlags - updated después de merge:", JSON.stringify(updated))
 
-  console.log("[v0] setGlobalFeatureFlags - guardando en clave:", GLOBAL_FLAGS_KEY, "valor:", JSON.stringify(updated))
   // Upstash serializa automáticamente, no usar JSON.stringify
-  const result = await redis.setex(GLOBAL_FLAGS_KEY, 30 * 24 * 60 * 60, updated as unknown as string)
-  console.log("[v0] setGlobalFeatureFlags - resultado de setex:", result)
-  console.info(`[FEATURE-FLAGS] ✓ Flags GLOBALES actualizados`, { updated })
+  await redis.setex(GLOBAL_FLAGS_KEY, 30 * 24 * 60 * 60, updated as unknown as string)
 }
 
 /**
@@ -207,29 +185,20 @@ export async function resetGlobalFeatureFlags(): Promise<void> {
 export async function getEffectiveFeatureFlags(configId: string): Promise<FeatureFlags> {
   try {
     const redis = getRedisClient()
-    if (!redis) {
-      console.log(`[FEATURE-FLAGS] getEffectiveFeatureFlags - Redis no disponible para ${configId}`)
-      return DEFAULT_FEATURE_FLAGS
-    }
+    if (!redis) return DEFAULT_FEATURE_FLAGS
 
     const clientKey = `${FEATURE_FLAGS_PREFIX}${configId}`
-    console.log(`[FEATURE-FLAGS] getEffectiveFeatureFlags - buscando flags específicos en: ${clientKey}`)
     const clientData = await redis.get(clientKey)
 
     // Si tiene flags específicos, úsalos
-    // Upstash REST client auto-deserializa JSON — si ya es objeto, no hacer JSON.parse
     if (clientData) {
-      console.log(`[FEATURE-FLAGS] getEffectiveFeatureFlags - encontrados flags específicos para ${configId}`)
       return (typeof clientData === "string" ? JSON.parse(clientData) : clientData) as FeatureFlags
     }
 
     // Si no, usar flags globales
-    console.log(`[FEATURE-FLAGS] getEffectiveFeatureFlags - no hay flags específicos para ${configId}, buscando GLOBALES`)
-    const globalFlags = await getGlobalFeatureFlags()
-    console.log(`[FEATURE-FLAGS] getEffectiveFeatureFlags - flags globales obtenidos:`, JSON.stringify(globalFlags))
-    return globalFlags
+    return await getGlobalFeatureFlags()
   } catch (err) {
-    console.log(`[FEATURE-FLAGS] getEffectiveFeatureFlags - ERROR:`, err)
+    console.error(`[FEATURE-FLAGS] Error obteniendo flags efectivos para ${configId}:`, err)
     return DEFAULT_FEATURE_FLAGS
   }
 }

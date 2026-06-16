@@ -5,7 +5,6 @@
 
 import { getRedisClient } from "@/lib/redis"
 import { ConversationContext } from "./types"
-import { createConversationLogger } from "./logger"
 
 const CONTEXT_PREFIX = "conv_context:"
 const DEFAULT_TTL = 48 * 60 * 60 // 48 horas
@@ -15,7 +14,6 @@ export interface ConversationStateRedis {
   metadata: {
     createdAt: string
     lastUpdatedAt: string
-    accessCount: number
   }
 }
 
@@ -37,14 +35,6 @@ export async function getConversationContext(
 
     // Upstash Redis puede devolver objeto ya parseado o string
     const state = (typeof data === 'object' ? data : JSON.parse(data as string)) as ConversationStateRedis
-    const logger = createConversationLogger(phone, configId, state.context.currentPhase)
-
-    // Actualizar access count
-    state.metadata.accessCount++
-    state.metadata.lastUpdatedAt = new Date().toISOString()
-    await redis.setex(key, DEFAULT_TTL, JSON.stringify(state))
-
-    logger.debug("Contexto recuperado del Redis", { accessCount: state.metadata.accessCount })
 
     return state.context
   } catch (error) {
@@ -64,12 +54,7 @@ export async function setConversationContext(
 ): Promise<void> {
   try {
     const redis = getRedisClient()
-    if (!redis) {
-      console.warn(`[CONV-CONTEXT] Redis no disponible para guardar contexto`)
-      return
-    }
-
-    const logger = createConversationLogger(phone, configId, context.currentPhase)
+    if (!redis) return
 
     const key = `${CONTEXT_PREFIX}${configId}:${phone}`
     const now = new Date().toISOString()
@@ -82,19 +67,12 @@ export async function setConversationContext(
       metadata: {
         createdAt: context.createdAt || now,
         lastUpdatedAt: now,
-        accessCount: 0,
       },
     }
 
     await redis.setex(key, ttl, JSON.stringify(state))
-
-    logger.info(`Contexto guardado en Redis`, {
-      phase: context.currentPhase,
-      ttl,
-    })
   } catch (error) {
-    const logger = createConversationLogger(phone, configId, "error")
-    logger.error(`Error guardando contexto`, error as Error)
+    console.error(`[CONV-CONTEXT] Error guardando contexto para ${phone}@${configId}:`, error)
     throw error
   }
 }
@@ -109,8 +87,6 @@ export async function clearConversationContext(phone: string, configId: string):
 
     const key = `${CONTEXT_PREFIX}${configId}:${phone}`
     await redis.del(key)
-
-    console.debug(`[CONV-CONTEXT] Contexto limpiado para ${phone}@${configId}`)
   } catch (error) {
     console.error(`[CONV-CONTEXT] Error limpiando contexto para ${phone}@${configId}:`, error)
   }

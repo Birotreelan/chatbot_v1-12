@@ -14,10 +14,9 @@ function getRedisClient() {
   try {
     // Inicializar el cliente de Redis usando las variables de entorno de Upstash
     redis = Redis.fromEnv()
-    console.log("[DB] ✅ Cliente Redis inicializado correctamente")
     return redis
   } catch (error) {
-    console.warn("[DB] ⚠️ Upstash Redis no está disponible:", error)
+    console.warn("[DB] Upstash Redis no está disponible:", error)
     return null
   }
 }
@@ -52,8 +51,6 @@ function isThreadExpired(threadInfo: ThreadInfo): boolean {
   const now = new Date()
   const hoursDiff = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60)
 
-  console.log(`[DB] 🕐 Thread creado hace ${hoursDiff.toFixed(2)} horas (expira a las ${THREAD_EXPIRY_HOURS} horas)`)
-
   return hoursDiff >= THREAD_EXPIRY_HOURS
 }
 
@@ -61,8 +58,7 @@ function isThreadExpired(threadInfo: ThreadInfo): boolean {
 function safeJsonParse(data: any, key?: string): any {
   if (typeof data === "string") {
     if (data.startsWith("thread_") && key?.includes(THREAD_PREFIX)) {
-      console.log(`[DB] 🧹 Detectado thread en formato antiguo: ${data.substring(0, 20)}... - será eliminado`)
-      return null // Retornar null para que sea filtrado y eliminado
+      return null // Thread en formato antiguo, será filtrado y eliminado
     }
 
     try {
@@ -100,8 +96,6 @@ async function scanRedisKeys(redisClient: Redis, pattern: string): Promise<strin
 export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Promise<WhatsAppConfig> {
   const id = config.id || nanoid()
   const now = new Date().toISOString()
-
-  console.log(`[DB] 📝 Creando nueva configuración con ID: ${id}`)
 
   const newConfig: WhatsAppConfig = {
     id,
@@ -152,7 +146,6 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
   const redisClient = getRedisClient()
 
   if (redisClient) {
-    console.log(`[DB] 💾 Guardando configuración ${id} en Redis`)
     // Guardar en Redis - siempre como cadena JSON
     await redisClient.set(`${CONFIG_PREFIX}${id}`, JSON.stringify(newConfig))
 
@@ -161,7 +154,6 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
       await redisClient.set(`${PHONE_TO_CONFIG_PREFIX}${newConfig.phoneNumberId}`, id)
     }
   } else {
-    console.log(`[DB] 💾 Guardando configuración ${id} en memoria`)
     // Fallback a memoria
     memoryStorage.configs.set(id, newConfig)
     if (newConfig.phoneNumberId) {
@@ -172,63 +164,34 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
   // Actualizar estadísticas
   await updateSystemStats()
 
-  console.log(`[DB] ✅ Configuración ${id} creada exitosamente`)
   return newConfig
 }
 
 // Obtener una configuración por ID
 export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | null> {
   try {
-    console.log(`[DB] 🔍 Obteniendo configuración ${id}`)
-
     const redisClient = getRedisClient()
 
     if (redisClient) {
-      console.log(`[DB] 🔍 Buscando en Redis con clave: ${CONFIG_PREFIX}${id}`)
       const configData = await redisClient.get(`${CONFIG_PREFIX}${id}`)
 
-      if (!configData) {
-        console.log(`[DB] ❌ Configuración ${id} no encontrada en Redis`)
+      if (!configData) return null
 
-        // Intentar listar todas las claves para debug
-        try {
-          const allKeys = await redisClient.keys(`${CONFIG_PREFIX}*`)
-          console.log(`[DB] 🔍 Claves disponibles en Redis:`, allKeys)
-        } catch (keyError) {
-          console.error(`[DB] Error al listar claves:`, keyError)
-        }
-
-        return null
-      }
-
-      console.log(`[DB] 📄 Datos encontrados en Redis, deserializando...`)
       // Usar la función auxiliar para manejar la deserialización
       const config = safeJsonParse(configData)
 
       if (!config) {
-        console.error(`[DB] ❌ Error al deserializar configuración ${id}`)
+        console.error(`[DB] Error al deserializar configuración ${id}`)
         return null
       }
 
-      console.log(`[DB] ✅ Configuración ${id} obtenida exitosamente`)
-      console.log(`[DB] - displayName: ${config.displayName}`)
-      console.log(`[DB] - cliente_id: ${config.cliente_id}`)
       return config
     } else {
-      console.log(`[DB] 🔍 Buscando en memoria`)
       // Fallback a memoria
-      const config = memoryStorage.configs.get(id) || null
-      console.log(`[DB] Configuración ${id} obtenida de memoria:`, config ? "encontrada" : "no encontrada")
-
-      if (!config) {
-        console.log(`[DB] 🔍 Configuraciones disponibles en memoria:`, Array.from(memoryStorage.configs.keys()))
-      }
-
-      return config
+      return memoryStorage.configs.get(id) || null
     }
   } catch (error) {
-    console.error(`[DB] ❌ ERROR CRÍTICO al obtener configuración ${id}:`, error)
-    console.error(`[DB] Stack trace:`, error instanceof Error ? error.stack : "No stack trace available")
+    console.error(`[DB] Error al obtener configuración ${id}:`, error)
     return null
   }
 }
@@ -236,21 +199,10 @@ export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | nu
 // Obtener una configuración por ID de número de teléfono - SIEMPRE FRESCA (sin cachear)
 export async function getWhatsAppConfigByPhoneIdFresh(phoneNumberId: string): Promise<WhatsAppConfig | null> {
   try {
-    console.log(`[DB] 🔄 Obteniendo configuración FRESCA para teléfono: ${phoneNumberId}`)
-    
-    // Forzar lectura de todas las configuraciones (sin usar cache de Redis)
     const allConfigs = await getAllWhatsAppConfigs()
-    const config = allConfigs.find((c) => c.phoneNumberId === phoneNumberId)
-    
-    if (config) {
-      console.log(`[DB] ✅ Configuración FRESCA encontrada: ${config.displayName}`)
-    } else {
-      console.log(`[DB] ❌ Configuración FRESCA no encontrada para: ${phoneNumberId}`)
-    }
-    
-    return config || null
+    return allConfigs.find((c) => c.phoneNumberId === phoneNumberId) || null
   } catch (error) {
-    console.error(`[DB] ❌ ERROR al obtener configuración fresca:`, error)
+    console.error(`[DB] Error al obtener configuración fresca para ${phoneNumberId}:`, error)
     return null
   }
 }
@@ -305,48 +257,26 @@ export async function getWhatsAppConfigByPhoneId(phoneNumberId: string): Promise
 // Obtener todas las configuraciones
 export async function getAllWhatsAppConfigs(): Promise<WhatsAppConfig[]> {
   try {
-    console.log(`[DB] 📋 Obteniendo todas las configuraciones`)
-
     const redisClient = getRedisClient()
 
     if (redisClient) {
-      console.log(`[DB] 🔍 Buscando en Redis`)
       const keys = await scanRedisKeys(redisClient, `${CONFIG_PREFIX}*`)
-      console.log(`[DB] 📊 Encontradas ${keys.length} claves en Redis`)
-
-      if (keys.length === 0) {
-        console.log(`[DB] ⚠️ No hay configuraciones en Redis`)
-        return []
-      }
+      if (keys.length === 0) return []
 
       const configs = await Promise.all(
         keys.map(async (key) => {
-          console.log(`[DB] 📄 Procesando clave: ${key}`)
           const configData = await redisClient.get(key)
-          // Usar la función auxiliar para manejar la deserialización
-          const config = safeJsonParse(configData)
-          if (config) {
-            console.log(`[DB] ✅ Configuración deserializada: ${config.displayName} (${config.id})`)
-          } else {
-            console.log(`[DB] ❌ Error al deserializar configuración de clave: ${key}`)
-          }
-          return config
+          return safeJsonParse(configData)
         }),
       )
 
-      const validConfigs = configs.filter(Boolean) as WhatsAppConfig[]
-      console.log(`[DB] ✅ Total de configuraciones válidas: ${validConfigs.length}`)
-      return validConfigs
+      return configs.filter(Boolean) as WhatsAppConfig[]
     } else {
-      console.log(`[DB] 🔍 Buscando en memoria`)
       // Fallback a memoria
-      const configs = Array.from(memoryStorage.configs.values())
-      console.log(`[DB] 📊 Encontradas ${configs.length} configuraciones en memoria`)
-      return configs
+      return Array.from(memoryStorage.configs.values())
     }
   } catch (error) {
-    console.error(`[DB] ❌ ERROR CRÍTICO al obtener todas las configuraciones:`, error)
-    console.error(`[DB] Stack trace:`, error instanceof Error ? error.stack : "No stack trace available")
+    console.error(`[DB] Error al obtener todas las configuraciones:`, error)
     return []
   }
 }
@@ -357,13 +287,8 @@ export async function updateWhatsAppConfig(
   updates: Partial<WhatsAppConfig>,
 ): Promise<WhatsAppConfig | null> {
   try {
-    console.log(`[DB] 🔄 Actualizando configuración ${id} con:`, updates)
-
     const config = await getWhatsAppConfig(id)
-    if (!config) {
-      console.log(`[DB] ❌ Configuración ${id} no encontrada`)
-      return null
-    }
+    if (!config) return null
 
     const redisClient = getRedisClient()
 
@@ -389,7 +314,6 @@ export async function updateWhatsAppConfig(
       const serializedConfig = JSON.stringify(updatedConfig)
       await redisClient.set(`${CONFIG_PREFIX}${id}`, serializedConfig)
 
-      console.log(`[DB] ✅ Configuración ${id} actualizada exitosamente`)
       return updatedConfig
     } else {
       // Fallback a memoria
@@ -407,11 +331,10 @@ export async function updateWhatsAppConfig(
       }
 
       memoryStorage.configs.set(id, updatedConfig)
-      console.log(`[DB] ✅ Configuración ${id} actualizada en memoria`)
       return updatedConfig
     }
   } catch (error) {
-    console.error(`[DB] ❌ Error al actualizar configuración ${id}:`, error)
+    console.error(`[DB] Error al actualizar configuración ${id}:`, error)
     throw error
   }
 }
@@ -448,34 +371,10 @@ export async function deleteWhatsAppConfig(id: string): Promise<boolean> {
 // Función para obtener configuración por clienteId - NUEVA FUNCIÓN AGREGADA
 export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppConfig | null> {
   try {
-    console.log(`[DB] 🔍 Buscando configuración para cliente_id: ${clienteId}`)
-
     const configs = await getAllWhatsAppConfigs()
-    console.log(`[DB] 📊 Total de configuraciones disponibles: ${configs.length}`)
-
-    if (configs.length > 0) {
-      console.log(`[DB] 🔍 IDs de configuraciones disponibles:`)
-      configs.forEach((config, index) => {
-        console.log(
-          `[DB]   ${index + 1}. ID: ${config.id}, cliente_id: ${config.cliente_id}, displayName: ${config.displayName}`,
-        )
-      })
-    }
-
-    const config = configs.find((config) => config.cliente_id === clienteId)
-
-    if (config) {
-      console.log(`[DB] ✅ Configuración encontrada para cliente_id ${clienteId}:`)
-      console.log(`[DB] - ID: ${config.id}`)
-      console.log(`[DB] - displayName: ${config.displayName}`)
-      return config
-    }
-
-    console.log(`[DB] ❌ No se encontró configuración para cliente_id: ${clienteId}`)
-    return null
+    return configs.find((config) => config.cliente_id === clienteId) || null
   } catch (error) {
-    console.error(`[DB] ❌ ERROR CRÍTICO al buscar configuración por cliente_id:`, error)
-    console.error(`[DB] Stack trace:`, error instanceof Error ? error.stack : "No stack trace available")
+    console.error(`[DB] Error al buscar configuración por cliente_id ${clienteId}:`, error)
     return null
   }
 }
@@ -501,8 +400,6 @@ export async function getThreadForUser(
   const normalizedPhone = normalizePhoneNumber(phoneNumber)
   const lockKey = `thread:${normalizedPhone}:${whatsappConfigId}`
 
-  console.log(`[DB] 🔍 Obteniendo thread para ${normalizedPhone} con config ${whatsappConfigId}`)
-
   return withLock(
     lockKey,
     async () => {
@@ -516,27 +413,21 @@ export async function getThreadForUser(
 
         if (threadInfo) {
           if (isThreadExpired(threadInfo)) {
-            console.log(`[DB] ⏰ Thread ${threadInfo.threadId} ha EXPIRADO. Creando uno nuevo...`)
-
             // Eliminar el thread antiguo de OpenAI
             try {
               const openai = new (await import("openai")).default({
                 apiKey: process.env.OPENAI_API_KEY,
               })
               await openai.beta.threads.delete(threadInfo.threadId)
-              console.log(`[DB] 🗑️ Thread expirado eliminado de OpenAI: ${threadInfo.threadId}`)
             } catch (deleteError: any) {
-              console.warn(`[DB] ⚠️ No se pudo eliminar thread expirado de OpenAI: ${deleteError.message}`)
+              console.warn(`[DB] No se pudo eliminar thread expirado de OpenAI: ${deleteError.message}`)
             }
 
             // Eliminar de Redis
             await redisClient.del(key)
-            console.log(`[DB] 🗑️ Thread expirado eliminado de Redis`)
 
             // Continuar para crear uno nuevo (el código abajo lo manejará)
           } else {
-            console.log(`[DB] ✅ Thread encontrado y válido: ${threadInfo.threadId}`)
-
             // Verificar si es un thread reseteado
             const isResetThread = threadInfo.isResetThread === true
 
@@ -566,27 +457,21 @@ export async function getThreadForUser(
 
         if (threadInfo) {
           if (isThreadExpired(threadInfo)) {
-            console.log(`[DB] ⏰ Thread ${threadInfo.threadId} en memoria ha EXPIRADO. Creando uno nuevo...`)
-
             // Eliminar el thread antiguo de OpenAI
             try {
               const openai = new (await import("openai")).default({
                 apiKey: process.env.OPENAI_API_KEY,
               })
               await openai.beta.threads.delete(threadInfo.threadId)
-              console.log(`[DB] 🗑️ Thread expirado eliminado de OpenAI: ${threadInfo.threadId}`)
             } catch (deleteError: any) {
-              console.warn(`[DB] ⚠️ No se pudo eliminar thread expirado de OpenAI: ${deleteError.message}`)
+              console.warn(`[DB] No se pudo eliminar thread expirado de OpenAI: ${deleteError.message}`)
             }
 
             // Eliminar de memoria
             memoryStorage.threads.delete(key)
-            console.log(`[DB] 🗑️ Thread expirado eliminado de memoria`)
 
             // Continuar para crear uno nuevo
           } else {
-            console.log(`[DB] ✅ Thread encontrado en memoria y válido: ${threadInfo.threadId}`)
-
             const isResetThread = threadInfo.isResetThread === true
 
             const updatedThreadInfo = {
@@ -609,13 +494,12 @@ export async function getThreadForUser(
       }
 
       // Crear un nuevo thread
-      console.log(`[DB] 📝 No se encontró thread existente o expiró, creando uno nuevo`)
       const openai = new (await import("openai")).default({
         apiKey: process.env.OPENAI_API_KEY,
       })
 
       const thread = await openai.beta.threads.create()
-      console.log(`[DB] ✅ Nuevo thread creado: ${thread.id}`)
+      console.info(`[DB] Nuevo thread creado: ${thread.id}`)
 
       const newThreadInfo: ThreadInfo = {
         threadId: thread.id,
@@ -652,8 +536,6 @@ export async function resetThreadForUser(
   const normalizedPhone = normalizePhoneNumber(phoneNumber)
   const lockKey = `thread:${normalizedPhone}:${whatsappConfigId}`
 
-  console.log(`[DB] 🔄 RESETEANDO thread para ${normalizedPhone} con config ${whatsappConfigId}`)
-
   return withLock(
     lockKey,
     async () => {
@@ -672,23 +554,19 @@ export async function resetThreadForUser(
           const oldThreadInfo = safeJsonParse(oldThreadData, key)
           if (oldThreadInfo) {
             oldThreadId = oldThreadInfo.threadId
-            console.log(`[DB] 📋 Thread anterior encontrado: ${oldThreadId}`)
           }
         } else {
           const oldThreadInfo = memoryStorage.threads.get(key)
           if (oldThreadInfo) {
             oldThreadId = oldThreadInfo.threadId
-            console.log(`[DB] 📋 Thread anterior encontrado en memoria: ${oldThreadId}`)
           }
         }
 
         if (oldThreadId) {
           try {
             await openai.beta.threads.delete(oldThreadId)
-            console.log(`[DB] 🗑️ Thread anterior ELIMINADO de OpenAI: ${oldThreadId}`)
           } catch (deleteError) {
-            console.warn(`[DB] ⚠️ No se pudo eliminar el thread anterior de OpenAI: ${deleteError.message}`)
-            // Continuar aunque falle la eliminación
+            console.warn(`[DB] No se pudo eliminar el thread anterior de OpenAI: ${deleteError.message}`)
           }
         }
 
@@ -701,15 +579,12 @@ export async function resetThreadForUser(
             isReset: "true",
           },
         })
-        console.log(`[DB] ✅ NUEVO thread creado en OpenAI: ${newThread.id}`)
 
         // 3. ELIMINAR COMPLETAMENTE EL THREAD ANTERIOR DE REDIS/MEMORIA
         if (redisClient) {
           await redisClient.del(key)
-          console.log(`[DB] 🗑️ Thread anterior eliminado de Redis`)
         } else {
           memoryStorage.threads.delete(key)
-          console.log(`[DB] 🗑️ Thread anterior eliminado de memoria`)
         }
 
         // 4. GUARDAR EL NUEVO THREAD CON FLAG DE RESET
@@ -718,32 +593,22 @@ export async function resetThreadForUser(
           phoneNumber: normalizedPhone,
           whatsappConfigId,
           lastMessageAt: new Date().toISOString(),
-          messageCount: 0, // Empezar en 0 para que se considere nuevo
-          isResetThread: true, // Flag para indicar que es un thread reseteado
+          messageCount: 0,
+          isResetThread: true,
           createdAt: new Date().toISOString(),
         }
 
         if (redisClient) {
           await redisClient.set(key, JSON.stringify(newThreadInfo))
-          console.log(`[DB] 💾 Nuevo thread guardado en Redis: ${newThread.id}`)
         } else {
           memoryStorage.threads.set(key, newThreadInfo)
-          console.log(`[DB] 💾 Nuevo thread guardado en memoria: ${newThread.id}`)
         }
 
-        console.log(`[DB] ✅ RESET COMPLETADO EXITOSAMENTE`)
-        console.log(`[DB] - Thread anterior: ${oldThreadId || "ninguno"} (ELIMINADO de OpenAI)`)
-        console.log(`[DB] - Thread nuevo: ${newThread.id} (CREADO en OpenAI)`)
+        console.info(`[DB] Thread reseteado: ${oldThreadId || "ninguno"} -> ${newThread.id}`)
 
         return { threadId: newThread.id, isNewThread: true }
       } catch (error) {
-        console.error(`[DB] ❌ Error al resetear thread:`, error)
-        console.error(`[DB] Error details:`, {
-          message: error.message,
-          stack: error.stack,
-          phoneNumber: normalizedPhone,
-          whatsappConfigId,
-        })
+        console.error(`[DB] Error al resetear thread para ${normalizedPhone}:`, error)
         throw error
       }
     },
@@ -780,11 +645,8 @@ export async function clearAllConversationStates(
   const errors: string[] = []
   
   if (!redisClient) {
-    console.warn("[DB] Redis no disponible para limpiar estados de conversación")
     return { clearedKeys, errors: ["Redis no disponible"] }
   }
-  
-  console.log(`[DB] 🧹 Iniciando limpieza de TODOS los estados para ${normalizedPhone}`)
   
   // Lista de todas las keys que debemos limpiar
   // Formato: algunos usan configId:phone, otros usan solo phone
@@ -815,22 +677,14 @@ export async function clearAllConversationStates(
       const deleted = await redisClient.del(key)
       if (deleted > 0) {
         clearedKeys.push(key)
-        console.log(`[DB] ✅ Estado limpiado: ${key}`)
       }
     } catch (error) {
       const errorMsg = `Error limpiando ${key}: ${(error as Error).message}`
       errors.push(errorMsg)
-      console.error(`[DB] ❌ ${errorMsg}`)
+      console.error(`[DB] ${errorMsg}`)
     }
   }
-  
-  console.log(`[DB] 🧹 Limpieza completada:`)
-  console.log(`[DB]   - Keys limpiadas: ${clearedKeys.length}`)
-  console.log(`[DB]   - Errores: ${errors.length}`)
-  if (clearedKeys.length > 0) {
-    console.log(`[DB]   - Detalle: ${clearedKeys.join(', ')}`)
-  }
-  
+
   return { clearedKeys, errors }
 }
 
@@ -855,7 +709,6 @@ export async function getAllThreads(): Promise<ThreadInfo[]> {
     const keysToDelete = threadsWithKeys.filter(({ data }) => data === null).map(({ key }) => key)
 
     if (keysToDelete.length > 0) {
-      console.log(`[DB] 🧹 Limpiando ${keysToDelete.length} threads en formato antiguo de Redis`)
       await Promise.all(keysToDelete.map((key) => redisClient.del(key)))
     }
 
@@ -951,8 +804,6 @@ export const getConfigById = getWhatsAppConfig // Alias para compatibilidad
 export const getWhatsAppConfigByClienteId = getConfigByClienteId
 
 export async function getThread(userIdentifier: string, configId: string): Promise<{ thread_id: string } | null> {
-  console.log(`[DB] 🔍 getThread llamado para ${userIdentifier}, config: ${configId}`)
-
   const normalizedIdentifier = normalizePhoneNumber(userIdentifier)
   const key = `${THREAD_PREFIX}${normalizedIdentifier}:${configId}`
   const redisClient = getRedisClient()
@@ -960,30 +811,20 @@ export async function getThread(userIdentifier: string, configId: string): Promi
   if (redisClient) {
     const threadData = await redisClient.get(key)
     const threadInfo = safeJsonParse(threadData, key)
-
     if (threadInfo && threadInfo.threadId) {
-      console.log(`[DB] ✅ Thread encontrado en Redis: ${threadInfo.threadId}`)
       return { thread_id: threadInfo.threadId }
     }
-
-    console.log(`[DB] ❌ Thread no encontrado en Redis`)
     return null
   } else {
     const threadInfo = memoryStorage.threads.get(key)
-
     if (threadInfo && threadInfo.threadId) {
-      console.log(`[DB] ✅ Thread encontrado en memoria: ${threadInfo.threadId}`)
       return { thread_id: threadInfo.threadId }
     }
-
-    console.log(`[DB] ❌ Thread no encontrado en memoria`)
     return null
   }
 }
 
 export async function setThread(userIdentifier: string, configId: string, threadId: string): Promise<void> {
-  console.log(`[DB] 💾 setThread llamado para ${userIdentifier}, config: ${configId}, thread: ${threadId}`)
-
   const normalizedIdentifier = normalizePhoneNumber(userIdentifier)
   const key = `${THREAD_PREFIX}${normalizedIdentifier}:${configId}`
   const redisClient = getRedisClient()
@@ -1001,14 +842,11 @@ export async function setThread(userIdentifier: string, configId: string, thread
     // Para threads de WhatsApp, sin TTL (permanente)
     if (userIdentifier.startsWith("web_")) {
       await redisClient.set(key, JSON.stringify(threadInfo), { ex: 7200 })
-      console.log(`[DB] ✅ Thread web guardado en Redis con TTL de 2 horas: ${threadId}`)
     } else {
       await redisClient.set(key, JSON.stringify(threadInfo))
-      console.log(`[DB] ✅ Thread de WhatsApp guardado en Redis (permanente): ${threadId}`)
     }
   } else {
     memoryStorage.threads.set(key, threadInfo)
-    console.log(`[DB] ✅ Thread guardado en memoria: ${threadId}`)
   }
 }
 
@@ -1051,50 +889,39 @@ export async function clearThreadAssistantId(
   const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
   const redisClient = getRedisClient()
 
-  console.log(`[DB] 🔄 Limpiando assistantId para ${normalizedPhone} con config ${whatsappConfigId}`)
-
   try {
     if (redisClient) {
       const threadData = await redisClient.get(key)
       const threadInfo = safeJsonParse(threadData, key)
 
       if (threadInfo) {
-        // Verificar si tiene un assistantId para limpiar
         if (threadInfo.assistantId) {
-          console.log(`[DB] 🤖 Limpiando assistantId: ${threadInfo.assistantId}`)
-          
           const updatedThreadInfo = {
             ...threadInfo,
-            assistantId: undefined, // Limpiar el assistantId
+            assistantId: undefined,
             lastMessageAt: new Date().toISOString(),
           }
-
           await redisClient.set(key, JSON.stringify(updatedThreadInfo))
-          console.log(`[DB] ✅ AssistantId limpiado exitosamente para ${normalizedPhone}`)
           return true
         } else {
-          console.log(`[DB] ℹ️ Thread no tenía assistantId personalizado`)
           return false
         }
       } else {
-        console.log(`[DB] ⚠️ No se encontró thread para limpiar`)
         return false
       }
     } else {
       // Fallback a memoria
       const threadInfo = memoryStorage.threads.get(key)
       if (threadInfo && threadInfo.assistantId) {
-        console.log(`[DB] 🤖 Limpiando assistantId en memoria: ${threadInfo.assistantId}`)
         threadInfo.assistantId = undefined
         threadInfo.lastMessageAt = new Date().toISOString()
         memoryStorage.threads.set(key, threadInfo)
-        console.log(`[DB] ✅ AssistantId limpiado exitosamente en memoria`)
         return true
       }
       return false
     }
   } catch (error) {
-    console.error(`[DB] ❌ Error al limpiar assistantId:`, error)
+    console.error(`[DB] Error al limpiar assistantId para ${normalizedPhone}:`, error)
     return false
   }
 }
@@ -1109,11 +936,6 @@ export async function updateThreadId(
   const key = `${THREAD_PREFIX}${normalizedPhone}:${whatsappConfigId}`
   const redisClient = getRedisClient()
 
-  console.log(`[DB] 🔄 Actualizando threadId para ${normalizedPhone} con config ${whatsappConfigId} -> ${newThreadId}`)
-  if (assistantId) {
-    console.log(`[DB] 🤖 Guardando assistantId: ${assistantId}`)
-  }
-
   const threadInfo: ThreadInfo = {
     threadId: newThreadId,
     phoneNumber: normalizedPhone,
@@ -1127,14 +949,8 @@ export async function updateThreadId(
 
   if (redisClient) {
     await redisClient.set(key, JSON.stringify(threadInfo))
-    console.log(
-      `[DB] ✅ ThreadId actualizado en Redis: ${newThreadId}${assistantId ? ` con assistant: ${assistantId}` : ""}`,
-    )
   } else {
     memoryStorage.threads.set(key, threadInfo)
-    console.log(
-      `[DB] ✅ ThreadId actualizado en memoria: ${newThreadId}${assistantId ? ` con assistant: ${assistantId}` : ""}`,
-    )
   }
 }
 
@@ -1152,8 +968,6 @@ export async function createGlobalTemplate(template: Omit<GlobalTemplate, "id" |
   const id = nanoid()
   const now = new Date().toISOString()
 
-  console.log(`[DB] 📝 Creando plantilla global con ID: ${id}`)
-
   const newTemplate: GlobalTemplate = {
     ...template,
     id,
@@ -1165,10 +979,8 @@ export async function createGlobalTemplate(template: Omit<GlobalTemplate, "id" |
 
   if (redisClient) {
     await redisClient.set(`${GLOBAL_TEMPLATE_PREFIX}${id}`, JSON.stringify(newTemplate))
-    console.log(`[DB] ✅ Plantilla global ${id} guardada en Redis`)
   } else {
     globalTemplateMemoryStorage.set(id, newTemplate)
-    console.log(`[DB] ✅ Plantilla global ${id} guardada en memoria`)
   }
 
   return newTemplate
@@ -1177,26 +989,17 @@ export async function createGlobalTemplate(template: Omit<GlobalTemplate, "id" |
 // Obtener una plantilla global por ID
 export async function getGlobalTemplate(id: string): Promise<GlobalTemplate | null> {
   try {
-    console.log(`[DB] 🔍 Obteniendo plantilla global ${id}`)
-
     const redisClient = getRedisClient()
 
     if (redisClient) {
       const templateData = await redisClient.get(`${GLOBAL_TEMPLATE_PREFIX}${id}`)
-      if (!templateData) {
-        console.log(`[DB] ❌ Plantilla global ${id} no encontrada en Redis`)
-        return null
-      }
-      const template = safeJsonParse(templateData)
-      console.log(`[DB] ✅ Plantilla global ${id} obtenida de Redis`)
-      return template
+      if (!templateData) return null
+      return safeJsonParse(templateData)
     } else {
-      const template = globalTemplateMemoryStorage.get(id) || null
-      console.log(`[DB] Plantilla global ${id} obtenida de memoria:`, template ? "encontrada" : "no encontrada")
-      return template
+      return globalTemplateMemoryStorage.get(id) || null
     }
   } catch (error) {
-    console.error(`[DB] ❌ Error al obtener plantilla global ${id}:`, error)
+    console.error(`[DB] Error al obtener plantilla global ${id}:`, error)
     return null
   }
 }
@@ -1204,17 +1007,11 @@ export async function getGlobalTemplate(id: string): Promise<GlobalTemplate | nu
 // Obtener todas las plantillas globales
 export async function getAllGlobalTemplates(): Promise<GlobalTemplate[]> {
   try {
-    console.log(`[DB] 📋 Obteniendo todas las plantillas globales`)
-
     const redisClient = getRedisClient()
 
     if (redisClient) {
       const keys = await scanRedisKeys(redisClient, `${GLOBAL_TEMPLATE_PREFIX}*`)
-      console.log(`[DB] 📊 Encontradas ${keys.length} plantillas globales en Redis`)
-
-      if (keys.length === 0) {
-        return []
-      }
+      if (keys.length === 0) return []
 
       const templates = await Promise.all(
         keys.map(async (key) => {
@@ -1224,19 +1021,15 @@ export async function getAllGlobalTemplates(): Promise<GlobalTemplate[]> {
       )
 
       const validTemplates = templates.filter(Boolean) as GlobalTemplate[]
-      // Ordenar por fecha de creacion descendente
       validTemplates.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      
-      console.log(`[DB] ✅ Total de plantillas globales válidas: ${validTemplates.length}`)
       return validTemplates
     } else {
       const templates = Array.from(globalTemplateMemoryStorage.values())
       templates.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      console.log(`[DB] 📊 Encontradas ${templates.length} plantillas globales en memoria`)
       return templates
     }
   } catch (error) {
-    console.error(`[DB] ❌ Error al obtener plantillas globales:`, error)
+    console.error(`[DB] Error al obtener plantillas globales:`, error)
     return []
   }
 }
@@ -1247,13 +1040,8 @@ export async function updateGlobalTemplate(
   updates: Partial<Omit<GlobalTemplate, "id" | "createdAt">>,
 ): Promise<GlobalTemplate | null> {
   try {
-    console.log(`[DB] 🔄 Actualizando plantilla global ${id}`)
-
     const template = await getGlobalTemplate(id)
-    if (!template) {
-      console.log(`[DB] ❌ Plantilla global ${id} no encontrada`)
-      return null
-    }
+    if (!template) return null
 
     const updatedTemplate: GlobalTemplate = {
       ...template,
@@ -1265,15 +1053,13 @@ export async function updateGlobalTemplate(
 
     if (redisClient) {
       await redisClient.set(`${GLOBAL_TEMPLATE_PREFIX}${id}`, JSON.stringify(updatedTemplate))
-      console.log(`[DB] ✅ Plantilla global ${id} actualizada en Redis`)
     } else {
       globalTemplateMemoryStorage.set(id, updatedTemplate)
-      console.log(`[DB] ✅ Plantilla global ${id} actualizada en memoria`)
     }
 
     return updatedTemplate
   } catch (error) {
-    console.error(`[DB] ❌ Error al actualizar plantilla global ${id}:`, error)
+    console.error(`[DB] Error al actualizar plantilla global ${id}:`, error)
     return null
   }
 }
@@ -1281,21 +1067,17 @@ export async function updateGlobalTemplate(
 // Eliminar una plantilla global
 export async function deleteGlobalTemplate(id: string): Promise<boolean> {
   try {
-    console.log(`[DB] 🗑️ Eliminando plantilla global ${id}`)
-
     const redisClient = getRedisClient()
 
     if (redisClient) {
       await redisClient.del(`${GLOBAL_TEMPLATE_PREFIX}${id}`)
-      console.log(`[DB] ✅ Plantilla global ${id} eliminada de Redis`)
     } else {
       globalTemplateMemoryStorage.delete(id)
-      console.log(`[DB] ✅ Plantilla global ${id} eliminada de memoria`)
     }
 
     return true
   } catch (error) {
-    console.error(`[DB] ❌ Error al eliminar plantilla global ${id}:`, error)
+    console.error(`[DB] Error al eliminar plantilla global ${id}:`, error)
     return false
   }
 }
