@@ -1784,6 +1784,23 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // INTERCEPTAR FLUJOS ACTIVOS: Detección inicial, Paciente Existente o Nuevo (Sprint 9a-c)
     // ============================================================================
     if (message.type === "text") {
+      // Si el mensaje es un saludo inicial (conversación nueva), limpiar estados zombie de flujos
+      // anteriores (new_patient_flow, existing_patient_flow) que hayan quedado en Redis.
+      // Esto evita que un "Holaaa" sea tratado como input de un flujo anterior (ej: awaiting_obra_social).
+      const isInitialGreeting = /^(hola+|buenas|buen\s*(d[ií]a|dia|tarde|noche)|saludos|buenos\s*(d[ií]as|dias)|hi|hey)\s*[!¡.]*$/i.test(userMessage.trim())
+      if (isInitialGreeting) {
+        const hadNewPatient = await isNewPatientFlowActive(userPhoneNumber)
+        const hadExistingPatient = await isExistingPatientFlowActive(userPhoneNumber)
+        if (hadNewPatient) {
+          console.log(`[WHATSAPP] Saludo inicial detectado - limpiando new_patient_flow zombie para ${userPhoneNumber}`)
+          await clearNewPatientFlow(userPhoneNumber, config.cliente_id)
+        }
+        if (hadExistingPatient) {
+          console.log(`[WHATSAPP] Saludo inicial detectado - limpiando existing_patient_flow zombie para ${userPhoneNumber}`)
+          await clearExistingPatientFlow(userPhoneNumber)
+        }
+      }
+
       // Si hay un booking flow activo (Sprint 6-8), tiene prioridad sobre el flujo de paciente nuevo.
       // El booking flow se procesa más adelante (línea ~2083) con handleBookingSelectionIfPending.
       // Evitamos que new_patient_flow intercepte mensajes que le pertenecen al booking flow.
