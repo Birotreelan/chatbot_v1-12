@@ -54,6 +54,7 @@ export interface ChatbotData {
 export type FlowStateType = 
   | 'awaiting_cancel_confirmation'
   | 'awaiting_reschedule_choice'
+  | 'awaiting_reschedule_no_turns_choice'
 
 export interface FlowState {
   type: FlowStateType

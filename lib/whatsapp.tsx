@@ -2226,14 +2226,55 @@ export async function processIndividualMessage(
                 return
               }
             }
-            
-            // Si no hay turnos disponibles, informar al usuario
+
+            // Sin turnos con el mismo profesional → intentar con cualquier médico de la sede (30 días)
+            const futureDateExtended = new Date(today)
+            futureDateExtended.setDate(today.getDate() + 30)
+            const rangoExtendido = `${formatDate(today)} a ${formatDate(futureDateExtended)}`
+
+            const turnosAlternativos = await buscarTurnosDisponibles(
+              rangoExtendido,
+              undefined,            // sin filtrar por profesional
+              undefined,
+              undefined,            // sin profesionalId → cualquier médico
+              config.cliente_id,
+              turnoData.sede_id,
+            )
+
+            const turnosAlt = turnosAlternativos.exito
+              ? (turnosAlternativos.datos?.turnos_disponibles || turnosAlternativos.datos || [])
+              : []
+
+            const primerNombre = pacienteData.nombres.split(" ")[0]
+
+            if (Array.isArray(turnosAlt) && turnosAlt.length > 0) {
+              // Hay turnos con otro profesional → ofrecer al usuario
+              const result = await startRescheduleFlow(
+                {
+                  paciente: pacienteData,
+                  turnos: [],
+                } as any,
+                turnosAlt,
+                phoneNumberId,
+                config.accessToken,
+                userPhoneNumber,
+                config.id,
+                config.cliente_id
+              )
+              if (result.handled) {
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
+              }
+            }
+
+            // Sin turnos en ninguna búsqueda → mensaje con opciones
             await sendWhatsAppMessage(
               phoneNumberId,
               config.accessToken,
               userPhoneNumber,
-              `Lo siento ${pacienteData.nombres.split(" ")[0]}, no hay turnos disponibles con el mismo profesional en este momento. Te recomendamos intentar más tarde o contactar a la clínica para más opciones.`
+              `Lo siento ${primerNombre}, en este momento no hay turnos disponibles en los próximos 30 días.\n\n¿Qué preferís hacer?\n\n*1* - Intentar nuevamente más tarde\n*2* - Que te contacten para coordinar un turno`
             )
+            await setFlowState(userPhoneNumber, { type: 'awaiting_reschedule_no_turns_choice', createdAt: new Date().toISOString(), turnoIndex: 0 })
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
