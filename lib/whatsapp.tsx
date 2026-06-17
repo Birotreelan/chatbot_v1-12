@@ -283,7 +283,23 @@ async function handlePendingFlowResponse(
           { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
         )
 
+        // Leer el body del proxy siempre, independientemente del HTTP status
+        let proxyBody: unknown = null
+        let proxyBodyText = ""
+        try {
+          proxyBodyText = await response.text()
+          proxyBody = proxyBodyText ? JSON.parse(proxyBodyText) : null
+        } catch {
+          proxyBody = proxyBodyText
+        }
+        logger.info("Respuesta del proxy (cancelacion)", {
+          httpStatus: response.status,
+          body: proxyBody,
+        })
+
         if (response.ok) {
+          await clearFlowState(userPhoneNumber, config.id)
+
           if (config.cliente_id) {
             const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
             await trackAppointmentEvent({
@@ -292,12 +308,10 @@ async function handlePendingFlowResponse(
               eventType: "cancelled",
               timestamp: new Date().toISOString(),
               templateSentAt: templateSentAt || undefined,
-              metadata: { source: "direct_flow" },
+              metadata: { source: "direct_flow", proxyBody },
             })
             await markPendingReschedule(config.cliente_id, userPhoneNumber)
           }
-
-          await clearFlowState(userPhoneNumber, config.id)
 
           const turno = chatbotData.turnos[flowState.turnoIndex || 0]
           const admiteReagendamiento = turno?.admite_reagendamiento !== false
@@ -342,7 +356,7 @@ async function handlePendingFlowResponse(
           await sendDirectResponse(ctx, successMsg, "awaiting_cancel_confirmation")
           return true
         } else {
-          logger.error("Error del proxy al cancelar", undefined, { status: response.status })
+          logger.error("Error del proxy al cancelar", undefined, { status: response.status, body: proxyBody })
           await clearFlowState(userPhoneNumber, config.id)
           return false
         }
