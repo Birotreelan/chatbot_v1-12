@@ -188,6 +188,26 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
+    // Saludo/despedida → respuesta de cortesía y cortar flujo (no iniciar detección de paciente)
+    if (classificationResult.intent === "saludo_despedida") {
+      const response = classificationResult.response || "¡Un placer! Si necesitás algo más, estoy acá para ayudarte."
+      return {
+        shouldHandle: true,
+        result: classificationResult,
+        response,
+      }
+    }
+
+    // Número equivocado → cortar flujo sin iniciar detección de paciente
+    if (classificationResult.intent === "numero_equivocado") {
+      const response = classificationResult.response || "¡Disculpá la confusión! Si tenés alguna duda podés escribirnos nuevamente."
+      return {
+        shouldHandle: true,
+        result: classificationResult,
+        response,
+      }
+    }
+
     // Otros casos: devolver que se debe manejar pero sin respuesta (para que continue normal)
     return { shouldHandle: false }
   } catch (error) {

@@ -309,9 +309,11 @@ export async function initializeExistingPatientFlow(
             obraSocialNombre: finalObraSocialNombre,
           })
           
+          const firstName = getFirstName(finalPatientFirstName || '')
+          const saludo = firstName ? `Hola ${firstName}. ` : ''
           return {
             handled: true,
-            message: `Hola ${getFirstName(finalPatientFirstName)}. Lamentablemente, tu obra social (${finalObraSocialNombre}) no está habilitada para agendar turnos por este medio.
+            message: `${saludo}Lamentablemente, tu obra social (${finalObraSocialNombre}) no está habilitada para agendar turnos por este medio.
 
 Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
             action: 'obra_social_no_permite_turnos_online',

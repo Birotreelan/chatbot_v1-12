@@ -380,9 +380,11 @@ async function handleObraSocialPhase(
           nombre: obraSocial.nombre 
         })
         
+        const firstName = getFirstName(state.patientFirstName || state.nombre || '')
+        const gracias = firstName ? `Gracias ${firstName}. ` : ''
         return {
           handled: true,
-          message: `Gracias ${getFirstName(state.patientFirstName || state.nombre || '')}. Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.
+          message: `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.
 
 Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
         }
@@ -488,9 +490,11 @@ async function handleObraSocialSelectionPhase(
           nombre: selectedOption.nombre 
         })
         
+        const firstName = getFirstName(state.patientFirstName || state.nombre || '')
+        const gracias = firstName ? `Gracias ${firstName}. ` : ''
         return {
           handled: true,
-          message: `Gracias ${state.patientFirstName}. Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.
+          message: `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.
 
 Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
         }
