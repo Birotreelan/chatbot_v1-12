@@ -1652,9 +1652,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         const detectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
                                await isExistingPatientFlowActive(userPhoneNumber) || 
                                await isNewPatientFlowActive(userPhoneNumber)
+
+        // Si hay appointmentContext activo (usuario llegó por template), el paciente ya está
+        // identificado — no reiniciar detección aunque la API devuelva pacientes_multiples.
+        const existingAppointmentCtx = await getAppointmentContext(userPhoneNumber, config.id)
         
-        if (!detectionActive) {
-          // No hay flujo activo, iniciar detección
+        if (!detectionActive && !existingAppointmentCtx) {
+          // No hay flujo activo ni contexto de template, iniciar detección
           // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
           const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
           
