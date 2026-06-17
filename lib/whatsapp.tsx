@@ -284,82 +284,91 @@ async function handlePendingFlowResponse(
         )
 
         // Leer el body del proxy siempre, independientemente del HTTP status
-        let proxyBody: unknown = null
+        let proxyBody: { success?: boolean; [key: string]: unknown } | null = null
         let proxyBodyText = ""
         try {
           proxyBodyText = await response.text()
           proxyBody = proxyBodyText ? JSON.parse(proxyBodyText) : null
         } catch {
-          proxyBody = proxyBodyText
+          // Si el body no es JSON válido, lo tratamos como fallo
+          proxyBody = null
         }
         logger.info("Respuesta del proxy (cancelacion)", {
           httpStatus: response.status,
           body: proxyBody,
         })
 
-        if (response.ok) {
-          await clearFlowState(userPhoneNumber, config.id)
+        // El éxito depende de response.ok Y de que el body indique success: true
+        const proxySuccess = response.ok && proxyBody?.success === true
 
-          if (config.cliente_id) {
-            const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
-            await trackAppointmentEvent({
-              clienteId: config.cliente_id,
-              phoneNumber: userPhoneNumber,
-              eventType: "cancelled",
-              timestamp: new Date().toISOString(),
-              templateSentAt: templateSentAt || undefined,
-              metadata: { source: "direct_flow", proxyBody },
-            })
-            await markPendingReschedule(config.cliente_id, userPhoneNumber)
-          }
-
-          const turno = chatbotData.turnos[flowState.turnoIndex || 0]
-          const admiteReagendamiento = turno?.admite_reagendamiento !== false
-          logger.info("Cancelacion exitosa via proxy", { admiteReagendamiento })
-
-          if (admiteReagendamiento) {
-            await setFlowState(userPhoneNumber, config.id, {
-              type: 'awaiting_reschedule_choice',
-              createdAt: new Date().toISOString(),
-              turnoIndex: flowState.turnoIndex || 0
-            })
-          }
-
-          // Guardar contexto post-acción para mensajes contextuales posteriores
-          // Ej: "Está con neumonía" como explicación de por qué canceló
-          const turnoIndex = flowState.turnoIndex || 0
-          const turnoCancelado = chatbotData.turnos[turnoIndex]
-          if (turnoCancelado) {
-            await savePostActionContext(userPhoneNumber, config.id, {
-              timestamp: Date.now(),
-              actionType: "cancellation",
-              turno: {
-                fecha: turnoCancelado.fecha,
-                hora: turnoCancelado.hora,
-                profesional: turnoCancelado.profesional || "",
-                profesional_id: turnoCancelado.profesional_id?.toString(),
-                sede: turnoCancelado.sede || "",
-                sede_id: turnoCancelado.sede_id?.toString(),
-                direccion: turnoCancelado.direccion,
-              },
-              paciente: {
-                nombres: chatbotData.paciente?.nombres || "",
-                apellido: chatbotData.paciente?.apellido || "",
-                dni: chatbotData.paciente?.dni,
-                telefono: userPhoneNumber,
-              },
-            })
-            logger.info("Contexto post-acción guardado (cancelación)")
-          }
-
-          const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
-          await sendDirectResponse(ctx, successMsg, "awaiting_cancel_confirmation")
-          return true
-        } else {
-          logger.error("Error del proxy al cancelar", undefined, { status: response.status, body: proxyBody })
+        if (!proxySuccess) {
+          logger.error("El proxy no confirmó la cancelacion", undefined, {
+            httpStatus: response.status,
+            proxySuccess: proxyBody?.success,
+            body: proxyBody,
+          })
           await clearFlowState(userPhoneNumber, config.id)
           return false
         }
+
+        // proxySuccess === true garantizado en este punto
+        await clearFlowState(userPhoneNumber, config.id)
+
+        if (config.cliente_id) {
+          const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+          await trackAppointmentEvent({
+            clienteId: config.cliente_id,
+            phoneNumber: userPhoneNumber,
+            eventType: "cancelled",
+            timestamp: new Date().toISOString(),
+            templateSentAt: templateSentAt || undefined,
+            metadata: { source: "direct_flow", proxyBody },
+          })
+          await markPendingReschedule(config.cliente_id, userPhoneNumber)
+        }
+
+        const turno = chatbotData.turnos[flowState.turnoIndex || 0]
+        const admiteReagendamiento = turno?.admite_reagendamiento !== false
+        logger.info("Cancelacion exitosa via proxy", { admiteReagendamiento })
+
+        if (admiteReagendamiento) {
+          await setFlowState(userPhoneNumber, config.id, {
+            type: 'awaiting_reschedule_choice',
+            createdAt: new Date().toISOString(),
+            turnoIndex: flowState.turnoIndex || 0
+          })
+        }
+
+        // Guardar contexto post-acción para mensajes contextuales posteriores
+        // Ej: "Está con neumonía" como explicación de por qué canceló
+        const turnoIndex = flowState.turnoIndex || 0
+        const turnoCancelado = chatbotData.turnos[turnoIndex]
+        if (turnoCancelado) {
+          await savePostActionContext(userPhoneNumber, config.id, {
+            timestamp: Date.now(),
+            actionType: "cancellation",
+            turno: {
+              fecha: turnoCancelado.fecha,
+              hora: turnoCancelado.hora,
+              profesional: turnoCancelado.profesional || "",
+              profesional_id: turnoCancelado.profesional_id?.toString(),
+              sede: turnoCancelado.sede || "",
+              sede_id: turnoCancelado.sede_id?.toString(),
+              direccion: turnoCancelado.direccion,
+            },
+            paciente: {
+              nombres: chatbotData.paciente?.nombres || "",
+              apellido: chatbotData.paciente?.apellido || "",
+              dni: chatbotData.paciente?.dni,
+              telefono: userPhoneNumber,
+            },
+          })
+          logger.info("Contexto post-acción guardado (cancelación)")
+        }
+
+        const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
+        await sendDirectResponse(ctx, successMsg, "awaiting_cancel_confirmation")
+        return true
       } catch (error) {
         logger.error("Error al cancelar via proxy", error as Error)
         await clearFlowState(userPhoneNumber, config.id)
