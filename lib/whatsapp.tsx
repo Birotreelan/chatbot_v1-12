@@ -2181,100 +2181,55 @@ export async function processIndividualMessage(
             })
             // Fallback al flujo legacy de OpenAI
           } else {
-            // Calcular rango de fechas (próximos 14 días)
             const today = new Date()
-            const futureDate = new Date(today)
-            futureDate.setDate(today.getDate() + 14)
             const formatDate = (date: Date) => date.toISOString().split("T")[0]
-            const rangoFechas = `${formatDate(today)} a ${formatDate(futureDate)}`
-            
-            
-            // Buscar turnos disponibles para el mismo profesional
-            // Firma: buscarTurnosDisponibles(rangoFechas, profesional, especialidad, profesionalId, clienteId, sedeId, ...)
-            const turnosResponse = await buscarTurnosDisponibles(
-              rangoFechas,           // rangoFechas (string "YYYY-MM-DD a YYYY-MM-DD")
-              undefined,             // profesional (nombre, no necesario si tenemos ID)
-              undefined,             // especialidad
-              turnoData.profesional_id,  // profesionalId
-              config.cliente_id,     // clienteId
-              turnoData.sede_id,     // sedeId
-            )
-            
-            
-            // Extraer turnos del response (puede venir en datos.turnos_disponibles o datos directamente)
-            const turnosDisponibles = turnosResponse.exito 
-              ? (turnosResponse.datos?.turnos_disponibles || turnosResponse.datos || [])
-              : []
-            
-            if (Array.isArray(turnosDisponibles) && turnosDisponibles.length > 0) {
-              // Iniciar flujo determinístico con los turnos encontrados
-              const result = await startRescheduleFlow(
-                {
-                  paciente: pacienteData,
-                  turnos: [], // No necesario para este flujo
-                } as any,
-                turnosDisponibles,
-                phoneNumberId,
-                config.accessToken,
-                userPhoneNumber,
-                config.id,
-                config.cliente_id
-              )
-              
-              if (result.handled) {
-                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-                return
-              }
-            }
-
-            // Sin turnos con el mismo profesional → intentar con cualquier médico de la sede (30 días)
-            const futureDateExtended = new Date(today)
-            futureDateExtended.setDate(today.getDate() + 30)
-            const rangoExtendido = `${formatDate(today)} a ${formatDate(futureDateExtended)}`
-
-            const turnosAlternativos = await buscarTurnosDisponibles(
-              rangoExtendido,
-              undefined,            // sin filtrar por profesional
-              undefined,
-              undefined,            // sin profesionalId → cualquier médico
-              config.cliente_id,
-              turnoData.sede_id,
-            )
-
-            const turnosAlt = turnosAlternativos.exito
-              ? (turnosAlternativos.datos?.turnos_disponibles || turnosAlternativos.datos || [])
-              : []
-
             const primerNombre = pacienteData.nombres.split(" ")[0]
 
-            if (Array.isArray(turnosAlt) && turnosAlt.length > 0) {
-              // Hay turnos con otro profesional → ofrecer al usuario
-              const result = await startRescheduleFlow(
-                {
-                  paciente: pacienteData,
-                  turnos: [],
-                } as any,
-                turnosAlt,
-                phoneNumberId,
-                config.accessToken,
-                userPhoneNumber,
-                config.id,
-                config.cliente_id
+            // Helper: buscar turnos con el mismo profesional y sede en N días
+            const buscarConRango = async (dias: number) => {
+              const hasta = new Date(today)
+              hasta.setDate(today.getDate() + dias)
+              const rango = `${formatDate(today)} a ${formatDate(hasta)}`
+              const resp = await buscarTurnosDisponibles(
+                rango,
+                undefined,
+                undefined,
+                turnoData.profesional_id,
+                config.cliente_id,
+                turnoData.sede_id,
               )
-              if (result.handled) {
-                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-                return
+              return resp.exito
+                ? (resp.datos?.turnos_disponibles || resp.datos || [])
+                : []
+            }
+
+            // Búsqueda progresiva: 14 días → 30 días → 60 días
+            for (const dias of [14, 30, 60]) {
+              const turnos = await buscarConRango(dias)
+              if (Array.isArray(turnos) && turnos.length > 0) {
+                const result = await startRescheduleFlow(
+                  { paciente: pacienteData, turnos: [] } as any,
+                  turnos,
+                  phoneNumberId,
+                  config.accessToken,
+                  userPhoneNumber,
+                  config.id,
+                  config.cliente_id
+                )
+                if (result.handled) {
+                  await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                  return
+                }
               }
             }
 
-            // Sin turnos en ninguna búsqueda → mensaje con opciones
+            // Sin turnos en los próximos 60 días → informar y cerrar
             await sendWhatsAppMessage(
               phoneNumberId,
               config.accessToken,
               userPhoneNumber,
-              `Lo siento ${primerNombre}, en este momento no hay turnos disponibles en los próximos 30 días.\n\n¿Qué preferís hacer?\n\n*1* - Intentar nuevamente más tarde\n*2* - Que te contacten para coordinar un turno`
+              `Lo siento ${primerNombre}, no encontramos turnos disponibles con el mismo profesional en los próximos 60 días.\n\nTe recomendamos intentar nuevamente más adelante o comunicarte telefónicamente con la clínica para coordinar un turno.`
             )
-            await setFlowState(userPhoneNumber, { type: 'awaiting_reschedule_no_turns_choice', createdAt: new Date().toISOString(), turnoIndex: 0 })
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
