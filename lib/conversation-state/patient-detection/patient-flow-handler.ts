@@ -19,6 +19,49 @@ const PATIENT_DETECTION_STATE_KEY = 'patient_detection_state'
 const PATIENT_DETECTION_TTL = 86400 // 24 horas
 
 /**
+ * Clave para persistir la identidad del paciente una vez identificado,
+ * sobrevive al clearPatientDetectionFlow para evitar re-validación en la misma sesión.
+ */
+const IDENTIFIED_PATIENT_KEY = 'identified_patient'
+const IDENTIFIED_PATIENT_TTL = 3600 // 1 hora
+
+export interface IdentifiedPatientData {
+  patientId: string
+  patientDNI: string
+  patientName: string
+  obraSocialId?: string
+  obraSocialNombre?: string
+}
+
+export async function saveIdentifiedPatient(
+  phoneNumber: string,
+  data: IdentifiedPatientData
+): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  const key = `${IDENTIFIED_PATIENT_KEY}:${phoneNumber}`
+  await redis.setex(key, IDENTIFIED_PATIENT_TTL, JSON.stringify(data))
+}
+
+export async function getIdentifiedPatient(
+  phoneNumber: string
+): Promise<IdentifiedPatientData | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+  const key = `${IDENTIFIED_PATIENT_KEY}:${phoneNumber}`
+  const raw = await redis.get(key)
+  if (!raw) return null
+  if (typeof raw === 'object') return raw as IdentifiedPatientData
+  try { return JSON.parse(raw as string) as IdentifiedPatientData } catch { return null }
+}
+
+export async function clearIdentifiedPatient(phoneNumber: string): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  await redis.del(`${IDENTIFIED_PATIENT_KEY}:${phoneNumber}`)
+}
+
+/**
  * Helper: Obtiene rango de fechas dinámico (hoy a próxima semana)
  */
 function getDefaultDateRange(): { desde: string; hasta: string } {
@@ -822,7 +865,9 @@ export async function getPatientDetectionState(
 }
 
 /**
- * Limpia el estado del flujo de detección
+ * Limpia el estado del flujo de detección.
+ * Si el estado tenía un paciente identificado, persiste su identidad en Redis
+ * por 1 hora para evitar re-validación en el mismo turno de conversación.
  */
 export async function clearPatientDetectionFlow(
   phoneNumber: string,
@@ -833,6 +878,22 @@ export async function clearPatientDetectionFlow(
 
   const logger = createConversationLogger(phoneNumber, clientId, 'initial_detection_pending')
   const stateKey = `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`
+
+  // Antes de borrar, persistir la identidad del paciente si ya fue identificado
+  const stateRaw = await redis.get(stateKey)
+  if (stateRaw) {
+    const state = (typeof stateRaw === 'object' ? stateRaw : JSON.parse(stateRaw as string)) as PatientDetectionState
+    if (state?.patientId) {
+      await saveIdentifiedPatient(phoneNumber, {
+        patientId: state.patientId,
+        patientDNI: state.patientDNI || '',
+        patientName: `${state.patientFirstName || ''} ${state.patientLastName || ''}`.trim() || state.patientName || '',
+        obraSocialId: state.obraSocialId,
+        obraSocialNombre: state.obraSocialNombre,
+      })
+    }
+  }
+
   await redis.del(stateKey)
   logger.info('Flow cleared', {})
 }
