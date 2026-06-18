@@ -2486,12 +2486,18 @@ ${JSON.stringify(functionArgs, null, 2)}`
 
     const scheduleInfo = formatScheduleForSystemBlock(config)
 
+    // Intentar obtener datos del paciente identificado en el flujo de detección (TTL 1h)
+    const identifiedPatient = await getIdentifiedPatient(userPhoneNumber)
+    const patientBlock = identifiedPatient
+      ? `\nNombrePaciente: ${identifiedPatient.patientName}${identifiedPatient.patientDNI ? `\nDNIPaciente: ${identifiedPatient.patientDNI}` : ""}${identifiedPatient.obraSocialNombre ? `\nObraSocialPaciente: ${identifiedPatient.obraSocialNombre}` : ""}`
+      : ""
+
     let messageToSend = `[SISTEMA]
 Nombre: ${config.displayName}
 FechaHora: ${getArgentinaDateTime()}
 PrimerMensaje: ${threadResult.isNewThread}
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${scheduleInfo}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${patientBlock}${scheduleInfo}
 [/SISTEMA]
 
 ${userMessage}`
@@ -2504,7 +2510,7 @@ FechaHora: ${getArgentinaDateTime()}
 PrimerMensaje: true
 ThreadReseteado: true
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${scheduleInfo}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${patientBlock}${scheduleInfo}
 [/SISTEMA]
 
 ${userMessage}`
