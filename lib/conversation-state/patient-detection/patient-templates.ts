@@ -77,22 +77,132 @@ function formatearProfesional(nombre: string): string {
 export function buildExistingPatientGreeting(
   patientName: string,
   turnos: any[],
-  clinicName: string = DEFAULT_CLINIC_NAME
+  clinicName: string = DEFAULT_CLINIC_NAME,
+  turnosQx: any[] = []
 ): string {
   const firstName = getFirstName(patientName)
+  const hasTurnos = turnos && turnos.length > 0
+  const hasTurnosQx = turnosQx && turnosQx.length > 0
+
+  // CASO: Solo cirugías (sin turnos médicos gestionables)
+  if (!hasTurnos && hasTurnosQx) {
+    return buildSoloCirugiaGreeting(firstName, turnosQx, clinicName)
+  }
 
   // CASO: Sin turnos agendados
-  if (!turnos || turnos.length === 0) {
+  if (!hasTurnos) {
     return buildExistingPatientNoTurnosGreeting(patientName, clinicName)
   }
 
-  // CASO: Un solo turno
+  // CASO: Turnos médicos (con o sin cirugías)
+  // Construir el saludo médico base y agregar sección de cirugías si corresponde
+  let mensaje: string
   if (turnos.length === 1) {
-    return buildSingleTurnoGreeting(firstName, turnos[0], clinicName)
+    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName)
+  } else {
+    mensaje = buildMultipleTurnosGreeting(firstName, turnos, clinicName)
   }
 
-  // CASO: Multiples turnos
-  return buildMultipleTurnosGreeting(firstName, turnos, clinicName)
+  // Si además hay cirugías, insertar bloque informativo antes del pie del menú
+  if (hasTurnosQx) {
+    mensaje = insertCirugiaBlock(mensaje, turnosQx)
+  }
+
+  return mensaje
+}
+
+/**
+ * Inserta un bloque informativo de cirugías dentro de un saludo médico existente.
+ * Se ubica antes de la última línea "Respondé con el número de opción que prefieras."
+ */
+function insertCirugiaBlock(mensajeBase: string, turnosQx: any[]): string {
+  const bloqueCirugias = buildBloqueCirugias(turnosQx)
+  const ancla = 'Respondé con el número de opción que prefieras.'
+  const idx = mensajeBase.lastIndexOf(ancla)
+  if (idx === -1) {
+    // Si no encontramos la ancla, simplemente agregamos al final
+    return mensajeBase + '\n\n' + bloqueCirugias
+  }
+  return mensajeBase.slice(0, idx) + bloqueCirugias + '\n\n' + mensajeBase.slice(idx)
+}
+
+/**
+ * Construye el bloque de texto informativo sobre turnos quirúrgicos.
+ */
+function buildBloqueCirugias(turnosQx: any[]): string {
+  let bloque = `_Además, registramos ${turnosQx.length === 1 ? 'un turno de cirugía agendado' : `${turnosQx.length} turnos de cirugía agendados`}:_\n\n`
+
+  turnosQx.forEach((qx, idx) => {
+    const fecha = formatearFecha(qx.Fecha || qx.fecha)
+    const hora = formatearHora(qx.Hora || qx.hora || '')
+    const cirugiaName = normalizeName(
+      qx.Cirugia_Nombre || qx.cirugia_nombre || qx.nombre_cirugia || qx.Descripcion || qx.descripcion || 'Cirugía'
+    )
+    const cirujano = formatearProfesional(
+      qx.Profesional_Nombre || qx.profesional_nombre || qx.nombre_profesional || qx.Cirujano || qx.cirujano || ''
+    )
+
+    if (turnosQx.length > 1) {
+      bloque += `${idx + 1}. Cirugía: ${cirugiaName}\n`
+    } else {
+      bloque += `Cirugía: ${cirugiaName}\n`
+    }
+    if (cirujano && cirujano !== 'el profesional') bloque += `Cirujano: ${cirujano}\n`
+    bloque += `Fecha: ${fecha}${hora ? ` a las ${hora}` : ''}\n`
+    if (idx < turnosQx.length - 1) bloque += '\n'
+  })
+
+  bloque += `\n_La gestión de turnos quirúrgicos debe realizarse comunicándote directamente con la clínica._\n\n`
+  return bloque
+}
+
+/**
+ * Saludo para paciente con SOLO turno(s) de cirugía (sin turnos médicos)
+ * Los turnos quirúrgicos son solo informativos, no se pueden gestionar por este canal
+ */
+function buildSoloCirugiaGreeting(
+  firstName: string,
+  turnosQx: any[],
+  clinicName: string
+): string {
+  let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
+  mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
+
+  if (turnosQx.length === 1) {
+    const qx = turnosQx[0]
+    const fecha = formatearFecha(qx.Fecha || qx.fecha)
+    const hora = formatearHora(qx.Hora || qx.hora || '')
+    const cirugiaName = qx.Cirugia_Nombre || qx.cirugia_nombre || qx.nombre_cirugia || qx.Descripcion || qx.descripcion || 'cirugía'
+    const cirujano = formatearProfesional(
+      qx.Profesional_Nombre || qx.profesional_nombre || qx.nombre_profesional || qx.Cirujano || qx.cirujano || ''
+    )
+
+    mensaje += `*Veo que tenés un turno de cirugía agendado:*\n\n`
+    mensaje += `Cirugía: ${normalizeName(cirugiaName)}\n`
+    if (cirujano && cirujano !== 'el profesional') mensaje += `Cirujano: ${cirujano}\n`
+    mensaje += `Fecha: ${fecha}${hora ? ` a las ${hora}` : ''}\n\n`
+  } else {
+    mensaje += `*Veo que tenés ${turnosQx.length} turnos de cirugía agendados:*\n\n`
+    turnosQx.forEach((qx, idx) => {
+      const fecha = formatearFecha(qx.Fecha || qx.fecha)
+      const hora = formatearHora(qx.Hora || qx.hora || '')
+      const cirugiaName = qx.Cirugia_Nombre || qx.cirugia_nombre || qx.nombre_cirugia || qx.Descripcion || qx.descripcion || 'cirugía'
+      const cirujano = formatearProfesional(
+        qx.Profesional_Nombre || qx.profesional_nombre || qx.nombre_profesional || qx.Cirujano || qx.cirujano || ''
+      )
+      mensaje += `${idx + 1}. Cirugía: ${normalizeName(cirugiaName)}\n`
+      if (cirujano && cirujano !== 'el profesional') mensaje += `   Cirujano: ${cirujano}\n`
+      mensaje += `   Fecha: ${fecha}${hora ? ` a las ${hora}` : ''}\n\n`
+    })
+  }
+
+  mensaje += `La gestión de turnos quirúrgicos (cancelación, modificación o confirmación) debe realizarse comunicándote directamente con la clínica.\n\n`
+  mensaje += `¿En qué más te puedo ayudar?\n\n`
+  mensaje += `1- Solicitar un turno médico\n`
+  mensaje += `2- Realizar otra consulta\n\n`
+  mensaje += `Respondé con el número de opción que prefieras.`
+
+  return mensaje
 }
 
 /**

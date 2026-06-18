@@ -117,7 +117,8 @@ export async function initializePatientDetection(
     const greeting = buildExistingPatientGreeting(
       detectionResult.patientName || 'Paciente',
       detectionResult.turnos || [],
-      clinicName
+      clinicName,
+      detectionResult.turnosQx || []
     )
 
     return {
@@ -496,7 +497,8 @@ export async function handleDNIForMultiplePatients(
   const greeting = buildExistingPatientGreeting(
     result.patientName || 'Paciente',
     result.turnos || [],
-    clinicName
+    clinicName,
+    result.turnosQx || []
   )
 
   return {
