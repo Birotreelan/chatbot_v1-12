@@ -94,13 +94,66 @@ export function buildExistingPatientGreeting(
     return buildExistingPatientNoTurnosGreeting(patientName, clinicName)
   }
 
-  // CASO: Un solo turno médico
+  // CASO: Turnos médicos (con o sin cirugías)
+  // Construir el saludo médico base y agregar sección de cirugías si corresponde
+  let mensaje: string
   if (turnos.length === 1) {
-    return buildSingleTurnoGreeting(firstName, turnos[0], clinicName)
+    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName)
+  } else {
+    mensaje = buildMultipleTurnosGreeting(firstName, turnos, clinicName)
   }
 
-  // CASO: Multiples turnos médicos
-  return buildMultipleTurnosGreeting(firstName, turnos, clinicName)
+  // Si además hay cirugías, insertar bloque informativo antes del pie del menú
+  if (hasTurnosQx) {
+    mensaje = insertCirugiaBlock(mensaje, turnosQx)
+  }
+
+  return mensaje
+}
+
+/**
+ * Inserta un bloque informativo de cirugías dentro de un saludo médico existente.
+ * Se ubica antes de la última línea "Respondé con el número de opción que prefieras."
+ */
+function insertCirugiaBlock(mensajeBase: string, turnosQx: any[]): string {
+  const bloqueCirugias = buildBloqueCirugias(turnosQx)
+  const ancla = 'Respondé con el número de opción que prefieras.'
+  const idx = mensajeBase.lastIndexOf(ancla)
+  if (idx === -1) {
+    // Si no encontramos la ancla, simplemente agregamos al final
+    return mensajeBase + '\n\n' + bloqueCirugias
+  }
+  return mensajeBase.slice(0, idx) + bloqueCirugias + '\n\n' + mensajeBase.slice(idx)
+}
+
+/**
+ * Construye el bloque de texto informativo sobre turnos quirúrgicos.
+ */
+function buildBloqueCirugias(turnosQx: any[]): string {
+  let bloque = `_Además, registramos ${turnosQx.length === 1 ? 'un turno de cirugía agendado' : `${turnosQx.length} turnos de cirugía agendados`}:_\n\n`
+
+  turnosQx.forEach((qx, idx) => {
+    const fecha = formatearFecha(qx.Fecha || qx.fecha)
+    const hora = formatearHora(qx.Hora || qx.hora || '')
+    const cirugiaName = normalizeName(
+      qx.Cirugia_Nombre || qx.cirugia_nombre || qx.nombre_cirugia || qx.Descripcion || qx.descripcion || 'Cirugía'
+    )
+    const cirujano = formatearProfesional(
+      qx.Profesional_Nombre || qx.profesional_nombre || qx.nombre_profesional || qx.Cirujano || qx.cirujano || ''
+    )
+
+    if (turnosQx.length > 1) {
+      bloque += `${idx + 1}. Cirugía: ${cirugiaName}\n`
+    } else {
+      bloque += `Cirugía: ${cirugiaName}\n`
+    }
+    if (cirujano && cirujano !== 'el profesional') bloque += `Cirujano: ${cirujano}\n`
+    bloque += `Fecha: ${fecha}${hora ? ` a las ${hora}` : ''}\n`
+    if (idx < turnosQx.length - 1) bloque += '\n'
+  })
+
+  bloque += `\n_La gestión de turnos quirúrgicos debe realizarse comunicándote directamente con la clínica._\n\n`
+  return bloque
 }
 
 /**
