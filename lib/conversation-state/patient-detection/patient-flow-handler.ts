@@ -95,6 +95,7 @@ interface PatientDetectionState {
   obraSocialId?: string      // ID de la obra social
   obraSocialNombre?: string  // Nombre de la obra social
   turnos?: any[]
+  turnosQx?: any[]           // Turnos de cirugía (solo informativos, no gestionables)
   multiplePatients?: any[] // Array de pacientes si hay múltiples
   detectedAt: number
   attempts: number
@@ -115,6 +116,7 @@ export async function startPatientDetectionFlow(
   patientName?: string
   patientId?: string
   turnos?: any[]
+  turnosQx?: any[]
   message?: string
   error?: string
 }> {
@@ -162,6 +164,7 @@ export async function startPatientDetectionFlow(
     let multiplePatients: any[] | null = null
     let patient: any
     let turnosFromResponse: any[] = []
+    let turnosQxFromResponse: any[] = []
 
     // Caso 1: Respuesta con warning "pacientes_multiples" (estructura real de la API)
     if (patientData.warning === 'pacientes_multiples' && Array.isArray(patientData.pacientes)) {
@@ -174,12 +177,14 @@ export async function startPatientDetectionFlow(
     // Caso 2: Respuesta con objeto "paciente" (paciente único - estructura real de la API)
     else if (patientData.paciente) {
       patient = patientData.paciente
-      // Los turnos ya vienen en la respuesta
+      // Los turnos médicos y quirúrgicos ya vienen en la respuesta
       turnosFromResponse = patientData.turnos_proximos || []
+      turnosQxFromResponse = patientData.turnos_qx || []
       logger.info('Single patient found by phone (paciente object)', {
         patientId: patient.Id,
         patientName: patient.Nombres,
         turnosCount: turnosFromResponse.length,
+        turnosQxCount: turnosQxFromResponse.length,
       })
     }
     // Caso 3: Array directo de múltiples pacientes
@@ -299,6 +304,7 @@ export async function startPatientDetectionFlow(
       obraSocialId: obraSocialId,
       obraSocialNombre: obraSocialNombre,
       turnos: turnos,
+      turnosQx: turnosQxFromResponse,
       detectedAt: Date.now(),
       attempts: 0,
     }
@@ -314,6 +320,7 @@ export async function startPatientDetectionFlow(
       patientName: patientName,
       patientId: patientId,
       turnos: turnos,
+      turnosQx: turnosQxFromResponse,
     }
   } catch (error) {
     logger.error('Error in patient detection', error as Error)
@@ -653,17 +660,25 @@ export async function processPatientDetectionMessage(
         }
       }
     } else if (state.phase === 'awaiting_action_selection') {
-      // El mapeo depende de si el paciente tiene turnos o no
+      // El mapeo depende de si el paciente tiene turnos médicos, quirúrgicos, o ninguno
       const hasTurnos = state.turnos && state.turnos.length > 0
+      const hasTurnosQx = state.turnosQx && state.turnosQx.length > 0
+      const soloQx = !hasTurnos && hasTurnosQx
 
       let actionMap: Record<number, string>
 
       if (hasTurnos) {
-        // Paciente con turnos: 1-Confirmar, 2-Cancelar, 3-Nuevo turno
+        // Paciente con turnos médicos: 1-Confirmar, 2-Cancelar, 3-Nuevo turno
         actionMap = {
           1: 'confirm_appointment',
           2: 'cancel_appointment',
           3: 'book_new_appointment',
+        }
+      } else if (soloQx) {
+        // Paciente SOLO con cirugías (no gestionables): 1-Solicitar turno médico, 2-Otra consulta
+        actionMap = {
+          1: 'book_new_appointment',
+          2: 'other_inquiry_intent',
         }
       } else {
         // Paciente SIN turnos: 1-Solicitar turno, 2-Otra consulta
@@ -675,6 +690,8 @@ export async function processPatientDetectionMessage(
 
       logger.info('Action map selected', {
         hasTurnos,
+        hasTurnosQx,
+        soloQx,
         selection,
         mappedAction: actionMap[selection] || 'none',
       })
@@ -694,6 +711,7 @@ export async function processPatientDetectionMessage(
             patientId: state.patientId,
             patientName: state.patientName,
             turnos: state.turnos,
+            turnosQx: state.turnosQx,
           },
         }
       }
@@ -770,6 +788,8 @@ export async function processPatientDetectionMessage(
         }
       } else if (state.phase === 'awaiting_action_selection') {
         const hasTurnos = state.turnos && state.turnos.length > 0
+        const hasTurnosQx = state.turnosQx && state.turnosQx.length > 0
+        const soloQx = !hasTurnos && hasTurnosQx
 
         let actionMap: Record<number, string>
 
@@ -778,6 +798,11 @@ export async function processPatientDetectionMessage(
             1: 'confirm_appointment',
             2: 'cancel_appointment',
             3: 'book_new_appointment',
+          }
+        } else if (soloQx) {
+          actionMap = {
+            1: 'book_new_appointment',
+            2: 'other_inquiry_intent',
           }
         } else {
           actionMap = {
@@ -800,6 +825,7 @@ export async function processPatientDetectionMessage(
               patientId: state.patientId,
               patientName: state.patientName,
               turnos: state.turnos,
+              turnosQx: state.turnosQx,
             },
           }
         }
@@ -933,6 +959,7 @@ export async function getDetectedPatientInfo(phoneNumber: string): Promise<{
   obraSocialId?: string
   obraSocialNombre?: string
   turnos?: any[]
+  turnosQx?: any[]
 } | null> {
   const state = await getPatientDetectionState(phoneNumber)
 
@@ -950,5 +977,6 @@ export async function getDetectedPatientInfo(phoneNumber: string): Promise<{
     obraSocialId: state.obraSocialId,
     obraSocialNombre: state.obraSocialNombre,
     turnos: state.turnos,
+    turnosQx: state.turnosQx,
   }
 }
