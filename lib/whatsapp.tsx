@@ -253,22 +253,14 @@ async function handlePendingFlowResponse(
       
       // Llamar al proxy para ejecutar la cancelacion
       try {
+        const turnoACancelar = chatbotData.turnos[flowState.turnoIndex || 0]
         const proxyPayload = {
-          action: "template_response",
           Cliente_Id: config.cliente_id,
-          Phone_Number_Id: phoneNumberId,
-          // Simular estructura de boton de cancelacion
-          messages: [{
-            type: "button",
-            button: {
-              text: "Cancelar",
-              payload: "Cancelar"
-            }
-          }],
-          metadata: {
-            phone_number_id: phoneNumberId
+          Action: "cancelar_turno",
+          fecha: turnoACancelar?.fecha,
+          paciente_datos: {
+            dni: chatbotData.paciente?.dni,
           },
-          contacts: value.contacts || []
         }
 
         logger.info("Enviando cancelacion al proxy")
@@ -307,8 +299,16 @@ async function handlePendingFlowResponse(
             proxySuccess: proxyBody?.success,
             body: proxyBody,
           })
-          await clearFlowState(userPhoneNumber, config.id)
-          return false
+          // NO limpiar flowState: mantener contexto para reintento o manejo de error
+          const ctx: DirectResponseContext = {
+            phoneNumberId,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+          await sendDirectResponse(ctx, "Hubo un problema al cancelar el turno. Por favor intentá de nuevo en unos momentos.", "cancel_proxy_error")
+          return true
         }
 
         // proxySuccess === true garantizado en este punto
