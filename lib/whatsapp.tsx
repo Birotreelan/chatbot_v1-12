@@ -20,11 +20,13 @@ import {
   setFlowState,
   clearFlowState,
   clearAppointmentContext,
+  clearAppointmentTurnos,
   isConfirmCancelResponse,
   isKeepAppointmentResponse,
   isRescheduleChoice,
   type ChatbotData,
   type ChatbotDataTurno,
+  type ChatbotDataTurnoCancelado,
 } from "./appointment-flow-state"
 import {
   buildConfirmationMessage,
@@ -316,9 +318,9 @@ async function handlePendingFlowResponse(
 
         // proxySuccess === true garantizado en este punto
         await clearFlowState(userPhoneNumber, config.id)
-        // Limpiar el contexto del turno cancelado para que OpenAI y los
-        // pre-flows no vuelvan a mencionarlo como si aún estuviera vigente
-        await clearAppointmentContext(userPhoneNumber, config.id)
+        // Limpieza selectiva: vacía turnos[] pero preserva paciente + turno_cancelado
+        // para que los pre-flows no vean el turno cancelado y el reagendamiento tenga datos
+        await clearAppointmentTurnos(userPhoneNumber, config.id, flowState.turnoIndex || 0)
 
         if (config.cliente_id) {
           const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
@@ -617,10 +619,25 @@ export async function handleMessage(value: any) {
       if (flowResult && typeof flowResult === 'object' && flowResult.type === 'route_to_reagendamiento') {
 
         try {
-          // Preparar los argumentos con los datos del turno cancelado
-          const turno = flowResult.chatbotData.turnos[flowResult.turnoIndex]
-          if (!turno) {
-            console.error(`[WHATSAPP] No se encontró turno en índice ${flowResult.turnoIndex}`)
+          // Usar turno_cancelado (preservado por clearAppointmentTurnos) como fuente de IDs.
+          // Si por algún motivo no existe, intentar fallback a turnos[turnoIndex] (datos legados).
+          const turnoCanceladoSnap: ChatbotDataTurnoCancelado | undefined =
+            flowResult.chatbotData.turno_cancelado ||
+            (flowResult.chatbotData.turnos[flowResult.turnoIndex]
+              ? {
+                  fecha: flowResult.chatbotData.turnos[flowResult.turnoIndex].fecha,
+                  hora: flowResult.chatbotData.turnos[flowResult.turnoIndex].hora,
+                  profesional: flowResult.chatbotData.turnos[flowResult.turnoIndex].profesional,
+                  profesional_id: flowResult.chatbotData.turnos[flowResult.turnoIndex].profesional_id,
+                  sede: flowResult.chatbotData.turnos[flowResult.turnoIndex].sede,
+                  sede_id: flowResult.chatbotData.sede_id,
+                  direccion: flowResult.chatbotData.turnos[flowResult.turnoIndex].direccion,
+                  agenda_id: flowResult.chatbotData.turnos[flowResult.turnoIndex].agenda_id,
+                }
+              : undefined)
+
+          if (!turnoCanceladoSnap) {
+            console.error(`[WHATSAPP] No se encontró turno_cancelado ni turnos[${flowResult.turnoIndex}] para reagendamiento`)
             await sendWhatsAppMessage(
               value.metadata.phone_number_id,
               config.accessToken,
@@ -637,16 +654,7 @@ export async function handleMessage(value: any) {
               dni: flowResult.chatbotData.paciente.dni,
               telefono: flowResult.chatbotData.paciente.telefono,
             },
-            turno_cancelado: {
-              fecha: turno.fecha,
-              hora: turno.hora_formateada,
-              profesional: turno.profesional,
-              profesional_id: turno.profesional_id,
-              sede: turno.sede,
-              sede_id: flowResult.chatbotData.sede_id,
-              direccion: turno.direccion,
-              agenda_id: turno.agenda_id,
-            },
+            turno_cancelado: turnoCanceladoSnap,
           }
 
           // Encolar el mensaje con flag especial - processIndividualMessage maneja el thread
@@ -2274,7 +2282,7 @@ export async function processIndividualMessage(
             const formatDate = (date: Date) => date.toISOString().split("T")[0]
             const primerNombre = pacienteData.nombres.split(" ")[0]
 
-            // Helper: buscar turnos con el mismo profesional y sede en N días
+            // Helper: buscar turnos con el mismo profesional, sede y DNI del paciente
             const buscarConRango = async (dias: number) => {
               const hasta = new Date(today)
               hasta.setDate(today.getDate() + dias)
@@ -2286,6 +2294,7 @@ export async function processIndividualMessage(
                 turnoData.profesional_id,
                 config.cliente_id,
                 turnoData.sede_id,
+                pacienteData.dni,  // Filtra por obra social del paciente
               )
               return resp.exito
                 ? (resp.datos?.turnos_disponibles || resp.datos || [])
@@ -2296,8 +2305,11 @@ export async function processIndividualMessage(
             for (const dias of [14, 30, 60]) {
               const turnos = await buscarConRango(dias)
               if (Array.isArray(turnos) && turnos.length > 0) {
+                // Pasar chatbotData completo (con turno_cancelado) para que startRescheduleFlow
+                // tenga el contexto correcto al construir el estado del flujo
+                const chatbotDataParaReschedule = await getAppointmentContext(userPhoneNumber, config.id)
                 const result = await startRescheduleFlow(
-                  { paciente: pacienteData, turnos: [] } as any,
+                  chatbotDataParaReschedule || ({ paciente: pacienteData, turnos: [] } as any),
                   turnos,
                   phoneNumberId,
                   config.accessToken,
@@ -2312,13 +2324,23 @@ export async function processIndividualMessage(
               }
             }
 
-            // Sin turnos en los próximos 60 días → informar y cerrar
-            await sendWhatsAppMessage(
-              phoneNumberId,
-              config.accessToken,
-              userPhoneNumber,
-              `Lo siento ${primerNombre}, no encontramos turnos disponibles con el mismo profesional en los próximos 60 días.\n\nTe recomendamos intentar nuevamente más adelante o comunicarte telefónicamente con la clínica para coordinar un turno.`
+            // Sin turnos en los próximos 60 días → mostrar menú de búsqueda ampliada
+            const { buildNoTurnosConProfesionalMessage, buildNoTurnosSaveSearchTypeState } =
+              await import("./conversation-state/reschedule-templates")
+            const noTurnosMsg = buildNoTurnosConProfesionalMessage(
+              primerNombre,
+              turnoData.profesional
             )
+            await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, noTurnosMsg)
+
+            // Guardar estado awaiting_search_type con datos del paciente y turno cancelado
+            await buildNoTurnosSaveSearchTypeState(
+              userPhoneNumber,
+              config.id,
+              turnoData,
+              pacienteData
+            )
+
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }

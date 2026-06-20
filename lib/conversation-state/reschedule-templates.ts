@@ -167,6 +167,65 @@ export function buildRescheduleErrorMessage(): string {
 }
 
 /**
+ * Mensaje para cuando no hay turnos con el mismo profesional en 60 días.
+ * Ofrece menú de 3 opciones de búsqueda ampliada.
+ */
+export function buildNoTurnosConProfesionalMessage(
+  primerNombre: string,
+  profesional: string
+): string {
+  return `Lo siento ${primerNombre}, no encontramos turnos disponibles con ${profesional} en los próximos 60 días.\n\n¿Querés buscar turno de otra forma?\n\n1. *Médico en particular* - Si ya sabés con qué profesional querés atenderte\n2. *Por especialidad* - Para elegir una especialidad y ver los profesionales disponibles\n3. *Cualquier médico disponible* - Para ver los turnos más próximos sin importar el profesional\n\nRespondé con el *número* de la opción que prefieras.`
+}
+
+/**
+ * Guarda el estado awaiting_search_type en Redis con los datos del paciente y turno cancelado
+ * para que el handler pueda pasarlos a OpenAI cuando el usuario elija una opción.
+ */
+export async function buildNoTurnosSaveSearchTypeState(
+  phone: string,
+  configId: string,
+  turnoData: {
+    profesional_id: string
+    profesional: string
+    sede_id: string
+  },
+  pacienteData: {
+    nombres: string
+    apellido: string
+    dni: string
+    telefono: string
+    obra_social_id?: string
+  }
+): Promise<void> {
+  const { saveRescheduleState } = await import("./reschedule-flow-handler")
+  await saveRescheduleState(phone, configId, {
+    phase: 'awaiting_search_type',
+    paciente: {
+      nombres: pacienteData.nombres,
+      apellido: pacienteData.apellido,
+      dni: pacienteData.dni,
+      telefono: pacienteData.telefono,
+    },
+    profesional_id: turnoData.profesional_id,
+    profesional_original: turnoData.profesional,
+    sede_id: turnoData.sede_id,
+    obra_social_id: pacienteData.obra_social_id,
+    paciente_dni: pacienteData.dni,
+    turnosCancelado: {
+      fecha: '',
+      hora: '',
+      profesional: turnoData.profesional,
+    },
+    turnosDisponibles: [],
+    turnoSeleccionado: null,
+    turnoReservado: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    intentosFallidos: 0,
+  })
+}
+
+/**
  * Mensaje para fallback a OpenAI
  * Se envía cuando OpenAI necesita interpretar texto libre
  */
