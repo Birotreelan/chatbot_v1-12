@@ -19,7 +19,7 @@ import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { validarObraSocial } from '@/lib/api-tools/api-functions'
 import { extractSelection } from '../selection-extractor'
-import { getFirstName } from '@/lib/utils/name-utils'
+import { getFirstName, parseNameInput } from '@/lib/utils/name-utils'
 
 // Importar handlers compartidos
 import {
@@ -292,9 +292,9 @@ async function handleNamePhase(
   const logger = createConversationLogger(phone, clientId, 'name_phase')
 
   const input = userMessage.trim()
-  const parts = input.split(/\s+/)
+  const parsed = parseNameInput(input)
 
-  if (parts.length < 2) {
+  if (!parsed) {
     state.attempts += 1
     await saveFlowState(phone, state)
 
@@ -312,11 +312,8 @@ async function handleNamePhase(
     }
   }
 
-  // Capitalizar nombre y apellido
-  const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
-  
-  state.nombre = capitalize(parts[0])
-  state.apellido = parts.slice(1).map(capitalize).join(' ')
+  state.nombre = parsed.nombre
+  state.apellido = parsed.apellido
   state.phase = 'awaiting_obra_social'
   state.attempts = 0
   await saveFlowState(phone, state)
@@ -1070,18 +1067,17 @@ async function handleModifyNombrePhase(
   const logger = createConversationLogger(phone, clientId, 'modify_nombre_phase')
 
   const input = userMessage.trim()
-  const parts = input.split(/\s+/)
+  const parsed = parseNameInput(input)
 
-  if (parts.length < 2) {
+  if (!parsed) {
     return {
       handled: true,
       message: `Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*`,
     }
   }
 
-  const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
-  state.nombre = capitalize(parts[0])
-  state.apellido = parts.slice(1).map(capitalize).join(' ')
+  state.nombre = parsed.nombre
+  state.apellido = parsed.apellido
   state.phase = 'awaiting_confirmation'
   await saveFlowState(phone, state)
 
