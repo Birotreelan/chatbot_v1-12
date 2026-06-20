@@ -212,6 +212,16 @@ ${getTimeBasedGreeting()}`
 }
 
 /**
+ * Mensaje cuando el usuario no quiere reagendar, sin contexto de paciente.
+ * Se usa cuando el appointmentContext ya fue limpiado (Sprint 39).
+ */
+export function buildNoRescheduleMessageFallback(): string {
+  return `Entendido. Si en el futuro necesitás agendar un nuevo turno, no dudes en escribirme.
+
+${getTimeBasedGreeting()}`
+}
+
+/**
  * Mensaje de inicio de flujo de reagendamiento
  */
 export function buildRescheduleStartMessage(chatbotData: ChatbotData): string {

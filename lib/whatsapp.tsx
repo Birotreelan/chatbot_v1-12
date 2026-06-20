@@ -32,6 +32,7 @@ import {
   buildCancellationSuccessMessage,
   buildKeepAppointmentMessage,
   buildNoRescheduleMessage,
+  buildNoRescheduleMessageFallback,
   buildRescheduleStartMessage,
   buildAlreadyCancelledMessage,
 } from "./direct-response-templates"
@@ -239,16 +240,17 @@ async function handlePendingFlowResponse(
     clienteId: config.cliente_id,
   }
 
-  // Obtener contexto del turno
+  // Obtener contexto del turno (puede ser null si ya fue limpiado post-cancelación)
   const chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
-  if (!chatbotData) {
-    logger.warn("No hay contexto de turno, pasando a OpenAI")
-    await clearFlowState(userPhoneNumber, config.id)
-    return false
-  }
 
   // Manejar segun el tipo de flujo
   if (flowState.type === 'awaiting_cancel_confirmation') {
+    // awaiting_cancel_confirmation siempre necesita chatbotData
+    if (!chatbotData) {
+      logger.warn("No hay contexto de turno para awaiting_cancel_confirmation, pasando a OpenAI")
+      await clearFlowState(userPhoneNumber, config.id)
+      return false
+    }
     // Usuario responde a "1- Si, cancelar" / "2- No, mantener"
     if (isConfirmCancelResponse(userMessage)) {
       
@@ -441,6 +443,12 @@ async function handlePendingFlowResponse(
     const choice = isRescheduleChoice(userMessage)
     
     if (choice === 'reschedule') {
+      // Para reagendar necesitamos chatbotData; si no está disponible, pasar a OpenAI
+      if (!chatbotData) {
+        logger.warn("No hay contexto de turno para reagendamiento, pasando a OpenAI")
+        await clearFlowState(userPhoneNumber, config.id)
+        return false
+      }
       logger.info("Usuario quiere reagendar - switch a asistente de reagendamiento")
       await clearFlowState(userPhoneNumber, config.id)
       return {
@@ -449,9 +457,12 @@ async function handlePendingFlowResponse(
         turnoIndex: flowState.turnoIndex || 0
       }
     } else if (choice === 'no_reschedule') {
+      // No reagendar: solo enviar despedida. No necesitamos chatbotData.
       logger.info("Usuario no quiere reagendar")
       await clearFlowState(userPhoneNumber, config.id)
-      const noRescheduleMsg = buildNoRescheduleMessage(chatbotData)
+      const noRescheduleMsg = chatbotData
+        ? buildNoRescheduleMessage(chatbotData)
+        : buildNoRescheduleMessageFallback()
       await sendDirectResponse(ctx, noRescheduleMsg, "awaiting_reschedule_choice")
       return true
     } else {
