@@ -87,6 +87,9 @@ export interface NewPatientFlowState {
   // Datos personales (especificos de paciente nuevo)
   nombre?: string
   apellido?: string
+
+  // Si el flujo fue iniciado para registrar a un familiar (no al usuario que escribe)
+  esFamiliar?: boolean
   
   // Obra social
   obraSocialId?: string
@@ -172,10 +175,11 @@ async function saveFlowState(phone: string, state: NewPatientFlowState): Promise
 export async function initializeNewPatientFlow(
   dni: string,
   phone: string,
-  clientId: string
+  clientId: string,
+  esFamiliar?: boolean
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'new_patient_init')
-  logger.info('Initializing new patient flow', { dni })
+  logger.info('Initializing new patient flow', { dni, esFamiliar })
 
   const flags = await getEffectiveFeatureFlags(clientId)
   if (!flags.directPacienteNuevo) {
@@ -192,6 +196,7 @@ export async function initializeNewPatientFlow(
     dni,
     phone,
     obraSocialValidada: false,
+    esFamiliar: esFamiliar === true,
     attempts: 0,
     createdAt: Date.now(),
     lastUpdated: Date.now(),
@@ -201,9 +206,13 @@ export async function initializeNewPatientFlow(
 
   logger.info('Flow initialized, requesting name', {})
 
+  const mensaje = esFamiliar
+    ? `Veo que es la primera vez con nosotros. Para registrarlo y agendar un turno, necesito algunos datos.\n\nPor favor, escribi el *nombre y apellido completo* de la persona que agendará el turno.`
+    : `Veo que es tu primera vez con nosotros. Para registrarte y agendar un turno, necesito algunos datos.\n\nPor favor, escribi tu *nombre y apellido completo*.`
+
   return {
     handled: true,
-    message: `Veo que es tu primera vez con nosotros. Para registrarte y agendar un turno, necesito algunos datos.\n\nPor favor, escribi tu *nombre y apellido completo*.`,
+    message: mensaje,
     patientInfo: { dni },
   }
 }
@@ -306,9 +315,13 @@ async function handleNamePhase(
       }
     }
 
+    const ejemploMsg = state.esFamiliar
+      ? 'Necesito el nombre y apellido completo del familiar. Por ejemplo: *Juan Perez*'
+      : 'Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*'
+
     return {
       handled: true,
-      message: 'Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*',
+      message: ejemploMsg,
     }
   }
 
@@ -323,9 +336,13 @@ async function handleNamePhase(
 
   logger.info('Name captured', { nombre: state.nombre, apellido: state.apellido })
 
+  const obraSocialMsg = state.esFamiliar
+    ? `Gracias. Ahora necesito saber la obra social o prepaga de *${state.nombre}*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tiene cobertura.`
+    : `Gracias ${state.nombre}. Ahora necesito saber tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenes cobertura.`
+
   return {
     handled: true,
-    message: `Gracias ${state.nombre}. Ahora necesito saber tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenes cobertura.`,
+    message: obraSocialMsg,
     patientInfo: {
       dni: state.dni,
       name: `${state.nombre} ${state.apellido}`,
@@ -362,9 +379,13 @@ async function handleObraSocialPhase(
         }
       }
 
+      const noEncontradoMsg = state.esFamiliar
+        ? `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de la obra social del familiar e intenta nuevamente.\n\nSi no tiene cobertura, escribi *Particular*.`
+        : `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de tu obra social e intenta nuevamente.\n\nSi no tenes cobertura, escribi *Particular*.`
+
       return {
         handled: true,
-        message: `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de tu obra social e intenta nuevamente.\n\nSi no tenes cobertura, escribi *Particular*.`,
+        message: noEncontradoMsg,
       }
     }
 
@@ -380,13 +401,14 @@ async function handleObraSocialPhase(
           nombre: obraSocial.nombre 
         })
         
-        const firstName = getFirstName(state.patientFirstName || state.nombre || '')
+        const firstName = getFirstName(state.nombre || '')
         const gracias = firstName ? `Gracias ${firstName}. ` : ''
+        const contactMsg = state.esFamiliar
+          ? `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar el turno del familiar, por favor contactanos al: *${numeroDerivacion}*`
+          : `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`
         return {
           handled: true,
-          message: `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.
-
-Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+          message: contactMsg,
         }
       }
       
@@ -415,7 +437,9 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     opciones.forEach((os) => {
       mensaje += `${os.numero}. ${os.nombre}\n`
     })
-    mensaje += `\nResponde con el *numero* de tu obra social.`
+    mensaje += state.esFamiliar
+      ? `\nResponde con el *numero* de la obra social del familiar.`
+      : `\nResponde con el *numero* de tu obra social.`
 
     // Guardar opciones y cambiar fase a seleccion
     state.obraSocialOpciones = opciones
@@ -437,9 +461,13 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     state.attempts += 1
     await saveFlowState(phone, state)
 
+    const errorMsg = state.esFamiliar
+      ? 'Ocurrio un error al validar la obra social del familiar. Por favor, intenta nuevamente.'
+      : 'Ocurrio un error al validar tu obra social. Por favor, intenta nuevamente.'
+
     return {
       handled: true,
-      message: 'Ocurrio un error al validar tu obra social. Por favor, intenta nuevamente.',
+      message: errorMsg,
     }
   }
 }
@@ -460,9 +488,12 @@ async function handleObraSocialSelectionPhase(
     // No hay opciones guardadas, volver a pedir obra social
     state.phase = 'awaiting_obra_social'
     await saveFlowState(phone, state)
+    const fallbackMsg = state.esFamiliar
+      ? 'Por favor, escribi el nombre de la *obra social o prepaga* del familiar.\n\nSi no tiene cobertura, escribi *Particular*.'
+      : 'Por favor, escribi el nombre de tu *obra social o prepaga*.\n\nSi no tenes cobertura, escribi *Particular*.'
     return {
       handled: true,
-      message: 'Por favor, escribi el nombre de tu *obra social o prepaga*.\n\nSi no tenes cobertura, escribi *Particular*.',
+      message: fallbackMsg,
     }
   }
 
@@ -490,13 +521,14 @@ async function handleObraSocialSelectionPhase(
           nombre: selectedOption.nombre 
         })
         
-        const firstName = getFirstName(state.patientFirstName || state.nombre || '')
+        const firstName = getFirstName(state.nombre || '')
         const gracias = firstName ? `Gracias ${firstName}. ` : ''
+        const contactMsgSel = state.esFamiliar
+          ? `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar el turno del familiar, por favor contactanos al: *${numeroDerivacion}*`
+          : `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`
         return {
           handled: true,
-          message: `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.
-
-Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+          message: contactMsgSel,
         }
       }
       
@@ -564,9 +596,33 @@ async function transitionToSedes(
   logger.info('Transitioned to sedes', { count: sedesResult.sedes.length })
 
   const nombreCompleto = `${state.nombre} ${state.apellido}`
+
+  // Para familiar: el encabezado del mensaje menciona al familiar, no al que escribe
+  let sedesMsg: string
+  if (state.esFamiliar) {
+    const primerNombre = state.nombre || ''
+    let msg = primerNombre ? `Perfecto. ` : ``
+    if (state.obraSocialNombre) {
+      msg += `La cobertura de *${primerNombre}* es *${state.obraSocialNombre}*.\n\n`
+    }
+    msg += `Para continuar, selecciona la sede donde se va a atender:\n\n`
+    sedesResult.sedes.forEach((sede) => {
+      let sedeInfo = `${sede.numero}. *${sede.nombre}*`
+      const ubicacionParts = [sede.domicilio, sede.localidad, sede.provincia].filter(Boolean)
+      if (ubicacionParts.length > 0) {
+        sedeInfo += `\n   Ubicacion: ${ubicacionParts.join(', ')}`
+      }
+      msg += `${sedeInfo}\n`
+    })
+    msg += `\nResponde con el *numero* de la sede que prefieras.`
+    sedesMsg = msg
+  } else {
+    sedesMsg = buildSedesMessage(sedesResult.sedes, nombreCompleto, state.obraSocialNombre)
+  }
+
   return {
     handled: true,
-    message: buildSedesMessage(sedesResult.sedes, nombreCompleto, state.obraSocialNombre),
+    message: sedesMsg,
     patientInfo: {
       dni: state.dni,
       name: nombreCompleto,
@@ -900,8 +956,22 @@ async function handleTurnoPhase(
 
   if (result.selectedTurno) {
     state.turnoSeleccionado = result.selectedTurno
-    state.phase = 'awaiting_confirmation'
     state.attempts = 0
+
+    // Paciente nuevo requiere email antes de confirmar
+    if (!state.email) {
+      state.phase = 'awaiting_email'
+      await saveFlowState(phone, state)
+      const emailMsg = state.esFamiliar
+        ? `Para confirmar el turno, necesito el *correo electronico* de ${state.nombre || 'el familiar'}.\n\nPor favor, escribi su email para enviarle la confirmacion del turno.`
+        : buildEmailRequestMessage()
+      return {
+        handled: true,
+        message: emailMsg,
+      }
+    }
+
+    state.phase = 'awaiting_confirmation'
     await saveFlowState(phone, state)
 
     const nombreCompleto = `${state.nombre} ${state.apellido}`
@@ -969,6 +1039,15 @@ async function handleEmailPhase(
     return {
       handled: true,
       message: result.message,
+    }
+  }
+
+  // Si aún no se recibió el email y el mensaje de error viene del handler compartido,
+  // adaptarlo para modo familiar si corresponde
+  if (state.esFamiliar && result.message?.includes('tu email')) {
+    return {
+      handled: true,
+      message: result.message.replace('tu email', `el email de ${state.nombre || 'el familiar'}`),
     }
   }
 
@@ -1073,9 +1152,12 @@ async function handleModifyNombrePhase(
   const parts = input.split(/\s+/)
 
   if (parts.length < 2) {
+    const msgNombre = state.esFamiliar
+      ? `Necesito el nombre y apellido completo del familiar. Por ejemplo: *Juan Perez*`
+      : `Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*`
     return {
       handled: true,
-      message: `Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*`,
+      message: msgNombre,
     }
   }
 
@@ -1156,9 +1238,12 @@ async function handleModifyObraSocialPhase(
     const result = await validarObraSocial(clientId, input)
 
     if (!result.exito || !result.datos || result.datos.total_encontradas === 0) {
+      const noEncontradoModify = state.esFamiliar
+        ? `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de la obra social del familiar e intenta nuevamente.\n\nSi no tiene cobertura, escribi *Particular*.`
+        : `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de tu obra social e intenta nuevamente.\n\nSi no tenes cobertura, escribi *Particular*.`
       return {
         handled: true,
-        message: `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de tu obra social e intenta nuevamente.\n\nSi no tenes cobertura, escribi *Particular*.`,
+        message: noEncontradoModify,
       }
     }
 
