@@ -16,6 +16,7 @@ import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 import {
   getAppointmentContext,
   saveAppointmentContext,
+  clearAppointmentContext,
   getFlowState,
   setFlowState,
   clearFlowState,
@@ -313,6 +314,9 @@ async function handlePendingFlowResponse(
 
         // proxySuccess === true garantizado en este punto
         await clearFlowState(userPhoneNumber, config.id)
+        // Borrar el contexto del turno para que el informational-query handler
+        // no responda con datos del turno ya cancelado
+        await clearAppointmentContext(userPhoneNumber, config.id)
 
         if (config.cliente_id) {
           const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)

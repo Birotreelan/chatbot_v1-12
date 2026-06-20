@@ -48,10 +48,11 @@ const CLEAR_ADDRESS_PATTERNS = [
 ]
 
 const CLEAR_SCHEDULE_PATTERNS = [
-  /\ba\s+qu[eé]\s+hora\s+(?:es|tengo)\b/i,                     // "a qué hora es/tengo"
-  /\b(?:cu[aá]l\s+es\s+)?(?:el\s+)?horario\b/i,               // "cuál es el horario"
-  /\ba\s+qu[eé]\s+hora\s+(?:debo\s+)?(?:ir|llegar)\b/i,        // "a qué hora debo ir"
-  /\b(?:qué\s+)?hora\s+es\b/i,                                 // "qué hora es"
+  /\ba\s+qu[eé]\s+hora\s+(?:es|tengo)\b/i,                                     // "a qué hora es/tengo"
+  /\b(?:cu[aá]l\s+es\s+(?:el\s+)?horario|qu[eé]\s+horario\s+(?:es|tengo))\b/i, // "cuál es el horario" / "qué horario es"
+  /\ba\s+qu[eé]\s+hora\s+(?:debo\s+)?(?:ir|llegar)\b/i,                        // "a qué hora debo ir"
+  /\b(?:qué\s+)?hora\s+es\s+(?:el\s+turno|mi\s+turno)\b/i,                     // "qué hora es el turno"
+  /\bhorario\s+del\s+turno\b/i,                                                 // "horario del turno"
 ]
 
 const CLEAR_PROFESSIONAL_PATTERNS = [
