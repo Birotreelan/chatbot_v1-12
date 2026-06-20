@@ -33,18 +33,19 @@ export class ClinicAPI {
    */
   private async fetchProxyApi<T>(action: string, params: Record<string, any> = {}): Promise<ApiResponse<T>> {
     try {
-      console.log(`Realizando petición POST a: ${this.proxyUrl}`)
-      console.log(`Action: ${action}, Cliente_Id: ${this.clienteId}`)
-      console.log(`Parámetros:`, params)
-
-      // Preparar el cuerpo de la solicitud - asegurarnos de que Cliente_Id está exactamente como se espera
+      // Preparar el cuerpo de la solicitud
       const requestBody = {
-        Cliente_Id: this.clienteId.trim(), // Eliminar espacios en blanco por si acaso
+        Cliente_Id: this.clienteId.trim(),
         Action: action,
         ...params,
       }
 
-      console.log(`Cuerpo de la solicitud: ${JSON.stringify(requestBody)}`)
+      console.info("[PROXY] Enviando request", {
+        url: this.proxyUrl,
+        action,
+        clienteId: this.clienteId.trim(),
+        params,
+      })
 
       const response = await fetchWithTimeout(
         this.proxyUrl,
@@ -60,15 +61,17 @@ export class ClinicAPI {
 
       // Obtener el texto de la respuesta
       const responseText = await response.text()
-      console.log(`Respuesta (texto) recibida:`, responseText)
 
       // Intentar parsear la respuesta como JSON
       let data
       try {
         data = JSON.parse(responseText)
-        console.log(`Respuesta (JSON) parseada:`, data)
       } catch (e) {
-        console.error(`Error al parsear la respuesta JSON:`, e)
+        console.error("[PROXY] JSON invalido en respuesta", {
+          action,
+          httpStatus: response.status,
+          rawResponse: responseText.substring(0, 200),
+        })
         return {
           exito: false,
           error: {
@@ -78,9 +81,16 @@ export class ClinicAPI {
         }
       }
 
+      console.info("[PROXY] Respuesta recibida", {
+        action,
+        httpStatus: response.status,
+        ok: response.ok,
+        body: data,
+      })
+
       // Verificar si hay un error específico de Cliente_Id
       if (data.error && typeof data.error === "string" && data.error.includes("Cliente_Id")) {
-        console.error(`Error de Cliente_Id:`, data.error)
+        console.error("[PROXY] Error Cliente_Id invalido", { action, error: data.error })
         return {
           exito: false,
           error: {
@@ -92,7 +102,7 @@ export class ClinicAPI {
 
       // Verificar si hay un error de la API
       if (!response.ok) {
-        console.error(`Error HTTP en la respuesta: ${response.status} ${response.statusText}`)
+        console.error("[PROXY] Error HTTP", { action, httpStatus: response.status, body: data })
         return {
           exito: false,
           error: {
@@ -104,7 +114,7 @@ export class ClinicAPI {
 
       // Si la respuesta tiene un formato específico de error
       if (data.error) {
-        console.error(`Error en los datos de la respuesta:`, data.error)
+        console.error("[PROXY] Error en body de respuesta", { action, error: data.error })
         return {
           exito: false,
           error: {
@@ -117,7 +127,7 @@ export class ClinicAPI {
       // Si la respuesta tiene un campo "success"
       if (data.success !== undefined) {
         if (!data.success) {
-          console.error(`La API indicó éxito=false:`, data)
+          console.error("[PROXY] API retorno success=false", { action, body: data })
           return {
             exito: false,
             error: {
@@ -126,18 +136,16 @@ export class ClinicAPI {
             },
           }
         }
-        // Si success es true, devolver los datos completos
         return {
           exito: true,
-          datos: data, // Devolver toda la respuesta, no solo data.data
+          datos: data,
         }
       }
 
       // Si llegamos aquí, asumimos que la respuesta es exitosa
       return { exito: true, datos: data }
     } catch (error) {
-      // Manejar errores de red u otros
-      console.error(`Error de red o durante el procesamiento:`, error)
+      console.error("[PROXY] Error de red", { action, error })
       return {
         exito: false,
         error: {

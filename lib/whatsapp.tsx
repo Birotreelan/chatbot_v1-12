@@ -1383,20 +1383,39 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             try {
               const proxyUrl = appointmentCtx.proxyUrl || process.env.CHATBOT_PROXY_URL
               if (proxyUrl && appointmentCtx.appointment_id) {
-                await fetchWithRetry(
-                  `${proxyUrl}/api/chatbot/confirmar`,
+                const confirmUrl = `${proxyUrl}/api/chatbot/confirmar`
+                const confirmPayload = {
+                  appointment_id: appointmentCtx.appointment_id,
+                  phone: userPhoneNumber,
+                }
+                console.info("[PROXY] Enviando confirmacion de turno", {
+                  url: confirmUrl,
+                  payload: confirmPayload,
+                })
+                const confirmProxyResponse = await fetchWithRetry(
+                  confirmUrl,
                   {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      appointment_id: appointmentCtx.appointment_id,
-                      phone: userPhoneNumber,
-                    }),
+                    body: JSON.stringify(confirmPayload),
                   },
-                  { timeoutMs: TIMEOUTS.PROXY_CONFIRM, retries: 2 }
+                  TIMEOUTS.PROXY_TIMEOUT,
+                  { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
                 )
+                let confirmProxyBody: unknown = null
+                let confirmProxyBodyText = ""
+                try {
+                  confirmProxyBodyText = await confirmProxyResponse.text()
+                  confirmProxyBody = confirmProxyBodyText ? JSON.parse(confirmProxyBodyText) : null
+                } catch {
+                  confirmProxyBody = confirmProxyBodyText || null
+                }
+                console.info("[PROXY] Respuesta confirmacion de turno", {
+                  httpStatus: confirmProxyResponse.status,
+                  ok: confirmProxyResponse.ok,
+                  body: confirmProxyBody,
+                })
 
-                
                 // Trackear evento
                 await trackAppointmentEvent({
                   clienteId: config.cliente_id,
@@ -1406,9 +1425,14 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   appointmentId: String(appointmentCtx.appointment_id),
                   metadata: { method: "direct_text" },
                 })
+              } else {
+                console.warn("[PROXY] Confirmacion de turno omitida", {
+                  tieneProxyUrl: !!proxyUrl,
+                  tieneAppointmentId: !!appointmentCtx.appointment_id,
+                })
               }
             } catch (proxyError) {
-              console.error("[WHATSAPP] Error enviando confirmación al proxy:", proxyError)
+              console.error("[PROXY] Error enviando confirmacion al proxy:", proxyError)
             }
             
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
