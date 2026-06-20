@@ -160,6 +160,9 @@ Intents posibles:
 // Construcción de respuestas por tipo de consulta
 // ---------------------------------------------------------------------------
 
+const CHANNEL_DISCLAIMER =
+  `\n\n_Este canal de WhatsApp es exclusivo para la gestión de turnos (solicitar, consultar, confirmar o cancelar turnos)._`
+
 function buildInterruptionResponse(
   intent: NLUIntent,
   escalationPhone?: string,
@@ -174,40 +177,41 @@ function buildInterruptionResponse(
   switch (intent) {
     case 'price_inquiry':
       responseBody =
-        `Lamentablemente no tengo información sobre precios o costos de consultas.${phoneText}`
+        `No puedo brindarte información sobre precios o costos de consultas, ya que ese tipo de consultas deben ser respondidas por la clínica.${phoneText}`
       break
     case 'location_inquiry':
       responseBody =
-        `La dirección de la sede la podrás ver una vez que la selecciones en el listado.` +
-        (escalationPhone ? ` Si necesitás más detalles, comunicate al *${escalationPhone}*.` : '')
+        `La dirección exacta de cada sede la podrás ver una vez que la selecciones en el listado.` +
+        (escalationPhone ? ` Para más detalles, comunicate con la clínica al *${escalationPhone}*.` : '')
       break
     case 'documentation_inquiry':
       responseBody =
-        `No cuento con información sobre los documentos requeridos para la consulta.${phoneText}`
+        `No puedo brindarte información sobre los documentos o requisitos necesarios para la consulta.${phoneText}`
       break
     case 'schedule_inquiry':
       responseBody =
-        `No tengo disponible el horario de atención de la clínica.${phoneText}`
+        `No puedo brindarte información sobre los horarios de atención de la clínica.${phoneText}`
       break
     case 'coverage_inquiry':
       responseBody =
-        `Para consultas sobre cobertura y copago de tu obra social, te recomendamos contactar a la clínica.${phoneText}`
+        `No puedo brindarte información sobre cobertura o copago de obra social.${phoneText}`
       break
     case 'cancel_flow':
-      // Si el usuario quiere cancelar el flujo, no re-mostramos las opciones
-      return (
-        `Entendido. Podés retomar el agendamiento cuando lo necesites. ¡Hasta luego! 👋`
-      )
+      // Si el usuario quiere cancelar el flujo, no re-mostramos opciones ni disclaimer
+      return `Entendido. Podés retomar el agendamiento cuando lo necesites. Hasta luego.`
     case 'other_inquiry':
     default:
       responseBody =
-        `Lo siento, no tengo información sobre eso.${phoneText}`
+        `No puedo brindarte información sobre eso.${phoneText}`
       break
   }
 
+  // Agregar disclaimer de exclusividad del canal
+  responseBody += CHANNEL_DISCLAIMER
+
   // Agregar el re-prompt del flujo
   const resumeBlock = resumePrompt
-    ? `\n\nPara continuar con tu turno, por favor:\n\n${resumePrompt}`
+    ? `\n\n${resumePrompt}`
     : ''
 
   return `${responseBody}${resumeBlock}`
