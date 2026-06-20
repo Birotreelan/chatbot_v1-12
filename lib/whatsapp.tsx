@@ -16,7 +16,7 @@ import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 import {
   getAppointmentContext,
   saveAppointmentContext,
-  clearAppointmentContext,
+  markTurnoAsCancelled,
   getFlowState,
   setFlowState,
   clearFlowState,
@@ -314,9 +314,10 @@ async function handlePendingFlowResponse(
 
         // proxySuccess === true garantizado en este punto
         await clearFlowState(userPhoneNumber, config.id)
-        // Borrar el contexto del turno para que el informational-query handler
-        // no responda con datos del turno ya cancelado
-        await clearAppointmentContext(userPhoneNumber, config.id)
+        // Marcar el turno como cancelado en el contexto sin borrarlo.
+        // Se conservan los datos del paciente (nombre, obra social, etc.)
+        // pero las consultas de horario/profesional ya no devolverán datos stale.
+        await markTurnoAsCancelled(userPhoneNumber, config.id, flowState.turnoIndex || 0)
 
         if (config.cliente_id) {
           const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
@@ -1264,7 +1265,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
         await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, errorMessage)
 
-        // Actualizar estadísticas - error
+        // Actualizar estad��sticas - error
         await updateWhatsAppStats(config.id, { errors: 1 })
 
         return // Salir de la función después de manejar el error

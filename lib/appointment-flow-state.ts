@@ -37,6 +37,7 @@ export interface ChatbotDataTurno {
   agenda_id: string
   admite_reagendamiento: boolean
   tipo: string
+  cancelado?: boolean // true cuando el turno fue cancelado exitosamente en esta sesión
 }
 
 export interface ChatbotData {
@@ -161,6 +162,42 @@ export async function clearAppointmentContext(
     return true
   } catch (error) {
     console.error("[APPOINTMENT-FLOW] Error eliminando contexto:", error)
+    return false
+  }
+}
+
+/**
+ * Marca un turno como cancelado en el contexto guardado, SIN borrar los datos
+ * del paciente ni los demás campos. Así el sistema sabe que el turno fue cancelado
+ * pero puede seguir usando nombre, obra social, etc. para futuros mensajes.
+ */
+export async function markTurnoAsCancelled(
+  phone: string,
+  configId: string,
+  turnoIndex: number = 0
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+
+  try {
+    const data = await getAppointmentContext(phone, configId)
+    if (!data) return false
+
+    // Marcar el turno como cancelado
+    if (data.turnos && data.turnos[turnoIndex]) {
+      data.turnos[turnoIndex].cancelado = true
+    }
+    // Si existe turno singular también
+    if ((data as any).turno && turnoIndex === 0) {
+      (data as any).turno.cancelado = true
+    }
+
+    const key = getContextKey(phone, configId)
+    await redis.set(key, JSON.stringify(data), { ex: CONTEXT_TTL })
+    console.log(`[APPOINTMENT-FLOW] Turno ${turnoIndex} marcado como cancelado para ${phone}`)
+    return true
+  } catch (error) {
+    console.error("[APPOINTMENT-FLOW] Error marcando turno como cancelado:", error)
     return false
   }
 }
