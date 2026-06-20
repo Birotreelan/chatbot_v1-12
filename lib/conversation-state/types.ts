@@ -219,6 +219,13 @@ export interface FeatureFlags {
   // Resuelve false positives (ej: "Si estaré ede dia" detectado como consulta de fecha)
   // y redirige al flujo correcto (confirmación, cancelación, queja, etc.)
   nluFallbackRouter: boolean
+
+  // Interceptor de Consultas Intercaladas en Flujos Activos (Sprint 44)
+  // Cuando el usuario envía texto libre mientras se espera una selección numérica
+  // (sede, especialidad, profesional, turno), detecta si es una consulta intercalada
+  // y responde sin perder el estado del flujo actual, re-mostrando las opciones al final.
+  // Si el feature está OFF, el comportamiento original (mensaje de error) se mantiene.
+  flowInterruptionHandler: boolean
 }
 
 /**
@@ -247,6 +254,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directInformationalQuery: false,
   postActionContextHandler: false,
   nluFallbackRouter: false,
+  flowInterruptionHandler: false,
 }
 
 /**
