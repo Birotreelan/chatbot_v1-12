@@ -1927,8 +1927,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           const patientResponse = await clinicAPI.paciente_dni(dniOnly)
 
           if (!patientResponse.exito || !patientResponse.datos) {
-            // Familiar NO encontrado → iniciar flujo de paciente nuevo con ese DNI
-            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id)
+            // Familiar NO encontrado → iniciar flujo de paciente nuevo con ese DNI (modo familiar)
+            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, true)
             if (newPatientResult?.handled && newPatientResult.message) {
               await sendDirectResponse(detectionCtx, newPatientResult.message, "familiar_new_patient")
               await completePatientDetectionFlow(userPhoneNumber, config.id)
