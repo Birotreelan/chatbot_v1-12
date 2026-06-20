@@ -401,13 +401,14 @@ async function handleObraSocialPhase(
           nombre: obraSocial.nombre 
         })
         
-        const firstName = getFirstName(state.patientFirstName || state.nombre || '')
+        const firstName = getFirstName(state.nombre || '')
         const gracias = firstName ? `Gracias ${firstName}. ` : ''
+        const contactMsg = state.esFamiliar
+          ? `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar el turno del familiar, por favor contactanos al: *${numeroDerivacion}*`
+          : `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`
         return {
           handled: true,
-          message: `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.
-
-Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+          message: contactMsg,
         }
       }
       
@@ -436,7 +437,9 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     opciones.forEach((os) => {
       mensaje += `${os.numero}. ${os.nombre}\n`
     })
-    mensaje += `\nResponde con el *numero* de tu obra social.`
+    mensaje += state.esFamiliar
+      ? `\nResponde con el *numero* de la obra social del familiar.`
+      : `\nResponde con el *numero* de tu obra social.`
 
     // Guardar opciones y cambiar fase a seleccion
     state.obraSocialOpciones = opciones
@@ -518,13 +521,14 @@ async function handleObraSocialSelectionPhase(
           nombre: selectedOption.nombre 
         })
         
-        const firstName = getFirstName(state.patientFirstName || state.nombre || '')
+        const firstName = getFirstName(state.nombre || '')
         const gracias = firstName ? `Gracias ${firstName}. ` : ''
+        const contactMsgSel = state.esFamiliar
+          ? `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar el turno del familiar, por favor contactanos al: *${numeroDerivacion}*`
+          : `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`
         return {
           handled: true,
-          message: `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.
-
-Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+          message: contactMsgSel,
         }
       }
       
@@ -592,9 +596,33 @@ async function transitionToSedes(
   logger.info('Transitioned to sedes', { count: sedesResult.sedes.length })
 
   const nombreCompleto = `${state.nombre} ${state.apellido}`
+
+  // Para familiar: el encabezado del mensaje menciona al familiar, no al que escribe
+  let sedesMsg: string
+  if (state.esFamiliar) {
+    const primerNombre = state.nombre || ''
+    let msg = primerNombre ? `Perfecto. ` : ``
+    if (state.obraSocialNombre) {
+      msg += `La cobertura de *${primerNombre}* es *${state.obraSocialNombre}*.\n\n`
+    }
+    msg += `Para continuar, selecciona la sede donde se va a atender:\n\n`
+    sedesResult.sedes.forEach((sede) => {
+      let sedeInfo = `${sede.numero}. *${sede.nombre}*`
+      const ubicacionParts = [sede.domicilio, sede.localidad, sede.provincia].filter(Boolean)
+      if (ubicacionParts.length > 0) {
+        sedeInfo += `\n   Ubicacion: ${ubicacionParts.join(', ')}`
+      }
+      msg += `${sedeInfo}\n`
+    })
+    msg += `\nResponde con el *numero* de la sede que prefieras.`
+    sedesMsg = msg
+  } else {
+    sedesMsg = buildSedesMessage(sedesResult.sedes, nombreCompleto, state.obraSocialNombre)
+  }
+
   return {
     handled: true,
-    message: buildSedesMessage(sedesResult.sedes, nombreCompleto, state.obraSocialNombre),
+    message: sedesMsg,
     patientInfo: {
       dni: state.dni,
       name: nombreCompleto,
@@ -928,8 +956,22 @@ async function handleTurnoPhase(
 
   if (result.selectedTurno) {
     state.turnoSeleccionado = result.selectedTurno
-    state.phase = 'awaiting_confirmation'
     state.attempts = 0
+
+    // Paciente nuevo requiere email antes de confirmar
+    if (!state.email) {
+      state.phase = 'awaiting_email'
+      await saveFlowState(phone, state)
+      const emailMsg = state.esFamiliar
+        ? `Para confirmar el turno, necesito el *correo electronico* de ${state.nombre || 'el familiar'}.\n\nPor favor, escribi su email para enviarle la confirmacion del turno.`
+        : buildEmailRequestMessage()
+      return {
+        handled: true,
+        message: emailMsg,
+      }
+    }
+
+    state.phase = 'awaiting_confirmation'
     await saveFlowState(phone, state)
 
     const nombreCompleto = `${state.nombre} ${state.apellido}`
@@ -997,6 +1039,15 @@ async function handleEmailPhase(
     return {
       handled: true,
       message: result.message,
+    }
+  }
+
+  // Si aún no se recibió el email y el mensaje de error viene del handler compartido,
+  // adaptarlo para modo familiar si corresponde
+  if (state.esFamiliar && result.message?.includes('tu email')) {
+    return {
+      handled: true,
+      message: result.message.replace('tu email', `el email de ${state.nombre || 'el familiar'}`),
     }
   }
 
@@ -1101,9 +1152,12 @@ async function handleModifyNombrePhase(
   const parts = input.split(/\s+/)
 
   if (parts.length < 2) {
+    const msgNombre = state.esFamiliar
+      ? `Necesito el nombre y apellido completo del familiar. Por ejemplo: *Juan Perez*`
+      : `Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*`
     return {
       handled: true,
-      message: `Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*`,
+      message: msgNombre,
     }
   }
 
@@ -1184,9 +1238,12 @@ async function handleModifyObraSocialPhase(
     const result = await validarObraSocial(clientId, input)
 
     if (!result.exito || !result.datos || result.datos.total_encontradas === 0) {
+      const noEncontradoModify = state.esFamiliar
+        ? `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de la obra social del familiar e intenta nuevamente.\n\nSi no tiene cobertura, escribi *Particular*.`
+        : `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de tu obra social e intenta nuevamente.\n\nSi no tenes cobertura, escribi *Particular*.`
       return {
         handled: true,
-        message: `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de tu obra social e intenta nuevamente.\n\nSi no tenes cobertura, escribi *Particular*.`,
+        message: noEncontradoModify,
       }
     }
 
