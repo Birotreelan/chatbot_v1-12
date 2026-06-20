@@ -83,7 +83,7 @@ function getDefaultDateRange(): { desde: string; hasta: string } {
  * Tipos internos del flujo
  */
 interface PatientDetectionState {
-  phase: 'awaiting_contact_intent' | 'awaiting_initial_response' | 'awaiting_dni_for_disambiguation' | 'awaiting_action_selection' | 'completed'
+  phase: 'awaiting_contact_intent' | 'awaiting_initial_response' | 'awaiting_dni_for_disambiguation' | 'awaiting_action_selection' | 'awaiting_familiar_dni' | 'completed'
   patientPhone: string
   patientId?: string
   patientName?: string
@@ -676,16 +676,18 @@ export async function processPatientDetectionMessage(
           4: 'other_inquiry_intent',
         }
       } else if (soloQx) {
-        // Paciente SOLO con cirugías (no gestionables): 1-Solicitar turno médico, 2-Otra consulta
+        // Paciente SOLO con cirugías (no gestionables): 1-Solicitar turno, 2-Familiar, 3-Otra consulta
         actionMap = {
           1: 'book_new_appointment',
-          2: 'other_inquiry_intent',
+          2: 'familiar_appointment_intent',
+          3: 'other_inquiry_intent',
         }
       } else {
-        // Paciente SIN turnos: 1-Solicitar turno, 2-Otra consulta
+        // Paciente SIN turnos: 1-Solicitar turno, 2-Familiar, 3-Otra consulta
         actionMap = {
           1: 'book_new_appointment',
-          2: 'other_inquiry_intent',
+          2: 'familiar_appointment_intent',
+          3: 'other_inquiry_intent',
         }
       }
 
@@ -804,12 +806,14 @@ export async function processPatientDetectionMessage(
         } else if (soloQx) {
           actionMap = {
             1: 'book_new_appointment',
-            2: 'other_inquiry_intent',
+            2: 'familiar_appointment_intent',
+            3: 'other_inquiry_intent',
           }
         } else {
           actionMap = {
             1: 'book_new_appointment',
-            2: 'other_inquiry_intent',
+            2: 'familiar_appointment_intent',
+            3: 'other_inquiry_intent',
           }
         }
 
@@ -931,7 +935,7 @@ export async function clearPatientDetectionFlow(
  */
 export async function updatePatientDetectionPhase(
   phoneNumber: string,
-  newPhase: 'awaiting_contact_intent' | 'awaiting_initial_response' | 'awaiting_dni_for_disambiguation' | 'awaiting_action_selection' | 'completed'
+  newPhase: 'awaiting_contact_intent' | 'awaiting_initial_response' | 'awaiting_dni_for_disambiguation' | 'awaiting_action_selection' | 'awaiting_familiar_dni' | 'completed'
 ): Promise<boolean> {
   const redis = getRedisClient()
   if (!redis) return false

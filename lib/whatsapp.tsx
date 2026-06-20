@@ -1758,11 +1758,15 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // Si el paciente ya fue identificado en esta sesión (p.ej. flujo terminó con "obra social
         // no habilitada" y el usuario responde "Ok"), no reiniciar la detección.
         const alreadyIdentified = await getIdentifiedPatient(userPhoneNumber)
+
+        console.log("[v0] [SPRINT9A] detectionActive:", detectionActive, "existingCtx:", !!existingAppointmentCtx, "alreadyIdentified:", !!alreadyIdentified)
         
         if (!detectionActive && !existingAppointmentCtx && !alreadyIdentified) {
           // No hay flujo activo ni contexto de template, iniciar detección
           // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
           const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+
+          console.log("[v0] [SPRINT9A] initializePatientDetection result:", JSON.stringify({ handled: detectionResult.handled, action: detectionResult.action, shouldCallOpenAI: detectionResult.shouldCallOpenAI }))
           
           if (detectionResult.handled) {
             const detectionCtx: DirectResponseContext = {
@@ -1901,6 +1905,81 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await completePatientDetectionFlow(userPhoneNumber, config.id)
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
+          }
+        }
+
+        // Paciente existente eligió "Solicitar turno para un familiar" (opción 2 del menú sin-turnos)
+        if (detectionResult?.action === 'familiar_appointment_intent') {
+          await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_familiar_dni')
+          const familiarDNIMessage = await import('./conversation-state/patient-detection/patient-templates').then(
+            m => m.buildFamiliarDNIRequestMessage()
+          )
+          await sendDirectResponse(detectionCtx, familiarDNIMessage, "familiar_appointment_intent")
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+
+        // Paciente ingresó el DNI del familiar
+        if (detectionResult?.action === 'familiar_dni_pending') {
+          const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
+          const { ClinicAPI } = await import('./clinic-api')
+          const clinicAPI = new ClinicAPI(config.cliente_id)
+          const patientResponse = await clinicAPI.paciente_dni(dniOnly)
+
+          if (!patientResponse.exito || !patientResponse.datos) {
+            // Familiar NO encontrado → iniciar flujo de paciente nuevo con ese DNI
+            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id)
+            if (newPatientResult?.handled && newPatientResult.message) {
+              await sendDirectResponse(detectionCtx, newPatientResult.message, "familiar_new_patient")
+              await completePatientDetectionFlow(userPhoneNumber, config.id)
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+          } else {
+            // Familiar encontrado → iniciar flujo de paciente existente
+            const patientData = patientResponse.datos
+            let familiar: any = null
+            if (patientData.paciente) {
+              familiar = patientData.paciente
+            } else if (Array.isArray(patientData) && patientData.length > 0) {
+              familiar = patientData[0]
+            } else {
+              familiar = patientData
+            }
+
+            const familiarId = familiar.paciente_id || familiar.Id || familiar.id || ''
+            const familiarName = familiar.nombre || `${(familiar.Nombres || familiar.nombres || '').trim()} ${(familiar.Apellido || familiar.apellido || '').trim()}`.trim()
+            const familiarDNI = (familiar.Nrodoc || familiar.dni || dniOnly).toString()
+            const familiarEmail = (() => {
+              const raw = (familiar.Mail || familiar.mail || familiar.Email || familiar.email || '').trim()
+              return raw === '-' || raw === 'NO USA' ? '' : raw
+            })()
+            const familiarCelular = (familiar.Celular || familiar.celular || familiar.Telefono || familiar.telefono || '').trim()
+            const familiarObraSocialId = (familiar.Deudor_Id || familiar.deudor_id || '').toString().trim()
+            const familiarObraSocialNombre = (familiar.Deudor_Nombre || familiar.deudor_nombre || '').toString().trim()
+
+            const existingResult = await initializeExistingPatientFlow(
+              userPhoneNumber,
+              familiarId,
+              familiarName,
+              familiarDNI,
+              familiarEmail || undefined,
+              config.cliente_id,
+              {
+                patientFirstName: (familiar.Nombres || familiar.nombres || '').trim(),
+                patientLastName: (familiar.Apellido || familiar.apellido || '').trim(),
+                patientCelular: familiarCelular,
+                obraSocialId: familiarObraSocialId,
+                obraSocialNombre: familiarObraSocialNombre,
+              },
+              config.escalationPhoneNumber
+            )
+            if (existingResult?.handled && existingResult.message) {
+              await sendDirectResponse(detectionCtx, existingResult.message, "familiar_existing_patient")
+              await completePatientDetectionFlow(userPhoneNumber, config.id)
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
           }
         }
 
