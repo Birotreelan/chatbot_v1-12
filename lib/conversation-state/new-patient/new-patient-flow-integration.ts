@@ -841,7 +841,8 @@ async function searchAndShowTurnos(
       mensajeEspecialidad,
       state.searchType,
       result.infoSinTurnos,
-      escalationPhoneNumber
+      escalationPhoneNumber,
+      state.obraSocialNombre
     )
     logger.info('[TURNOS] Mensaje enviado al usuario', {
       messagePreview: noTurnosMessage.substring(0, 100) + '...',

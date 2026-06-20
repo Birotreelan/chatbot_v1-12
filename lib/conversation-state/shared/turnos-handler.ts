@@ -313,7 +313,8 @@ export function buildNoTurnosMessage(
   especialidadName?: string,
   searchType?: string,
   infoSinTurnos?: any,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  obraSocialNombre?: string
 ): string {
   let message = ''
 
@@ -342,6 +343,9 @@ export function buildNoTurnosMessage(
     message += ` en *${sedeName}*`
   }
 
+  if (obraSocialNombre) {
+    message += ` para tu obra social *${obraSocialNombre}*`
+  }
   message += ' en los proximos 60 dias.\n\n'
   message += 'Podes intentar con otra busqueda:\n\n'
   message += '1. *Medico en particular* - Buscar con otro profesional\n'
