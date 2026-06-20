@@ -6,6 +6,7 @@
 import { createConversationLogger } from '../logger'
 import { obtenerTodasLasSedes } from '../../api-tools/api-functions'
 import { extractSelection } from '../selection-extractor'
+import { detectFlowInterruption } from './flow-interruption-handler'
 import type { SedeOption, HandlerResult, SharedFlowState } from './types'
 
 /**
@@ -107,13 +108,24 @@ export function buildSedesMessage(
 }
 
 /**
+ * Opciones para el interceptor de consultas intercaladas
+ */
+export interface SedeInterruptionOptions {
+  /** Mensaje original con la lista de sedes para re-mostrar al usuario */
+  originalSedesMessage: string
+  /** Teléfono de la clínica para derivar consultas que el bot no puede responder */
+  escalationPhone?: string
+}
+
+/**
  * Maneja la seleccion de sede por parte del usuario
  */
 export async function handleSedeSelection(
   userInput: string,
   sedesOpciones: SedeOption[],
   phoneNumber: string,
-  clientId: string
+  clientId: string,
+  interruptionOptions?: SedeInterruptionOptions
 ): Promise<HandlerResult & { selectedSede?: SedeOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'sede_selection')
 
@@ -143,8 +155,28 @@ export async function handleSedeSelection(
     }
   }
 
-  // Sin coincidencia
+  // Sin coincidencia — verificar si es consulta intercalada (si el feature está habilitado)
   logger.info('Seleccion de sede no reconocida', { input: userInput, matchType: result.matchType })
+
+  if (interruptionOptions) {
+    const interruption = await detectFlowInterruption(
+      userInput,
+      'awaiting_sede',
+      { originalPromptMessage: interruptionOptions.originalSedesMessage },
+      interruptionOptions.escalationPhone,
+      phoneNumber,
+      clientId
+    )
+
+    if (interruption.isInterruption && interruption.response) {
+      logger.info('Consulta intercalada en seleccion de sede, respondiendo sin cambiar fase')
+      return {
+        handled: true,
+        message: interruption.response,
+        nextPhase: 'awaiting_sede',
+      }
+    }
+  }
 
   return {
     handled: true,

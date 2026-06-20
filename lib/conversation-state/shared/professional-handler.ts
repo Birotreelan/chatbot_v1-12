@@ -5,6 +5,7 @@
 import { createConversationLogger } from '../logger'
 import { buscarProfesionales } from '../../api-tools/api-functions'
 import { extractSelection } from '../selection-extractor'
+import { detectFlowInterruption } from './flow-interruption-handler'
 import type { ProfessionalOption, HandlerResult } from './types'
 
 /**
@@ -79,13 +80,24 @@ Voy a buscar los turnos disponibles con este profesional.`
 }
 
 /**
+ * Opciones para el interceptor de consultas intercaladas
+ */
+export interface ProfessionalInterruptionOptions {
+  /** Mensaje original con la lista de profesionales para re-mostrar al usuario */
+  originalProfessionalsMessage: string
+  /** Teléfono de la clínica para derivar consultas que el bot no puede responder */
+  escalationPhone?: string
+}
+
+/**
  * Maneja la seleccion de profesional de la lista
  */
 export async function handleProfessionalSelection(
   userInput: string,
   profesionalesOpciones: ProfessionalOption[],
   phoneNumber: string,
-  clientId: string
+  clientId: string,
+  interruptionOptions?: ProfessionalInterruptionOptions
 ): Promise<HandlerResult & { selectedProfessional?: ProfessionalOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'professional_selection')
 
@@ -115,8 +127,28 @@ export async function handleProfessionalSelection(
     }
   }
 
-  // Sin coincidencia
+  // Sin coincidencia — verificar si es consulta intercalada (si el feature está habilitado)
   logger.info('Seleccion de profesional no reconocida', { input: userInput, matchType: result.matchType })
+
+  if (interruptionOptions) {
+    const interruption = await detectFlowInterruption(
+      userInput,
+      'awaiting_professional_selection',
+      { originalPromptMessage: interruptionOptions.originalProfessionalsMessage },
+      interruptionOptions.escalationPhone,
+      phoneNumber,
+      clientId
+    )
+
+    if (interruption.isInterruption && interruption.response) {
+      logger.info('Consulta intercalada en seleccion de profesional, respondiendo sin cambiar fase')
+      return {
+        handled: true,
+        message: interruption.response,
+        nextPhase: 'awaiting_professional_selection',
+      }
+    }
+  }
 
   return {
     handled: true,

@@ -5,6 +5,7 @@
 import { createConversationLogger } from '../logger'
 import { obtenerSubespecialidades } from '../../api-tools/api-functions'
 import { extractSelection } from '../selection-extractor'
+import { detectFlowInterruption } from './flow-interruption-handler'
 import type { SpecialtyOption, HandlerResult } from './types'
 
 /**
@@ -60,13 +61,24 @@ export function buildSpecialtiesMessage(especialidades: SpecialtyOption[]): stri
 }
 
 /**
+ * Opciones para el interceptor de consultas intercaladas
+ */
+export interface SpecialtyInterruptionOptions {
+  /** Mensaje original con la lista de especialidades para re-mostrar al usuario */
+  originalSpecialtiesMessage: string
+  /** Teléfono de la clínica para derivar consultas que el bot no puede responder */
+  escalationPhone?: string
+}
+
+/**
  * Maneja la seleccion de especialidad
  */
 export async function handleSpecialtySelection(
   userInput: string,
   especialidadesOpciones: SpecialtyOption[],
   phoneNumber: string,
-  clientId: string
+  clientId: string,
+  interruptionOptions?: SpecialtyInterruptionOptions
 ): Promise<HandlerResult & { selectedSpecialty?: SpecialtyOption }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'specialty_selection')
 
@@ -96,8 +108,28 @@ export async function handleSpecialtySelection(
     }
   }
 
-  // Sin coincidencia
+  // Sin coincidencia — verificar si es consulta intercalada (si el feature está habilitado)
   logger.info('Seleccion de especialidad no reconocida', { input: userInput, matchType: result.matchType })
+
+  if (interruptionOptions) {
+    const interruption = await detectFlowInterruption(
+      userInput,
+      'awaiting_specialty_selection',
+      { originalPromptMessage: interruptionOptions.originalSpecialtiesMessage },
+      interruptionOptions.escalationPhone,
+      phoneNumber,
+      clientId
+    )
+
+    if (interruption.isInterruption && interruption.response) {
+      logger.info('Consulta intercalada en seleccion de especialidad, respondiendo sin cambiar fase')
+      return {
+        handled: true,
+        message: interruption.response,
+        nextPhase: 'awaiting_specialty_selection',
+      }
+    }
+  }
 
   return {
     handled: true,

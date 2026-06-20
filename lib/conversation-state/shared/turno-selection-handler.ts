@@ -11,6 +11,7 @@
 
 import { createConversationLogger } from '../logger'
 import { openai } from '@/lib/openai'
+import { detectFlowInterruption } from './flow-interruption-handler'
 import type { TurnoOption, HandlerResult, SearchType } from './types'
 
 /**
@@ -407,6 +408,16 @@ Retorna JSON.`
 }
 
 /**
+ * Opciones para el interceptor de consultas intercaladas en seleccion de turno
+ */
+export interface TurnoInterruptionOptions {
+  /** Mensaje original con la lista de turnos para re-mostrar al usuario */
+  originalTurnosMessage: string
+  /** Teléfono de la clínica para derivar consultas que el bot no puede responder */
+  escalationPhone?: string
+}
+
+/**
  * Maneja la seleccion de turno por parte del usuario
  * IMPORTANTE: Mapea por campo 'numero', NO por indice de array
  */
@@ -415,7 +426,8 @@ export async function handleTurnoSelection(
   turnosOpciones: TurnoOption[],
   phoneNumber: string,
   clientId: string,
-  searchType?: SearchType
+  searchType?: SearchType,
+  interruptionOptions?: TurnoInterruptionOptions
 ): Promise<HandlerResult & { selectedTurno?: TurnoOption; requestedRebusqueda?: boolean; noMoreTurnos?: boolean }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turno_selection')
 
@@ -561,11 +573,32 @@ export async function handleTurnoSelection(
       }
     }
 
-    // outcome === 'unrelated' o error → mostrar lista completa
+    // outcome === 'unrelated' o error → verificar si es consulta intercalada antes de mostrar error
     logger.info('NLU OpenAI: input sin relacion con seleccion de turno', {
       input: userInput,
       reasoning: nluResult.reasoning,
     })
+
+    if (interruptionOptions) {
+      const interruption = await detectFlowInterruption(
+        userInput,
+        'awaiting_turno_selection',
+        { originalPromptMessage: interruptionOptions.originalTurnosMessage },
+        interruptionOptions.escalationPhone,
+        phoneNumber,
+        clientId
+      )
+
+      if (interruption.isInterruption && interruption.response) {
+        logger.info('Consulta intercalada en seleccion de turno, respondiendo sin cambiar fase')
+        return {
+          handled: true,
+          message: interruption.response,
+          nextPhase: 'awaiting_turno_selection',
+        }
+      }
+    }
+
     return {
       handled: true,
       message: buildInvalidSelectionMessage(turnosOpciones, searchType),

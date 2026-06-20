@@ -27,6 +27,7 @@ import {
   buildSedesMessage,
   handleSedeSelection as handleSedeSelectionShared,
   buildSedesErrorMessage,
+  type SedeInterruptionOptions,
 } from '../shared/sede-handler'
 import {
   buildSearchOptionsMessage,
@@ -39,10 +40,13 @@ import {
   buildSpecialtiesMessage,
   handleSpecialtySelection,
   buildSpecialtiesErrorMessage,
+  type SpecialtyInterruptionOptions,
 } from '../shared/specialty-handler'
 import {
   handleProfessionalNameInput,
   handleProfessionalSelection,
+  buildProfessionalsListMessage,
+  type ProfessionalInterruptionOptions,
 } from '../shared/professional-handler'
 import {
   searchTurnosAcumulativo,
@@ -52,6 +56,8 @@ import {
 import {
   handleTurnoSelection,
   buildTurnoSelectedMessage,
+  buildInvalidSelectionMessage,
+  type TurnoInterruptionOptions,
 } from '../shared/turno-selection-handler'
 import {
   buildEmailRequestMessage,
@@ -236,6 +242,10 @@ export async function handleNewPatientMessage(
 
   logger.info('Processing message', { phase: state.phase, message: userMessage.substring(0, 50) })
 
+  // Leer flag de interrupción una sola vez para todo el router
+  const flags = await getEffectiveFeatureFlags(clientId)
+  const flowInterruptionEnabled = flags.flowInterruptionHandler === true
+
   // Router por fase
   switch (state.phase) {
     case 'awaiting_name':
@@ -248,7 +258,7 @@ export async function handleNewPatientMessage(
       return handleObraSocialSelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_sede':
-      return handleSedePhase(phone, userMessage, clientId, state, searchOptionsConfig)
+      return handleSedePhase(phone, userMessage, clientId, state, searchOptionsConfig, flowInterruptionEnabled, escalationPhoneNumber)
 
     case 'awaiting_search_type':
       return handleSearchTypePhase(phone, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
@@ -257,13 +267,13 @@ export async function handleNewPatientMessage(
       return handleProfessionalNamePhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 
     case 'awaiting_professional_selection':
-      return handleProfessionalSelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
+      return handleProfessionalSelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
 
     case 'awaiting_specialty_selection':
-      return handleSpecialtyPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
+      return handleSpecialtyPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
 
     case 'awaiting_turno_selection':
-      return handleTurnoPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
+      return handleTurnoPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
 
     case 'awaiting_email':
       return handleEmailPhase(phone, userMessage, clientId, state)
@@ -639,13 +649,22 @@ async function handleSedePhase(
   userMessage: string,
   clientId: string,
   state: NewPatientFlowState,
-  searchOptionsConfig?: SearchOptionsConfig
+  searchOptionsConfig?: SearchOptionsConfig,
+  flowInterruptionEnabled?: boolean,
+  escalationPhoneNumber?: string
 ): Promise<NewPatientResult> {
   if (!state.sedesOpciones || state.sedesOpciones.length === 0) {
     return { handled: false, shouldCallOpenAI: true }
   }
 
-  const result = await handleSedeSelectionShared(userMessage, state.sedesOpciones, phone, clientId)
+  const interruptionOptions: SedeInterruptionOptions | undefined = flowInterruptionEnabled
+    ? {
+        originalSedesMessage: buildSedesMessage(state.sedesOpciones),
+        escalationPhone: escalationPhoneNumber,
+      }
+    : undefined
+
+  const result = await handleSedeSelectionShared(userMessage, state.sedesOpciones, phone, clientId, interruptionOptions)
 
   if (result.selectedSede) {
     state.sedeId = result.selectedSede.id
@@ -770,13 +789,21 @@ async function handleProfessionalSelectionPhase(
   userMessage: string,
   clientId: string,
   state: NewPatientFlowState,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  flowInterruptionEnabled?: boolean
 ): Promise<NewPatientResult> {
   if (!state.profesionalesOpciones) {
     return { handled: false, shouldCallOpenAI: true }
   }
 
-  const result = await handleProfessionalSelection(userMessage, state.profesionalesOpciones, phone, clientId)
+  const interruptionOptions: ProfessionalInterruptionOptions | undefined = flowInterruptionEnabled && state.profesionalesOpciones.length > 0
+    ? {
+        originalProfessionalsMessage: buildProfessionalsListMessage(state.profesionalesOpciones, ''),
+        escalationPhone: escalationPhoneNumber,
+      }
+    : undefined
+
+  const result = await handleProfessionalSelection(userMessage, state.profesionalesOpciones, phone, clientId, interruptionOptions)
 
   if (result.selectedProfessional) {
     state.profesionalId = result.selectedProfessional.id
@@ -801,13 +828,21 @@ async function handleSpecialtyPhase(
   userMessage: string,
   clientId: string,
   state: NewPatientFlowState,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  flowInterruptionEnabled?: boolean
 ): Promise<NewPatientResult> {
   if (!state.especialidadesOpciones) {
     return { handled: false, shouldCallOpenAI: true }
   }
 
-  const result = await handleSpecialtySelection(userMessage, state.especialidadesOpciones, phone, clientId)
+  const interruptionOptions: SpecialtyInterruptionOptions | undefined = flowInterruptionEnabled && state.especialidadesOpciones.length > 0
+    ? {
+        originalSpecialtiesMessage: buildSpecialtiesMessage(state.especialidadesOpciones),
+        escalationPhone: escalationPhoneNumber,
+      }
+    : undefined
+
+  const result = await handleSpecialtySelection(userMessage, state.especialidadesOpciones, phone, clientId, interruptionOptions)
 
   if (result.selectedSpecialty) {
     state.especialidadId = result.selectedSpecialty.id
@@ -932,13 +967,21 @@ async function handleTurnoPhase(
   userMessage: string,
   clientId: string,
   state: NewPatientFlowState,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  flowInterruptionEnabled?: boolean
 ): Promise<NewPatientResult> {
   if (!state.turnosOpciones) {
     return { handled: false, shouldCallOpenAI: true }
   }
 
-  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phone, clientId, state.searchType)
+  const interruptionOptions: TurnoInterruptionOptions | undefined = flowInterruptionEnabled && state.turnosOpciones.length > 0
+    ? {
+        originalTurnosMessage: buildInvalidSelectionMessage(state.turnosOpciones, state.searchType),
+        escalationPhone: escalationPhoneNumber,
+      }
+    : undefined
+
+  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phone, clientId, state.searchType, interruptionOptions)
 
   // Si solicito rebusqueda con cualquier medico
   if (result.requestedRebusqueda) {
