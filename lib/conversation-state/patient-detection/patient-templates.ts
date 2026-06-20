@@ -249,13 +249,15 @@ function buildSingleTurnoGreeting(
     mensaje += `¿En qué te podemos ayudar?\n\n`
     mensaje += `1- Confirmar asistencia al turno médico (ya confirmado)\n`
     mensaje += `2- Cancelar el turno médico confirmado\n`
-    mensaje += `3- Solicitar otro turno médico\n\n`
+    mensaje += `3- Solicitar otro turno médico\n`
+    mensaje += `4- Realizar otra consulta\n\n`
   } else {
     mensaje += `*Veo que ya tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
     mensaje += `¿En qué te podemos ayudar?\n\n`
     mensaje += `1- Confirmar asistencia al turno médico\n`
     mensaje += `2- Cancelar turno médico\n`
-    mensaje += `3- Solicitar otro turno médico\n\n`
+    mensaje += `3- Solicitar otro turno médico\n`
+    mensaje += `4- Realizar otra consulta\n\n`
   }
 
   mensaje += `Respondé con el número de opción que prefieras.`
@@ -291,7 +293,8 @@ function buildMultipleTurnosGreeting(
   mensaje += `¿En qué te podemos ayudar?\n\n`
   mensaje += `1- Confirmar asistencia a un turno\n`
   mensaje += `2- Cancelar un turno\n`
-  mensaje += `3- Solicitar otro turno médico\n\n`
+  mensaje += `3- Solicitar otro turno médico\n`
+  mensaje += `4- Realizar otra consulta\n\n`
   mensaje += `Respondé con el número de opción que prefieras.`
 
   return mensaje
@@ -404,7 +407,8 @@ export function buildInvalidSelectionMessage(): string {
     `No pude identificar tu selección. Por favor, respondé con el número de la opción que prefieras:\n\n` +
     `1- Confirmar asistencia al turno\n` +
     `2- Cancelar turno\n` +
-    `3- Solicitar otro turno médico`
+    `3- Solicitar otro turno médico\n` +
+    `4- Realizar otra consulta`
   )
 }
 
