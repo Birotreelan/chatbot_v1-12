@@ -1392,11 +1392,15 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             
             // Enviar evento al proxy para confirmar el turno
             try {
-              const proxyUrl = appointmentCtx.proxyUrl || process.env.CHATBOT_PROXY_URL
-              if (proxyUrl && appointmentCtx.appointment_id) {
+              const proxyUrl = appointmentCtx.proxyUrl || process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL
+              // appointment_id puede venir en la raiz o en turnos[0].agenda_id (según cómo lo guardó el proxylistener)
+              const appointmentId = appointmentCtx.appointment_id
+                || (Array.isArray(appointmentCtx.turnos) && appointmentCtx.turnos[0]?.agenda_id)
+                || null
+              if (proxyUrl && appointmentId) {
                 const confirmUrl = `${proxyUrl}/api/chatbot/confirmar`
                 const confirmPayload = {
-                  appointment_id: appointmentCtx.appointment_id,
+                  appointment_id: appointmentId,
                   phone: userPhoneNumber,
                 }
                 console.info("[PROXY] Enviando confirmacion de turno", {
@@ -1433,13 +1437,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   phoneNumber: userPhoneNumber,
                   eventType: "template_confirmed",
                   timestamp: new Date().toISOString(),
-                  appointmentId: String(appointmentCtx.appointment_id),
+                  appointmentId: String(appointmentId),
                   metadata: { method: "direct_text" },
                 })
               } else {
                 console.warn("[PROXY] Confirmacion de turno omitida", {
                   tieneProxyUrl: !!proxyUrl,
-                  tieneAppointmentId: !!appointmentCtx.appointment_id,
+                  tieneAppointmentId: !!appointmentId,
                 })
               }
             } catch (proxyError) {

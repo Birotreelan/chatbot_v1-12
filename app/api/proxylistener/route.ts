@@ -618,8 +618,20 @@ async function handleTemplateSend(data: any) {
         // Guardar el Chatbot_Data en Redis para respuestas directas (sin OpenAI)
         if (chatbotDataParsed && config && cleanPhoneNumber) {
           try {
+            // Enriquecer el contexto con appointment_id (del primer turno) y proxyUrl
+            // para que whatsapp.tsx pueda llamar al proxy al confirmar por texto libre
+            const firstTurno = Array.isArray(chatbotDataParsed.turnos) && chatbotDataParsed.turnos[0]
+            if (firstTurno && firstTurno.agenda_id && !chatbotDataParsed.appointment_id) {
+              chatbotDataParsed.appointment_id = firstTurno.agenda_id
+            }
+            if (!chatbotDataParsed.proxyUrl) {
+              chatbotDataParsed.proxyUrl = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL || null
+            }
             await saveAppointmentContext(cleanPhoneNumber, config.id, chatbotDataParsed)
-            console.log("[PROXYLISTENER] ✅ Contexto de turno guardado en Redis para respuestas directas")
+            console.log("[PROXYLISTENER] ✅ Contexto de turno guardado en Redis para respuestas directas", {
+              appointment_id: chatbotDataParsed.appointment_id,
+              tieneProxyUrl: !!chatbotDataParsed.proxyUrl,
+            })
           } catch (e) {
             console.error("[PROXYLISTENER] ⚠️ Error guardando contexto en Redis (continuando):", e)
           }
