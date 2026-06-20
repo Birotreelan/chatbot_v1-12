@@ -19,6 +19,7 @@ import {
   getFlowState,
   setFlowState,
   clearFlowState,
+  clearAppointmentContext,
   isConfirmCancelResponse,
   isKeepAppointmentResponse,
   isRescheduleChoice,
@@ -313,6 +314,9 @@ async function handlePendingFlowResponse(
 
         // proxySuccess === true garantizado en este punto
         await clearFlowState(userPhoneNumber, config.id)
+        // Limpiar el contexto del turno cancelado para que OpenAI y los
+        // pre-flows no vuelvan a mencionarlo como si aún estuviera vigente
+        await clearAppointmentContext(userPhoneNumber, config.id)
 
         if (config.cliente_id) {
           const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
