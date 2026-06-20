@@ -184,6 +184,28 @@ export async function handlePatientDetectionMessage(
     }
   }
 
+  // --- Fase: Espera de DNI del familiar ---
+  if (state.phase === 'awaiting_familiar_dni') {
+    logger.info('Processing familiar DNI input', {})
+    const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
+
+    if (dniOnly.length < 7 || dniOnly.length > 9) {
+      return {
+        handled: true,
+        message:
+          'El DNI no parece válido. Por favor, indicame el DNI del familiar (7 u 8 dígitos) sin puntos ni espacios.',
+      }
+    }
+
+    // Tiene formato de DNI válido — delegar a whatsapp.tsx con clienteId
+    return {
+      handled: false,
+      shouldCallOpenAI: false,
+      action: 'familiar_dni_pending',
+      patientInfo: { isNewPatient: false },
+    }
+  }
+
   // --- Fase: Espera de DNI para desambiguar múltiples pacientes ---
   if (state.phase === 'awaiting_dni_for_disambiguation') {
     logger.info('Processing DNI for disambiguation', {})
@@ -510,6 +532,38 @@ export async function handleDNIForMultiplePatients(
       patientName: result.patientName,
       turnos: result.turnos,
     },
+  }
+}
+
+/**
+ * Procesa el DNI del familiar ingresado por el usuario
+ * Busca al familiar en el sistema y arranca el flujo de paciente existente o nuevo
+ */
+export async function handleFamiliarDNI(
+  phoneNumber: string,
+  dniMessage: string,
+  configId: string,
+  clienteId: string,
+  clinicName?: string
+): Promise<PatientDetectionResult> {
+  const logger = createConversationLogger(phoneNumber, configId, 'familiar_dni')
+  logger.info('Processing familiar DNI', {})
+
+  const dniOnly = dniMessage.trim().replace(/[^0-9]/g, '')
+
+  if (dniOnly.length < 7 || dniOnly.length > 9) {
+    return {
+      handled: true,
+      message:
+        'El DNI no parece válido. Por favor, indicame el DNI del familiar (7 u 8 dígitos) sin puntos ni espacios.',
+    }
+  }
+
+  return {
+    handled: false,
+    shouldCallOpenAI: false,
+    action: 'familiar_dni_resolved',
+    patientInfo: { isNewPatient: false },
   }
 }
 

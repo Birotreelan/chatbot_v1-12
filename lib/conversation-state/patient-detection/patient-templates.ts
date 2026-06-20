@@ -199,7 +199,8 @@ function buildSoloCirugiaGreeting(
   mensaje += `La gestión de turnos quirúrgicos (cancelación, modificación o confirmación) debe realizarse comunicándote directamente con la clínica.\n\n`
   mensaje += `¿En qué más te puedo ayudar?\n\n`
   mensaje += `1- Solicitar un turno médico\n`
-  mensaje += `2- Realizar otra consulta\n\n`
+  mensaje += `2- Solicitar turno para un familiar\n`
+  mensaje += `3- Realizar otra consulta\n\n`
   mensaje += `Respondé con el número de opción que prefieras.`
 
   return mensaje
@@ -207,6 +208,7 @@ function buildSoloCirugiaGreeting(
 
 /**
  * Saludo para paciente existente SIN turnos agendados
+ * Incluye opcion para solicitar turno para un familiar
  */
 function buildExistingPatientNoTurnosGreeting(
   patientName: string,
@@ -219,8 +221,19 @@ function buildExistingPatientNoTurnosGreeting(
     `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +
     `Veo que actualmente no tenés turnos agendados. ¿En qué te puedo ayudar?\n\n` +
     `1- Solicitar turno médico\n` +
-    `2- Realizar otra consulta\n\n` +
+    `2- Solicitar turno para un familiar\n` +
+    `3- Realizar otra consulta\n\n` +
     `Por favor, respondé con el *número* de opción que prefieras.`
+  )
+}
+
+/**
+ * Mensaje solicitando el DNI del familiar
+ */
+export function buildFamiliarDNIRequestMessage(): string {
+  return (
+    `Por favor, indicame el *DNI del familiar* (7 u 8 dígitos, sin puntos ni espacios) ` +
+    `para poder identificarlo en nuestro sistema.`
   )
 }
 

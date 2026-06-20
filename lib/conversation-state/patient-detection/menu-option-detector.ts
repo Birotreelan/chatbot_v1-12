@@ -38,6 +38,7 @@ export const NEW_PATIENT_MENU: MenuOption[] = [
 
 /**
  * Opciones del menú para pacientes existentes SIN turnos
+ * Incluye opcion para solicitar turno para un familiar
  */
 export const EXISTING_PATIENT_NO_TURNOS_MENU: MenuOption[] = [
   {
@@ -47,8 +48,25 @@ export const EXISTING_PATIENT_NO_TURNOS_MENU: MenuOption[] = [
   },
   {
     index: 2,
+    label: 'Solicitar turno para un familiar',
+    keywords: ['familiar', 'hijo', 'hija', 'esposa', 'esposo', 'madre', 'padre', 'mama', 'mamá', 'papa', 'papá', 'pareja', 'hermano', 'hermana', 'familiar'],
+  },
+  {
+    index: 3,
     label: 'Realizar otra consulta',
     keywords: ['consulta', 'pregunta', 'información', 'duda', 'ayuda'],
+  },
+]
+
+/**
+ * Opciones del menú durante la solicitud de DNI del familiar
+ * Solo para detección simple si el usuario escribe texto libre en vez de un DNI
+ */
+export const FAMILIAR_DNI_MENU: MenuOption[] = [
+  {
+    index: 0,
+    label: 'DNI del familiar',
+    keywords: [], // No se usa para keyword matching, solo para contexto
   },
 ]
 
