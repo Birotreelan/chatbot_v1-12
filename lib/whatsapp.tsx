@@ -1385,16 +1385,19 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               clienteId: config.cliente_id,
             }
 
-            const proxyUrl = appointmentCtx.proxyUrl || process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL
-            // appointment_id puede venir en la raiz o en turnos[0].agenda_id (según cómo lo guardó el proxylistener)
+            // appointment_id se conserva para trackeo de eventos
             const appointmentId = appointmentCtx.appointment_id
               || (Array.isArray(appointmentCtx.turnos) && appointmentCtx.turnos[0]?.agenda_id)
               || null
+            const tieneProxy = !!config.proxy
+            const tieneFecha = !!(Array.isArray(appointmentCtx.turnos) && appointmentCtx.turnos[0]?.fecha)
+            const tieneDni = !!appointmentCtx.paciente?.dni
 
-            if (!proxyUrl || !appointmentId) {
+            if (!tieneProxy || !tieneFecha || !tieneDni) {
               console.warn("[PROXY] Confirmacion de turno omitida — datos insuficientes", {
-                tieneProxyUrl: !!proxyUrl,
-                tieneAppointmentId: !!appointmentId,
+                tieneProxy,
+                tieneFecha,
+                tieneDni,
               })
               await sendDirectResponse(confirmCtx, "No pudimos confirmar tu turno en este momento. Por favor intentá de nuevo en unos minutos.", "direct_confirm_error")
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -1403,17 +1406,21 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
             // Llamar al proxy PRIMERO — el mensaje al usuario depende de la respuesta
             try {
-              const confirmUrl = `${proxyUrl}/api/chatbot/confirmar`
+              const turnoAConfirmar = Array.isArray(appointmentCtx.turnos) && appointmentCtx.turnos[0]
               const confirmPayload = {
-                appointment_id: appointmentId,
-                phone: userPhoneNumber,
+                Cliente_Id: config.cliente_id,
+                Action: "confirmar_turno",
+                fecha: turnoAConfirmar?.fecha,
+                paciente_datos: {
+                  dni: appointmentCtx.paciente?.dni,
+                },
               }
               console.info("[PROXY] Enviando confirmacion de turno", {
-                url: confirmUrl,
+                url: config.proxy,
                 payload: confirmPayload,
               })
               const confirmProxyResponse = await fetchWithRetry(
-                confirmUrl,
+                config.proxy,
                 {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
