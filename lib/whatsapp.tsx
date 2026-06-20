@@ -1758,11 +1758,15 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // Si el paciente ya fue identificado en esta sesión (p.ej. flujo terminó con "obra social
         // no habilitada" y el usuario responde "Ok"), no reiniciar la detección.
         const alreadyIdentified = await getIdentifiedPatient(userPhoneNumber)
+
+        console.log("[v0] [SPRINT9A] detectionActive:", detectionActive, "existingCtx:", !!existingAppointmentCtx, "alreadyIdentified:", !!alreadyIdentified)
         
         if (!detectionActive && !existingAppointmentCtx && !alreadyIdentified) {
           // No hay flujo activo ni contexto de template, iniciar detección
           // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
           const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+
+          console.log("[v0] [SPRINT9A] initializePatientDetection result:", JSON.stringify({ handled: detectionResult.handled, action: detectionResult.action, shouldCallOpenAI: detectionResult.shouldCallOpenAI }))
           
           if (detectionResult.handled) {
             const detectionCtx: DirectResponseContext = {

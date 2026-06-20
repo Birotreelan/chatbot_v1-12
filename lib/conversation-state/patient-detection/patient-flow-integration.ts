@@ -63,6 +63,8 @@ export async function initializePatientDetection(
   // Verificar si el feature flag está habilitado
   const flags = await getEffectiveFeatureFlags(configId)
 
+  console.log(`[v0] [INIT_DETECTION] flag directPatientDetection=${flags.directPatientDetection} configId=${configId}`)
+
   if (!flags.directPatientDetection) {
     logger.debug('Feature flag disabled, using OpenAI', {})
     return {
@@ -74,6 +76,7 @@ export async function initializePatientDetection(
 
   try {
     const detectionResult = await startPatientDetectionFlow(phoneNumber, configId, clienteId)
+    console.log(`[v0] [INIT_DETECTION] startPatientDetectionFlow result: isNewPatient=${detectionResult.isNewPatient} error=${detectionResult.error} multiplePatients=${detectionResult.multiplePatients?.length}`)
 
     if (detectionResult.error) {
       logger.warn('Detection error, fallback to OpenAI', {
