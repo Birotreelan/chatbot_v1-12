@@ -8,7 +8,7 @@ import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
 import { validarObraSocial } from '@/lib/api-tools/api-functions' // 🆕 IMPORT PARA VALIDAR OBRA SOCIAL
-import { getFirstName } from '@/lib/utils/name-utils'
+import { getFirstName, parseNameInput } from '@/lib/utils/name-utils'
 
 // Importar handlers compartidos
 import {
@@ -1095,26 +1095,22 @@ async function handleModifyNombrePhase(
   const logger = createConversationLogger(phoneNumber, clientId, 'modify_nombre_phase')
 
   const input = userMessage.trim()
-  const parts = input.split(/\s+/)
+  const parsed = parseNameInput(input)
 
-  if (parts.length < 2) {
+  if (!parsed) {
     return {
       handled: true,
       message: `Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*`,
     }
   }
 
-  const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
-  const nuevoNombre = capitalize(parts[0])
-  const nuevoApellido = parts.slice(1).map(capitalize).join(' ')
-
-  state.patientFirstName = nuevoNombre
-  state.patientLastName = nuevoApellido
-  state.patientName = `${nuevoNombre} ${nuevoApellido}`
+  state.patientFirstName = parsed.nombre
+  state.patientLastName = parsed.apellido
+  state.patientName = `${parsed.nombre} ${parsed.apellido}`
   state.phase = 'awaiting_confirmation'
   await saveFlowState(phoneNumber, state)
 
-  logger.info('Nombre updated', { nombre: nuevoNombre, apellido: nuevoApellido })
+  logger.info('Nombre updated', { nombre: parsed.nombre, apellido: parsed.apellido })
 
   return {
     handled: true,
