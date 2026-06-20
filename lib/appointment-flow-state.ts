@@ -33,10 +33,26 @@ export interface ChatbotDataTurno {
   profesional: string
   profesional_id: string
   sede: string
+  sede_id?: string
   direccion: string
   agenda_id: string
   admite_reagendamiento: boolean
   tipo: string
+}
+
+/**
+ * Snapshot del turno cancelado, preservado en Redis para uso en reagendamiento.
+ * Se rellena en clearAppointmentTurnos() y no se borra hasta que expire el TTL.
+ */
+export interface ChatbotDataTurnoCancelado {
+  fecha: string
+  hora: string
+  profesional: string
+  profesional_id: string
+  sede: string
+  sede_id: string
+  direccion: string
+  agenda_id: string
 }
 
 export interface ChatbotData {
@@ -49,6 +65,8 @@ export interface ChatbotData {
   sede_id: string
   clinica: string
   tipo_mensaje: string
+  /** Datos del último turno cancelado, preservados para reagendamiento */
+  turno_cancelado?: ChatbotDataTurnoCancelado
 }
 
 export type FlowStateType = 
@@ -145,7 +163,7 @@ export async function getAppointmentContext(
 }
 
 /**
- * Elimina el contexto del turno (llamar despues de cancelar exitosamente)
+ * Elimina el contexto del turno por completo (uso legacy / situaciones sin reagendamiento)
  */
 export async function clearAppointmentContext(
   phone: string,
@@ -161,6 +179,66 @@ export async function clearAppointmentContext(
     return true
   } catch (error) {
     console.error("[APPOINTMENT-FLOW] Error eliminando contexto:", error)
+    return false
+  }
+}
+
+/**
+ * Limpieza selectiva post-cancelación.
+ *
+ * - Vacía turnos[] y cantidad_turnos → los pre-flows dejan de ver el turno
+ * - Copia el turno cancelado a turno_cancelado → disponible para reagendamiento
+ * - Cambia tipo_mensaje a "turno_cancelado"
+ * - El bloque paciente se preserva intacto
+ *
+ * @param turnoIndex índice del turno en el array (normalmente 0)
+ */
+export async function clearAppointmentTurnos(
+  phone: string,
+  configId: string,
+  turnoIndex = 0
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+
+  try {
+    const key = getContextKey(phone, configId)
+    const raw = await redis.get<string>(key)
+
+    if (!raw) {
+      console.warn(`[APPOINTMENT-FLOW] clearAppointmentTurnos: no hay contexto para ${phone}`)
+      return false
+    }
+
+    const chatbotData: ChatbotData =
+      typeof raw === 'object' ? (raw as unknown as ChatbotData) : JSON.parse(raw)
+
+    const turnoACancelar = chatbotData.turnos[turnoIndex]
+
+    // Guardar snapshot del turno cancelado antes de vaciar el array
+    if (turnoACancelar) {
+      chatbotData.turno_cancelado = {
+        fecha: turnoACancelar.fecha,
+        hora: turnoACancelar.hora,
+        profesional: turnoACancelar.profesional,
+        profesional_id: turnoACancelar.profesional_id,
+        sede: turnoACancelar.sede,
+        sede_id: turnoACancelar.sede_id || chatbotData.sede_id || '',
+        direccion: turnoACancelar.direccion,
+        agenda_id: turnoACancelar.agenda_id,
+      }
+    }
+
+    // Vaciar turnos activos
+    chatbotData.turnos = []
+    chatbotData.cantidad_turnos = 0
+    chatbotData.tipo_mensaje = 'turno_cancelado'
+
+    await redis.set(key, JSON.stringify(chatbotData), { ex: CONTEXT_TTL })
+    console.log(`[APPOINTMENT-FLOW] Turnos limpiados para ${phone}, turno_cancelado preservado`)
+    return true
+  } catch (error) {
+    console.error("[APPOINTMENT-FLOW] Error en clearAppointmentTurnos:", error)
     return false
   }
 }

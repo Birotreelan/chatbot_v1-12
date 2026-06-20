@@ -38,6 +38,7 @@ export type ReschedulePhase =
   | 'awaiting_selection'
   | 'awaiting_confirmation'
   | 'completed'
+  | 'awaiting_search_type'  // Sin turnos con el mismo profesional; esperando opción 1/2/3
 
 export interface RescheduleFlowState {
   phase: ReschedulePhase
@@ -49,6 +50,9 @@ export interface RescheduleFlowState {
   }
   profesional_id: string
   sede_id: string
+  obra_social_id?: string   // Para búsqueda ampliada con filtro de obra social
+  paciente_dni?: string     // Para búsqueda ampliada: filtra turnos por DNI/obra social
+  profesional_original?: string // Nombre del profesional del turno cancelado
   turnosCancelado: {
     fecha: string
     hora: string
@@ -72,6 +76,17 @@ export interface RescheduleFlowResult {
     intent: string
     extractedData?: Record<string, any>
     originalMessage: string
+    // Campos adicionales para búsqueda ampliada post-60-días
+    searchType?: string
+    pacienteDni?: string
+    obraSocialId?: string
+    sedeId?: string
+    paciente?: {
+      nombres: string
+      apellido: string
+      dni: string
+      telefono: string
+    }
   }
 }
 
@@ -413,6 +428,39 @@ export async function handleRescheduleMessage(
     return {
       type: 'error',
       message: "El flujo de reagendamiento ya ha sido completado.",
+    }
+  }
+
+  // Fase 5: Esperando opción de búsqueda ampliada (1/2/3)
+  if (state.phase === 'awaiting_search_type') {
+    const normalized = message.trim().toLowerCase()
+    const isOp1 = /^1\.?$/.test(normalized) || /m[eé]dico|profesional|particular/.test(normalized)
+    const isOp2 = /^2\.?$/.test(normalized) || /especialidad/.test(normalized)
+    const isOp3 = /^3\.?$/.test(normalized) || /cualquier|disponible/.test(normalized)
+
+    if (isOp1 || isOp2 || isOp3) {
+      const searchType = isOp1 ? 'por_profesional' : isOp2 ? 'por_especialidad' : 'cualquier_medico'
+      console.log(`[RESCHEDULE-FLOW] Búsqueda ampliada seleccionada: ${searchType}`)
+      await clearRescheduleState(phone, configId)
+      return {
+        type: 'fallback_to_openai',
+        fallbackContext: {
+          intent: 'reschedule_broad_search',
+          searchType,
+          originalMessage: message,
+          pacienteDni: state.paciente_dni,
+          obraSocialId: state.obra_social_id,
+          sedeId: state.sede_id,
+          paciente: state.paciente,
+        },
+      }
+    }
+
+    // Respuesta no reconocida
+    return {
+      type: 'pending',
+      nextPhase: 'awaiting_search_type',
+      state,
     }
   }
 

@@ -261,7 +261,31 @@ export async function processRescheduleMessage(
   }
 
   // ========================================
-  // CASO 4: Fallback a OpenAI para NLU
+  // CASO 4a: Búsqueda ampliada post-60-días (opción 1/2/3 del menú de no-turnos)
+  // El handler ya limpió el estado; pasar a OpenAI con contexto del paciente precargado
+  // ========================================
+  if (result.type === 'fallback_to_openai' && result.fallbackContext?.intent === 'reschedule_broad_search') {
+    const fc = result.fallbackContext
+    console.log(`[RESCHEDULE-INTEGRATION] Búsqueda ampliada, tipo: ${fc.searchType}`)
+
+    // Retornar sin manejar para que whatsapp.tsx lo route a OpenAI con el contexto del paciente
+    return {
+      handled: false,
+      fallbackToOpenAI: true,
+      fallbackContext: {
+        type: 'reschedule_broad_search',
+        searchType: fc.searchType,
+        paciente: fc.paciente,
+        pacienteDni: fc.pacienteDni,
+        obraSocialId: fc.obraSocialId,
+        sedeId: fc.sedeId,
+        originalMessage: fc.originalMessage,
+      },
+    }
+  }
+
+  // ========================================
+  // CASO 4b: Fallback a OpenAI para NLU (selección ambigua dentro del flujo)
   // ========================================
   if (result.type === 'fallback_to_openai' && result.fallbackContext) {
     console.log(`[RESCHEDULE-INTEGRATION] Fallback a OpenAI:`, result.fallbackContext.intent)
