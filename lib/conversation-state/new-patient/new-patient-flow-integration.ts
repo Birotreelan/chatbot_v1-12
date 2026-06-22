@@ -109,7 +109,7 @@ export interface NewPatientFlowState {
   sedesOpciones?: SedeOption[]
   
   // Busqueda
-  searchType?: 'medico_particular' | 'especialidad' | 'cualquier_medico'
+  searchType?: 'medico_particular' | 'especialidad' | 'cualquier_medico' | 'cambiar_sede'
   
   // Profesional
   profesionalId?: string
@@ -735,6 +735,32 @@ async function handleSearchTypePhase(
 
     if (result.searchType === 'cualquier_medico') {
       return await searchAndShowTurnos(phone, clientId, state, escalationPhoneNumber)
+    }
+
+    if (result.searchType === 'cambiar_sede') {
+      // Opcion "Buscar en otra sede": volver al paso de seleccion de sede.
+      // Limpiar la sede y los filtros previos para empezar la busqueda en otra sede.
+      state.sedeId = undefined
+      state.sedeNombre = undefined
+      state.profesionalId = undefined
+      state.profesionalNombre = undefined
+      state.especialidadId = undefined
+      state.especialidadNombre = undefined
+      state.profesionalesOpciones = undefined
+      state.especialidadesOpciones = undefined
+      state.turnosOpciones = undefined
+      state.searchType = undefined
+      state.phase = 'awaiting_sede'
+      await saveFlowState(phone, state)
+
+      if (!state.sedesOpciones || state.sedesOpciones.length === 0) {
+        return { handled: false, shouldCallOpenAI: true }
+      }
+
+      return {
+        handled: true,
+        message: buildSedesMessage(state.sedesOpciones),
+      }
     }
   }
 

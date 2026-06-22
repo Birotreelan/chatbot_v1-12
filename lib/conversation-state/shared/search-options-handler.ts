@@ -106,6 +106,19 @@ export async function handleSearchTypeSelection(
   // Normalizar input
   const inputNormalizado = userInput.trim().toLowerCase()
 
+  // Opcion "Buscar en otra sede": es la opcion N+1 (despues de las busquedas disponibles).
+  // Solo se ofrece en el mensaje de "no hay turnos" (buildNoTurnosMessage), pero la
+  // detectamos aqui para reusar el mismo handler de seleccion de tipo de busqueda.
+  const cambiarSedeNumber = availableOptions.length + 1
+  if (inputNormalizado === cambiarSedeNumber.toString()) {
+    logger.info('Tipo de busqueda: cambiar_sede', {})
+    return {
+      handled: true,
+      nextPhase: 'awaiting_sede',
+      searchType: 'cambiar_sede',
+    }
+  }
+
   // Detectar opcion por numero
   const optionByNumber = availableOptions.find((opt) => opt.number.toString() === inputNormalizado)
   if (optionByNumber) {
@@ -149,6 +162,15 @@ export async function handleSearchTypeSelection(
       handled: true,
       nextPhase: 'awaiting_turno_selection',
       searchType: 'cualquier_medico',
+    }
+  }
+
+  if (inputNormalizado.includes('otra sede') || inputNormalizado.includes('cambiar sede') || inputNormalizado.includes('otra clinica')) {
+    logger.info('Tipo de busqueda: cambiar_sede', {})
+    return {
+      handled: true,
+      nextPhase: 'awaiting_sede',
+      searchType: 'cambiar_sede',
     }
   }
 
