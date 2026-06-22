@@ -1951,33 +1951,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
         } else if (!detectionActive && !existingAppointmentCtx && alreadyIdentified) {
           // El paciente ya fue identificado en esta sesión (cache identified_patient, TTL 1h)
-          // pero no hay flujo estructurado activo. En vez de delegar a OpenAI (que re-pide DNI
-          // e improvisa un menú), rehidratamos el flujo determinístico de paciente existente.
-          // Esto reconstruye el menú estructurado correcto (incluido el de "sin turnos", Sprint 43)
-          // y deja el flujo activo para que la siguiente selección sea interceptada determinísticamente.
-          console.log("[v0] [SPRINT9A] Rehidratando flujo de paciente identificado (alreadyIdentified)")
+          // pero no hay flujo de detección activo. En vez de delegar a OpenAI (que re-pide DNI
+          // e improvisa un menú), re-ejecutamos la detección determinística.
+          // initializePatientDetection vuelve a consultar por teléfono, construye el saludo
+          // estructurado correcto (incluido el de "sin turnos", Sprint 43) y deja el estado de
+          // detección activo para que la siguiente selección (1/2/3) sea interceptada por el
+          // bloque isDetectionActive, nunca por OpenAI.
+          console.log("[v0] [SPRINT9A] Rehidratando detección de paciente identificado (alreadyIdentified)")
 
-          const nameParts = (alreadyIdentified.patientName || "").trim().split(/\s+/).filter(Boolean)
-          const firstName = nameParts.length > 0 ? nameParts[0] : ""
-          const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : ""
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
 
-          const existingResult = await initializeExistingPatientFlow(
-            userPhoneNumber,
-            alreadyIdentified.patientId,
-            alreadyIdentified.patientName,
-            alreadyIdentified.patientDNI,
-            undefined,
-            config.cliente_id,
-            {
-              patientFirstName: firstName,
-              patientLastName: lastName,
-              obraSocialId: alreadyIdentified.obraSocialId,
-              obraSocialNombre: alreadyIdentified.obraSocialNombre,
-            },
-            config.escalationPhoneNumber
-          )
-
-          if (existingResult?.handled && existingResult.message) {
+          if (detectionResult.handled && detectionResult.message) {
             const detectionCtx: DirectResponseContext = {
               phoneNumberId: value.metadata.phone_number_id,
               accessToken: config.accessToken,
@@ -1986,7 +1970,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               clienteId: config.cliente_id,
             }
 
-            await sendDirectResponse(detectionCtx, existingResult.message, "rehydrated_existing_patient")
+            await sendDirectResponse(detectionCtx, detectionResult.message, "rehydrated_patient_detection")
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
@@ -2230,7 +2214,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               // Verificar si ya hay un flujo de paciente existente activo y más avanzado
               const existingPhase = await getExistingPatientFlowPhase(userPhoneNumber)
               
-              // Fases más avanzadas que awaiting_sede (ya pasaron la selección de sede)
+              // Fases m��s avanzadas que awaiting_sede (ya pasaron la selección de sede)
               const advancedPhases = [
                 'awaiting_search_type', 'awaiting_professional_name', 'awaiting_especialidad',
                 'awaiting_turno_selection', 'awaiting_email', 'awaiting_confirmation'
