@@ -289,11 +289,27 @@ export async function getFlowState(
     if (!data) return null
 
     // Redis puede devolver el objeto ya parseado o un string
-    if (typeof data === 'object') {
-      return data as unknown as FlowState
+    const raw: any = typeof data === 'object' ? data : JSON.parse(data)
+    
+    // Compatibilidad con estados guardados con campo "state" en lugar de "type"
+    // (Bug en versiones anteriores donde setFlowState recibía { state: ..., timestamp: ... })
+    if (raw && !raw.type && raw.state) {
+      raw.type = raw.state as FlowStateType
+      if (!raw.createdAt) {
+        raw.createdAt = raw.timestamp ? new Date(raw.timestamp).toISOString() : new Date().toISOString()
+      }
     }
     
-    return JSON.parse(data) as FlowState
+    // Si sigue sin tipo reconocido, descartar el estado para evitar bucles
+    if (!raw || !raw.type || (raw.type !== 'awaiting_cancel_confirmation' && raw.type !== 'awaiting_reschedule_choice')) {
+      console.warn(`[APPOINTMENT-FLOW] Estado de flujo corrupto o desconocido descartado para ${phone}:`, raw)
+      // Limpiar la clave para evitar que bloquee futuras requests
+      const redis2 = getRedisClient()
+      if (redis2) await redis2.del(getFlowStateKey(phone, configId))
+      return null
+    }
+
+    return raw as FlowState
   } catch (error) {
     console.error("[APPOINTMENT-FLOW] Error obteniendo estado de flujo:", error)
     return null
