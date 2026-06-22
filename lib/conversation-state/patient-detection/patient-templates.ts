@@ -253,6 +253,7 @@ function buildSingleTurnoGreeting(
   const sede = turno.Centro_Nombre || turno.sede || clinicName
   const estado = (turno.Estado || turno.estado || '').toLowerCase()
   const estaConfirmado = estado === 'confirmado'
+  const estaPendiente = estado === 'no confirmado'
 
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
@@ -265,7 +266,11 @@ function buildSingleTurnoGreeting(
     mensaje += `3- Cancelar el turno médico y solicitar uno nuevo\n`
     mensaje += `4- Realizar otra consulta\n\n`
   } else {
-    mensaje += `*Veo que ya tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
+    if (estaPendiente) {
+      mensaje += `*Veo que ya tenés un turno médico pendiente de aprobación por parte de la clínica, agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
+    } else {
+      mensaje += `*Veo que ya tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
+    }
     mensaje += `¿En qué te podemos ayudar?\n\n`
     mensaje += `1- Confirmar asistencia al turno médico\n`
     mensaje += `2- Cancelar turno médico\n`
@@ -297,7 +302,12 @@ function buildMultipleTurnosGreeting(
       turno.Profesional_Nombre || turno.profesional_nombre || turno.nombre_profesional || ''
     )
     const estado = (turno.Estado || turno.estado || '').toLowerCase()
-    const estadoTexto = estado === 'confirmado' ? ' ✓ Confirmado' : ''
+    const estadoTexto =
+      estado === 'confirmado'
+        ? ' ✓ Confirmado'
+        : estado === 'no confirmado'
+          ? ' (pendiente de aprobación)'
+          : ''
 
     mensaje += `${idx + 1}. ${fecha} a las ${hora}\n`
     mensaje += `   ${profesional}${estadoTexto}\n\n`
