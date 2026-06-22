@@ -51,6 +51,7 @@ export interface RescheduleFlowState {
   profesional_id: string
   sede_id: string
   obra_social_id?: string   // Para búsqueda ampliada con filtro de obra social
+  obra_social_nombre?: string // Para mostrar en el resumen de confirmación (formato estándar)
   paciente_dni?: string     // Para búsqueda ampliada: filtra turnos por DNI/obra social
   profesional_original?: string // Nombre del profesional del turno cancelado
   turnosCancelado: {
@@ -280,6 +281,8 @@ export async function initRescheduleFlow(
     },
     profesional_id: turno.profesional_id,
     sede_id: chatbotData.sede_id || (turno as any).sede_id,
+    obra_social_id: chatbotData.paciente.obra_social_id,
+    obra_social_nombre: chatbotData.paciente.obra_social_nombre,
     turnosCancelado: {
       fecha: turno.fecha,
       hora: turno.hora,

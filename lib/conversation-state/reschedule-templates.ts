@@ -98,27 +98,47 @@ export function buildRescheduleStartMessage(
 }
 
 /**
- * Mensaje de confirmacion del turno seleccionado
+ * Mensaje de confirmacion del turno seleccionado.
+ * Usa EXACTAMENTE el mismo formato que el flujo de agendamiento normal
+ * (buildConfirmationMessage en shared/confirmation-handler.ts): resumen con
+ * DATOS DEL PACIENTE / DATOS DEL TURNO y opciones "1. Sí, confirmar / 2. No, modificar".
  */
 export function buildRescheduleConfirmationMessage(
   state: RescheduleFlowState,
   turnoSeleccionado: TurnoDisponible
 ): string {
   const nombre = formatPatientName(state.paciente.nombres)
-  const fecha = formatFullDate(turnoSeleccionado.fecha)
+  const fechaRaw = formatFullDate(turnoSeleccionado.fecha)
+  const fecha = fechaRaw.charAt(0).toUpperCase() + fechaRaw.slice(1)
   const hora = formatTime(turnoSeleccionado.hora_formateada || turnoSeleccionado.hora)
   const profesional = turnoSeleccionado.profesional
   const sede = turnoSeleccionado.sede
 
-  return `${nombre}, confirmas este turno?
+  // Número del turno (1-based) según su posición en la lista mostrada.
+  const idx = state.turnosDisponibles.findIndex(t => t.agenda_id === turnoSeleccionado.agenda_id)
+  const numero = (idx >= 0 ? idx : 0) + 1
 
-Fecha: ${fecha}
-Hora: ${hora} hs
-Profesional: ${profesional}
-Sede: ${sede}
+  let message = `${nombre}, para confirmar tu reserva necesito verificar los datos:\n\n`
 
-1. Sí, confirmar
-2. No, elegir otro turno`
+  message += `**DATOS DEL PACIENTE:**\n\n`
+  message += `Apellido: ${state.paciente.apellido || ''}\n\n`
+  message += `Nombre: ${state.paciente.nombres || ''}\n\n`
+  message += `DNI: ${state.paciente.dni || ''}\n\n`
+  message += `Obra Social: ${state.obra_social_nombre || ''}\n\n`
+
+  message += `**DATOS DEL TURNO:**\n\n`
+  message += `Fecha: ${fecha}\n\n`
+  message += `Hora: ${hora}\n\n`
+  message += `Profesional: ${profesional}\n\n`
+  message += `Sede: ${sede || ''}\n\n`
+  message += `Id Turno: ${turnoSeleccionado.agenda_id}\n\n`
+
+  message += `¿Confirmás que los datos son correctos y deseás realizar la reserva del turno número ${numero}?\n\n`
+  message += `Respondé con:\n`
+  message += `1. Sí, confirmar\n`
+  message += `2. No, modificar`
+
+  return message
 }
 
 /**
