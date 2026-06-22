@@ -1124,6 +1124,9 @@ export async function handleMessage(value: any) {
               apellido: flowResult.chatbotData.paciente.apellido,
               dni: flowResult.chatbotData.paciente.dni,
               telefono: flowResult.chatbotData.paciente.telefono,
+              // Preservar obra social para el resumen de confirmación y la reserva
+              obra_social_id: flowResult.chatbotData.paciente.obra_social_id,
+              obra_social_nombre: flowResult.chatbotData.paciente.obra_social_nombre,
             },
             turno_cancelado: turnoCanceladoSnap,
           }

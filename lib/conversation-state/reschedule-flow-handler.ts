@@ -272,7 +272,13 @@ export async function initRescheduleFlow(
   }
 
   const state: RescheduleFlowState = {
-    phase: 'showing_turns',
+    // IMPORTANTE: la lista de turnos se envía inmediatamente después de init
+    // (en startRescheduleFlow), por lo que el estado persistido debe quedar en
+    // 'awaiting_selection' esperando la selección del usuario. Si se guardaba
+    // 'showing_turns', la PRIMERA selección caía en el branch de seguridad que
+    // sólo cambia de fase sin procesar el número → se re-mostraba la lista
+    // ("Elegí otro turno...") y el usuario tenía que seleccionar dos veces.
+    phase: 'awaiting_selection',
     paciente: {
       nombres: chatbotData.paciente.nombres,
       apellido: chatbotData.paciente.apellido,
@@ -326,15 +332,13 @@ export async function handleRescheduleMessage(
 
   console.log(`[RESCHEDULE-FLOW] Procesando mensaje en fase: ${state.phase}`)
 
-  // Fase 1: Mostrar turnos (nunca debe llegar aqui, pero por seguridad)
+  // Fase 1: Mostrar turnos. No debería persistir esta fase (init ya guarda
+  // 'awaiting_selection'), pero si llega aquí, promovemos a awaiting_selection y
+  // CONTINUAMOS para procesar la selección en el mismo turno (sin swallow del input).
   if (state.phase === 'showing_turns') {
     state.phase = 'awaiting_selection'
     await saveRescheduleState(phone, configId, state)
-    return {
-      type: 'pending',
-      nextPhase: 'awaiting_selection',
-      state,
-    }
+    // fall-through intencional hacia el bloque de awaiting_selection
   }
 
   // Fase 2: Esperando seleccion de turno
@@ -455,7 +459,7 @@ export async function handleRescheduleMessage(
   // Fase 5: Esperando opción de búsqueda ampliada (1/2/3)
   if (state.phase === 'awaiting_search_type') {
     const normalized = message.trim().toLowerCase()
-    const isOp1 = /^1\.?$/.test(normalized) || /m[eé]dico|profesional|particular/.test(normalized)
+    const isOp1 = /^1\.?$/.test(normalized) || /m[e��]dico|profesional|particular/.test(normalized)
     const isOp2 = /^2\.?$/.test(normalized) || /especialidad/.test(normalized)
     const isOp3 = /^3\.?$/.test(normalized) || /cualquier|disponible/.test(normalized)
 
