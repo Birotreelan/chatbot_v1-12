@@ -97,6 +97,29 @@ export const EXISTING_PATIENT_SINGLE_TURNO_MENU: MenuOption[] = [
 ]
 
 /**
+ * Opciones del menú para pacientes con UN turno NO confirmado (pendiente de aprobación).
+ * La confirmación de asistencia NO está disponible hasta que el turno esté confirmado,
+ * por eso esta variante omite la opción "Confirmar asistencia" y renumera el resto.
+ */
+export const EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU: MenuOption[] = [
+  {
+    index: 1,
+    label: 'Cancelar turno médico',
+    keywords: ['cancelar', 'no', 'no voy', 'cancel', 'cancelo', 'no puedo', 'no puedo ir'],
+  },
+  {
+    index: 2,
+    label: 'Cancelar el turno médico y solicitar uno nuevo',
+    keywords: ['otro', 'nuevo', 'agendar', 'otro turno', 'another', 'más turnos', 'cancelar y', 'cambiar turno', 'reprogramar', 'cancelar otro'],
+  },
+  {
+    index: 3,
+    label: 'Realizar otra consulta',
+    keywords: ['consulta', 'pregunta', 'información', 'duda', 'ayuda', 'otra consulta', 'otro tema'],
+  },
+]
+
+/**
  * Opciones del menú para pacientes con múltiples turnos
  */
 export const EXISTING_PATIENT_MULTIPLE_TURNOS_MENU: MenuOption[] = [
