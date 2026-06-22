@@ -24,6 +24,7 @@ import {
   isConfirmCancelResponse,
   isKeepAppointmentResponse,
   isRescheduleChoice,
+  isCancelAndRescheduleChoice,
   type ChatbotData,
   type ChatbotDataTurno,
   type ChatbotDataTurnoCancelado,
@@ -441,6 +442,95 @@ async function handlePendingFlowResponse(
       await clearFlowState(userPhoneNumber, config.id)
       return false
     }
+  } else if (flowState.type === 'awaiting_cancel_and_reschedule_confirm') {
+    // Menú de 2 opciones mostrado cuando el paciente quiere reagendar con turno activo:
+    //   1- Confirmar asistencia al turno médico
+    //   2- Cancelar el turno médico y solicitar uno nuevo
+    const choice = isCancelAndRescheduleChoice(userMessage)
+
+    if (choice === 'confirm_attendance') {
+      // El paciente decidió confirmar asistencia al turno existente
+      if (!chatbotData) {
+        logger.warn("No hay contexto de turno para confirmar asistencia, pasando a OpenAI")
+        await clearFlowState(userPhoneNumber, config.id)
+        return false
+      }
+      logger.info("Usuario confirmó asistencia al turno (desde menú reagendar)")
+      await clearFlowState(userPhoneNumber, config.id)
+      const turnoACancelar = chatbotData.turnos[flowState.turnoIndex || 0]
+      const confirmMsg = buildConfirmationMessage(chatbotData, turnoACancelar)
+      await sendDirectResponse(ctx, confirmMsg, "awaiting_cancel_and_reschedule_confirm")
+      return true
+
+    } else if (choice === 'cancel_and_reschedule') {
+      // El paciente quiere cancelar el turno activo y luego sacar uno nuevo
+      // Primero ejecutar la cancelación, luego redirigir al flujo de reagendamiento
+      if (!chatbotData) {
+        logger.warn("No hay contexto de turno para cancelar y reagendar, pasando a OpenAI")
+        await clearFlowState(userPhoneNumber, config.id)
+        return false
+      }
+      logger.info("Usuario quiere cancelar turno activo y solicitar uno nuevo")
+
+      try {
+        const turnoACancelar = chatbotData.turnos[flowState.turnoIndex || 0]
+        const proxyPayload = {
+          Cliente_Id: config.cliente_id,
+          Action: "cancelar_turno",
+          fecha: turnoACancelar?.fecha,
+          agenda_id: turnoACancelar?.agenda_id,
+          profesional_id: turnoACancelar?.profesional_id,
+        }
+        const proxyUrl = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL
+        const appointmentId = turnoACancelar?.agenda_id
+
+        let proxySuccess = false
+        if (proxyUrl && appointmentId) {
+          const proxyResponse = await fetch(proxyUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(proxyPayload),
+          })
+          proxySuccess = proxyResponse.ok
+        } else {
+          logger.warn("[PROXY] Cancelación omitida en cancel_and_reschedule", { tieneProxyUrl: !!proxyUrl, tieneAppointmentId: !!appointmentId })
+        }
+
+        if (proxySuccess || (!proxyUrl && !appointmentId)) {
+          // Cancelación exitosa (o sin proxy configurado): limpiar turno y redirigir a reagendamiento
+          await clearFlowState(userPhoneNumber, config.id)
+          await clearAppointmentTurnos(userPhoneNumber, config.id, flowState.turnoIndex || 0)
+
+          // Releer chatbotData actualizado desde Redis (clearAppointmentTurnos escribe en Redis)
+          const updatedChatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+
+          return {
+            type: 'route_to_reagendamiento',
+            chatbotData: updatedChatbotData || chatbotData,
+            turnoIndex: flowState.turnoIndex || 0
+          }
+        } else {
+          // Error en la cancelación: informar al usuario
+          await clearFlowState(userPhoneNumber, config.id)
+          const errorMsg = `Hubo un inconveniente al procesar la cancelación. Por favor, intentá nuevamente o comunicate con la clínica.`
+          await sendDirectResponse(ctx, errorMsg, "awaiting_cancel_and_reschedule_confirm")
+          return true
+        }
+      } catch (err) {
+        logger.error("Error al cancelar en cancel_and_reschedule:", { err })
+        await clearFlowState(userPhoneNumber, config.id)
+        const errorMsg = `Hubo un inconveniente al procesar la cancelación. Por favor, intentá nuevamente o comunicate con la clínica.`
+        await sendDirectResponse(ctx, errorMsg, "awaiting_cancel_and_reschedule_confirm")
+        return true
+      }
+
+    } else {
+      // Respuesta no reconocida como 1/2
+      logger.info("Respuesta de cancel_and_reschedule no reconocida, pasando a OpenAI", { userMessage })
+      await clearFlowState(userPhoneNumber, config.id)
+      return false
+    }
+
   } else if (flowState.type === 'awaiting_reschedule_choice') {
     const choice = isRescheduleChoice(userMessage)
     
@@ -1727,12 +1817,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
         }
 
-        // Si fue reagendar → establecer flowState awaiting_reschedule_choice
+        // Si fue reagendar con turno activo → estado específico para menú de 2 opciones
+        // (1-Confirmar asistencia / 2-Cancelar y solicitar uno nuevo)
         if (nluFallbackResult.result?.intent === "reagendar_turno") {
           if (appointmentData) {
             const turnoIdx = (appointmentData.turnos && appointmentData.turnos.length > 0) ? 0 : undefined
             await setFlowState(userPhoneNumber, config.id, {
-              type: "awaiting_reschedule_choice",
+              type: "awaiting_cancel_and_reschedule_confirm",
               createdAt: new Date().toISOString(),
               turnoIndex: turnoIdx,
             })
