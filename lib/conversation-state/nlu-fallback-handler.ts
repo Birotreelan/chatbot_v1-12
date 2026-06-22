@@ -138,9 +138,10 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es queja/frustración → respuesta empática de GPT + menú estándar
+    // Si es queja/frustración → solo respuesta empática, sin menú
+    // Adjuntar el menú encima de una queja produce efecto de "ignorar al paciente"
     if (classificationResult.intent === "queja_frustracion") {
-      const response = buildMenuResponse(appointmentContext, classificationResult.response)
+      const response = classificationResult.response || "Lamentamos los inconvenientes. Estamos trabajando para mejorar. Si necesitás ayuda con tu turno, escribinos cuando quieras."
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -148,9 +149,10 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es explicación contextual → respuesta empática de GPT + menú estándar
+    // Si es explicación contextual → solo respuesta empática, sin menú
+    // El paciente está informando un motivo, no tomando una acción sobre el turno
     if (classificationResult.intent === "explicacion_contextual") {
-      const response = buildMenuResponse(appointmentContext, classificationResult.response)
+      const response = classificationResult.response || "Entendemos la situación, gracias por avisarnos. Si necesitás hacer algún cambio en tu turno, podés indicarnos qué preferís."
       return {
         shouldHandle: true,
         result: classificationResult,
