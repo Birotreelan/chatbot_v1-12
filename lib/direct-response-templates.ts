@@ -138,6 +138,45 @@ Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
 }
 
 /**
+ * Mensaje para que el paciente elija sobre cuál turno operar cuando tiene varios.
+ * El verbo de la acción se adapta: cancelar / confirmar asistencia / cancelar y solicitar uno nuevo.
+ * Ejemplo:
+ *   "Ariel, tenés más de un turno agendado. ¿Cuál querés cancelar?
+ *    1- miércoles, 24 de junio de 2026 a las 09:50 con LANCHUSKE NATALIA (SALUD OCULAR CALLAO)
+ *    2- jueves, 25 de junio de 2026 a las 11:00 con BUSTAMANTE PIA (SALUD OCULAR CALLAO)
+ *    Respondé con el número del turno."
+ */
+export function buildTurnoSelectionMessage(
+  chatbotData: ChatbotData,
+  accion: "cancel_appointment" | "confirm_appointment" | "cancel_and_book_new_appointment"
+): string {
+  const nombre = formatPatientName(chatbotData)
+
+  const verbo =
+    accion === "confirm_appointment"
+      ? "confirmar asistencia"
+      : accion === "cancel_and_book_new_appointment"
+        ? "cancelar (para luego solicitar uno nuevo)"
+        : "cancelar"
+
+  const lineasTurnos = chatbotData.turnos
+    .map((turno, i) => {
+      const fechaCompleta = formatFullDate(turno.fecha)
+      const hora = formatTime(turno.hora)
+      const profesional = turno.profesional || ""
+      const sede = turno.sede || ""
+      return `${i + 1}- ${fechaCompleta} a las ${hora} con ${profesional}${sede ? ` (${sede})` : ""}`
+    })
+    .join("\n")
+
+  return `${nombre}, tenés más de un turno agendado. ¿Cuál querés ${verbo}?
+
+${lineasTurnos}
+
+Respondé con el número del turno que prefieras.`
+}
+
+/**
  * Mensaje de cancelacion exitosa con opcion de reagendamiento
  * Ejemplo: "Gracias, Rosa. La cancelacion fue procesada correctamente.
  *           Puedo ofrecerte la opcion de reagendar tu turno en otra fecha y horario.

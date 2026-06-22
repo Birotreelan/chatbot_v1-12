@@ -37,7 +37,11 @@ export interface PatientDetectionResult {
     isNewPatient: boolean
     patientId?: string
     patientName?: string
+    patientDNI?: string
+    patientLastName?: string
+    patientFirstName?: string
     turnos?: any[]
+    turnosQx?: any[]
   }
   shouldCallOpenAI?: boolean
   openAIContext?: string

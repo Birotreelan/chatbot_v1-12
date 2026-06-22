@@ -33,6 +33,7 @@ import {
   buildConfirmationMessage,
   buildCancelDoubleConfirmMessage,
   buildCancellationSuccessMessage,
+  buildTurnoSelectionMessage,
   buildKeepAppointmentMessage,
   buildNoRescheduleMessage,
   buildNoRescheduleMessageFallback,
@@ -247,6 +248,64 @@ async function handlePendingFlowResponse(
   const chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
 
   // Manejar segun el tipo de flujo
+
+  // El paciente tenía varios turnos y le pedimos elegir sobre cuál operar.
+  // Acá recibimos el número del turno elegido y derivamos a la acción pendiente.
+  if (flowState.type === 'awaiting_turno_selection') {
+    if (!chatbotData || !chatbotData.turnos || chatbotData.turnos.length === 0) {
+      logger.warn("No hay contexto de turnos para awaiting_turno_selection, pasando a OpenAI")
+      await clearFlowState(userPhoneNumber, config.id)
+      return false
+    }
+
+    // Extraer el primer número del mensaje (ej: "2", "el 2", "quiero el 2")
+    const match = userMessage.match(/\d+/)
+    const seleccion = match ? parseInt(match[0], 10) : NaN
+
+    if (isNaN(seleccion) || seleccion < 1 || seleccion > chatbotData.turnos.length) {
+      // Selección inválida: re-mostrar la lista sin cambiar el estado
+      logger.warn("Selección de turno inválida", { userMessage, total: chatbotData.turnos.length })
+      const retryMsg = buildTurnoSelectionMessage(
+        chatbotData,
+        (flowState.pendingAction || 'cancel_appointment') as
+          | 'confirm_appointment'
+          | 'cancel_appointment'
+          | 'cancel_and_book_new_appointment'
+      )
+      await sendDirectResponse(ctx, retryMsg, "turno_selection")
+      return true
+    }
+
+    const turnoIndex = seleccion - 1
+    const pendingAction = flowState.pendingAction || 'cancel_appointment'
+
+    if (pendingAction === 'confirm_appointment') {
+      // Confirmar asistencia al turno elegido
+      const confirmMsg = buildConfirmationMessage(chatbotData, turnoIndex)
+      await sendDirectResponse(ctx, confirmMsg, "confirm_flow")
+      await trackAppointmentEvent({
+        clienteId: config.cliente_id,
+        phoneNumber: userPhoneNumber,
+        eventType: 'confirmed',
+        metadata: { source: 'user_initiated_menu_multi', turnoIndex }
+      })
+      await clearFlowState(userPhoneNumber, config.id)
+      return true
+    }
+
+    // Cancelación (o cancelar+solicitar nuevo) del turno elegido: pedir doble confirmación
+    const wantsBookNew = pendingAction === 'cancel_and_book_new_appointment'
+    await setFlowState(userPhoneNumber, config.id, {
+      type: 'awaiting_cancel_confirmation',
+      createdAt: new Date().toISOString(),
+      turnoIndex,
+      ...(wantsBookNew ? { postCancelAction: 'book_new' as const } : {}),
+    })
+    const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex)
+    await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_flow")
+    return true
+  }
+
   if (flowState.type === 'awaiting_cancel_confirmation') {
     // awaiting_cancel_confirmation siempre necesita chatbotData
     if (!chatbotData) {
@@ -2229,7 +2288,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             const patientInfo = detectionResult.patientInfo
 
             if (detectionResult.action === 'other_inquiry_intent') {
-              // Paciente existente sin turnos eligió "Realizar otra consulta" → derivar a tel��fono
+              // Paciente existente sin turnos eligió "Realizar otra consulta" → derivar a tel����fono
               const escalationPhone = config.escalationPhoneNumber || 'nuestro equipo'
               const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
                 m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
@@ -2295,14 +2354,16 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               
               // Verificar que tenemos turnos del paciente
               if (patientInfo?.turnos && patientInfo.turnos.length > 0) {
-                const turno = patientInfo.turnos[0] // Usar el primer turno
-                
-                // Convertir el turno del flujo de detección al formato ChatbotData
+                const turno = patientInfo.turnos[0] // Primer turno (referencia para sede_id global)
+
+                // Convertir los turnos del flujo de detección al formato ChatbotData.
+                // El DNI y apellido provienen del estado de detección (necesarios para el
+                // payload del proxy de cancelación: "al menos teléfono o DNI del paciente").
                 const chatbotData: ChatbotData = {
                   paciente: {
-                    nombres: patientInfo.patientName || 'Paciente',
-                    apellido: '',
-                    dni: '',
+                    nombres: patientInfo.patientFirstName || patientInfo.patientName || 'Paciente',
+                    apellido: patientInfo.patientLastName || '',
+                    dni: patientInfo.patientDNI || '',
                     telefono: userPhoneNumber,
                   },
                   turnos: patientInfo.turnos.map((t: any): ChatbotDataTurno => ({
@@ -2313,6 +2374,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     profesional: t.Profesional_Nombre || t.profesional || '',
                     profesional_id: t.Profesional_Id || t.profesional_id || '',
                     sede: t.Centro_Nombre || t.sede || '',
+                    sede_id: t.Sede_Id || t.sede_id || '',
                     direccion: t.Direccion || t.direccion || '',
                     agenda_id: t.Agenda_Id || t.agenda_id || '',
                     admite_reagendamiento: t.admite_reagendamiento || false,
@@ -2323,15 +2385,34 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   clinica: config.displayName || 'Clínica',
                   tipo_mensaje: 'user_initiated',
                 }
-                
+
                 // Guardar el contexto para que el flujo de confirmación/cancelación lo use
                 await saveAppointmentContext(userPhoneNumber, config.id, chatbotData)
-                
-                if (detectionResult.action === 'confirm_appointment') {
-                  // Confirmar asistencia directamente
+
+                // Si el paciente tiene MÁS DE UN turno, primero debe elegir sobre cuál operar.
+                // Guardamos la acción pendiente y esperamos la selección numérica.
+                if (patientInfo.turnos.length > 1) {
+                  await setFlowState(userPhoneNumber, config.id, {
+                    type: 'awaiting_turno_selection',
+                    createdAt: new Date().toISOString(),
+                    pendingAction: detectionResult.action as
+                      | 'confirm_appointment'
+                      | 'cancel_appointment'
+                      | 'cancel_and_book_new_appointment',
+                  })
+                  const selectionMsg = buildTurnoSelectionMessage(
+                    chatbotData,
+                    detectionResult.action as
+                      | 'confirm_appointment'
+                      | 'cancel_appointment'
+                      | 'cancel_and_book_new_appointment'
+                  )
+                  await sendDirectResponse(detectionCtx, selectionMsg, "turno_selection")
+                } else if (detectionResult.action === 'confirm_appointment') {
+                  // Un solo turno: confirmar asistencia directamente
                   const confirmMsg = buildConfirmationMessage(chatbotData, 0)
                   await sendDirectResponse(detectionCtx, confirmMsg, "confirm_flow")
-                  
+
                   // Registrar evento de confirmación
                   await trackAppointmentEvent({
                     clienteId: config.cliente_id,
@@ -2340,7 +2421,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     metadata: { source: 'user_initiated_menu', turnoIndex: 0 }
                   })
                 } else {
-                  // Cancelación (o cancelar+solicitar nuevo): mostrar doble confirmación
+                  // Un solo turno, cancelación (o cancelar+solicitar nuevo): mostrar doble confirmación
                   const wantsBookNew = detectionResult.action === 'cancel_and_book_new_appointment'
 
                   // Setear estado de flujo para esperar confirmación.
@@ -2352,7 +2433,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     turnoIndex: 0,
                     ...(wantsBookNew ? { postCancelAction: 'book_new' as const } : {}),
                   })
-                  
+
                   // Construir y enviar mensaje de doble confirmación
                   const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, 0)
                   await sendDirectResponse(detectionCtx, doubleConfirmMsg, "cancel_flow")
