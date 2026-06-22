@@ -2595,6 +2595,11 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     apellido: patientInfo.patientLastName || '',
                     dni: patientInfo.patientDNI || '',
                     telefono: userPhoneNumber,
+                    // Obra social del paciente identificado (Deudor_Id/Nombre del proxy),
+                    // necesaria para el resumen de confirmación y para enviar Deudor_Id
+                    // al sistema externo al reservar el turno reagendado.
+                    obra_social_id: patientInfo.obraSocialId,
+                    obra_social_nombre: patientInfo.obraSocialNombre,
                   },
                   turnos: patientInfo.turnos.map((t: any): ChatbotDataTurno => ({
                     fecha: t.Fecha || t.fecha,
@@ -2658,7 +2663,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
                   // Setear estado de flujo para esperar confirmación.
                   // Si el paciente eligió "cancelar y solicitar uno nuevo", marcamos postCancelAction
-                  // para que tras la cancelación exitosa se inicie el flujo de reserva nueva.
+                  // para que tras la cancelaci��n exitosa se inicie el flujo de reserva nueva.
                   await setFlowState(userPhoneNumber, config.id, {
                     type: 'awaiting_cancel_confirmation',
                     createdAt: new Date().toISOString(),
