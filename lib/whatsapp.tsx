@@ -210,6 +210,80 @@ async function sendDirectResponse(
 }
 
 /**
+ * Confirma un turno contra el sistema externo (proxy).
+ * Devuelve true solo si el proxy respondió success === true.
+ * Centraliza el payload de "confirmar_turno" para que todos los caminos de
+ * confirmación (turno único y selección múltiple) impacten en el sistema externo.
+ */
+async function confirmarTurnoEnProxy(
+  config: any,
+  chatbotData: ChatbotData,
+  turnoIndex: number,
+  userPhoneNumber: string
+): Promise<boolean> {
+  const turno = chatbotData.turnos?.[turnoIndex]
+  const dni = chatbotData.paciente?.dni
+  const fecha = turno?.fecha
+
+  if (!config?.proxy || !fecha || !dni) {
+    console.warn("[PROXY] Confirmacion de turno omitida — datos insuficientes", {
+      tieneProxy: !!config?.proxy,
+      tieneFecha: !!fecha,
+      tieneDni: !!dni,
+    })
+    return false
+  }
+
+  try {
+    const confirmPayload = {
+      Cliente_Id: config.cliente_id,
+      Action: "confirmar_turno",
+      fecha,
+      paciente_datos: { dni },
+    }
+    console.info("[PROXY] Enviando confirmacion de turno", { url: config.proxy, payload: confirmPayload })
+    const response = await fetchWithRetry(
+      config.proxy,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(confirmPayload),
+      },
+      TIMEOUTS.PROXY_TIMEOUT,
+      { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
+    )
+
+    let proxyBody: { success?: boolean; [key: string]: unknown } | null = null
+    try {
+      const bodyText = await response.text()
+      proxyBody = bodyText ? JSON.parse(bodyText) : null
+    } catch {
+      proxyBody = null
+    }
+    console.info("[PROXY] Respuesta confirmacion de turno", {
+      httpStatus: response.status,
+      ok: response.ok,
+      body: proxyBody,
+    })
+
+    const proxySuccess = response.ok && proxyBody?.success === true
+    if (proxySuccess && config.cliente_id) {
+      await trackAppointmentEvent({
+        clienteId: config.cliente_id,
+        phoneNumber: userPhoneNumber,
+        eventType: "confirmed",
+        timestamp: new Date().toISOString(),
+        metadata: { source: "user_initiated_menu", turnoIndex, proxyBody },
+      })
+    }
+    return proxySuccess
+  } catch (error) {
+    console.error("[PROXY] Error al confirmar turno", error)
+    return false
+  }
+}
+
+/**
  * Maneja respuestas de doble confirmacion de cancelacion ("1"/"2")
  * Retorna:
  * - false: respuesta no manejada, continuar a OpenAI
@@ -299,16 +373,21 @@ async function handlePendingFlowResponse(
     const turnoIndex = seleccion - 1
 
     if (pendingAction === 'confirm_appointment') {
-      // Confirmar asistencia al turno elegido
+      // Confirmar asistencia al turno elegido — primero impactar en el sistema externo (proxy)
+      const proxySuccess = await confirmarTurnoEnProxy(config, chatbotData, turnoIndex, userPhoneNumber)
+      await clearFlowState(userPhoneNumber, config.id)
+
+      if (!proxySuccess) {
+        await sendDirectResponse(
+          ctx,
+          "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos.",
+          "confirm_flow_error"
+        )
+        return true
+      }
+
       const confirmMsg = buildConfirmationMessage(chatbotData, turnoIndex)
       await sendDirectResponse(ctx, confirmMsg, "confirm_flow")
-      await trackAppointmentEvent({
-        clienteId: config.cliente_id,
-        phoneNumber: userPhoneNumber,
-        eventType: 'confirmed',
-        metadata: { source: 'user_initiated_menu_multi', turnoIndex }
-      })
-      await clearFlowState(userPhoneNumber, config.id)
       return true
     }
 
@@ -2536,17 +2615,19 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   )
                   await sendDirectResponse(detectionCtx, selectionMsg, "turno_selection")
                 } else if (detectionResult.action === 'confirm_appointment') {
-                  // Un solo turno: confirmar asistencia directamente
-                  const confirmMsg = buildConfirmationMessage(chatbotData, 0)
-                  await sendDirectResponse(detectionCtx, confirmMsg, "confirm_flow")
+                  // Un solo turno: confirmar asistencia. Primero impactar en el sistema externo (proxy).
+                  const proxySuccess = await confirmarTurnoEnProxy(config, chatbotData, 0, userPhoneNumber)
 
-                  // Registrar evento de confirmación
-                  await trackAppointmentEvent({
-                    clienteId: config.cliente_id,
-                    phoneNumber: userPhoneNumber,
-                    eventType: 'confirmed',
-                    metadata: { source: 'user_initiated_menu', turnoIndex: 0 }
-                  })
+                  if (proxySuccess) {
+                    const confirmMsg = buildConfirmationMessage(chatbotData, 0)
+                    await sendDirectResponse(detectionCtx, confirmMsg, "confirm_flow")
+                  } else {
+                    await sendDirectResponse(
+                      detectionCtx,
+                      "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos.",
+                      "confirm_flow_error"
+                    )
+                  }
                 } else {
                   // Un solo turno, cancelación (o cancelar+solicitar nuevo): mostrar doble confirmación
                   const wantsBookNew = detectionResult.action === 'cancel_and_book_new_appointment'
