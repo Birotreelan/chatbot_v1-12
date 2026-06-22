@@ -62,7 +62,7 @@ export interface ObraSocialOption {
 }
 
 // Tipo de busqueda
-export type SearchType = 'medico_particular' | 'especialidad' | 'cualquier_medico'
+export type SearchType = 'medico_particular' | 'especialidad' | 'cualquier_medico' | 'cambiar_sede'
 
 // Fases del flujo
 export type FlowPhase =

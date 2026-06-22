@@ -350,7 +350,8 @@ export function buildNoTurnosMessage(
   message += 'Podes intentar con otra busqueda:\n\n'
   message += '1. *Medico en particular* - Buscar con otro profesional\n'
   message += '2. *Por especialidad* - Buscar en otra especialidad\n'
-  message += '3. *Cualquier medico disponible* - Ver turnos mas proximos\n\n'
+  message += '3. *Cualquier medico disponible* - Ver turnos mas proximos\n'
+  message += '4. *Buscar en otra sede* - Elegir una sede distinta\n\n'
   message += 'Responde con el *numero* de la opcion que prefieras.'
 
   return message
