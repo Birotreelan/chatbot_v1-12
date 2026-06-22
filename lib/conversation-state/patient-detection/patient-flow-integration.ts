@@ -40,6 +40,8 @@ export interface PatientDetectionResult {
     patientDNI?: string
     patientLastName?: string
     patientFirstName?: string
+    obraSocialId?: string
+    obraSocialNombre?: string
     turnos?: any[]
     turnosQx?: any[]
   }
