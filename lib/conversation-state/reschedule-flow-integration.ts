@@ -235,10 +235,68 @@ export async function processRescheduleMessage(
   }
 
   // ========================================
-  // CASO 3: Reserva completada exitosamente
+  // CASO 3: Confirmación recibida → RESERVAR en el sistema externo (proxy)
+  // El handler marca el flujo como 'completed', pero la reserva real contra el
+  // proxy se ejecuta aquí. Solo si el proxy confirma se envía el mensaje de
+  // éxito; de lo contrario se revierte a 'awaiting_confirmation' para reintentar.
   // ========================================
   if (result.type === 'completed' && result.state?.turnoReservado) {
-    const successMsg = buildRescheduleSuccessMessage(result.state, result.state.turnoReservado)
+    const st = result.state
+    const turno = st.turnoReservado!
+
+    // Ejecutar la reserva REAL en el sistema externo (proxy)
+    let reservaExito = false
+    let reservaError: string | undefined
+    try {
+      if (!clienteId) {
+        reservaError = "clienteId ausente"
+        console.error("[RESCHEDULE-INTEGRATION] No se puede reservar: clienteId ausente")
+      } else if (!turno.agenda_id) {
+        reservaError = "agenda_id ausente"
+        console.error("[RESCHEDULE-INTEGRATION] No se puede reservar: turno.agenda_id ausente", turno)
+      } else {
+        const { reservarTurno } = await import("../openai-tools")
+        const pacienteDatos: Record<string, unknown> = {
+          dni: st.paciente.dni,
+          nombre: st.paciente.nombres,
+          apellido: st.paciente.apellido,
+          telefono: st.paciente.telefono,
+          ...(st.obra_social_id ? { obra_social_id: st.obra_social_id } : {}),
+        }
+        console.log(`[RESCHEDULE-INTEGRATION] Reservando turno en proxy (Agenda_Id: ${turno.agenda_id})`)
+        const reservaRaw = await reservarTurno(clienteId, turno.agenda_id, pacienteDatos)
+        const parsed = typeof reservaRaw === "string" ? JSON.parse(reservaRaw) : reservaRaw
+        reservaExito = parsed?.exito === true
+        if (!reservaExito) {
+          reservaError = parsed?.error || parsed?.mensaje || "respuesta sin éxito"
+          console.error("[RESCHEDULE-INTEGRATION] El proxy no confirmó la reserva:", reservaError)
+        }
+      }
+    } catch (err) {
+      reservaError = err instanceof Error ? err.message : "error desconocido"
+      console.error("[RESCHEDULE-INTEGRATION] Error reservando turno en el proxy:", err)
+    }
+
+    // Si la reserva falló: revertir a awaiting_confirmation y avisar al usuario
+    if (!reservaExito) {
+      const revertState: RescheduleFlowState = {
+        ...st,
+        phase: 'awaiting_confirmation',
+        turnoReservado: null,
+      }
+      await saveRescheduleState(userPhoneNumber, configId, revertState)
+      await sendRescheduleResponse(
+        ctx,
+        "Hubo un problema al reagendar tu turno. Por favor, respondé *1* para reintentar o contactá a la clínica."
+      )
+      return {
+        handled: true,
+        fallbackToOpenAI: false,
+      }
+    }
+
+    // Reserva exitosa → enviar confirmación
+    const successMsg = buildRescheduleSuccessMessage(st, turno)
     await sendRescheduleResponse(ctx, successMsg)
 
     // Trackear éxito
