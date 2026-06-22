@@ -44,6 +44,22 @@ function formatTime(hora: string): string {
   return hora.substring(0, 5)
 }
 
+/**
+ * Formatea una fecha ISO ("YYYY-MM-DD") como encabezado de día,
+ * replicando el formato del agendamiento: "Miercoles 24 de junio".
+ */
+function formatShortDate(fechaISO: string): string {
+  const diasSemana = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"]
+  const meses = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+  ]
+  const fecha = new Date(fechaISO + "T12:00:00")
+  const dia = diasSemana[fecha.getDay()]
+  const encabezado = `${dia} ${fecha.getDate()} de ${meses[fecha.getMonth()]}`
+  return encabezado.charAt(0).toUpperCase() + encabezado.slice(1)
+}
+
 // ============================================================================
 // TEMPLATES DE REAGENDAMIENTO
 // ============================================================================
@@ -61,10 +77,19 @@ export function buildRescheduleStartMessage(
 
   let message = `${nombre}, estos son los turnos disponibles con ${profesional}:\n\n`
 
+  // Agrupar por fecha preservando el orden e índice global del array.
+  // El número mostrado DEBE coincidir con (index + 1) porque la selección
+  // resuelve el turno como turnosDisponibles[numero - 1].
+  let fechaActual: string | null = null
   turnosDisponibles.forEach((turno, index) => {
-    const fecha = turno.fecha_formateada || turno.fecha
+    if (turno.fecha !== fechaActual) {
+      fechaActual = turno.fecha
+      if (index > 0) message += `\n`
+      message += `*${formatShortDate(turno.fecha)}*\n`
+    }
     const hora = turno.hora_formateada || formatTime(turno.hora)
-    message += `${index + 1}. ${fecha} - ${hora} hs\n`
+    const prof = turno.profesional || profesional
+    message += `  ${index + 1}. ${hora} - ${prof}\n`
   })
 
   message += `\nResponde con el número del turno que queres reservar.`
