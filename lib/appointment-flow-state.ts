@@ -74,6 +74,7 @@ export type FlowStateType =
   | 'awaiting_reschedule_choice'
   | 'awaiting_cancel_and_reschedule_confirm'
   | 'awaiting_turno_selection'
+  | 'awaiting_cancel_all_confirmation'
 
 // Acción pendiente que se ejecutará una vez que el paciente elija sobre cuál turno operar
 // (cuando tiene más de un turno activo).
@@ -316,7 +317,7 @@ export async function getFlowState(
     }
     
     // Si sigue sin tipo reconocido, descartar el estado para evitar bucles
-    if (!raw || !raw.type || (raw.type !== 'awaiting_cancel_confirmation' && raw.type !== 'awaiting_reschedule_choice' && raw.type !== 'awaiting_cancel_and_reschedule_confirm' && raw.type !== 'awaiting_turno_selection')) {
+    if (!raw || !raw.type || (raw.type !== 'awaiting_cancel_confirmation' && raw.type !== 'awaiting_reschedule_choice' && raw.type !== 'awaiting_cancel_and_reschedule_confirm' && raw.type !== 'awaiting_turno_selection' && raw.type !== 'awaiting_cancel_all_confirmation')) {
       console.warn(`[APPOINTMENT-FLOW] Estado de flujo corrupto o desconocido descartado para ${phone}:`, raw)
       // Limpiar la clave para evitar que bloquee futuras requests
       const redis2 = getRedisClient()

@@ -169,11 +169,52 @@ export function buildTurnoSelectionMessage(
     })
     .join("\n")
 
+  // Para las acciones de cancelación ofrecemos además "cancelar todos" como última opción.
+  const esCancelacion = accion === "cancel_appointment" || accion === "cancel_and_book_new_appointment"
+  const opcionCancelarTodos = esCancelacion
+    ? `\n${chatbotData.turnos.length + 1}- Cancelar todos los turnos agendados.`
+    : ""
+
   return `${nombre}, tenés más de un turno agendado. ¿Cuál querés ${verbo}?
+
+${lineasTurnos}${opcionCancelarTodos}
+
+Respondé con el número del turno que prefieras.`
+}
+
+/**
+ * Doble confirmación para cancelar TODOS los turnos del paciente.
+ */
+export function buildCancelAllDoubleConfirmMessage(chatbotData: ChatbotData): string {
+  const nombre = formatPatientName(chatbotData)
+
+  const lineasTurnos = chatbotData.turnos
+    .map((turno, i) => {
+      const fechaCompleta = formatFullDate(turno.fecha)
+      const hora = formatTime(turno.hora)
+      const profesional = turno.profesional || ""
+      const sede = turno.sede || ""
+      return `${i + 1}- ${fechaCompleta} a las ${hora} con ${profesional}${sede ? ` (${sede})` : ""}`
+    })
+    .join("\n")
+
+  return `${nombre}, vas a cancelar TODOS tus turnos agendados:
 
 ${lineasTurnos}
 
-Respondé con el número del turno que prefieras.`
+Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
+1- Sí, cancelar todos los turnos
+2- No, mantener los turnos`
+}
+
+/**
+ * Mensaje de cancelación exitosa de todos los turnos.
+ */
+export function buildCancelAllSuccessMessage(chatbotData: ChatbotData): string {
+  const nombre = formatPatientName(chatbotData)
+  return `Listo, ${nombre}. Cancelamos todos tus turnos agendados correctamente.
+
+Si querés agendar un nuevo turno, escribime cuando quieras.`
 }
 
 /**

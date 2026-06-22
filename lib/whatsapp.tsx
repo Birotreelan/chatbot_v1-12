@@ -34,6 +34,8 @@ import {
   buildCancelDoubleConfirmMessage,
   buildCancellationSuccessMessage,
   buildTurnoSelectionMessage,
+  buildCancelAllDoubleConfirmMessage,
+  buildCancelAllSuccessMessage,
   buildKeepAppointmentMessage,
   buildNoRescheduleMessage,
   buildNoRescheduleMessageFallback,
@@ -258,16 +260,22 @@ async function handlePendingFlowResponse(
       return false
     }
 
+    const pendingAction = flowState.pendingAction || 'cancel_appointment'
+    const esCancelacion = pendingAction === 'cancel_appointment' || pendingAction === 'cancel_and_book_new_appointment'
+    // Para las acciones de cancelación existe una opción extra "cancelar todos" al final
+    const opcionCancelarTodos = esCancelacion ? chatbotData.turnos.length + 1 : null
+    const maxOpcion = opcionCancelarTodos ?? chatbotData.turnos.length
+
     // Extraer el primer número del mensaje (ej: "2", "el 2", "quiero el 2")
     const match = userMessage.match(/\d+/)
     const seleccion = match ? parseInt(match[0], 10) : NaN
 
-    if (isNaN(seleccion) || seleccion < 1 || seleccion > chatbotData.turnos.length) {
+    if (isNaN(seleccion) || seleccion < 1 || seleccion > maxOpcion) {
       // Selección inválida: re-mostrar la lista sin cambiar el estado
       logger.warn("Selección de turno inválida", { userMessage, total: chatbotData.turnos.length })
       const retryMsg = buildTurnoSelectionMessage(
         chatbotData,
-        (flowState.pendingAction || 'cancel_appointment') as
+        pendingAction as
           | 'confirm_appointment'
           | 'cancel_appointment'
           | 'cancel_and_book_new_appointment'
@@ -276,8 +284,19 @@ async function handlePendingFlowResponse(
       return true
     }
 
+    // El paciente eligió "cancelar todos los turnos agendados"
+    if (opcionCancelarTodos !== null && seleccion === opcionCancelarTodos) {
+      logger.info("Paciente eligió cancelar TODOS los turnos", { total: chatbotData.turnos.length })
+      await setFlowState(userPhoneNumber, config.id, {
+        type: 'awaiting_cancel_all_confirmation',
+        createdAt: new Date().toISOString(),
+      })
+      const confirmAllMsg = buildCancelAllDoubleConfirmMessage(chatbotData)
+      await sendDirectResponse(ctx, confirmAllMsg, "cancel_all_flow")
+      return true
+    }
+
     const turnoIndex = seleccion - 1
-    const pendingAction = flowState.pendingAction || 'cancel_appointment'
 
     if (pendingAction === 'confirm_appointment') {
       // Confirmar asistencia al turno elegido
@@ -303,6 +322,114 @@ async function handlePendingFlowResponse(
     })
     const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex)
     await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_flow")
+    return true
+  }
+
+  // Doble confirmación para cancelar TODOS los turnos del paciente.
+  if (flowState.type === 'awaiting_cancel_all_confirmation') {
+    if (!chatbotData || !chatbotData.turnos || chatbotData.turnos.length === 0) {
+      logger.warn("No hay contexto de turnos para awaiting_cancel_all_confirmation, pasando a OpenAI")
+      await clearFlowState(userPhoneNumber, config.id)
+      return false
+    }
+
+    if (isKeepAppointmentResponse(userMessage)) {
+      logger.info("Usuario decide mantener todos los turnos")
+      await clearFlowState(userPhoneNumber, config.id)
+      await sendDirectResponse(ctx, "Perfecto, mantenemos todos tus turnos agendados. ¿En qué más te puedo ayudar?", "cancel_all_flow")
+      return true
+    }
+
+    if (!isConfirmCancelResponse(userMessage)) {
+      // Respuesta no reconocida: re-mostrar la doble confirmación
+      logger.warn("Respuesta no reconocida en awaiting_cancel_all_confirmation", { userMessage })
+      const retryMsg = buildCancelAllDoubleConfirmMessage(chatbotData)
+      await sendDirectResponse(ctx, retryMsg, "cancel_all_flow")
+      return true
+    }
+
+    // Confirmado: cancelar todos los turnos uno por uno vía proxy
+    logger.info("Cancelando TODOS los turnos", { total: chatbotData.turnos.length })
+    const totalTurnos = chatbotData.turnos.length
+    let cancelados = 0
+    const fallidos: string[] = []
+
+    for (const turno of chatbotData.turnos) {
+      try {
+        const proxyPayload = {
+          Cliente_Id: config.cliente_id,
+          Action: "cancelar_turno",
+          fecha: turno?.fecha,
+          paciente_datos: {
+            dni: chatbotData.paciente?.dni,
+          },
+        }
+        const response = await fetchWithRetry(
+          config.proxy,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(proxyPayload),
+          },
+          TIMEOUTS.PROXY_TIMEOUT,
+          { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
+        )
+
+        let proxyBody: { success?: boolean; [key: string]: unknown } | null = null
+        try {
+          const bodyText = await response.text()
+          proxyBody = bodyText ? JSON.parse(bodyText) : null
+        } catch {
+          proxyBody = null
+        }
+
+        if (response.ok && proxyBody?.success === true) {
+          cancelados++
+          if (config.cliente_id) {
+            await trackAppointmentEvent({
+              clienteId: config.cliente_id,
+              phoneNumber: userPhoneNumber,
+              eventType: "cancelled",
+              timestamp: new Date().toISOString(),
+              metadata: { source: "cancel_all", proxyBody },
+            })
+          }
+        } else {
+          logger.error("Falló cancelación de un turno en cancelar-todos", undefined, {
+            fecha: turno?.fecha,
+            httpStatus: response.status,
+            body: proxyBody,
+          })
+          fallidos.push(`${turno?.fecha_formateada || turno?.fecha} a las ${turno?.hora_formateada || turno?.hora}`)
+        }
+      } catch (error) {
+        logger.error("Error al cancelar un turno en cancelar-todos", error as Error)
+        fallidos.push(`${turno?.fecha_formateada || turno?.fecha} a las ${turno?.hora_formateada || turno?.hora}`)
+      }
+    }
+
+    await clearFlowState(userPhoneNumber, config.id)
+
+    if (cancelados === totalTurnos) {
+      // Todos cancelados con éxito: limpiar contexto por completo
+      await clearAppointmentContext(userPhoneNumber, config.id)
+      const successMsg = buildCancelAllSuccessMessage(chatbotData)
+      await sendDirectResponse(ctx, successMsg, "cancel_all_flow")
+    } else if (cancelados > 0) {
+      // Cancelación parcial
+      await sendDirectResponse(
+        ctx,
+        `Cancelamos ${cancelados} de ${totalTurnos} turnos. No pudimos cancelar: ${fallidos.join("; ")}. Por favor intentá de nuevo en unos momentos o comunicate con la clínica.`,
+        "cancel_all_flow"
+      )
+    } else {
+      // Ninguno cancelado
+      await sendDirectResponse(
+        ctx,
+        "Hubo un problema al cancelar tus turnos. Por favor intentá de nuevo en unos momentos.",
+        "cancel_all_flow"
+      )
+    }
     return true
   }
 
