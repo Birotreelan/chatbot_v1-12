@@ -63,7 +63,12 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
   if (!redis) return
 
   const statsKey = `${APPOINTMENT_STATS_PREFIX}${clienteId}`
-  const eventDate = new Date(event.timestamp)
+  // Fallback defensivo: si el timestamp falta o es inválido, usar el momento actual
+  // para evitar "RangeError: Invalid time value" al llamar toISOString().
+  let eventDate = new Date(event.timestamp)
+  if (isNaN(eventDate.getTime())) {
+    eventDate = new Date()
+  }
   const date = eventDate.toISOString().split("T")[0] // YYYY-MM-DD en UTC
 
   try {
