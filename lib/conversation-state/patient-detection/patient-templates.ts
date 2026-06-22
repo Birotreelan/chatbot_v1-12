@@ -223,7 +223,7 @@ function buildExistingPatientNoTurnosGreeting(
     `1- Solicitar turno médico\n` +
     `2- Solicitar turno para un familiar\n` +
     `3- Realizar otra consulta\n\n` +
-    `Por favor, respondé con el *número* de opción que prefieras.`
+    `Por favor, respondé con el número de opción que prefieras.`
   )
 }
 
