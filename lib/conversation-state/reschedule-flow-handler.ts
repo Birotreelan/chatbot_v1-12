@@ -258,7 +258,18 @@ export async function initRescheduleFlow(
     }
   }
 
-  const turno = chatbotData.turnos[0]
+  // Fuente del turno original: cuando se llega aquí tras "cancelar y reagendar"
+  // (clearAppointmentTurnos), turnos[] está vacío y los datos viven en turno_cancelado.
+  // Usamos turnos[0] si existe, con fallback a turno_cancelado.
+  const turno = chatbotData.turnos?.[0] || chatbotData.turno_cancelado
+  if (!turno) {
+    console.error(`[RESCHEDULE-FLOW] No hay turno de origen (turnos[] vacío y sin turno_cancelado)`)
+    return {
+      type: 'error',
+      message: "Lo siento, hubo un error al iniciar el reagendamiento. Por favor, intentá nuevamente.",
+    }
+  }
+
   const state: RescheduleFlowState = {
     phase: 'showing_turns',
     paciente: {
@@ -268,7 +279,7 @@ export async function initRescheduleFlow(
       telefono: chatbotData.paciente.telefono,
     },
     profesional_id: turno.profesional_id,
-    sede_id: chatbotData.sede_id,
+    sede_id: chatbotData.sede_id || (turno as any).sede_id,
     turnosCancelado: {
       fecha: turno.fecha,
       hora: turno.hora,
