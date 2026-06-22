@@ -625,6 +625,11 @@ async function handlePendingFlowResponse(
           // clearPatientDetectionFlow además persiste la identidad del paciente por 1h.
           await clearPatientDetectionFlow(userPhoneNumber, config.id)
 
+          // Pasar explícitamente nombre/apellido y obra social en additionalPatientData.
+          // IMPORTANTE: clearPatientDetectionFlow (arriba) borró el estado de detección, por lo
+          // que initializeExistingPatientFlow ya NO puede recuperar firstName/lastName vía
+          // getDetectedPatientInfo. Sin esto, el resumen final "DATOS DEL PACIENTE" queda vacío.
+          // chatbotData.paciente tiene nombres + apellido del turno cancelado.
           const bookingResult = await initializeExistingPatientFlow(
             userPhoneNumber,
             identified?.patientId || "",
@@ -632,9 +637,12 @@ async function handlePendingFlowResponse(
             identified?.patientDNI || chatbotData.paciente?.dni || "",
             undefined,
             config.cliente_id,
-            identified?.obraSocialId
-              ? { obraSocialId: identified.obraSocialId, obraSocialNombre: identified.obraSocialNombre }
-              : undefined,
+            {
+              patientFirstName: chatbotData.paciente?.nombres || undefined,
+              patientLastName: chatbotData.paciente?.apellido || undefined,
+              obraSocialId: identified?.obraSocialId,
+              obraSocialNombre: identified?.obraSocialNombre,
+            },
             config.escalationPhoneNumber
           )
 
