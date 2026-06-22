@@ -668,11 +668,12 @@ export async function processPatientDetectionMessage(
       let actionMap: Record<number, string>
 
       if (hasTurnos) {
-        // Paciente con turnos médicos: 1-Confirmar, 2-Cancelar, 3-Nuevo turno, 4-Otra consulta
+        // Paciente con turnos médicos: 1-Confirmar, 2-Cancelar,
+        // 3-Cancelar y solicitar uno nuevo (debe cancelar antes de poder agendar), 4-Otra consulta
         actionMap = {
           1: 'confirm_appointment',
           2: 'cancel_appointment',
-          3: 'book_new_appointment',
+          3: 'cancel_and_book_new_appointment',
           4: 'other_inquiry_intent',
         }
       } else if (soloQx) {

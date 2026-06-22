@@ -86,8 +86,8 @@ export const EXISTING_PATIENT_SINGLE_TURNO_MENU: MenuOption[] = [
   },
   {
     index: 3,
-    label: 'Solicitar otro turno médico',
-    keywords: ['otro', 'nuevo', 'turno', 'agendar', 'otro turno', 'another', 'más turnos'],
+    label: 'Cancelar el turno médico y solicitar uno nuevo',
+    keywords: ['otro', 'nuevo', 'agendar', 'otro turno', 'another', 'más turnos', 'cancelar y', 'cambiar turno', 'reprogramar', 'cancelar otro'],
   },
   {
     index: 4,
@@ -112,8 +112,8 @@ export const EXISTING_PATIENT_MULTIPLE_TURNOS_MENU: MenuOption[] = [
   },
   {
     index: 3,
-    label: 'Solicitar otro turno médico',
-    keywords: ['otro', 'nuevo', 'turno', 'agendar', 'otro turno'],
+    label: 'Cancelar un turno y solicitar uno nuevo',
+    keywords: ['otro', 'nuevo', 'agendar', 'otro turno', 'cancelar y', 'cambiar turno', 'reprogramar', 'cancelar otro'],
   },
   {
     index: 4,
