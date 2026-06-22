@@ -128,9 +128,9 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es reagendar → mostrar menú
+    // Si es reagendar → mostrar menú de 2 opciones (con turno activo, debe cancelar primero)
     if (classificationResult.intent === "reagendar_turno") {
-      const response = buildMenuResponse(appointmentContext, classificationResult.response)
+      const response = buildCancelAndRescheduleMenuResponse(appointmentContext, classificationResult.response)
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -138,9 +138,10 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es queja/frustración → respuesta empática de GPT + menú estándar
+    // Si es queja/frustración → solo respuesta empática, sin menú
+    // Adjuntar el menú encima de una queja produce efecto de "ignorar al paciente"
     if (classificationResult.intent === "queja_frustracion") {
-      const response = buildMenuResponse(appointmentContext, classificationResult.response)
+      const response = classificationResult.response || "Lamentamos los inconvenientes. Estamos trabajando para mejorar. Si necesitás ayuda con tu turno, escribinos cuando quieras."
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -148,9 +149,10 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es explicación contextual → respuesta empática de GPT + menú estándar
+    // Si es explicación contextual → solo respuesta empática, sin menú
+    // El paciente está informando un motivo, no tomando una acción sobre el turno
     if (classificationResult.intent === "explicacion_contextual") {
-      const response = buildMenuResponse(appointmentContext, classificationResult.response)
+      const response = classificationResult.response || "Entendemos la situación, gracias por avisarnos. Si necesitás hacer algún cambio en tu turno, podés indicarnos qué preferís."
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -441,13 +443,25 @@ function extractTurnoData(appointmentContext: any): {
 }
 
 /**
- * Menú estándar de opciones (consistente con el resto del sistema)
+ * Menú estándar de opciones para cancelación (confirmar cancelación)
  */
 const MENU_OPCIONES = `¿En qué te podemos ayudar?
 
 1- Confirmar asistencia al turno médico
 2- Cancelar el turno médico
 3- Solicitar otro turno médico
+
+Respondé con el número de opción que prefieras.`
+
+/**
+ * Menú de 2 opciones para cuando el paciente quiere reagendar con turno activo.
+ * La opción 2 incluye explícitamente que primero se cancela y luego se agenda el nuevo.
+ * Esto evita que el paciente tenga dos turnos activos simultáneamente.
+ */
+const MENU_REAGENDAR_CON_TURNO_ACTIVO = `¿Qué preferís hacer?
+
+1- Confirmar asistencia al turno médico
+2- Cancelar el turno médico y solicitar uno nuevo
 
 Respondé con el número de opción que prefieras.`
 
@@ -479,6 +493,23 @@ function buildMenuResponse(appointmentContext: any, gptResponse?: string): strin
 Veo que tenés un turno programado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
 
 ${MENU_OPCIONES}`
+}
+
+/**
+ * Respuesta empática (de GPT) + menú de 2 opciones para reagendar con turno activo.
+ * El turno activo no puede omitirse: primero se cancela, luego se agenda el nuevo.
+ */
+function buildCancelAndRescheduleMenuResponse(appointmentContext: any, gptResponse?: string): string {
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
+
+  const empaticResponse = gptResponse || "Entendemos que necesitás cambiar la fecha del turno."
+
+  return `${empaticResponse}
+
+Veo que tenés un turno programado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
+
+${MENU_REAGENDAR_CON_TURNO_ACTIVO}`
 }
 
 /**

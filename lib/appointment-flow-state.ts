@@ -69,9 +69,10 @@ export interface ChatbotData {
   turno_cancelado?: ChatbotDataTurnoCancelado
 }
 
-export type FlowStateType = 
+export type FlowStateType =
   | 'awaiting_cancel_confirmation'
   | 'awaiting_reschedule_choice'
+  | 'awaiting_cancel_and_reschedule_confirm'
 
 export interface FlowState {
   type: FlowStateType
@@ -301,7 +302,7 @@ export async function getFlowState(
     }
     
     // Si sigue sin tipo reconocido, descartar el estado para evitar bucles
-    if (!raw || !raw.type || (raw.type !== 'awaiting_cancel_confirmation' && raw.type !== 'awaiting_reschedule_choice')) {
+    if (!raw || !raw.type || (raw.type !== 'awaiting_cancel_confirmation' && raw.type !== 'awaiting_reschedule_choice' && raw.type !== 'awaiting_cancel_and_reschedule_confirm')) {
       console.warn(`[APPOINTMENT-FLOW] Estado de flujo corrupto o desconocido descartado para ${phone}:`, raw)
       // Limpiar la clave para evitar que bloquee futuras requests
       const redis2 = getRedisClient()
@@ -404,6 +405,39 @@ export function isRescheduleChoice(message: string): 'reschedule' | 'no_reschedu
   // No quiere reagendar
   if (/^2\.?$/.test(normalized) || /no\s*(quiero\s*)?reagendar/.test(normalized)) {
     return 'no_reschedule'
+  }
+
+  return null
+}
+
+/**
+ * Detecta la elección del paciente en el menú de 2 opciones para reagendar
+ * cuando hay un turno activo (debe cancelar primero y luego sacar uno nuevo).
+ *
+ * Menú mostrado:
+ *   1- Confirmar asistencia al turno médico
+ *   2- Cancelar el turno médico y solicitar uno nuevo
+ *
+ * Retorna:
+ *   'confirm_attendance' → El paciente quiere confirmar asistencia (opción 1)
+ *   'cancel_and_reschedule' → El paciente quiere cancelar y sacar turno nuevo (opción 2)
+ *   null → No se reconoció la respuesta
+ */
+export function isCancelAndRescheduleChoice(message: string): 'confirm_attendance' | 'cancel_and_reschedule' | null {
+  const normalized = message
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+
+  // Opción 1: confirmar asistencia
+  if (/^1\.?$/.test(normalized) || /confirm|asistir|asistire|ahi voy|ahi estare|voy a ir/.test(normalized)) {
+    return 'confirm_attendance'
+  }
+
+  // Opción 2: cancelar y sacar nuevo turno
+  if (/^2\.?$/.test(normalized) || /cancel|nuevo turno|otro turno|cambiar|cambio|reagendar/.test(normalized)) {
+    return 'cancel_and_reschedule'
   }
 
   return null
