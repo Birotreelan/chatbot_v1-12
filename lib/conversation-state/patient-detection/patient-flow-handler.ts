@@ -6,6 +6,7 @@ import {
   NEW_PATIENT_MENU,
   EXISTING_PATIENT_NO_TURNOS_MENU,
   EXISTING_PATIENT_SINGLE_TURNO_MENU,
+  EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU,
   EXISTING_PATIENT_MULTIPLE_TURNOS_MENU,
 } from './menu-option-detector'
 
@@ -665,16 +666,32 @@ export async function processPatientDetectionMessage(
       const hasTurnosQx = state.turnosQx && state.turnosQx.length > 0
       const soloQx = !hasTurnos && hasTurnosQx
 
+      // Turno único NO confirmado (pendiente de aprobación): la confirmación de
+      // asistencia no está disponible, por eso se omite la opción 1 y se renumera.
+      const singleTurno = hasTurnos && state.turnos!.length === 1 ? state.turnos![0] : null
+      const singleTurnoNoConfirmado =
+        !!singleTurno &&
+        String(singleTurno.Estado || singleTurno.estado || '').toLowerCase() !== 'confirmado'
+
       let actionMap: Record<number, string>
 
       if (hasTurnos) {
-        // Paciente con turnos médicos: 1-Confirmar, 2-Cancelar,
-        // 3-Cancelar y solicitar uno nuevo (debe cancelar antes de poder agendar), 4-Otra consulta
-        actionMap = {
-          1: 'confirm_appointment',
-          2: 'cancel_appointment',
-          3: 'cancel_and_book_new_appointment',
-          4: 'other_inquiry_intent',
+        if (singleTurnoNoConfirmado) {
+          // Turno no confirmado: 1-Cancelar, 2-Cancelar y solicitar uno nuevo, 3-Otra consulta
+          actionMap = {
+            1: 'cancel_appointment',
+            2: 'cancel_and_book_new_appointment',
+            3: 'other_inquiry_intent',
+          }
+        } else {
+          // Paciente con turnos médicos confirmados: 1-Confirmar, 2-Cancelar,
+          // 3-Cancelar y solicitar uno nuevo (debe cancelar antes de poder agendar), 4-Otra consulta
+          actionMap = {
+            1: 'confirm_appointment',
+            2: 'cancel_appointment',
+            3: 'cancel_and_book_new_appointment',
+            4: 'other_inquiry_intent',
+          }
         }
       } else if (soloQx) {
         // Paciente SOLO con cirugías (no gestionables): 1-Solicitar turno, 2-Familiar, 3-Otra consulta
@@ -742,9 +759,15 @@ export async function processPatientDetectionMessage(
       menuOptions = NEW_PATIENT_MENU
     } else if (state.phase === 'awaiting_action_selection') {
       const hasTurnos = state.turnos && state.turnos.length > 0
-      if (hasTurnos && state.turnos.length === 1) {
-        menuOptions = EXISTING_PATIENT_SINGLE_TURNO_MENU
-      } else if (hasTurnos && state.turnos.length > 1) {
+      if (hasTurnos && state.turnos!.length === 1) {
+        const turnoEstado = String(
+          state.turnos![0].Estado || state.turnos![0].estado || ''
+        ).toLowerCase()
+        menuOptions =
+          turnoEstado === 'confirmado'
+            ? EXISTING_PATIENT_SINGLE_TURNO_MENU
+            : EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU
+      } else if (hasTurnos && state.turnos!.length > 1) {
         menuOptions = EXISTING_PATIENT_MULTIPLE_TURNOS_MENU
       } else {
         menuOptions = EXISTING_PATIENT_NO_TURNOS_MENU
@@ -798,14 +821,28 @@ export async function processPatientDetectionMessage(
         const hasTurnosQx = state.turnosQx && state.turnosQx.length > 0
         const soloQx = !hasTurnos && hasTurnosQx
 
+        // Turno único NO confirmado: se omite "Confirmar asistencia" y se renumera.
+        const singleTurno = hasTurnos && state.turnos!.length === 1 ? state.turnos![0] : null
+        const singleTurnoNoConfirmado =
+          !!singleTurno &&
+          String(singleTurno.Estado || singleTurno.estado || '').toLowerCase() !== 'confirmado'
+
         let actionMap: Record<number, string>
 
         if (hasTurnos) {
-          actionMap = {
-            1: 'confirm_appointment',
-            2: 'cancel_appointment',
-            3: 'book_new_appointment',
-            4: 'other_inquiry_intent',
+          if (singleTurnoNoConfirmado) {
+            actionMap = {
+              1: 'cancel_appointment',
+              2: 'book_new_appointment',
+              3: 'other_inquiry_intent',
+            }
+          } else {
+            actionMap = {
+              1: 'confirm_appointment',
+              2: 'cancel_appointment',
+              3: 'book_new_appointment',
+              4: 'other_inquiry_intent',
+            }
           }
         } else if (soloQx) {
           actionMap = {

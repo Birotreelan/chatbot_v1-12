@@ -271,11 +271,12 @@ function buildSingleTurnoGreeting(
     } else {
       mensaje += `*Veo que ya tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
     }
+    // La confirmación de asistencia solo está disponible cuando el turno está Confirmado,
+    // por eso aquí (turno no confirmado) se omite esa opción.
     mensaje += `¿En qué te podemos ayudar?\n\n`
-    mensaje += `1- Confirmar asistencia al turno médico\n`
-    mensaje += `2- Cancelar turno médico\n`
-    mensaje += `3- Cancelar el turno médico y solicitar uno nuevo\n`
-    mensaje += `4- Realizar otra consulta\n\n`
+    mensaje += `1- Cancelar turno médico\n`
+    mensaje += `2- Cancelar el turno médico y solicitar uno nuevo\n`
+    mensaje += `3- Realizar otra consulta\n\n`
   }
 
   mensaje += `Respondé con el número de opción que prefieras.`
