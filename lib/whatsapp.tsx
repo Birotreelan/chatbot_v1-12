@@ -606,8 +606,11 @@ async function handlePendingFlowResponse(
         if (flowState.postCancelAction === 'book_new') {
           logger.info("Cancelacion exitosa, iniciando flujo de reserva nueva (postCancelAction=book_new)")
 
-          // Confirmar la cancelación antes de iniciar la reserva nueva
-          const cancelMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
+          // Confirmar la cancelación antes de iniciar la reserva nueva.
+          // includeRescheduleOffer=false: el paciente ya eligió "cancelar y solicitar uno nuevo",
+          // por lo que NO se muestra el menú de reagendamiento (1. Reagendar / 2. No reagendar);
+          // en su lugar transicionamos directamente al flujo de reserva (selección de sede).
+          const cancelMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0, false)
           await sendDirectResponse(ctx, cancelMsg, "cancel_and_book_new")
 
           // Recuperar identificadores del paciente desde el cache de detección
