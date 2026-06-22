@@ -446,86 +446,151 @@ async function handlePendingFlowResponse(
     // Menú de 2 opciones mostrado cuando el paciente quiere reagendar con turno activo:
     //   1- Confirmar asistencia al turno médico
     //   2- Cancelar el turno médico y solicitar uno nuevo
+    if (!chatbotData) {
+      logger.warn("No hay contexto de turno en cancel_and_reschedule, pasando a OpenAI")
+      await clearFlowState(userPhoneNumber, config.id)
+      return false
+    }
+
     const choice = isCancelAndRescheduleChoice(userMessage)
 
     if (choice === 'confirm_attendance') {
-      // El paciente decidió confirmar asistencia al turno existente
-      if (!chatbotData) {
-        logger.warn("No hay contexto de turno para confirmar asistencia, pasando a OpenAI")
+      // El paciente decidió confirmar asistencia al turno existente.
+      // Llamar al proxy PRIMERO (mismo patrón que el flujo de confirmación directo).
+      try {
+        const turnoAConfirmar = chatbotData.turnos[flowState.turnoIndex || 0]
+        const confirmPayload = {
+          Cliente_Id: config.cliente_id,
+          Action: "confirmar_turno",
+          fecha: turnoAConfirmar?.fecha,
+          paciente_datos: {
+            dni: chatbotData.paciente?.dni,
+          },
+        }
+        logger.info("Enviando confirmacion al proxy (desde menú reagendar)")
+        const response = await fetchWithRetry(
+          config.proxy,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(confirmPayload),
+          },
+          TIMEOUTS.PROXY_TIMEOUT,
+          { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
+        )
+
+        let proxyBody: { success?: boolean; [key: string]: unknown } | null = null
+        try {
+          const bodyText = await response.text()
+          proxyBody = bodyText ? JSON.parse(bodyText) : null
+        } catch {
+          proxyBody = null
+        }
+
+        const proxySuccess = response.ok && proxyBody?.success === true
+
         await clearFlowState(userPhoneNumber, config.id)
-        return false
+
+        if (!proxySuccess) {
+          logger.error("El proxy no confirmó el turno (menú reagendar)", undefined, {
+            httpStatus: response.status,
+            body: proxyBody,
+          })
+          await sendDirectResponse(ctx, "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos.", "cancel_reschedule_confirm_error")
+          return true
+        }
+
+        const confirmMsg = buildConfirmationMessage(chatbotData, flowState.turnoIndex || 0)
+        await sendDirectResponse(ctx, confirmMsg, "awaiting_cancel_and_reschedule_confirm")
+        return true
+      } catch (error) {
+        logger.error("Error al confirmar via proxy (menú reagendar)", error as Error)
+        await clearFlowState(userPhoneNumber, config.id)
+        await sendDirectResponse(ctx, "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos.", "cancel_reschedule_confirm_error")
+        return true
       }
-      logger.info("Usuario confirmó asistencia al turno (desde menú reagendar)")
-      await clearFlowState(userPhoneNumber, config.id)
-      const turnoACancelar = chatbotData.turnos[flowState.turnoIndex || 0]
-      const confirmMsg = buildConfirmationMessage(chatbotData, turnoACancelar)
-      await sendDirectResponse(ctx, confirmMsg, "awaiting_cancel_and_reschedule_confirm")
-      return true
 
     } else if (choice === 'cancel_and_reschedule') {
-      // El paciente quiere cancelar el turno activo y luego sacar uno nuevo
-      // Primero ejecutar la cancelación, luego redirigir al flujo de reagendamiento
-      if (!chatbotData) {
-        logger.warn("No hay contexto de turno para cancelar y reagendar, pasando a OpenAI")
-        await clearFlowState(userPhoneNumber, config.id)
-        return false
-      }
-      logger.info("Usuario quiere cancelar turno activo y solicitar uno nuevo")
-
+      // El paciente quiere cancelar el turno activo y luego sacar uno nuevo.
+      // Mismo patrón de cancelación que awaiting_cancel_confirmation, y al terminar
+      // se redirige al flujo de reagendamiento usando turno_cancelado (Sprint 41).
       try {
         const turnoACancelar = chatbotData.turnos[flowState.turnoIndex || 0]
         const proxyPayload = {
           Cliente_Id: config.cliente_id,
           Action: "cancelar_turno",
           fecha: turnoACancelar?.fecha,
-          agenda_id: turnoACancelar?.agenda_id,
-          profesional_id: turnoACancelar?.profesional_id,
+          paciente_datos: {
+            dni: chatbotData.paciente?.dni,
+          },
         }
-        const proxyUrl = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL
-        const appointmentId = turnoACancelar?.agenda_id
 
-        let proxySuccess = false
-        if (proxyUrl && appointmentId) {
-          const proxyResponse = await fetch(proxyUrl, {
+        logger.info("Enviando cancelacion al proxy (cancel_and_reschedule)")
+        const response = await fetchWithRetry(
+          config.proxy,
+          {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(proxyPayload),
-          })
-          proxySuccess = proxyResponse.ok
-        } else {
-          logger.warn("[PROXY] Cancelación omitida en cancel_and_reschedule", { tieneProxyUrl: !!proxyUrl, tieneAppointmentId: !!appointmentId })
+          },
+          TIMEOUTS.PROXY_TIMEOUT,
+          { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
+        )
+
+        let proxyBody: { success?: boolean; [key: string]: unknown } | null = null
+        try {
+          const bodyText = await response.text()
+          proxyBody = bodyText ? JSON.parse(bodyText) : null
+        } catch {
+          proxyBody = null
         }
 
-        if (proxySuccess || (!proxyUrl && !appointmentId)) {
-          // Cancelación exitosa (o sin proxy configurado): limpiar turno y redirigir a reagendamiento
-          await clearFlowState(userPhoneNumber, config.id)
-          await clearAppointmentTurnos(userPhoneNumber, config.id, flowState.turnoIndex || 0)
+        const proxySuccess = response.ok && proxyBody?.success === true
 
-          // Releer chatbotData actualizado desde Redis (clearAppointmentTurnos escribe en Redis)
-          const updatedChatbotData = await getAppointmentContext(userPhoneNumber, config.id)
-
-          return {
-            type: 'route_to_reagendamiento',
-            chatbotData: updatedChatbotData || chatbotData,
-            turnoIndex: flowState.turnoIndex || 0
-          }
-        } else {
-          // Error en la cancelación: informar al usuario
-          await clearFlowState(userPhoneNumber, config.id)
-          const errorMsg = `Hubo un inconveniente al procesar la cancelación. Por favor, intentá nuevamente o comunicate con la clínica.`
-          await sendDirectResponse(ctx, errorMsg, "awaiting_cancel_and_reschedule_confirm")
+        if (!proxySuccess) {
+          logger.error("El proxy no confirmó la cancelacion (cancel_and_reschedule)", undefined, {
+            httpStatus: response.status,
+            body: proxyBody,
+          })
+          // NO limpiar flowState: mantener contexto para reintento
+          await sendDirectResponse(ctx, "Hubo un problema al cancelar el turno. Por favor intentá de nuevo en unos momentos.", "cancel_reschedule_proxy_error")
           return true
         }
-      } catch (err) {
-        logger.error("Error al cancelar en cancel_and_reschedule:", { err })
+
+        // Cancelación exitosa: tracking + limpieza selectiva preservando turno_cancelado
+        if (config.cliente_id) {
+          const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+          await trackAppointmentEvent({
+            clienteId: config.cliente_id,
+            phoneNumber: userPhoneNumber,
+            eventType: "cancelled",
+            timestamp: new Date().toISOString(),
+            templateSentAt: templateSentAt || undefined,
+            metadata: { source: "cancel_and_reschedule", proxyBody },
+          })
+        }
+
         await clearFlowState(userPhoneNumber, config.id)
-        const errorMsg = `Hubo un inconveniente al procesar la cancelación. Por favor, intentá nuevamente o comunicate con la clínica.`
-        await sendDirectResponse(ctx, errorMsg, "awaiting_cancel_and_reschedule_confirm")
+        await clearAppointmentTurnos(userPhoneNumber, config.id, flowState.turnoIndex || 0)
+
+        // Releer contexto actualizado: turnos[] vacío + turno_cancelado seteado (Sprint 41)
+        const updatedChatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+
+        logger.info("Cancelación exitosa, redirigiendo a reagendamiento")
+        return {
+          type: 'route_to_reagendamiento',
+          chatbotData: updatedChatbotData || chatbotData,
+          turnoIndex: flowState.turnoIndex || 0
+        }
+      } catch (error) {
+        logger.error("Error al cancelar via proxy (cancel_and_reschedule)", error as Error)
+        await clearFlowState(userPhoneNumber, config.id)
+        await sendDirectResponse(ctx, "Hubo un problema al cancelar el turno. Por favor intentá de nuevo en unos momentos.", "cancel_reschedule_proxy_error")
         return true
       }
 
     } else {
-      // Respuesta no reconocida como 1/2
+      // Respuesta no reconocida como 1/2 → pasar a OpenAI
       logger.info("Respuesta de cancel_and_reschedule no reconocida, pasando a OpenAI", { userMessage })
       await clearFlowState(userPhoneNumber, config.id)
       return false
