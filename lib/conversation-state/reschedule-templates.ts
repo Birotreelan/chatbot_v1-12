@@ -128,21 +128,13 @@ export function buildRescheduleSuccessMessage(
   state: RescheduleFlowState,
   turnoReservado: TurnoDisponible
 ): string {
-  const nombre = formatPatientName(state.paciente.nombres)
-  const fecha = formatFullDate(turnoReservado.fecha)
-  const hora = formatTime(turnoReservado.hora_formateada || turnoReservado.hora)
-  const profesional = turnoReservado.profesional
-  const sede = turnoReservado.sede
-  const direccion = turnoReservado.direccion
+  // Mensaje alineado con el flujo de agendamiento normal (confirmation-handler.ts /
+  // new-patient-templates.ts): la reserva vía proxy (set_turno) es una SOLICITUD que
+  // debe ser aprobada por la clínica, por lo que el mensaje no debe afirmar que el
+  // turno ya está confirmado.
+  return `¡Tu solicitud de turno fue enviada exitosamente!
 
-  return `¡Listo, ${nombre}! Tu turno fue reagendado exitosamente.
-
-Fecha: ${fecha}
-Hora: ${hora} hs
-Profesional: ${profesional}
-Sede: ${sede} - ${direccion}
-
-Te esperamos! Si necesitás algo más, no dudes en escribirme.`
+Importante: Esta solicitud debe ser aprobada por la clínica para que el turno te sea otorgado. Te notificaremos cuando ello ocurra.`
 }
 
 /**
