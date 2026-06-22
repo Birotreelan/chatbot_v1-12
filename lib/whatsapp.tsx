@@ -336,6 +336,36 @@ async function handlePendingFlowResponse(
           await markPendingReschedule(config.cliente_id, userPhoneNumber)
         }
 
+        // Si el paciente eligió "Cancelar y solicitar uno nuevo" (opción 3 del menú con turnos),
+        // tras la cancelación exitosa iniciamos directamente el flujo de reserva de un turno nuevo.
+        if (flowState.postCancelAction === 'book_new') {
+          logger.info("Cancelacion exitosa, iniciando flujo de reserva nueva (postCancelAction=book_new)")
+
+          // Confirmar la cancelación antes de iniciar la reserva nueva
+          const cancelMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
+          await sendDirectResponse(ctx, cancelMsg, "cancel_and_book_new")
+
+          // Recuperar identificadores del paciente desde el cache de detección
+          const identified = await getIdentifiedPatient(userPhoneNumber)
+          const bookingResult = await initializeExistingPatientFlow(
+            userPhoneNumber,
+            identified?.patientId || "",
+            identified?.patientName || chatbotData.paciente?.nombres || "",
+            identified?.patientDNI || chatbotData.paciente?.dni || "",
+            undefined,
+            config.cliente_id,
+            identified?.obraSocialId
+              ? { obraSocialId: identified.obraSocialId, obraSocialNombre: identified.obraSocialNombre }
+              : undefined,
+            config.escalationPhoneNumber
+          )
+
+          if (bookingResult?.handled && bookingResult.message) {
+            await sendDirectResponse(ctx, bookingResult.message, "cancel_and_book_new")
+          }
+          return true
+        }
+
         const turno = chatbotData.turnos[flowState.turnoIndex || 0]
         const admiteReagendamiento = turno?.admite_reagendamiento !== false
         logger.info("Cancelacion exitosa via proxy", { admiteReagendamiento })
@@ -2258,8 +2288,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               
               // Limpiar estado de detección DESPUÉS de inicializar el flujo
               await completePatientDetectionFlow(userPhoneNumber, config.id)
-            } else if (detectionResult.action === 'confirm_appointment' || detectionResult.action === 'cancel_appointment') {
+            } else if (detectionResult.action === 'confirm_appointment' || detectionResult.action === 'cancel_appointment' || detectionResult.action === 'cancel_and_book_new_appointment') {
               // Sprint 9a: Manejar confirmación/cancelación directamente con los turnos del paciente detectado
+              // 'cancel_and_book_new_appointment' = el paciente quiere solicitar otro turno teniendo uno activo:
+              // primero debe cancelar (doble confirmación) y luego inicia el flujo de reserva nueva.
               
               // Verificar que tenemos turnos del paciente
               if (patientInfo?.turnos && patientInfo.turnos.length > 0) {
@@ -2308,13 +2340,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     metadata: { source: 'user_initiated_menu', turnoIndex: 0 }
                   })
                 } else {
-                  // Cancelación: mostrar doble confirmación
-                  
-                  // Setear estado de flujo para esperar confirmación
+                  // Cancelación (o cancelar+solicitar nuevo): mostrar doble confirmación
+                  const wantsBookNew = detectionResult.action === 'cancel_and_book_new_appointment'
+
+                  // Setear estado de flujo para esperar confirmación.
+                  // Si el paciente eligió "cancelar y solicitar uno nuevo", marcamos postCancelAction
+                  // para que tras la cancelación exitosa se inicie el flujo de reserva nueva.
                   await setFlowState(userPhoneNumber, config.id, {
                     type: 'awaiting_cancel_confirmation',
                     createdAt: new Date().toISOString(),
-                    turnoIndex: 0
+                    turnoIndex: 0,
+                    ...(wantsBookNew ? { postCancelAction: 'book_new' as const } : {}),
                   })
                   
                   // Construir y enviar mensaje de doble confirmación

@@ -79,6 +79,9 @@ export interface FlowState {
   createdAt: string
   // Datos adicionales que puedan necesitarse durante el flujo
   turnoIndex?: number // Cual turno se esta cancelando (si hay multiples)
+  // Acción a ejecutar tras una cancelación exitosa.
+  // 'book_new' → iniciar el flujo de reserva de un turno nuevo (opción "Cancelar y solicitar otro turno")
+  postCancelAction?: 'book_new'
 }
 
 // ============================================================================
