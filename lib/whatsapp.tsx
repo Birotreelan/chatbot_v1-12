@@ -79,6 +79,7 @@ import {
   isPatientDetectionFlowActive,
   updatePatientDetectionPhase,
   getIdentifiedPatient,
+  clearPatientDetectionFlow,
 } from "./conversation-state/patient-detection/patient-flow-integration"
 import {
   initializeExistingPatientFlow,
@@ -615,6 +616,15 @@ async function handlePendingFlowResponse(
 
           // Recuperar identificadores del paciente desde el cache de detección
           const identified = await getIdentifiedPatient(userPhoneNumber)
+
+          // IMPORTANTE: limpiar el estado de detección de paciente (Sprint 9a) que pudo
+          // quedar activo. Si no se borra, el bloque de intercepción evalúa
+          // isPatientDetectionFlowActive ANTES que isExistingPatientFlowActive y enruta la
+          // próxima selección de sede (ej. "3") a handlePatientDetectionMessage → NLU →
+          // OpenAI, que re-saluda y vuelve a pedir el DNI (se pierde el flujo de reserva).
+          // clearPatientDetectionFlow además persiste la identidad del paciente por 1h.
+          await clearPatientDetectionFlow(userPhoneNumber, config.id)
+
           const bookingResult = await initializeExistingPatientFlow(
             userPhoneNumber,
             identified?.patientId || "",
