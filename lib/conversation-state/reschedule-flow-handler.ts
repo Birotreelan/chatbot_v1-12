@@ -336,16 +336,23 @@ export async function handleRescheduleMessage(
 
   // Fase 2: Esperando seleccion de turno
   if (state.phase === 'awaiting_selection') {
-    // Intentar resolver con backend
-    const selection = extractSelection(message, state.turnosDisponibles.map((t, i) => ({
-      label: `${t.fecha_formateada} - ${t.hora_formateada} hs`,
-      value: i,
-    })))
+    // Intentar resolver con el extractor de selecciones.
+    // IMPORTANTE: extractSelection espera opciones con forma { index, label }
+    // y devuelve { selected, selectedIndex }. (Antes se leían campos
+    // inexistentes resolved/value, por lo que la selección nunca resolvía y
+    // el flujo caía indebidamente al fallback de OpenAI.)
+    const selection = extractSelection(
+      message,
+      state.turnosDisponibles.map((t, i) => ({
+        index: i,
+        label: `${t.fecha_formateada} - ${t.hora_formateada} hs`,
+      }))
+    )
 
     console.log(`[RESCHEDULE-FLOW] Selection extractor result:`, selection)
 
-    if (selection.resolved && selection.value !== undefined) {
-      const turnoIndex = selection.value as number
+    if (selection.selected && selection.selectedIndex !== undefined) {
+      const turnoIndex = selection.selectedIndex
       const turnoSeleccionado = state.turnosDisponibles[turnoIndex]
 
       if (turnoSeleccionado) {
