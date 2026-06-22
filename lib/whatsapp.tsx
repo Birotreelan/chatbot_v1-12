@@ -1714,15 +1714,27 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           await trackAppointmentEvent(config.cliente_id, userPhoneNumber, "direct_confirm", appointmentData.appointment_id)
         }
         
-        // Si fue cancelación, marcar como confirmación para el flujo de cancelación
+        // Si fue cancelación, establecer flowState para doble confirmación
         if (nluFallbackResult.result?.intent === "cancelar_turno") {
-          // Establecer flowState para esperar la doble confirmación de cancelación
-          if (appointmentData?.appointment_id) {
+          if (appointmentData) {
+            // Buscar el turnoIndex (0 por defecto si hay turnos)
+            const turnoIdx = (appointmentData.turnos && appointmentData.turnos.length > 0) ? 0 : undefined
             await setFlowState(userPhoneNumber, config.id, {
-              state: "awaiting_cancel_confirmation",
-              appointmentId: String(appointmentData.appointment_id),
-              patientName: appointmentData.pacient_name || "Paciente",
-              timestamp: Date.now(),
+              type: "awaiting_cancel_confirmation",
+              createdAt: new Date().toISOString(),
+              turnoIndex: turnoIdx,
+            })
+          }
+        }
+
+        // Si fue reagendar → establecer flowState awaiting_reschedule_choice
+        if (nluFallbackResult.result?.intent === "reagendar_turno") {
+          if (appointmentData) {
+            const turnoIdx = (appointmentData.turnos && appointmentData.turnos.length > 0) ? 0 : undefined
+            await setFlowState(userPhoneNumber, config.id, {
+              type: "awaiting_reschedule_choice",
+              createdAt: new Date().toISOString(),
+              turnoIndex: turnoIdx,
             })
           }
         }
