@@ -2229,7 +2229,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             const patientInfo = detectionResult.patientInfo
 
             if (detectionResult.action === 'other_inquiry_intent') {
-              // Paciente existente sin turnos eligió "Realizar otra consulta" → derivar a teléfono
+              // Paciente existente sin turnos eligió "Realizar otra consulta" → derivar a tel��fono
               const escalationPhone = config.escalationPhoneNumber || 'nuestro equipo'
               const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
                 m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
@@ -2604,9 +2604,48 @@ export async function processIndividualMessage(
                 turnoData.sede_id,
                 pacienteData.dni,  // Filtra por obra social del paciente
               )
-              return resp.exito
-                ? (resp.datos?.turnos_disponibles || resp.datos || [])
-                : []
+              if (!resp.exito) return []
+
+              // El proxy puede devolver los turnos agrupados por fecha
+              // ([{ fecha, turnos: [...] }]) o como lista directa. Aplanamos y
+              // normalizamos al formato TurnoDisponible (campos en minúscula) que
+              // espera el flujo de reagendamiento; de lo contrario formatTime(hora)
+              // recibe undefined y lanza "Cannot read properties of undefined (reading 'length')".
+              const raw: any[] = resp.datos?.turnos_disponibles || resp.datos || []
+              const planos: any[] = []
+              for (const item of raw) {
+                if (item && Array.isArray(item.turnos)) {
+                  planos.push(...item.turnos)
+                } else if (item) {
+                  planos.push(item)
+                }
+              }
+
+              const formatFechaAr = (fechaStr: string): string => {
+                if (!fechaStr) return ""
+                const [y, m, d] = fechaStr.split("-")
+                return y && m && d ? `${d}/${m}/${y}` : fechaStr
+              }
+
+              return planos.map((t: any) => {
+                const fecha = t.Fecha || t.fecha || ""
+                const horaRaw = (t.Hora || t.hora || t.hora_formateada || "").toString()
+                const horaCorta = horaRaw.trim().substring(0, 5)
+                return {
+                  id: t.Id || t.id || t.Agenda_Id || t.agenda_id || "",
+                  fecha,
+                  fecha_formateada: t.fecha_formateada || formatFechaAr(fecha),
+                  hora: horaRaw,
+                  hora_formateada: t.hora_formateada || horaCorta,
+                  profesional:
+                    t.Profesional_Nombre || t.profesional || t.profesional_nombre || turnoData.profesional || "",
+                  profesional_id: t.Profesional_Id || t.profesional_id || turnoData.profesional_id || "",
+                  sede: t.Sede_Nombre || t.sede || t.sede_nombre || turnoData.sede || "",
+                  direccion: t.Direccion || t.direccion || "",
+                  agenda_id: t.Id || t.id || t.Agenda_Id || t.agenda_id || "",
+                  disponibilidad: 1,
+                }
+              })
             }
 
             // Búsqueda progresiva: 14 días → 30 días → 60 días
