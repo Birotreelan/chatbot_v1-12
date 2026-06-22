@@ -73,6 +73,14 @@ export type FlowStateType =
   | 'awaiting_cancel_confirmation'
   | 'awaiting_reschedule_choice'
   | 'awaiting_cancel_and_reschedule_confirm'
+  | 'awaiting_turno_selection'
+
+// Acción pendiente que se ejecutará una vez que el paciente elija sobre cuál turno operar
+// (cuando tiene más de un turno activo).
+export type PendingTurnoAction =
+  | 'confirm_appointment'
+  | 'cancel_appointment'
+  | 'cancel_and_book_new_appointment'
 
 export interface FlowState {
   type: FlowStateType
@@ -82,6 +90,9 @@ export interface FlowState {
   // Acción a ejecutar tras una cancelación exitosa.
   // 'book_new' → iniciar el flujo de reserva de un turno nuevo (opción "Cancelar y solicitar otro turno")
   postCancelAction?: 'book_new'
+  // Acción que el paciente eligió y que se ejecutará tras seleccionar el turno
+  // (estado 'awaiting_turno_selection', cuando hay múltiples turnos)
+  pendingAction?: PendingTurnoAction
 }
 
 // ============================================================================
@@ -305,7 +316,7 @@ export async function getFlowState(
     }
     
     // Si sigue sin tipo reconocido, descartar el estado para evitar bucles
-    if (!raw || !raw.type || (raw.type !== 'awaiting_cancel_confirmation' && raw.type !== 'awaiting_reschedule_choice' && raw.type !== 'awaiting_cancel_and_reschedule_confirm')) {
+    if (!raw || !raw.type || (raw.type !== 'awaiting_cancel_confirmation' && raw.type !== 'awaiting_reschedule_choice' && raw.type !== 'awaiting_cancel_and_reschedule_confirm' && raw.type !== 'awaiting_turno_selection')) {
       console.warn(`[APPOINTMENT-FLOW] Estado de flujo corrupto o desconocido descartado para ${phone}:`, raw)
       // Limpiar la clave para evitar que bloquee futuras requests
       const redis2 = getRedisClient()

@@ -714,6 +714,9 @@ export async function processPatientDetectionMessage(
           data: {
             patientId: state.patientId,
             patientName: state.patientName,
+            patientDNI: state.patientDNI,
+            patientLastName: state.patientLastName,
+            patientFirstName: state.patientFirstName,
             turnos: state.turnos,
             turnosQx: state.turnosQx,
           },
@@ -831,6 +834,9 @@ export async function processPatientDetectionMessage(
             data: {
               patientId: state.patientId,
               patientName: state.patientName,
+              patientDNI: state.patientDNI,
+              patientLastName: state.patientLastName,
+              patientFirstName: state.patientFirstName,
               turnos: state.turnos,
               turnosQx: state.turnosQx,
             },
