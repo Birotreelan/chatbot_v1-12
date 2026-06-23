@@ -9,6 +9,7 @@ import {
   EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU,
   EXISTING_PATIENT_MULTIPLE_TURNOS_MENU,
 } from './menu-option-detector'
+import { shouldOfferConfirmation } from './turno-estado'
 
 /**
  * Patient Detection Flow Handler
@@ -666,18 +667,18 @@ export async function processPatientDetectionMessage(
       const hasTurnosQx = state.turnosQx && state.turnosQx.length > 0
       const soloQx = !hasTurnos && hasTurnosQx
 
-      // Turno único NO confirmado (pendiente de aprobación): la confirmación de
-      // asistencia no está disponible, por eso se omite la opción 1 y se renumera.
+      // La confirmación de asistencia solo se ofrece cuando el turno está "Confirmado"
+      // (ya confirmado) o "No confirmado" (el paciente todavía puede confirmar). Cuando
+      // está "Pendiente de aprobación" por la clínica, se omite la opción 1 y se renumera.
       const singleTurno = hasTurnos && state.turnos!.length === 1 ? state.turnos![0] : null
-      const singleTurnoNoConfirmado =
-        !!singleTurno &&
-        String(singleTurno.Estado || singleTurno.estado || '').toLowerCase() !== 'confirmado'
+      const singleTurnoSinConfirmacion =
+        !!singleTurno && !shouldOfferConfirmation(singleTurno)
 
       let actionMap: Record<number, string>
 
       if (hasTurnos) {
-        if (singleTurnoNoConfirmado) {
-          // Turno no confirmado: 1-Cancelar, 2-Cancelar y solicitar uno nuevo, 3-Otra consulta
+        if (singleTurnoSinConfirmacion) {
+          // Turno pendiente de aprobación: 1-Cancelar, 2-Cancelar y solicitar uno nuevo, 3-Otra consulta
           actionMap = {
             1: 'cancel_appointment',
             2: 'cancel_and_book_new_appointment',
@@ -760,13 +761,9 @@ export async function processPatientDetectionMessage(
     } else if (state.phase === 'awaiting_action_selection') {
       const hasTurnos = state.turnos && state.turnos.length > 0
       if (hasTurnos && state.turnos!.length === 1) {
-        const turnoEstado = String(
-          state.turnos![0].Estado || state.turnos![0].estado || ''
-        ).toLowerCase()
-        menuOptions =
-          turnoEstado === 'confirmado'
-            ? EXISTING_PATIENT_SINGLE_TURNO_MENU
-            : EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU
+        menuOptions = shouldOfferConfirmation(state.turnos![0])
+          ? EXISTING_PATIENT_SINGLE_TURNO_MENU
+          : EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU
       } else if (hasTurnos && state.turnos!.length > 1) {
         menuOptions = EXISTING_PATIENT_MULTIPLE_TURNOS_MENU
       } else {
@@ -821,16 +818,15 @@ export async function processPatientDetectionMessage(
         const hasTurnosQx = state.turnosQx && state.turnosQx.length > 0
         const soloQx = !hasTurnos && hasTurnosQx
 
-        // Turno único NO confirmado: se omite "Confirmar asistencia" y se renumera.
+        // Turno pendiente de aprobación: se omite "Confirmar asistencia" y se renumera.
         const singleTurno = hasTurnos && state.turnos!.length === 1 ? state.turnos![0] : null
-        const singleTurnoNoConfirmado =
-          !!singleTurno &&
-          String(singleTurno.Estado || singleTurno.estado || '').toLowerCase() !== 'confirmado'
+        const singleTurnoSinConfirmacion =
+          !!singleTurno && !shouldOfferConfirmation(singleTurno)
 
         let actionMap: Record<number, string>
 
         if (hasTurnos) {
-          if (singleTurnoNoConfirmado) {
+          if (singleTurnoSinConfirmacion) {
             actionMap = {
               1: 'cancel_appointment',
               2: 'book_new_appointment',
