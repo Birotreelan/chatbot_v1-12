@@ -33,6 +33,9 @@ import {
   buildRescheduleOpenAIMessage,
 } from "./reschedule-templates"
 import type { ChatbotData } from "../appointment-flow-state"
+import { getAppointmentContext, saveAppointmentContext } from "../appointment-flow-state"
+import { getThreadForUser, safelyAddMessageToThread } from "../thread-manager"
+import { clearPostActionContext } from "./post-action-context"
 
 // ============================================================================
 // CONSTANTES
@@ -85,6 +88,116 @@ async function sendRescheduleResponse(
   } catch (error) {
     console.error("[RESCHEDULE-INTEGRATION] Error enviando respuesta:", error)
     return false
+  }
+}
+
+/**
+ * Tras un reagendamiento exitoso, sincroniza TODO el contexto persistente para que
+ * el turno cancelado deje de aparecer como "vigente". Sin esto, el thread de OpenAI
+ * sigue sembrado con el CONTEXTO_COMPLETO_TURNO del turno original (cancelado) y, ante
+ * un mensaje libre posterior, el asistente responde refiriéndose al turno cancelado.
+ *
+ * Acciones:
+ *  1. Actualiza el appointment_context en Redis: turnos[] = [nuevo turno],
+ *     tipo_mensaje = "turno_reagendado", turno_cancelado eliminado.
+ *  2. Inyecta un mensaje de actualización en el thread de OpenAI para que el asistente
+ *     ignore el turno cancelado y use el nuevo turno como vigente.
+ *  3. Limpia el contexto post-acción (que quedó como "cancellation").
+ *
+ * Es best-effort: cualquier error se loguea pero no interrumpe el flujo de éxito.
+ */
+async function syncContextAfterReschedule(
+  userPhoneNumber: string,
+  configId: string,
+  turno: TurnoDisponible,
+  paciente: RescheduleFlowState["paciente"],
+  obraSocialId?: string,
+  obraSocialNombre?: string
+): Promise<void> {
+  // 1. Actualizar appointment_context en Redis
+  try {
+    const existing = await getAppointmentContext(userPhoneNumber, configId)
+    const nuevoTurno = {
+      fecha: turno.fecha,
+      fecha_formateada: turno.fecha_formateada,
+      hora: turno.hora,
+      hora_formateada: turno.hora_formateada,
+      profesional: turno.profesional,
+      profesional_id: turno.profesional_id,
+      sede: turno.sede,
+      direccion: turno.direccion,
+      agenda_id: turno.agenda_id,
+      admite_reagendamiento: true,
+      tipo: "consulta",
+    }
+
+    const updated: ChatbotData = {
+      ...(existing || {}),
+      paciente: existing?.paciente || {
+        nombres: paciente.nombres,
+        apellido: paciente.apellido,
+        dni: paciente.dni,
+        telefono: paciente.telefono,
+        ...(obraSocialId ? { obra_social_id: obraSocialId } : {}),
+        ...(obraSocialNombre ? { obra_social_nombre: obraSocialNombre } : {}),
+      },
+      turnos: [nuevoTurno],
+      cantidad_turnos: 1,
+      tipo_mensaje: "turno_reagendado",
+    } as ChatbotData
+
+    // Eliminar el snapshot del turno cancelado para que no se reutilice
+    if ("turno_cancelado" in updated) {
+      delete (updated as { turno_cancelado?: unknown }).turno_cancelado
+    }
+
+    await saveAppointmentContext(userPhoneNumber, configId, updated)
+    console.log(`[RESCHEDULE-INTEGRATION] appointment_context actualizado con el turno reagendado`)
+  } catch (err) {
+    console.error("[RESCHEDULE-INTEGRATION] Error actualizando appointment_context tras reagendar:", err)
+  }
+
+  // 2. Actualizar el thread de OpenAI para que ignore el turno cancelado
+  try {
+    const threadData = await getThreadForUser(userPhoneNumber, configId)
+    const threadId = threadData?.thread_id
+    if (threadId) {
+      const updateMessage = `[SISTEMA_ACTUALIZACION_TURNO]
+El turno mencionado anteriormente fue CANCELADO y REEMPLAZADO mediante un reagendamiento exitoso.
+IMPORTANTE: Ignorá por completo el turno cancelado del contexto previo. El único turno VIGENTE del paciente es el siguiente:
+
+[CONTEXTO_COMPLETO_TURNO]
+Paciente_Nombres: ${paciente.nombres}
+Paciente_Apellido: ${paciente.apellido}
+Paciente_DNI: ${paciente.dni}
+Paciente_Telefono: ${paciente.telefono}${obraSocialNombre ? `\nPaciente_Obra_Social: ${obraSocialNombre}` : ""}
+
+Cantidad_Turnos: 1
+
+Turno_1:
+  - Fecha_Formateada: ${turno.fecha_formateada}
+  - Hora_Formateada: ${turno.hora_formateada}
+  - Profesional: ${turno.profesional}
+  - Sede: ${turno.sede}
+  - Dirección: ${turno.direccion}
+  - Agenda_ID: ${turno.agenda_id}
+
+Tipo_Mensaje: turno_reagendado
+[/CONTEXTO_COMPLETO_TURNO]
+[/SISTEMA_ACTUALIZACION_TURNO]`
+
+      await safelyAddMessageToThread(threadId, { role: "user", content: updateMessage })
+      console.log(`[RESCHEDULE-INTEGRATION] Thread de OpenAI actualizado con el turno reagendado`)
+    }
+  } catch (err) {
+    console.error("[RESCHEDULE-INTEGRATION] Error actualizando thread de OpenAI tras reagendar:", err)
+  }
+
+  // 3. Limpiar contexto post-acción (quedó como "cancellation")
+  try {
+    await clearPostActionContext(userPhoneNumber, configId)
+  } catch (err) {
+    console.error("[RESCHEDULE-INTEGRATION] Error limpiando post-action context tras reagendar:", err)
   }
 }
 
@@ -308,6 +421,17 @@ export async function processRescheduleMessage(
         timestamp: new Date().toISOString(),
       })
     }
+
+    // Sincronizar contexto persistente (Redis + thread OpenAI + post-action) para que
+    // el turno cancelado deje de figurar como vigente en mensajes posteriores.
+    await syncContextAfterReschedule(
+      userPhoneNumber,
+      configId,
+      turno,
+      st.paciente,
+      st.obra_social_id,
+      st.obra_social_nombre
+    )
 
     // Limpiar estado
     await clearRescheduleState(userPhoneNumber, configId)
