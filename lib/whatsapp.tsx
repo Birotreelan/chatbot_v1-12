@@ -602,6 +602,31 @@ async function handlePendingFlowResponse(
           await markPendingReschedule(config.cliente_id, userPhoneNumber)
         }
 
+        // Sincronizar el thread de OpenAI: el thread fue sembrado por el template con un
+        // bloque [CONTEXTO_COMPLETO_TURNO] del turno ahora CANCELADO. Sin esta actualización,
+        // cualquier mensaje libre posterior ("¿podré obtener otro turno?") cae al asistente
+        // OpenAI, cuyo thread sigue viendo el turno cancelado como vigente y responde con datos
+        // obsoletos. Inyectamos un mensaje de actualización para que ignore el turno cancelado.
+        // Best-effort: no bloquea el flujo de éxito.
+        try {
+          const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
+          const threadId = threadInfo?.threadId
+          if (threadId) {
+            const turnoCanceladoThread = chatbotData.turnos[flowState.turnoIndex || 0]
+            const cancelUpdateMessage = `[SISTEMA_ACTUALIZACION_TURNO]
+El turno que figuraba en el contexto anterior fue CANCELADO exitosamente y YA NO ES VÁLIDO.
+IMPORTANTE: Ignorá por completo ese turno cancelado. El paciente NO tiene ningún turno vigente en este momento.
+Turno cancelado (solo referencia, NO vigente): ${turnoCanceladoThread?.fecha_formateada || turnoCanceladoThread?.fecha || ""} ${turnoCanceladoThread?.hora_formateada || turnoCanceladoThread?.hora || ""} con ${turnoCanceladoThread?.profesional || ""} en ${turnoCanceladoThread?.sede || ""}.
+Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEVA solicitud de turno; no lo refieras al turno cancelado.
+[/SISTEMA_ACTUALIZACION_TURNO]`
+            const { safelyAddMessageToThread } = await import("./thread-manager")
+            await safelyAddMessageToThread(threadId, { role: "user", content: cancelUpdateMessage })
+            logger.info("Thread de OpenAI actualizado tras cancelación (turno ya no vigente)")
+          }
+        } catch (threadError) {
+          logger.error("Error actualizando thread de OpenAI tras cancelación", threadError as Error)
+        }
+
         // Si el paciente venía del menú "Cancelar el turno médico y solicitar uno nuevo"
         // (postCancelAction='reschedule'), tras confirmar y cancelar exitosamente
         // redirigimos al flujo de reagendamiento usando turno_cancelado (Sprint 41).
@@ -2353,7 +2378,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
 
           if (selection === 1) {
-            // Opción 1: Solicitar turno — cambiar fase a awaiting_initial_response (pedir DNI)
+            // Opción 1: Solicitar turno ��� cambiar fase a awaiting_initial_response (pedir DNI)
             await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_initial_response')
             const turnoConfirmMessage = await import('./conversation-state/patient-detection/patient-templates').then(
               m => m.buildTurnoIntentConfirmedMessage()
