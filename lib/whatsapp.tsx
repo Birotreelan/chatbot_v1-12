@@ -602,6 +602,21 @@ async function handlePendingFlowResponse(
           await markPendingReschedule(config.cliente_id, userPhoneNumber)
         }
 
+        // Si el paciente venía del menú "Cancelar el turno médico y solicitar uno nuevo"
+        // (postCancelAction='reschedule'), tras confirmar y cancelar exitosamente
+        // redirigimos al flujo de reagendamiento usando turno_cancelado (Sprint 41).
+        if (flowState.postCancelAction === 'reschedule') {
+          await clearFlowState(userPhoneNumber, config.id)
+          // Releer contexto actualizado: turnos[] vacío + turno_cancelado seteado
+          const updatedChatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+          logger.info("Cancelación confirmada, redirigiendo a reagendamiento")
+          return {
+            type: 'route_to_reagendamiento',
+            chatbotData: updatedChatbotData || chatbotData,
+            turnoIndex: flowState.turnoIndex || 0,
+          }
+        }
+
         // Si el paciente eligió "Cancelar y solicitar uno nuevo" (opción 3 del menú con turnos),
         // tras la cancelación exitosa iniciamos directamente el flujo de reserva de un turno nuevo.
         if (flowState.postCancelAction === 'book_new') {
@@ -827,83 +842,21 @@ async function handlePendingFlowResponse(
       }
 
     } else if (choice === 'cancel_and_reschedule') {
-      // El paciente quiere cancelar el turno activo y luego sacar uno nuevo.
-      // Mismo patrón de cancelación que awaiting_cancel_confirmation, y al terminar
-      // se redirige al flujo de reagendamiento usando turno_cancelado (Sprint 41).
-      try {
-        const turnoACancelar = chatbotData.turnos[flowState.turnoIndex || 0]
-        const proxyPayload = {
-          Cliente_Id: config.cliente_id,
-          Action: "cancelar_turno",
-          fecha: turnoACancelar?.fecha,
-          paciente_datos: {
-            dni: chatbotData.paciente?.dni,
-          },
-        }
-
-        logger.info("Enviando cancelacion al proxy (cancel_and_reschedule)")
-        const response = await fetchWithRetry(
-          config.proxy,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(proxyPayload),
-          },
-          TIMEOUTS.PROXY_TIMEOUT,
-          { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
-        )
-
-        let proxyBody: { success?: boolean; [key: string]: unknown } | null = null
-        try {
-          const bodyText = await response.text()
-          proxyBody = bodyText ? JSON.parse(bodyText) : null
-        } catch {
-          proxyBody = null
-        }
-
-        const proxySuccess = response.ok && proxyBody?.success === true
-
-        if (!proxySuccess) {
-          logger.error("El proxy no confirmó la cancelacion (cancel_and_reschedule)", undefined, {
-            httpStatus: response.status,
-            body: proxyBody,
-          })
-          // NO limpiar flowState: mantener contexto para reintento
-          await sendDirectResponse(ctx, "Hubo un problema al cancelar el turno. Por favor intentá de nuevo en unos momentos.", "cancel_reschedule_proxy_error")
-          return true
-        }
-
-        // Cancelación exitosa: tracking + limpieza selectiva preservando turno_cancelado
-        if (config.cliente_id) {
-          const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
-          await trackAppointmentEvent({
-            clienteId: config.cliente_id,
-            phoneNumber: userPhoneNumber,
-            eventType: "cancelled",
-            timestamp: new Date().toISOString(),
-            templateSentAt: templateSentAt || undefined,
-            metadata: { source: "cancel_and_reschedule", proxyBody },
-          })
-        }
-
-        await clearFlowState(userPhoneNumber, config.id)
-        await clearAppointmentTurnos(userPhoneNumber, config.id, flowState.turnoIndex || 0)
-
-        // Releer contexto actualizado: turnos[] vacío + turno_cancelado seteado (Sprint 41)
-        const updatedChatbotData = await getAppointmentContext(userPhoneNumber, config.id)
-
-        logger.info("Cancelación exitosa, redirigiendo a reagendamiento")
-        return {
-          type: 'route_to_reagendamiento',
-          chatbotData: updatedChatbotData || chatbotData,
-          turnoIndex: flowState.turnoIndex || 0
-        }
-      } catch (error) {
-        logger.error("Error al cancelar via proxy (cancel_and_reschedule)", error as Error)
-        await clearFlowState(userPhoneNumber, config.id)
-        await sendDirectResponse(ctx, "Hubo un problema al cancelar el turno. Por favor intentá de nuevo en unos momentos.", "cancel_reschedule_proxy_error")
-        return true
-      }
+      // El paciente eligió "Cancelar el turno médico y solicitar uno nuevo".
+      // NO cancelamos todavía: primero pedimos doble confirmación de la cancelación
+      // (igual que el flujo de cancelación normal). Recién cuando el paciente confirma,
+      // el handler de 'awaiting_cancel_confirmation' cancela vía proxy y, gracias a
+      // postCancelAction='reschedule', redirige al flujo de reagendamiento.
+      const turnoIndex = flowState.turnoIndex || 0
+      await setFlowState(userPhoneNumber, config.id, {
+        type: 'awaiting_cancel_confirmation',
+        createdAt: new Date().toISOString(),
+        turnoIndex,
+        postCancelAction: 'reschedule',
+      })
+      const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex)
+      await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_and_reschedule")
+      return true
 
     } else {
       // Respuesta no reconocida como 1/2 → pasar a OpenAI
@@ -2658,7 +2611,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     )
                   }
                 } else {
-                  // Un solo turno, cancelación (o cancelar+solicitar nuevo): mostrar doble confirmación
+                  // Un solo turno, cancelaci��n (o cancelar+solicitar nuevo): mostrar doble confirmación
                   const wantsBookNew = detectionResult.action === 'cancel_and_book_new_appointment'
 
                   // Setear estado de flujo para esperar confirmación.

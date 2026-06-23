@@ -84,6 +84,24 @@ export async function detectNLUFallbackPreFlow(
       return { shouldHandle: false }
     }
 
+    // El turno ya fue cancelado: el contexto persiste en Redis (con turno_cancelado)
+    // pero no hay un turno ACTIVO. Si lo tratáramos como activo, intents como
+    // "reagendar_turno"/"confirmar_asistencia" generarían menús con datos vacíos
+    // ("fecha no disponible", "hora no disponible"). En ese caso dejamos pasar al
+    // flujo normal para que inicie una nueva reserva.
+    const turnosActivos =
+      Array.isArray(appointmentContext?.turnos) && appointmentContext.turnos.length > 0
+    const tieneFechaDirecta = !!(appointmentContext?.fecha || appointmentContext?.appointment_date)
+    const fueCancelado = appointmentContext?.tipo_mensaje === "turno_cancelado"
+
+    if (fueCancelado || (!turnosActivos && !tieneFechaDirecta)) {
+      logger.info(`[Sprint 18] Sin turno activo (cancelado o turnos vacíos), no interceptar`, {
+        tipoMensaje: appointmentContext?.tipo_mensaje,
+        turnosActivos,
+      })
+      return { shouldHandle: false }
+    }
+
     logger.info(`[Sprint 18] Clasificando mensaje con NLU fallback`, {
       userMessage,
       hasAppointmentContext: !!appointmentContext,
