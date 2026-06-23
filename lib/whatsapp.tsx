@@ -2447,6 +2447,24 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
         // Paciente ingresó el DNI del familiar
         if (detectionResult?.action === 'familiar_dni_pending') {
+          // "Volver al menú principal" desde el submenú de DNI del familiar
+          const { isBackCommand } = await import('./conversation-state/shared/back-navigation')
+          if (isBackCommand(userMessage)) {
+            const mainMenuResult = await initializePatientDetection(
+              userPhoneNumber,
+              config.id,
+              config.cliente_id,
+              config.displayName
+            )
+            if (mainMenuResult?.handled && mainMenuResult.message) {
+              await sendDirectResponse(detectionCtx, mainMenuResult.message, "familiar_back_to_main_menu")
+            } else {
+              await sendDirectResponse(detectionCtx, 'Volvamos al inicio. ¿En qué puedo ayudarte?', "familiar_back_fallback")
+            }
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+
           const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
           const { ClinicAPI } = await import('./clinic-api')
           const clinicAPI = new ClinicAPI(config.cliente_id)
@@ -2519,6 +2537,29 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
+        }
+
+        // "Volver al menú principal": el usuario eligió volver desde el primer paso de un
+        // flujo de reserva. El flujo ya limpió su propio estado; re-iniciamos la detección
+        // para volver a mostrar el menú principal (saludo con turnos / opciones).
+        if (detectionResult?.action === 'back_to_main_menu') {
+          const mainMenuResult = await initializePatientDetection(
+            userPhoneNumber,
+            config.id,
+            config.cliente_id,
+            config.displayName
+          )
+          if (mainMenuResult?.handled && mainMenuResult.message) {
+            await sendDirectResponse(detectionCtx, mainMenuResult.message, "back_to_main_menu")
+          } else {
+            await sendDirectResponse(
+              detectionCtx,
+              'Volvamos al inicio. ¿En qué puedo ayudarte?',
+              "back_to_main_menu_fallback"
+            )
+          }
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
         }
 
         if (detectionResult?.handled) {

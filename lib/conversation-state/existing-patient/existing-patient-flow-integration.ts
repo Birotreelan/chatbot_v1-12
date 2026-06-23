@@ -69,6 +69,12 @@ import type {
   TurnoOption,
   FlowPhase,
 } from '../shared/types'
+import {
+  isBackCommand,
+  withBackOption,
+  getPreviousPhase,
+  MAIN_MENU,
+} from '../shared/back-navigation'
 
 // Constantes
 const EXISTING_PATIENT_FLOW_KEY = 'existing_patient_flow'
@@ -399,47 +405,243 @@ export async function handleExistingPatientMessage(
   const flags = await getEffectiveFeatureFlags(clientId)
   const flowInterruptionEnabled = flags.flowInterruptionHandler === true
 
+  // Pre-check de "Volver al paso anterior" (opción 0 o palabras clave)
+  if (isBackCommand(userMessage)) {
+    logger.info('[BACK] Comando de volver detectado', { phase: state.phase })
+    return handleBackNavigation(phoneNumber, clientId, state, searchOptionsConfig, escalationPhoneNumber)
+  }
+
   // Router por fase
+  let result: ExistingPatientResult
   switch (state.phase) {
     case 'awaiting_sede':
-      return handleSedePhase(phoneNumber, userMessage, clientId, state, searchOptionsConfig, flowInterruptionEnabled, escalationPhoneNumber)
+      result = await handleSedePhase(phoneNumber, userMessage, clientId, state, searchOptionsConfig, flowInterruptionEnabled, escalationPhoneNumber)
+      break
 
     case 'awaiting_search_type':
-      return handleSearchTypePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
+      result = await handleSearchTypePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
+      break
 
     case 'awaiting_professional_name':
-      return handleProfessionalNamePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
+      result = await handleProfessionalNamePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
+      break
 
     case 'awaiting_professional_selection':
-      return handleProfessionalSelectionPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      result = await handleProfessionalSelectionPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      break
 
     case 'awaiting_specialty_selection':
-      return handleSpecialtyPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      result = await handleSpecialtyPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      break
 
     case 'awaiting_turno_selection':
-      return handleTurnoPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      result = await handleTurnoPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      break
 
     case 'awaiting_email':
-      return handleEmailPhase(phoneNumber, userMessage, clientId, state)
+      result = await handleEmailPhase(phoneNumber, userMessage, clientId, state)
+      break
 
     case 'awaiting_confirmation':
-      return handleConfirmationPhase(phoneNumber, userMessage, clientId, state)
+      result = await handleConfirmationPhase(phoneNumber, userMessage, clientId, state)
+      break
 
     case 'awaiting_modify_selection':
-      return handleModifySelectionPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
+      result = await handleModifySelectionPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
+      break
 
     case 'awaiting_modify_nombre':
-      return handleModifyNombrePhase(phoneNumber, userMessage, clientId, state)
+      result = await handleModifyNombrePhase(phoneNumber, userMessage, clientId, state)
+      break
 
     case 'awaiting_modify_dni':
-      return handleModifyDniPhase(phoneNumber, userMessage, clientId, state)
+      result = await handleModifyDniPhase(phoneNumber, userMessage, clientId, state)
+      break
 
     case 'awaiting_modify_obra_social':
-      return handleModifyObraSocialPhase(phoneNumber, userMessage, clientId, state)
+      result = await handleModifyObraSocialPhase(phoneNumber, userMessage, clientId, state)
+      break
 
     default:
       logger.warn('Unhandled phase', { phase: state.phase })
       return { handled: false, shouldCallOpenAI: true }
+  }
+
+  // Anexar centralmente la opción "Volver al paso anterior" al mensaje saliente
+  if (result.handled && result.message && !result.shouldCallOpenAI) {
+    result.message = withBackOption(result.message, result.nextPhase, 'existing')
+  }
+  return result
+}
+
+/**
+ * Maneja el comando "Volver al paso anterior" para el flujo de paciente existente.
+ * Limpia los datos del paso actual, retrocede a la fase previa y re-renderiza su mensaje.
+ * Si no hay paso previo (primer paso), devuelve action 'back_to_main_menu'.
+ */
+async function handleBackNavigation(
+  phoneNumber: string,
+  clientId: string,
+  state: ExistingPatientFlowState,
+  searchOptionsConfig?: SearchOptionsConfig,
+  escalationPhoneNumber?: string
+): Promise<ExistingPatientResult> {
+  const logger = createConversationLogger(phoneNumber, clientId, 'back_navigation')
+  const prev = getPreviousPhase(state.phase, { flow: 'existing', searchType: state.searchType })
+
+  // Primer paso -> volver al menú principal de detección
+  if (prev === MAIN_MENU) {
+    logger.info('[BACK] Sin paso previo, volviendo al menú principal', { phase: state.phase })
+    await clearExistingPatientFlow(phoneNumber)
+    return { handled: true, action: 'back_to_main_menu' }
+  }
+
+  logger.info('[BACK] Retrocediendo de fase', { from: state.phase, to: prev })
+  state.attempts = 0
+
+  switch (prev) {
+    case 'awaiting_sede': {
+      // Limpiar sede y todo lo posterior
+      state.sedeId = undefined
+      state.sedeNombre = undefined
+      state.searchType = undefined
+      state.profesionalId = undefined
+      state.profesionalNombre = undefined
+      state.profesionalesOpciones = undefined
+      state.especialidadId = undefined
+      state.especialidadNombre = undefined
+      state.especialidadesOpciones = undefined
+      state.turnosOpciones = undefined
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_sede'
+
+      if (!state.sedesOpciones || state.sedesOpciones.length === 0) {
+        const sedesResult = await fetchSedes(clientId)
+        if (!sedesResult.success || !sedesResult.sedes) {
+          return { handled: true, message: buildSedesErrorMessage(), nextPhase: 'error' }
+        }
+        state.sedesOpciones = sedesResult.sedes
+      }
+      await saveFlowState(phoneNumber, state)
+      return {
+        handled: true,
+        message: withBackOption(buildSedesMessage(state.sedesOpciones), 'awaiting_sede', 'existing'),
+        nextPhase: 'awaiting_sede',
+      }
+    }
+
+    case 'awaiting_search_type': {
+      state.searchType = undefined
+      state.profesionalId = undefined
+      state.profesionalNombre = undefined
+      state.profesionalesOpciones = undefined
+      state.especialidadId = undefined
+      state.especialidadNombre = undefined
+      state.especialidadesOpciones = undefined
+      state.turnosOpciones = undefined
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_search_type'
+      await saveFlowState(phoneNumber, state)
+      return {
+        handled: true,
+        message: withBackOption(buildSearchOptionsMessage(state.sedeNombre || '', searchOptionsConfig), 'awaiting_search_type', 'existing'),
+        nextPhase: 'awaiting_search_type',
+      }
+    }
+
+    case 'awaiting_professional_name': {
+      state.profesionalId = undefined
+      state.profesionalNombre = undefined
+      state.profesionalesOpciones = undefined
+      state.turnosOpciones = undefined
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_professional_name'
+      await saveFlowState(phoneNumber, state)
+      return {
+        handled: true,
+        message: withBackOption(buildProfessionalNameRequestMessage(), 'awaiting_professional_name', 'existing'),
+        nextPhase: 'awaiting_professional_name',
+      }
+    }
+
+    case 'awaiting_specialty_selection': {
+      state.especialidadId = undefined
+      state.especialidadNombre = undefined
+      state.turnosOpciones = undefined
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_specialty_selection'
+      if (!state.especialidadesOpciones || state.especialidadesOpciones.length === 0) {
+        const espResult = await fetchSpecialties(clientId)
+        if (!espResult.success || !espResult.especialidades) {
+          return { handled: true, message: buildSpecialtiesErrorMessage(), nextPhase: 'error' }
+        }
+        state.especialidadesOpciones = espResult.especialidades
+      }
+      await saveFlowState(phoneNumber, state)
+      return {
+        handled: true,
+        message: withBackOption(buildSpecialtiesMessage(state.especialidadesOpciones), 'awaiting_specialty_selection', 'existing'),
+        nextPhase: 'awaiting_specialty_selection',
+      }
+    }
+
+    case 'awaiting_turno_selection': {
+      // Volver a la lista de turnos: limpiar la selección y re-mostrar/re-buscar
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_turno_selection'
+      if (state.turnosOpciones && state.turnosOpciones.length > 0) {
+        await saveFlowState(phoneNumber, state)
+        return {
+          handled: true,
+          message: withBackOption(
+            buildTurnosListMessage(state.turnosOpciones, state.patientName, state.sedeNombre, state.profesionalNombre),
+            'awaiting_turno_selection',
+            'existing'
+          ),
+          nextPhase: 'awaiting_turno_selection',
+        }
+      }
+      await saveFlowState(phoneNumber, state)
+      const turnosResult = await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
+      if (turnosResult.message) {
+        turnosResult.message = withBackOption(turnosResult.message, turnosResult.nextPhase, 'existing')
+      }
+      return turnosResult
+    }
+
+    case 'awaiting_confirmation': {
+      // Volver desde un paso de modificación hacia la confirmación
+      state.phase = 'awaiting_confirmation'
+      await saveFlowState(phoneNumber, state)
+      return {
+        handled: true,
+        message: withBackOption(
+          buildConfirmationMessage(
+            state.turnoSeleccionado!,
+            state.patientName,
+            state.sedeNombre,
+            state.obraSocialNombre,
+            {
+              apellido: state.patientLastName,
+              nombre: state.patientFirstName,
+              dni: state.patientDNI,
+              telefono: state.patientPhone,
+              email: state.patientEmail,
+            }
+          ),
+          'awaiting_confirmation',
+          'existing'
+        ),
+        nextPhase: 'awaiting_confirmation',
+      }
+    }
+
+    default: {
+      // Caso no esperado: volver al menú principal por seguridad
+      logger.warn('[BACK] Paso previo no manejado, volviendo al menú principal', { prev })
+      await clearExistingPatientFlow(phoneNumber)
+      return { handled: true, action: 'back_to_main_menu' }
+    }
   }
 }
 

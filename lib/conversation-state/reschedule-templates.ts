@@ -93,6 +93,7 @@ export function buildRescheduleStartMessage(
   })
 
   message += `\nResponde con el número del turno que queres reservar.`
+  message += `\n\n0. *Volver al paso anterior*`
 
   return message
 }

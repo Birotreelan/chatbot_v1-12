@@ -234,10 +234,11 @@ function buildExistingPatientNoTurnosGreeting(
  */
 export function buildFamiliarDNIRequestMessage(): string {
   return (
-    `Por favor, indicame el *DNI del familiar* (7 u 8 dígitos, sin puntos ni espacios) ` +
-    `para poder identificarlo en nuestro sistema.`
+  `Por favor, indicame el *DNI del familiar* (7 u 8 dígitos, sin puntos ni espacios) ` +
+  `para poder identificarlo en nuestro sistema.` +
+  `\n\n0. *Volver al menú principal*`
   )
-}
+  }
 
 /**
  * Saludo con UN solo turno

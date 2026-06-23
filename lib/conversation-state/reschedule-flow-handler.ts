@@ -13,6 +13,7 @@
 
 import { getRedisClient } from "@/lib/redis"
 import { extractSelection, SelectionResult } from "./selection-extractor"
+import { isBackCommand } from "./shared/back-navigation"
 import type { ChatbotData, ChatbotDataTurno } from "../appointment-flow-state"
 
 // ============================================================================
@@ -343,6 +344,18 @@ export async function handleRescheduleMessage(
 
   // Fase 2: Esperando seleccion de turno
   if (state.phase === 'awaiting_selection') {
+    // "Volver al paso anterior" (opción 0 o palabras clave): el paso previo a la
+    // selección de turno es la cancelación, fuera de este flujo. Abandonamos el
+    // reagendamiento de forma elegante y dejamos que el usuario reinicie si quiere.
+    if (isBackCommand(message)) {
+      console.log(`[RESCHEDULE-FLOW] Comando de volver en selección, abandonando reagendamiento`)
+      await clearRescheduleState(phone, configId)
+      return {
+        type: 'error',
+        message: "Listo, cancelé el reagendamiento. Si querés agendar o reagendar un turno, escribime cuando quieras.",
+      }
+    }
+
     // Intentar resolver con el extractor de selecciones.
     // IMPORTANTE: extractSelection espera opciones con forma { index, label }
     // y devuelve { selected, selectedIndex }. (Antes se leían campos
