@@ -97,9 +97,10 @@ export const EXISTING_PATIENT_SINGLE_TURNO_MENU: MenuOption[] = [
 ]
 
 /**
- * Opciones del menú para pacientes con UN turno NO confirmado (pendiente de aprobación).
- * La confirmación de asistencia NO está disponible hasta que el turno esté confirmado,
+ * Opciones del menú para pacientes con UN turno PENDIENTE DE APROBACIÓN por la clínica.
+ * La confirmación de asistencia NO está disponible mientras la clínica no apruebe el turno,
  * por eso esta variante omite la opción "Confirmar asistencia" y renumera el resto.
+ * (El estado "No confirmado" SÍ permite confirmar y usa EXISTING_PATIENT_SINGLE_TURNO_MENU.)
  */
 export const EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU: MenuOption[] = [
   {

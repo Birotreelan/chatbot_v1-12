@@ -9,6 +9,8 @@
  * - Nombre de la clinica: parametrizable
  */
 
+import { classifyTurnoEstado } from './turno-estado'
+
 // Nombre de la clinica por defecto (se puede parametrizar)
 const DEFAULT_CLINIC_NAME = 'Salud Ocular'
 
@@ -251,28 +253,32 @@ function buildSingleTurnoGreeting(
     turno.Profesional_Nombre || turno.profesional_nombre || turno.nombre_profesional || ''
   )
   const sede = turno.Centro_Nombre || turno.sede || clinicName
-  const estado = (turno.Estado || turno.estado || '').toLowerCase()
-  const estaConfirmado = estado === 'confirmado'
-  const estaPendiente = estado === 'no confirmado'
+  const categoria = classifyTurnoEstado(turno)
 
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
 
-  if (estaConfirmado) {
+  if (categoria === 'confirmado') {
+    // Turno ya confirmado por el paciente.
     mensaje += `*Veo que ya tenés un turno médico agendado y con la asistencia confirmada para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
     mensaje += `¿En qué te podemos ayudar?\n\n`
     mensaje += `1- Confirmar asistencia al turno médico (ya confirmado)\n`
     mensaje += `2- Cancelar el turno médico confirmado\n`
     mensaje += `3- Cancelar el turno médico y solicitar uno nuevo\n`
     mensaje += `4- Realizar otra consulta\n\n`
+  } else if (categoria === 'no_confirmado') {
+    // Turno agendado pero el paciente todavía NO confirmó su asistencia:
+    // se ofrece la opción de confirmar.
+    mensaje += `*Veo que tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}, pero todavía no confirmaste tu asistencia.*\n\n`
+    mensaje += `¿En qué te podemos ayudar?\n\n`
+    mensaje += `1- Confirmar asistencia al turno médico\n`
+    mensaje += `2- Cancelar turno médico\n`
+    mensaje += `3- Cancelar el turno médico y solicitar uno nuevo\n`
+    mensaje += `4- Realizar otra consulta\n\n`
   } else {
-    if (estaPendiente) {
-      mensaje += `*Veo que ya tenés un turno médico pendiente de aprobación por parte de la clínica, agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
-    } else {
-      mensaje += `*Veo que ya tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
-    }
-    // La confirmación de asistencia solo está disponible cuando el turno está Confirmado,
-    // por eso aquí (turno no confirmado) se omite esa opción.
+    // Pendiente de aprobación por la clínica (o estado desconocido): la confirmación
+    // de asistencia NO está disponible, por eso se omite esa opción.
+    mensaje += `*Veo que ya tenés un turno médico pendiente de aprobación por parte de la clínica, agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
     mensaje += `¿En qué te podemos ayudar?\n\n`
     mensaje += `1- Cancelar turno médico\n`
     mensaje += `2- Cancelar el turno médico y solicitar uno nuevo\n`
@@ -302,13 +308,13 @@ function buildMultipleTurnosGreeting(
     const profesional = formatearProfesional(
       turno.Profesional_Nombre || turno.profesional_nombre || turno.nombre_profesional || ''
     )
-    const estado = (turno.Estado || turno.estado || '').toLowerCase()
+    const categoria = classifyTurnoEstado(turno)
     const estadoTexto =
-      estado === 'confirmado'
+      categoria === 'confirmado'
         ? ' ✓ Confirmado'
-        : estado === 'no confirmado'
-          ? ' (pendiente de aprobación)'
-          : ''
+        : categoria === 'no_confirmado'
+          ? ' (sin confirmar)'
+          : ' (pendiente de aprobación)'
 
     mensaje += `${idx + 1}. ${fecha} a las ${hora}\n`
     mensaje += `   ${profesional}${estadoTexto}\n\n`
