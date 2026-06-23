@@ -79,6 +79,12 @@ import type {
   ObraSocialValidada,
   ObraSocialOption,
 } from '../shared/types'
+import {
+  isBackCommand,
+  withBackOption,
+  getPreviousPhase,
+  MAIN_MENU,
+} from '../shared/back-navigation'
 
 // Constantes
 const NEW_PATIENT_FLOW_KEY = 'new_patient_flow'
@@ -246,56 +252,262 @@ export async function handleNewPatientMessage(
   const flags = await getEffectiveFeatureFlags(clientId)
   const flowInterruptionEnabled = flags.flowInterruptionHandler === true
 
+  // Pre-check de "Volver al paso anterior" (opción 0 o palabras clave)
+  if (isBackCommand(userMessage)) {
+    logger.info('[BACK] Comando de volver detectado', { phase: state.phase })
+    return handleBackNavigation(phone, clientId, state, searchOptionsConfig)
+  }
+
   // Router por fase
+  let result: NewPatientResult
   switch (state.phase) {
     case 'awaiting_name':
-      return handleNamePhase(phone, userMessage, clientId, state)
+      result = await handleNamePhase(phone, userMessage, clientId, state)
+      break
 
     case 'awaiting_obra_social':
-      return handleObraSocialPhase(phone, userMessage, clientId, state)
+      result = await handleObraSocialPhase(phone, userMessage, clientId, state)
+      break
 
     case 'awaiting_obra_social_selection':
-      return handleObraSocialSelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
+      result = await handleObraSocialSelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
+      break
 
     case 'awaiting_sede':
-      return handleSedePhase(phone, userMessage, clientId, state, searchOptionsConfig, flowInterruptionEnabled, escalationPhoneNumber)
+      result = await handleSedePhase(phone, userMessage, clientId, state, searchOptionsConfig, flowInterruptionEnabled, escalationPhoneNumber)
+      break
 
     case 'awaiting_search_type':
-      return handleSearchTypePhase(phone, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
+      result = await handleSearchTypePhase(phone, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
+      break
 
     case 'awaiting_professional_name':
-      return handleProfessionalNamePhase(phone, userMessage, clientId, state, escalationPhoneNumber)
+      result = await handleProfessionalNamePhase(phone, userMessage, clientId, state, escalationPhoneNumber)
+      break
 
     case 'awaiting_professional_selection':
-      return handleProfessionalSelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      result = await handleProfessionalSelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      break
 
     case 'awaiting_specialty_selection':
-      return handleSpecialtyPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      result = await handleSpecialtyPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      break
 
     case 'awaiting_turno_selection':
-      return handleTurnoPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      result = await handleTurnoPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
+      break
 
     case 'awaiting_email':
-      return handleEmailPhase(phone, userMessage, clientId, state)
+      result = await handleEmailPhase(phone, userMessage, clientId, state)
+      break
 
     case 'awaiting_confirmation':
-      return handleConfirmationPhase(phone, userMessage, clientId, state)
+      result = await handleConfirmationPhase(phone, userMessage, clientId, state)
+      break
 
     case 'awaiting_modify_selection':
-      return handleModifySelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
+      result = await handleModifySelectionPhase(phone, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
+      break
 
     case 'awaiting_modify_nombre':
-      return handleModifyNombrePhase(phone, userMessage, clientId, state)
+      result = await handleModifyNombrePhase(phone, userMessage, clientId, state)
+      break
 
     case 'awaiting_modify_dni':
-      return handleModifyDniPhase(phone, userMessage, clientId, state)
+      result = await handleModifyDniPhase(phone, userMessage, clientId, state)
+      break
 
     case 'awaiting_modify_obra_social':
-      return handleModifyObraSocialPhase(phone, userMessage, clientId, state)
+      result = await handleModifyObraSocialPhase(phone, userMessage, clientId, state)
+      break
 
     default:
       logger.warn('Unhandled phase', { phase: state.phase })
       return { handled: false, shouldCallOpenAI: true }
+  }
+
+  // Anexar centralmente la opción "Volver al paso anterior" al mensaje saliente.
+  // Los handlers de paciente nuevo no devuelven nextPhase, por lo que usamos state.phase
+  // (ya actualizado por el handler) para determinar el destino.
+  if (result.handled && result.message && !result.shouldCallOpenAI && !result.action) {
+    result.message = withBackOption(result.message, state.phase, 'new')
+  }
+  return result
+}
+
+/**
+ * Maneja el comando "Volver al paso anterior" para el flujo de paciente nuevo.
+ * Limpia los datos del paso actual, retrocede a la fase previa y re-renderiza su mensaje.
+ * Si no hay paso previo (primer paso), devuelve action 'back_to_main_menu'.
+ */
+async function handleBackNavigation(
+  phone: string,
+  clientId: string,
+  state: NewPatientFlowState,
+  searchOptionsConfig?: SearchOptionsConfig
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'back_navigation_new')
+  const prev = getPreviousPhase(state.phase as string, { flow: 'new', searchType: state.searchType })
+
+  if (prev === MAIN_MENU) {
+    logger.info('[BACK] Sin paso previo, volviendo al menú principal', { phase: state.phase })
+    await clearNewPatientFlow(phone, clientId)
+    return { handled: true, action: 'back_to_main_menu' }
+  }
+
+  logger.info('[BACK] Retrocediendo de fase', { from: state.phase, to: prev })
+  state.attempts = 0
+
+  const reRender = (message: string, phase: string): NewPatientResult => ({
+    handled: true,
+    message: withBackOption(message, phase, 'new'),
+  })
+
+  switch (prev) {
+    case 'awaiting_name': {
+      state.nombre = undefined
+      state.apellido = undefined
+      state.obraSocialId = undefined
+      state.obraSocialNombre = undefined
+      state.obraSocialValidada = false
+      state.obraSocialOpciones = undefined
+      state.phase = 'awaiting_name'
+      await saveFlowState(phone, state)
+      const msg = state.esFamiliar
+        ? `Por favor, escribi el *nombre y apellido completo* de la persona que agendará el turno.`
+        : `Por favor, escribi tu *nombre y apellido completo*.`
+      return reRender(msg, 'awaiting_name')
+    }
+
+    case 'awaiting_obra_social': {
+      state.obraSocialId = undefined
+      state.obraSocialNombre = undefined
+      state.obraSocialValidada = false
+      state.obraSocialOpciones = undefined
+      state.sedeId = undefined
+      state.sedeNombre = undefined
+      state.phase = 'awaiting_obra_social'
+      await saveFlowState(phone, state)
+      const msg = state.esFamiliar
+        ? `Escribi el nombre de la *obra social o prepaga* del familiar (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tiene cobertura.`
+        : `Escribi el nombre de tu *obra social o prepaga* (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenes cobertura.`
+      return reRender(msg, 'awaiting_obra_social')
+    }
+
+    case 'awaiting_sede': {
+      state.sedeId = undefined
+      state.sedeNombre = undefined
+      state.searchType = undefined
+      state.profesionalId = undefined
+      state.profesionalNombre = undefined
+      state.profesionalesOpciones = undefined
+      state.especialidadId = undefined
+      state.especialidadNombre = undefined
+      state.especialidadesOpciones = undefined
+      state.turnosOpciones = undefined
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_sede'
+      if (!state.sedesOpciones || state.sedesOpciones.length === 0) {
+        const sedesResult = await fetchSedes(clientId)
+        if (!sedesResult.success || !sedesResult.sedes) {
+          return { handled: true, message: buildSedesErrorMessage() }
+        }
+        state.sedesOpciones = sedesResult.sedes
+      }
+      await saveFlowState(phone, state)
+      const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
+      return reRender(buildSedesMessage(state.sedesOpciones, nombreCompleto || undefined, state.obraSocialNombre), 'awaiting_sede')
+    }
+
+    case 'awaiting_search_type': {
+      state.searchType = undefined
+      state.profesionalId = undefined
+      state.profesionalNombre = undefined
+      state.profesionalesOpciones = undefined
+      state.especialidadId = undefined
+      state.especialidadNombre = undefined
+      state.especialidadesOpciones = undefined
+      state.turnosOpciones = undefined
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_search_type'
+      await saveFlowState(phone, state)
+      return reRender(buildSearchOptionsMessage(state.sedeNombre || '', searchOptionsConfig), 'awaiting_search_type')
+    }
+
+    case 'awaiting_professional_name': {
+      state.profesionalId = undefined
+      state.profesionalNombre = undefined
+      state.profesionalesOpciones = undefined
+      state.turnosOpciones = undefined
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_professional_name'
+      await saveFlowState(phone, state)
+      return reRender(buildProfessionalNameRequestMessage(), 'awaiting_professional_name')
+    }
+
+    case 'awaiting_specialty_selection': {
+      state.especialidadId = undefined
+      state.especialidadNombre = undefined
+      state.turnosOpciones = undefined
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_specialty_selection'
+      if (!state.especialidadesOpciones || state.especialidadesOpciones.length === 0) {
+        const espResult = await fetchSpecialties(clientId)
+        if (!espResult.success || !espResult.especialidades) {
+          return { handled: true, message: buildSpecialtiesErrorMessage() }
+        }
+        state.especialidadesOpciones = espResult.especialidades
+      }
+      await saveFlowState(phone, state)
+      return reRender(buildSpecialtiesMessage(state.especialidadesOpciones), 'awaiting_specialty_selection')
+    }
+
+    case 'awaiting_turno_selection': {
+      state.turnoSeleccionado = undefined
+      state.phase = 'awaiting_turno_selection'
+      if (state.turnosOpciones && state.turnosOpciones.length > 0) {
+        await saveFlowState(phone, state)
+        const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
+        return reRender(
+          buildTurnosListMessage(state.turnosOpciones, nombreCompleto || undefined, state.sedeNombre, state.profesionalNombre),
+          'awaiting_turno_selection'
+        )
+      }
+      await saveFlowState(phone, state)
+      const turnosResult = await searchAndShowTurnos(phone, clientId, state)
+      if (turnosResult.message) {
+        turnosResult.message = withBackOption(turnosResult.message, state.phase, 'new')
+      }
+      return turnosResult
+    }
+
+    case 'awaiting_confirmation': {
+      state.phase = 'awaiting_confirmation'
+      await saveFlowState(phone, state)
+      const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
+      return reRender(
+        buildConfirmationMessage(
+          state.turnoSeleccionado!,
+          nombreCompleto,
+          state.sedeNombre,
+          state.obraSocialNombre,
+          {
+            apellido: state.apellido,
+            nombre: state.nombre,
+            dni: state.dni,
+            telefono: state.telefono,
+            email: state.email,
+          }
+        ),
+        'awaiting_confirmation'
+      )
+    }
+
+    default: {
+      logger.warn('[BACK] Paso previo no manejado, volviendo al menú principal', { prev })
+      await clearNewPatientFlow(phone, clientId)
+      return { handled: true, action: 'back_to_main_menu' }
+    }
   }
 }
 
