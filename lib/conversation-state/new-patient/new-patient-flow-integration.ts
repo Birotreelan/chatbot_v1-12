@@ -266,7 +266,7 @@ export async function handleNewPatientMessage(
       break
 
     case 'awaiting_obra_social':
-      result = await handleObraSocialPhase(phone, userMessage, clientId, state)
+      result = await handleObraSocialPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
       break
 
     case 'awaiting_obra_social_selection':
@@ -578,7 +578,8 @@ async function handleObraSocialPhase(
   phone: string,
   userMessage: string,
   clientId: string,
-  state: NewPatientFlowState
+  state: NewPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'obra_social_phase')
 
@@ -789,7 +790,7 @@ async function handleObraSocialSelectionPhase(
   await saveFlowState(phone, state)
   
   // Re-procesar el mensaje como si fuera una nueva busqueda de obra social
-  return handleObraSocialPhase(phone, userMessage, clientId, state)
+  return handleObraSocialPhase(phone, userMessage, clientId, state, escalationPhoneNumber)
 }
 
 /**
