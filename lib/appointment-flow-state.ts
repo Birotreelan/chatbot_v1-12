@@ -89,8 +89,9 @@ export interface FlowState {
   // Datos adicionales que puedan necesitarse durante el flujo
   turnoIndex?: number // Cual turno se esta cancelando (si hay multiples)
   // Acción a ejecutar tras una cancelación exitosa.
-  // 'book_new' → iniciar el flujo de reserva de un turno nuevo (opción "Cancelar y solicitar otro turno")
-  postCancelAction?: 'book_new'
+  // 'book_new'    → iniciar el flujo de reserva de un turno nuevo (opción "Cancelar y solicitar otro turno")
+  // 'reschedule'  → redirigir al flujo de reagendamiento (menú "Cancelar el turno médico y solicitar uno nuevo")
+  postCancelAction?: 'book_new' | 'reschedule'
   // Acción que el paciente eligió y que se ejecutará tras seleccionar el turno
   // (estado 'awaiting_turno_selection', cuando hay múltiples turnos)
   pendingAction?: PendingTurnoAction
