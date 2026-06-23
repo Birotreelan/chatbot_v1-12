@@ -103,10 +103,12 @@ export interface FlowState {
 
 const CONTEXT_PREFIX = "appointment_context"
 const FLOW_STATE_PREFIX = "appointment_flow"
+const CONFIRMED_PREFIX = "appointment_confirmed"
 
 // TTLs en segundos
 const CONTEXT_TTL = 48 * 60 * 60 // 48 horas - el contexto del turno
 const FLOW_STATE_TTL = 30 * 60   // 30 minutos - el estado del flujo pendiente
+const CONFIRMED_TTL = 48 * 60 * 60 // 48 horas - marca de "turno ya confirmado"
 
 function getContextKey(phone: string, configId: string): string {
   return `${CONTEXT_PREFIX}:${configId}:${phone}`
@@ -114,6 +116,27 @@ function getContextKey(phone: string, configId: string): string {
 
 function getFlowStateKey(phone: string, configId: string): string {
   return `${FLOW_STATE_PREFIX}:${configId}:${phone}`
+}
+
+function getConfirmedKey(phone: string, configId: string): string {
+  return `${CONFIRMED_PREFIX}:${configId}:${phone}`
+}
+
+/**
+ * Devuelve un identificador del turno actual (agenda_id o appointment_id) para
+ * poder asociar la marca de "confirmado" a un turno específico. Si el contexto
+ * trae un turno nuevo (otro agenda_id) la marca vieja deja de aplicar.
+ */
+export function getAppointmentRef(chatbotData: ChatbotData | null | undefined): string | undefined {
+  if (!chatbotData) return undefined
+  const turno = Array.isArray(chatbotData.turnos) && chatbotData.turnos.length > 0
+    ? chatbotData.turnos[0]
+    : undefined
+  return (
+    turno?.agenda_id ||
+    (chatbotData as unknown as { appointment_id?: string }).appointment_id ||
+    undefined
+  )
 }
 
 // ============================================================================
@@ -252,10 +275,102 @@ export async function clearAppointmentTurnos(
     chatbotData.tipo_mensaje = 'turno_cancelado'
 
     await redis.set(key, JSON.stringify(chatbotData), { ex: CONTEXT_TTL })
+
+    // El turno fue cancelado: la marca de "confirmado" ya no aplica
+    try {
+      await redis.del(getConfirmedKey(phone, configId))
+    } catch {
+      // best-effort
+    }
+
     console.log(`[APPOINTMENT-FLOW] Turnos limpiados para ${phone}, turno_cancelado preservado`)
     return true
   } catch (error) {
     console.error("[APPOINTMENT-FLOW] Error en clearAppointmentTurnos:", error)
+    return false
+  }
+}
+
+// ============================================================================
+// CONFIRMED MARKER FUNCTIONS
+// ============================================================================
+
+/**
+ * Marca que el turno activo del paciente YA fue confirmado.
+ * Se usa para no volver a ofrecer "Confirmar asistencia" cuando el paciente
+ * escribe texto libre después de haber confirmado (ej: "¿puedo obtener otro turno?").
+ *
+ * @param appointmentRef agenda_id / appointment_id del turno confirmado (opcional)
+ */
+export async function markAppointmentConfirmed(
+  phone: string,
+  configId: string,
+  appointmentRef?: string
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+
+  try {
+    const key = getConfirmedKey(phone, configId)
+    await redis.set(key, appointmentRef || "1", { ex: CONFIRMED_TTL })
+    console.log(`[APPOINTMENT-FLOW] Turno marcado como confirmado para ${phone} (ref: ${appointmentRef || "n/a"})`)
+    return true
+  } catch (error) {
+    console.error("[APPOINTMENT-FLOW] Error marcando turno confirmado:", error)
+    return false
+  }
+}
+
+/**
+ * Indica si el turno activo del paciente ya fue confirmado.
+ * Si se provee appointmentRef y la marca guardada tiene una referencia distinta
+ * (es decir, corresponde a otro turno), se considera NO confirmado.
+ */
+export async function isAppointmentConfirmed(
+  phone: string,
+  configId: string,
+  appointmentRef?: string
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+
+  try {
+    const key = getConfirmedKey(phone, configId)
+    const stored = await redis.get<string>(key)
+    if (!stored) return false
+
+    const storedRef = typeof stored === "string" ? stored : String(stored)
+
+    // Marca genérica (sin ref) → aplica a cualquier turno activo
+    if (storedRef === "1") return true
+
+    // Si tenemos ref del turno actual, exigir coincidencia con la marca guardada
+    if (appointmentRef) return storedRef === appointmentRef
+
+    // Sin ref para comparar, asumimos que la marca aplica
+    return true
+  } catch (error) {
+    console.error("[APPOINTMENT-FLOW] Error leyendo marca de confirmación:", error)
+    return false
+  }
+}
+
+/**
+ * Elimina la marca de "turno confirmado" (uso tras cancelación o nuevo turno).
+ */
+export async function clearAppointmentConfirmed(
+  phone: string,
+  configId: string
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+
+  try {
+    const key = getConfirmedKey(phone, configId)
+    await redis.del(key)
+    return true
+  } catch (error) {
+    console.error("[APPOINTMENT-FLOW] Error eliminando marca de confirmación:", error)
     return false
   }
 }

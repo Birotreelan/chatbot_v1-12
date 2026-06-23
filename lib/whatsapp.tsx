@@ -25,6 +25,9 @@ import {
   isKeepAppointmentResponse,
   isRescheduleChoice,
   isCancelAndRescheduleChoice,
+  markAppointmentConfirmed,
+  isAppointmentConfirmed,
+  getAppointmentRef,
   type ChatbotData,
   type ChatbotDataTurno,
   type ChatbotDataTurnoCancelado,
@@ -276,6 +279,10 @@ async function confirmarTurnoEnProxy(
         timestamp: new Date().toISOString(),
         metadata: { source: "user_initiated_menu", turnoIndex, proxyBody },
       })
+    }
+    // Marcar el turno como confirmado para no volver a ofrecer "Confirmar asistencia"
+    if (proxySuccess && config.id) {
+      await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(chatbotData))
     }
     return proxySuccess
   } catch (error) {
@@ -856,6 +863,8 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
           return true
         }
 
+        await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(chatbotData))
+
         const confirmMsg = buildConfirmationMessage(chatbotData, flowState.turnoIndex || 0)
         await sendDirectResponse(ctx, confirmMsg, "awaiting_cancel_and_reschedule_confirm")
         return true
@@ -1346,6 +1355,8 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
 
                 // Intentar respuesta directa con datos del contexto guardado
                 const chatbotDataConfirm = await getAppointmentContext(userPhoneNumber, config.id)
+                // Marcar el turno como confirmado para no volver a ofrecer "Confirmar asistencia"
+                await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(chatbotDataConfirm))
                 if (chatbotDataConfirm) {
                   
                   const ctxConfirm: DirectResponseContext = {
@@ -1490,7 +1501,11 @@ Responde de manera apropiada según la acción realizada.`
                 if (eventType === "confirmed") {
                   const confirmFlags = await getEffectiveFeatureFlags(config.id)
                   const confirmLogger = createConversationLogger(userPhoneNumber, config.id, "awaiting_confirmation")
-                  
+
+                  // Marcar el turno como confirmado para no volver a ofrecer "Confirmar asistencia"
+                  const chatbotDataForMark = await getAppointmentContext(userPhoneNumber, config.id)
+                  await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(chatbotDataForMark))
+
                   if (confirmFlags.directConfirmation) {
                     const chatbotDataSimple = await getAppointmentContext(userPhoneNumber, config.id)
                     if (chatbotDataSimple) {
@@ -1601,6 +1616,9 @@ IMPORTANTE: Si es una confirmación o cancelación, busca en el historial de la 
                 metadata: { proxyResponse },
               })
             }
+            // El turno ya estaba confirmado: marcarlo para no volver a ofrecer "Confirmar asistencia"
+            const chatbotDataAlreadyConfirmed = await getAppointmentContext(userPhoneNumber, config.id)
+            await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(chatbotDataAlreadyConfirmed))
           }
 
           switch (errorType) {
@@ -1919,6 +1937,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               const confirmResponse = buildConfirmationSuccessResponse(patientName)
               await sendDirectResponse(confirmCtx, confirmResponse, "direct_confirm")
 
+              // Marcar el turno como confirmado para no volver a ofrecer "Confirmar asistencia"
+              await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(appointmentCtx))
+
               // Trackear evento
               await trackAppointmentEvent({
                 clienteId: config.cliente_id,
@@ -2139,14 +2160,23 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       
       // Obtener el appointmentContext si existe
       const appointmentData = await getAppointmentContext(userPhoneNumber, config.id)
-      
+
+      // ¿El turno activo ya fue confirmado? Si es así, no debemos volver a ofrecer
+      // "Confirmar asistencia" cuando el paciente escribe texto libre (ej: "¿puedo obtener otro turno?")
+      const appointmentAlreadyConfirmed = await isAppointmentConfirmed(
+        userPhoneNumber,
+        config.id,
+        getAppointmentRef(appointmentData)
+      )
+
       const nluFallbackResult = await detectNLUFallbackPreFlow(
         userPhoneNumber,
         userMessage,
         config.id,
         appointmentData,
         undefined, // conversationHistory - puede agregarse después si es necesario
-        config.escalationPhoneNumber // Número de derivación para consultas que no podemos responder
+        config.escalationPhoneNumber, // Número de derivación para consultas que no podemos responder
+        appointmentAlreadyConfirmed
       )
       
       if (nluFallbackResult.shouldHandle && nluFallbackResult.response) {
@@ -2161,9 +2191,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         
         await sendDirectResponse(nluCtx, nluFallbackResult.response, "nlu_fallback_response")
         
-        // Si fue confirmación, actualizar stats
+        // Si fue confirmación, actualizar stats y marcar el turno como confirmado
         if (nluFallbackResult.result?.intent === "confirmar_asistencia" && appointmentData) {
           await trackAppointmentEvent(config.cliente_id, userPhoneNumber, "direct_confirm", appointmentData.appointment_id)
+          await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(appointmentData))
         }
         
         // Si fue cancelación, establecer flowState para doble confirmación
@@ -2179,15 +2210,20 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
         }
 
-        // Si fue reagendar con turno activo → estado específico para menú de 2 opciones
-        // (1-Confirmar asistencia / 2-Cancelar y solicitar uno nuevo)
-        if (nluFallbackResult.result?.intent === "reagendar_turno") {
+        // Si fue reagendar con turno activo → estado de flujo según la directiva del handler.
+        // - Turno NO confirmado: menú de 2 opciones (1-Confirmar asistencia / 2-Cancelar y solicitar uno nuevo)
+        // - Turno YA confirmado: doble confirmación de cancelación directa (postCancelAction='reschedule')
+        if (nluFallbackResult.result?.intent === "reagendar_turno" && nluFallbackResult.flowStateDirective) {
           if (appointmentData) {
             const turnoIdx = (appointmentData.turnos && appointmentData.turnos.length > 0) ? 0 : undefined
+            const directive = nluFallbackResult.flowStateDirective
             await setFlowState(userPhoneNumber, config.id, {
-              type: "awaiting_cancel_and_reschedule_confirm",
+              type: directive.type,
               createdAt: new Date().toISOString(),
               turnoIndex: turnoIdx,
+              ...(directive.type === "awaiting_cancel_confirmation" && directive.postCancelAction
+                ? { postCancelAction: directive.postCancelAction }
+                : {}),
             })
           }
         }
