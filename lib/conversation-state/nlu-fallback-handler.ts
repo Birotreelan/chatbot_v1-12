@@ -67,10 +67,19 @@ export async function detectNLUFallbackPreFlow(
   appointmentContext?: any,
   conversationHistory?: string,
   escalationPhoneNumber?: string,
+  alreadyConfirmed?: boolean,
 ): Promise<{
   shouldHandle: boolean
   result?: FallbackIntentResult
   response?: string
+  /**
+   * Estado de flujo que el consumer (whatsapp.tsx) debe establecer tras enviar la
+   * respuesta. Permite, por ejemplo, saltar el menú "Confirmar asistencia" cuando el
+   * turno ya fue confirmado y enviar directamente la doble confirmación de cancelación.
+   */
+  flowStateDirective?:
+    | { type: "awaiting_cancel_and_reschedule_confirm" }
+    | { type: "awaiting_cancel_confirmation"; postCancelAction?: "book_new" | "reschedule" }
 }> {
   try {
     // ¡IMPORTANTE! Solo procesar si:
@@ -128,7 +137,11 @@ export async function detectNLUFallbackPreFlow(
 
     // Si es confirmación → activar acción directa de confirmación
     if (classificationResult.intent === "confirmar_asistencia") {
-      const response = buildConfirmationResponse(appointmentContext)
+      // Si el turno YA estaba confirmado, no repetir "confirmación recibida":
+      // simplemente recordar que el turno sigue confirmado.
+      const response = alreadyConfirmed
+        ? buildAlreadyConfirmedResponse(appointmentContext)
+        : buildConfirmationResponse(appointmentContext)
       return {
         shouldHandle: true,
         result: classificationResult,
@@ -146,13 +159,27 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es reagendar → mostrar menú de 2 opciones (con turno activo, debe cancelar primero)
+    // Si es reagendar → mostrar menú (con turno activo, debe cancelar primero)
     if (classificationResult.intent === "reagendar_turno") {
+      // Si el turno YA fue confirmado, NO ofrecer de nuevo "Confirmar asistencia".
+      // Vamos directo a la doble confirmación de cancelación (1- Sí, cancelar / 2- No,
+      // mantener) y, al cancelar, redirigimos al flujo de reagendamiento.
+      if (alreadyConfirmed) {
+        const response = buildRescheduleAfterConfirmedResponse(appointmentContext, classificationResult.response)
+        return {
+          shouldHandle: true,
+          result: classificationResult,
+          response,
+          flowStateDirective: { type: "awaiting_cancel_confirmation", postCancelAction: "reschedule" },
+        }
+      }
+
       const response = buildCancelAndRescheduleMenuResponse(appointmentContext, classificationResult.response)
       return {
         shouldHandle: true,
         result: classificationResult,
         response,
+        flowStateDirective: { type: "awaiting_cancel_and_reschedule_confirm" },
       }
     }
 
@@ -511,6 +538,41 @@ function buildMenuResponse(appointmentContext: any, gptResponse?: string): strin
 Veo que tenés un turno programado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
 
 ${MENU_OPCIONES}`
+}
+
+/**
+ * Respuesta cuando el turno YA fue confirmado y el paciente pregunta para confirmar otra vez.
+ * No repetimos "tu confirmación fue recibida"; recordamos que el turno sigue confirmado.
+ */
+function buildAlreadyConfirmedResponse(appointmentContext: any): string {
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
+
+  return `Tu turno ya se encuentra confirmado. Te esperamos el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en la sede ${sede || 'indicada'}.
+
+Si necesitás algo más, no dudes en escribirme.`
+}
+
+/**
+ * Respuesta cuando el turno YA fue confirmado y el paciente quiere reagendar / obtener otro turno.
+ * Como ya confirmó, NO ofrecemos "Confirmar asistencia": vamos directo a pedir la doble
+ * confirmación de cancelación (1- Sí, cancelar / 2- No, mantener). Al confirmar, el flujo
+ * de 'awaiting_cancel_confirmation' (postCancelAction='reschedule') redirige al reagendamiento.
+ */
+function buildRescheduleAfterConfirmedResponse(appointmentContext: any, gptResponse?: string): string {
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
+
+  const empaticResponse = gptResponse || "Entiendo que querés gestionar un nuevo turno."
+
+  return `${empaticResponse}
+
+Tu turno del *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'} ya está confirmado. Para darte uno nuevo, primero necesito cancelar el actual.
+
+¿Confirmás la cancelación del turno?
+
+1- Sí, cancelar el turno
+2- No, mantener el turno`
 }
 
 /**
