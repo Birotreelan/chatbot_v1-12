@@ -495,7 +495,6 @@ async function handleBackNavigation(
             apellido: state.apellido,
             nombre: state.nombre,
             dni: state.dni,
-            telefono: state.telefono,
             email: state.email,
           }
         ),
