@@ -1937,6 +1937,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               const confirmResponse = buildConfirmationSuccessResponse(patientName)
               await sendDirectResponse(confirmCtx, confirmResponse, "direct_confirm")
 
+              // Marcar el turno como confirmado para no volver a ofrecer "Confirmar asistencia"
+              await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(appointmentCtx))
+
               // Trackear evento
               await trackAppointmentEvent({
                 clienteId: config.cliente_id,
