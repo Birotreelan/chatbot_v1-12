@@ -100,6 +100,7 @@ interface PatientDetectionState {
   turnos?: any[]
   turnosQx?: any[]           // Turnos de cirugía (solo informativos, no gestionables)
   multiplePatients?: any[] // Array de pacientes si hay múltiples
+  postActionContext?: 'just_confirmed' // Contexto post-acción para adaptar el menú de retorno
   detectedAt: number
   attempts: number
 }
@@ -574,8 +575,8 @@ export async function processPatientDetectionMessage(
     ? stateStr as PatientDetectionState
     : JSON.parse(stateStr as string)
 
-  // Detectar selección numérica (1-4)
-  const numMatch = userMessage.trim().match(/^[1-4]$/)
+  // Detectar selección numérica (0-4); el 0 es "Volver al menú anterior" post-acción
+  const numMatch = userMessage.trim().match(/^[0-4]$/)
 
   if (numMatch) {
     // ========================================================================
@@ -623,6 +624,47 @@ export async function processPatientDetectionMessage(
         }
       }
     } else if (state.phase === 'awaiting_action_selection') {
+      // ── Menú simplificado post-confirmación ──────────────────────────────────
+      // Cuando el paciente acaba de confirmar su turno, mostramos solo:
+      //   1- Realizar otra consulta
+      //   0- Volver al menú anterior
+      if (state.postActionContext === 'just_confirmed') {
+        const firstName = state.patientFirstName || (state.patientName ? state.patientName.split(' ')[0] : 'Paciente')
+
+        if (selection === 1) {
+          // "Realizar otra consulta" → derivar normalmente
+          state.phase = 'completed'
+          delete state.postActionContext
+          await redis.setex(stateKey, 3600, JSON.stringify(state))
+          return {
+            handled: true,
+            action: 'other_inquiry_intent',
+            nextPhase: 'action_processing',
+            data: {
+              patientId: state.patientId,
+              patientName: state.patientName,
+              patientFirstName: firstName,
+              patientDNI: state.patientDNI,
+              turnos: state.turnos,
+            },
+          }
+        } else if (selection === 0) {
+          // "Volver al menú anterior" → limpiar contexto post-acción y mostrar menú completo
+          delete state.postActionContext
+          // Mantener phase en awaiting_action_selection para seguir aceptando selecciones
+          await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+          const fullMenu = buildPostActionMenu(firstName, state.turnos || [])
+          return {
+            handled: true,
+            action: 'go_back_to_menu',
+            message: fullMenu,
+            nextPhase: 'awaiting_action_selection',
+            data: {},
+          }
+        }
+        // Selección no reconocida en este contexto → caer al flujo normal de NLU
+      }
+
       // El mapeo depende de si el paciente tiene turnos médicos, quirúrgicos, o ninguno
       const hasTurnos = state.turnos && state.turnos.length > 0
       const hasTurnosQx = state.turnosQx && state.turnosQx.length > 0
@@ -959,7 +1001,8 @@ export async function updatePatientDetectionPhase(
  */
 export async function returnPatientToMenu(
   phoneNumber: string,
-  turnosUpdated?: any[]
+  turnosUpdated?: any[],
+  postActionContext?: 'just_confirmed'
 ): Promise<string | null> {
   const redis = getRedisClient()
   if (!redis) return null
@@ -975,13 +1018,20 @@ export async function returnPatientToMenu(
   // Resetear fase para que la próxima respuesta del paciente sea tratada como selección de acción
   state.phase = 'awaiting_action_selection'
 
+  // Guardar contexto post-acción (si aplica) para adaptar el menú de retorno
+  if (postActionContext) {
+    state.postActionContext = postActionContext
+  } else {
+    delete state.postActionContext
+  }
+
   const stateKey = `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`
   await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
 
   const firstName =
     state.patientFirstName ||
     (state.patientName ? state.patientName.split(' ')[0] : 'Paciente')
-  return buildPostActionMenu(firstName, state.turnos || [])
+  return buildPostActionMenu(firstName, state.turnos || [], undefined, postActionContext)
 }
 
 /**

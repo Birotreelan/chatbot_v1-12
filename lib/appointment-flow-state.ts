@@ -475,7 +475,10 @@ export async function clearFlowState(
 // ============================================================================
 
 /**
- * Detecta si una respuesta del usuario es una confirmacion de cancelacion ("1", "si", etc)
+ * Detecta si una respuesta del usuario es una confirmacion de cancelacion ("1", "si", etc).
+ *
+ * Maneja respuestas compuestas (ej: "si gracias", "si, de acuerdo") que contienen
+ * la afirmaci\u00f3n como primer token significativo.
  */
 export function isConfirmCancelResponse(message: string): boolean {
   const normalized = message
@@ -484,20 +487,25 @@ export function isConfirmCancelResponse(message: string): boolean {
     .replace(/[\u0300-\u036f]/g, "") // quita acentos
     .trim()
 
-  // Respuestas que confirman la cancelacion
   const confirmPatterns = [
-    /^1\.?$/,           // "1" o "1."
-    /^si\.?$/,          // "si" o "si."
-    /^s$/,              // "s"
-    /cancelar/,         // contiene "cancelar"
-    /^si,?\s*cancelar/, // "si, cancelar" o "si cancelar"
+    /^1\.?$/,              // "1" o "1."
+    /^si\b/,               // empieza con "si" (cubre "si gracias", "si de acuerdo", etc.)
+    /^s$/,                 // "s"
+    /^ok\b/,               // "ok", "ok gracias"
+    /^dale\b/,             // "dale", "dale gracias"
+    /^de acuerdo\b/,       // "de acuerdo"
+    /^claro\b/,            // "claro", "claro que si"
+    /cancelar/,            // contiene "cancelar"
   ]
 
   return confirmPatterns.some(pattern => pattern.test(normalized))
 }
 
 /**
- * Detecta si una respuesta del usuario es para mantener el turno ("2", "no", etc)
+ * Detecta si una respuesta del usuario es para mantener el turno ("2", "no", etc).
+ *
+ * Maneja respuestas compuestas (ej: "no gracias", "no, prefiero mantener") que contienen
+ * la negaci\u00f3n como primer token significativo.
  */
 export function isKeepAppointmentResponse(message: string): boolean {
   const normalized = message
@@ -506,13 +514,12 @@ export function isKeepAppointmentResponse(message: string): boolean {
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
 
-  // Respuestas que mantienen el turno
   const keepPatterns = [
-    /^2\.?$/,           // "2" o "2."
-    /^no\.?$/,          // "no" o "no."
-    /^n$/,              // "n"
-    /mantener/,         // contiene "mantener"
-    /^no,?\s*mantener/, // "no, mantener" o "no mantener"
+    /^2\.?$/,              // "2" o "2."
+    /^no\b/,               // empieza con "no" (cubre "no gracias", "no, prefiero", etc.)
+    /^n$/,                 // "n"
+    /^nop(e)?\b/,          // "nope", "nop"
+    /mantener/,            // contiene "mantener"
   ]
 
   return keepPatterns.some(pattern => pattern.test(normalized))

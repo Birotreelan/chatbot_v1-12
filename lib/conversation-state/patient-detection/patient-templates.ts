@@ -489,7 +489,8 @@ export function buildDNINotFoundInMultipleMessage(attempts: number): string {
 export function buildPostActionMenu(
   firstName: string,
   turnos: any[],
-  clinicName: string = DEFAULT_CLINIC_NAME
+  clinicName: string = DEFAULT_CLINIC_NAME,
+  postActionContext?: 'just_confirmed'
 ): string {
   const hasTurnos = turnos && turnos.length > 0
 
@@ -515,7 +516,13 @@ export function buildPostActionMenu(
     const sede = t.Centro_Nombre || t.sede || clinicName
     const cat = classifyTurnoEstado(t)
 
-    if (cat === 'no_confirmado') {
+    if (postActionContext === 'just_confirmed') {
+      // El paciente acaba de confirmar: no ofrecer cancelación de inmediato.
+      // Menú mínimo: solo otra consulta o volver al menú completo.
+      msg += `Tu turno del ${fecha} a las ${hora} con ${prof} en ${sede} *ya está confirmado*. ✓\n\n`
+      msg += `1- Realizar otra consulta\n`
+      msg += `0- Volver al menú anterior\n\n`
+    } else if (cat === 'no_confirmado') {
       msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
       msg += `1- Confirmar asistencia al turno médico\n`
       msg += `2- Cancelar turno médico\n`

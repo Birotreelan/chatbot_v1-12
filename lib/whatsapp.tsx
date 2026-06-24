@@ -418,7 +418,7 @@ async function handlePendingFlowResponse(
           ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' }
           : t
       })
-      const menuMsgAfterConfirm = await returnPatientToMenu(userPhoneNumber, updatedTurnosAfterConfirm)
+      const menuMsgAfterConfirm = await returnPatientToMenu(userPhoneNumber, updatedTurnosAfterConfirm, 'just_confirmed')
       if (menuMsgAfterConfirm) await sendDirectResponse(ctx, menuMsgAfterConfirm, "return_to_menu")
 
       return true
@@ -833,16 +833,20 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
           return true  // Flujo manejado, NO pasar a OpenAI
         }
         
-        // action === "abandon_flow" o fallback
-        logger.info("NLU: abandonando flujo", { reason: contextualResult.reasoning })
-        await clearFlowState(userPhoneNumber, config.id)
-        return false
+        // action === "abandon_flow" o NLU sin resultado concluyente → re-promptear,
+        // nunca abandonar el flujo (evita que el farewell handler u otros capturen el mensaje)
+        logger.info("NLU: sin resultado concluyente, re-mostrando prompt de cancelación")
+        const retryNluMsg = buildCancelDoubleConfirmMessage(chatbotData, flowState.turnoIndex || 0)
+        await sendDirectResponse(ctx, retryNluMsg, "awaiting_cancel_confirmation_retry")
+        return true
       }
-      
-      // Sin NLU contextual, comportamiento original
-      logger.info("Respuesta no reconocida, pasando a OpenAI", { userMessage })
-      await clearFlowState(userPhoneNumber, config.id)
-      return false
+
+      // Sin NLU contextual: re-promptear en lugar de pasar a otros handlers.
+      // Mantener el flow state para que el próximo mensaje vuelva aquí.
+      logger.info("Respuesta no reconocida en awaiting_cancel_confirmation, re-mostrando prompt", { userMessage })
+      const retryMsg = buildCancelDoubleConfirmMessage(chatbotData, flowState.turnoIndex || 0)
+      await sendDirectResponse(ctx, retryMsg, "awaiting_cancel_confirmation_retry")
+      return true
     }
   } else if (flowState.type === 'awaiting_cancel_and_reschedule_confirm') {
     // Menú de 2 opciones mostrado cuando el paciente quiere reagendar con turno activo:
@@ -912,7 +916,7 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         const updatedTurnosCR = (chatbotData.turnos || []).map((t: any, i: number) =>
           i === turnoIdxCR ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
         )
-        const menuAfterCR = await returnPatientToMenu(userPhoneNumber, updatedTurnosCR)
+        const menuAfterCR = await returnPatientToMenu(userPhoneNumber, updatedTurnosCR, 'just_confirmed')
         if (menuAfterCR) await sendDirectResponse(ctx, menuAfterCR, "return_to_menu")
 
         return true
@@ -1076,7 +1080,15 @@ export async function handleMessage(value: any) {
       return
     }
 
-    if (message.type === "text" && userMessage && /^[\p{Emoji}\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u.test(userMessage.trim()) && !/\w/.test(userMessage)) {
+    // Ignorar mensajes de texto compuestos únicamente por emojis/iconos.
+    // Nota: ️ (variation selector) y ‍ (ZWJ) son parte de secuencias emoji
+    // pero NO están cubiertos por \p{Emoji}, por lo que se incluyen explícitamente.
+    if (
+      message.type === "text" &&
+      userMessage &&
+      /^[\p{Emoji}\p{Emoji_Presentation}\p{Extended_Pictographic}\u{FE0E}\u{FE0F}\u{200D}\s]+$/u.test(userMessage.trim()) &&
+      !/[\p{L}\p{N}]/u.test(userMessage)
+    ) {
       return
     }
 
@@ -1435,7 +1447,7 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
                     const updatedTurnosTemplate = (chatbotDataConfirm.turnos || []).map((t: any, i: number) =>
                       i === 0 ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
                     )
-                    const menuAfterTemplate = await returnPatientToMenu(userPhoneNumber, updatedTurnosTemplate)
+                    const menuAfterTemplate = await returnPatientToMenu(userPhoneNumber, updatedTurnosTemplate, 'just_confirmed')
                     if (menuAfterTemplate) await sendDirectResponse(ctxConfirm, menuAfterTemplate, "return_to_menu")
 
                     return // Salir, no pasar a OpenAI
@@ -1591,7 +1603,7 @@ Responde de manera apropiada según la acción realizada.`
                         const updatedTurnosSimple = (chatbotDataSimple.turnos || []).map((t: any, i: number) =>
                           i === 0 ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
                         )
-                        const menuAfterSimple = await returnPatientToMenu(userPhoneNumber, updatedTurnosSimple)
+                        const menuAfterSimple = await returnPatientToMenu(userPhoneNumber, updatedTurnosSimple, 'just_confirmed')
                         if (menuAfterSimple) await sendDirectResponse(ctxSimple, menuAfterSimple, "return_to_menu")
                         return
                       }
@@ -2648,6 +2660,16 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // "Volver al menú principal": el usuario eligió volver desde el primer paso de un
         // flujo de reserva. El flujo ya limpió su propio estado; re-iniciamos la detección
         // para volver a mostrar el menú principal (saludo con turnos / opciones).
+        if (detectionResult?.action === 'go_back_to_menu') {
+          // El paciente eligió "0- Volver al menú anterior" desde el menú post-confirmación.
+          // El handler ya limpió postActionContext y generó el menú completo.
+          if (detectionResult.message) {
+            await sendDirectResponse(detectionCtx, detectionResult.message, "go_back_to_menu")
+          }
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+
         if (detectionResult?.action === 'back_to_main_menu') {
           const mainMenuResult = await initializePatientDetection(
             userPhoneNumber,
@@ -2821,7 +2843,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     const updatedTurnosDetect = (chatbotData.turnos || []).map((t: any) => ({
                       ...t, Estado: 'Confirmado', estado: 'Confirmado'
                     }))
-                    const menuAfterDetect = await returnPatientToMenu(userPhoneNumber, updatedTurnosDetect)
+                    const menuAfterDetect = await returnPatientToMenu(userPhoneNumber, updatedTurnosDetect, 'just_confirmed')
                     if (menuAfterDetect) await sendDirectResponse(detectionCtx, menuAfterDetect, "return_to_menu")
                   } else {
                     await sendDirectResponse(
