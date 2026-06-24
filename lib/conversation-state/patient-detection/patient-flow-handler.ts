@@ -489,29 +489,8 @@ export async function processDNIForDisambiguation(
     // Usar turnos de la respuesta de get_paciente si existen
     let turnos: any[] = turnosFromResponse
 
-    // Si no hay turnos en la respuesta de get_paciente, intentar obtenerlos con get_turnos_paciente
-    if (turnos.length === 0) {
-      try {
-        // Usar get_turnos_paciente para obtener los turnos AGENDADOS del paciente
-        const turnosPacienteResponse = await clinicAPI.obtenerTurnosPaciente(
-          foundPatientId,
-          validatedPatientDNI
-        )
-
-        if (turnosPacienteResponse.exito && turnosPacienteResponse.datos) {
-          turnos = turnosPacienteResponse.datos
-          logger.info('Turnos obtenidos via get_turnos_paciente (fallback)', {
-            count: turnos.length,
-            patientId: foundPatientId,
-          })
-        }
-      } catch (e) {
-        logger.warn('Error fetching patient turns via get_turnos_paciente', {
-          error: String(e),
-          patientId: foundPatientId,
-        })
-      }
-    }
+    // Nota: get_turnos_paciente no existe en el proxy — los turnos siempre vienen
+    // en turnos_proximos del get_paciente. Si no hay turnos aquí, el paciente no tiene turnos.
 
     // Filtrar turnos cancelados
     turnos = turnos.filter(

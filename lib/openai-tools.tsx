@@ -1573,6 +1573,10 @@ export async function getAssistantResponse(
   const openai = getOpenAIClient()
 
   try {
+    if (!threadId) {
+      throw new Error(`[OPENAI] threadId inválido (${threadId}) — no se puede crear el run`)
+    }
+
     const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
     if (!config) {
       throw new Error(`No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
