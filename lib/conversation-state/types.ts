@@ -239,6 +239,14 @@ export interface FeatureFlags {
   // a partir de datos estructurados + historial conversacional.
   // Fallback siempre al template original si GPT falla.
   humanizedResponses: boolean
+
+  // AI Dispatcher (Sprint 60)
+  // Capa de IA híbrida que interpreta la intención del usuario y la conecta al
+  // flujo determinístico correcto. Reemplaza el enqueueUserMessage genérico cuando
+  // está activo. Usa GPT-4o-mini con function calling sobre un manifest de todas
+  // las capacidades del sistema.
+  // OFF por defecto — activar por cliente vía Redis flags.
+  aiDispatcher: boolean
 }
 
 /**
@@ -270,6 +278,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   entityExtraction: true,
   conversationHistory: true,
   humanizedResponses: true,
+  aiDispatcher: true,
 }
 
 /**

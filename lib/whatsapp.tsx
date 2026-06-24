@@ -107,6 +107,9 @@ import {
   handleContextualIntent,
   type ContextualIntentResult,
 } from "./conversation-state/pending-flow-nlu/contextual-intent-handler"
+import { buildDispatcherContext } from "./conversation-state/ai-dispatcher/context-builder"
+import { runAIDispatcher } from "./conversation-state/ai-dispatcher/dispatcher"
+import { executeDispatcherDecision, type ExecutorDeps } from "./conversation-state/ai-dispatcher/tool-executor"
 
 
 // Función para extraer el contenido del mensaje según su tipo
@@ -3036,6 +3039,215 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
         } else {
           farewellLogger.debug("Sin recordatorio previo, pasando a OpenAI (no se procesa directamente)")
+        }
+      }
+    }
+
+    // ============================================================================
+    // AI DISPATCHER (Sprint 60) — Capa híbrida de inteligencia
+    // Solo activo cuando aiDispatcher flag está ON.
+    // Si toma una decisión, ejecuta el handler correcto y retorna.
+    // Si no (error / passthrough), cae al enqueueUserMessage normal.
+    // ============================================================================
+    if (message.type === "text") {
+      const dispatcherFlags = await getEffectiveFeatureFlags(config.id)
+      if (dispatcherFlags.aiDispatcher) {
+        try {
+          const dispatcherLogger = createConversationLogger(userPhoneNumber, config.id, "ai-dispatcher")
+
+          // Obtener contexto de turno e historial (pueden no estar en scope aquí)
+          const dispatcherAppCtx = await getAppointmentContext(userPhoneNumber, config.id).catch(() => null)
+          const dispatcherHistory = await import('./conversation-state/conversation-history')
+            .then(m => m.getHistory(userPhoneNumber))
+            .then(msgs => msgs.map((m: any) => `${m.role === 'user' ? 'Paciente' : 'Bot'}: ${m.content}`).join('\n'))
+            .catch(() => '')
+
+          // Construir contexto completo del paciente
+          const dispatcherCtx = await buildDispatcherContext(
+            userPhoneNumber,
+            config.id,
+            dispatcherAppCtx,
+            dispatcherHistory
+          )
+
+          // Llamar al dispatcher (GPT-4o-mini con function calling)
+          const dispatcherResult = await runAIDispatcher(
+            userPhoneNumber,
+            config.id,
+            userMessage,
+            dispatcherCtx
+          )
+
+          if (dispatcherResult.handled) {
+            const executorDeps: ExecutorDeps = {
+              phoneNumber: userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+              escalationPhone: config.escalationPhoneNumber,
+            }
+
+            const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
+            dispatcherLogger.info('[Dispatcher] Acción ejecutada', { action: execResult.action.type, note: execResult.logNote })
+
+            const dispatcherCtxDirect: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+
+            const action = execResult.action
+
+            if (action.type === 'send_and_return') {
+              await sendDirectResponse(dispatcherCtxDirect, action.message, "ai-dispatcher")
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            if (action.type === 'init_patient_detection') {
+              const detResult = await initializePatientDetection(
+                userPhoneNumber, config.id, config.cliente_id, config.displayName
+              )
+              if (detResult?.handled && detResult.message) {
+                await sendDirectResponse(dispatcherCtxDirect, detResult.message, "ai-dispatcher-menu")
+              }
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            if (action.type === 'init_existing_patient_flow') {
+              const patient = dispatcherCtx.patient
+              const initialMsg = action.slots?.profesional
+                ? `Necesito turno con ${action.slots.profesional}`
+                : action.slots?.especialidad
+                  ? `Necesito turno de ${action.slots.especialidad}`
+                  : undefined
+              const existingResult = await initializeExistingPatientFlow(
+                userPhoneNumber,
+                '',  // patientId — se recupera durante el flujo desde la API
+                patient.name ?? '',
+                patient.dni ?? '',
+                undefined,
+                config.cliente_id,
+                undefined,
+                config.escalationPhoneNumber,
+                initialMsg
+              )
+              if (existingResult?.handled && existingResult.message) {
+                await sendDirectResponse(dispatcherCtxDirect, existingResult.message, "ai-dispatcher-existing")
+              }
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            if (action.type === 'trigger_confirm_appointment') {
+              // Confirmar asistencia directo usando el buildConfirmationSuccessResponse existente
+              if (dispatcherAppCtx) {
+                const { buildConfirmationSuccessResponse } = await import('./conversation-state/direct-confirmation-handler')
+                const turno = dispatcherCtx.turnos[0]
+                const turnoDetails = turno
+                  ? `📅 ${turno.fecha} a las ${turno.hora}\n👨‍⚕️ ${turno.profesional}\n📍 ${turno.sede}`
+                  : "Tu turno programado"
+                const confirmMsg = buildConfirmationSuccessResponse(turnoDetails)
+                await sendDirectResponse(dispatcherCtxDirect, confirmMsg, "ai-dispatcher-confirm")
+              }
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            if (action.type === 'trigger_cancel_menu') {
+              // Mostrar menú de cancelación — reutilizar template existente
+              const { buildCancelConfirmationPrompt } = await import('./conversation-state/direct-confirmation-handler')
+              const turno = dispatcherCtx.turnos[0]
+              const turnoDetails = turno
+                ? `📅 ${turno.fecha} a las ${turno.hora}\n👨‍⚕️ ${turno.profesional}\n📍 ${turno.sede}`
+                : "Tu turno programado"
+              const cancelMsg = buildCancelConfirmationPrompt(turnoDetails)
+              await sendDirectResponse(dispatcherCtxDirect, cancelMsg, "ai-dispatcher-cancel")
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            if (action.type === 'trigger_cancel_and_rebook') {
+              // Mostrar prompt de cancelación — igual que trigger_cancel_menu.
+              // Después de la cancelación, el dispatcher interceptará el próximo mensaje
+              // de reserva y lo enrutará a iniciar_reserva_turno automáticamente.
+              const { buildCancelConfirmationPrompt } = await import('./conversation-state/direct-confirmation-handler')
+              const turno = dispatcherCtx.turnos[0]
+              const turnoDetails = turno
+                ? `📅 ${turno.fecha} a las ${turno.hora}\n👨‍⚕️ ${turno.profesional}\n📍 ${turno.sede}`
+                : "Tu turno programado"
+              const cancelMsg = buildCancelConfirmationPrompt(turnoDetails)
+              await sendDirectResponse(dispatcherCtxDirect, cancelMsg, "ai-dispatcher-cancel-rebook")
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            if (action.type === 'init_new_patient_flow') {
+              // Para pacientes nuevos sin DNI previo, iniciar flujo de detección.
+              // Si el DNI ingresado no existe en el sistema, patient-detection
+              // derivará automáticamente al flujo de paciente nuevo.
+              const detResult = await initializePatientDetection(
+                userPhoneNumber, config.id, config.cliente_id, config.displayName
+              )
+              if (detResult?.handled && detResult.message) {
+                await sendDirectResponse(dispatcherCtxDirect, detResult.message, "ai-dispatcher-new-patient")
+              }
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            if (action.type === 'continue_active_flow') {
+              // El mensaje es una respuesta válida al flujo activo.
+              // Según el flujo activo, delegar al handler correspondiente.
+              const flowType = dispatcherCtx.activeFlow.type
+              if (flowType === 'existing_patient') {
+                const existRes = await handleExistingPatientMessage(
+                  userPhoneNumber, userMessage, config.cliente_id,
+                  config.escalationPhoneNumber,
+                  {
+                    enableSearchByProfessional: config.enableSearchByProfessional !== false,
+                    enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
+                    enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+                  }
+                )
+                if (existRes?.handled && existRes.message) {
+                  await sendDirectResponse(dispatcherCtxDirect, existRes.message, "ai-dispatcher-continue-existing")
+                }
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
+              }
+              if (flowType === 'new_patient') {
+                const newRes = await handleNewPatientMessage(
+                  userPhoneNumber, userMessage, config.cliente_id, config.escalationPhoneNumber
+                )
+                if (newRes?.handled && newRes.message) {
+                  await sendDirectResponse(dispatcherCtxDirect, newRes.message, "ai-dispatcher-continue-new")
+                }
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
+              }
+              if (flowType === 'patient_detection') {
+                const detRes = await handlePatientDetectionMessage(
+                  userPhoneNumber, userMessage, config.id, config.cliente_id,
+                  config.displayName, config.escalationPhoneNumber
+                )
+                if (detRes?.handled && detRes.message) {
+                  await sendDirectResponse(dispatcherCtxDirect, detRes.message, "ai-dispatcher-continue-detection")
+                }
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
+              }
+              // Sin flujo activo reconocido: caer al enqueue
+            }
+
+            // action.type === 'passthrough' → caer al enqueue normal
+          }
+        } catch (dispatcherError) {
+          createConversationLogger(userPhoneNumber, config.id, "ai-dispatcher")
+            .error('[Dispatcher] Error crítico — fallback a enqueue normal', dispatcherError as Error)
+          // Continúa al enqueueUserMessage de abajo
         }
       }
     }
