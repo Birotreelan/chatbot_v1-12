@@ -238,7 +238,23 @@ export function buildFamiliarDNIRequestMessage(): string {
   `para poder identificarlo en nuestro sistema.` +
   `\n\n0. *Volver al menú principal*`
   )
-  }
+}
+
+/**
+ * Mensaje contextualizado para pedir DNI del familiar cuando se detectó intención
+ * desde el primer mensaje (ej: "mi marido tiene turno").
+ */
+export function buildFamiliarDNIRequestContextualMessage(
+  callerFirstName: string,
+  relation?: string
+): string {
+  const relationText = relation ? `tu ${relation}` : 'tu familiar'
+  return (
+    `${callerFirstName}, entendí que necesitás gestionar el turno de ${relationText}. ` +
+    `Para buscarlo en nuestro sistema, indicame su *DNI* (7 u 8 dígitos, sin puntos ni espacios).\n\n` +
+    `0. *Volver al menú principal*`
+  )
+}
 
 /**
  * Saludo con UN solo turno

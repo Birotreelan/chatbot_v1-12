@@ -17,6 +17,12 @@
 import { getRedisClient } from "@/lib/redis"
 import { createConversationLogger } from "./logger"
 import { extractSelection, createOptionsFromLabels, SelectionResult } from "./selection-extractor"
+import {
+  detectAndApplyFilter,
+  extractNewSearchDates,
+} from "./booking-turno-filter"
+import { resolverTextoATurno, resolverTurnoConNLU } from "./shared/turno-selection-handler"
+import { detectFlowInterruption } from "./shared/flow-interruption-handler"
 
 // ============================================================================
 // TIPOS
@@ -82,6 +88,8 @@ export interface BookingFlowState {
   profesionalOptions?: ProfesionalOption[]
   especialidadOptions?: EspecialidadOption[]
   turnoOptions?: TurnoOption[]
+  /** Lista completa antes de aplicar un filtro (para poder restaurar "ver todos") */
+  fullTurnoOptions?: TurnoOption[]
   // Selecciones confirmadas
   obraSocialId?: string
   obraSocialNombre?: string
@@ -108,6 +116,13 @@ export type BookingSelectionResult =
   | { handled: true; type: "valid_turno"; turno: TurnoOption; confirmationMessage: string }
   | { handled: true; type: "invalid_selection"; errorMessage: string }
   | { handled: true; type: "search_type_selected"; searchType: "medico_particular" | "especialidad" | "cualquier_medico"; nextMessage?: string }
+  // Nuevos tipos para manejo de texto libre en awaiting_turno_selection
+  | { handled: true; type: "turno_filtered"; message: string }
+  | { handled: true; type: "no_filter_results"; filterDesc: string }
+  | { handled: true; type: "needs_new_date_search"; fechaDesde: string; fechaHasta: string; description: string }
+  | { handled: true; type: "booking_exit_flow" }
+  | { handled: true; type: "turno_selection_clarify"; clarificationMessage: string }
+  | { handled: true; type: "turno_selection_question"; response: string }
 
 // ============================================================================
 // REDIS KEYS
@@ -231,7 +246,12 @@ export async function handleBookingSelectionIfPending(
 
     const selectedNum = extractSelectionNumber(userMessage)
     if (selectedNum === null) {
-      // Input no numérico - dejar que OpenAI lo interprete (ej: "el de las 11 con Karpec")
+      // Input no numérico
+      if (state.step === "awaiting_turno_selection") {
+        // Para turno selection, interceptar con NLU en lugar de pasar a OpenAI
+        return await handleNonNumericTurnoSelection(userMessage, phone, configId, state, logger)
+      }
+      // Para otros pasos del booking flow, continuar con OpenAI
       logger.info("Input no numerico en booking flow, pasando a OpenAI", { step: state.step, userMessage })
       return { handled: false }
     }
@@ -409,6 +429,182 @@ export async function handleBookingSelectionIfPending(
     const logger = createConversationLogger(phone, configId, "booking-flow")
     logger.error("Error en handleBookingSelectionIfPending", error as Error)
     return { handled: false }
+  }
+}
+
+// ============================================================================
+// HANDLER DE TEXTO LIBRE EN AWAITING_TURNO_SELECTION
+// ============================================================================
+
+/**
+ * Maneja mensajes de texto libre cuando el usuario está en awaiting_turno_selection.
+ *
+ * Pipeline (orden de prioridad):
+ *   1. Exit keywords → booking_exit_flow
+ *   2. "ver todos" → restaurar lista completa
+ *   3. Filtro determinístico (día/hora/prof) → turno_filtered / no_filter_results
+ *   4. Resolver a turno específico por texto (resolverTextoATurno)
+ *   5. NLU fallback (resolverTurnoConNLU) → resolved / ambiguous
+ *   6. Consulta intercalada (detectFlowInterruption) → turno_selection_question / exit
+ *   7. Extracción de fechas para nueva búsqueda → needs_new_date_search
+ *   8. Re-prompt genérico
+ */
+async function handleNonNumericTurnoSelection(
+  userMessage: string,
+  phone: string,
+  configId: string,
+  state: BookingFlowState,
+  logger: ReturnType<typeof createConversationLogger>
+): Promise<BookingSelectionResult> {
+  const options = state.turnoOptions || []
+  const msg = userMessage.trim().toLowerCase()
+
+  // --- 1. Exit keywords ---
+  const exitPatterns = [/^0$/, /\bvolver\b/, /\bcancelar\b/, /\bsalir\b/, /no me interesa/, /lo dejo/, /para otro momento/]
+  if (exitPatterns.some(p => p.test(msg))) {
+    logger.info("Exit en selección de turno por keyword", { userMessage })
+    return { handled: true, type: "booking_exit_flow" }
+  }
+
+  // --- 2. "Ver todos" restaura lista completa ---
+  if (/ver todos|mostrar todos|todas las opciones/.test(msg) && state.fullTurnoOptions && state.fullTurnoOptions.length > 0) {
+    logger.info("Restaurando lista completa de turnos", { total: state.fullTurnoOptions.length })
+    const { buildFilteredTurnoListMessage } = await import('./booking-turno-filter')
+    await setBookingFlowState(phone, configId, {
+      ...state,
+      turnoOptions: state.fullTurnoOptions,
+      fullTurnoOptions: undefined,
+    })
+    const restoreMsg = buildFilteredTurnoListMessage(state.fullTurnoOptions, 'todas las fechas disponibles', state.fullTurnoOptions.length)
+    return { handled: true, type: "turno_filtered", message: restoreMsg }
+  }
+
+  // --- 3. Filtro determinístico (día/hora/profesional) ---
+  if (options.length > 0) {
+    const { buildFilteredTurnoListMessage, buildNoFilterResultsMessage } = await import('./booking-turno-filter')
+    const filterResult = detectAndApplyFilter(userMessage, options)
+
+    if (filterResult.type === 'filtered') {
+      logger.info("Filtro aplicado a lista de turnos", { filterDesc: filterResult.filterDesc, resultCount: filterResult.turnos.length })
+      await setBookingFlowState(phone, configId, {
+        ...state,
+        turnoOptions: filterResult.turnos,
+        fullTurnoOptions: state.fullTurnoOptions ?? options,
+      })
+      const message = buildFilteredTurnoListMessage(filterResult.turnos, filterResult.filterDesc, filterResult.originalCount)
+      return { handled: true, type: "turno_filtered", message }
+    }
+
+    if (filterResult.type === 'no_results') {
+      logger.info("Filtro sin resultados", { filterDesc: filterResult.filterDesc })
+      // Intentar nueva búsqueda por fechas antes de rendirse
+      const newDates = await extractNewSearchDates(userMessage)
+      if (newDates) {
+        logger.info("Extraídas fechas para nueva búsqueda", { fechaDesde: newDates.fechaDesde, fechaHasta: newDates.fechaHasta })
+        return {
+          handled: true,
+          type: "needs_new_date_search",
+          fechaDesde: newDates.fechaDesde,
+          fechaHasta: newDates.fechaHasta,
+          description: newDates.description,
+        }
+      }
+      // Sin nuevas fechas: re-mostrar lista original con mensaje informativo
+      const fullOptions = state.fullTurnoOptions ?? options
+      buildNoFilterResultsMessage(filterResult.filterDesc, fullOptions) // built but sent as no_filter_results type
+      return { handled: true, type: "no_filter_results", filterDesc: filterResult.filterDesc }
+    }
+  }
+
+  // --- 4. Resolver a turno específico por texto (determinístico) ---
+  // Nota: cast a any necesario porque resolverTextoATurno usa shared/TurnoOption (con campo `id`)
+  // mientras que BookingFlowState usa booking/TurnoOption (con `idTurno`). Son duck-type compatibles.
+  if (options.length > 0) {
+    const resolvedRef = resolverTextoATurno(userMessage, options as any)
+    const turnoResuelto = resolvedRef ? options.find(t => t.numero === resolvedRef.numero) : null
+    if (turnoResuelto) {
+      logger.info("Turno resuelto por texto determinístico", { numero: turnoResuelto.numero })
+      await setBookingFlowState(phone, configId, {
+        ...state,
+        step: "awaiting_turno_confirmation",
+        turnoSeleccionado: turnoResuelto,
+      })
+      const nombrePaciente = state.patientName ? state.patientName.split(' ')[0] : ''
+      return { handled: true, type: "valid_turno", turno: turnoResuelto, confirmationMessage: buildTurnoConfirmationMessage(turnoResuelto, nombrePaciente) }
+    }
+  }
+
+  // --- 5. NLU fallback para resolver turno específico ---
+  if (options.length > 0) {
+    const nluResult = await resolverTurnoConNLU(userMessage, options as any)
+
+    if (nluResult.outcome === 'resolved') {
+      const turnoNLU = options.find(t => t.numero === nluResult.turnoNumero)
+      if (turnoNLU) {
+        logger.info("Turno resuelto por NLU", { numero: turnoNLU.numero })
+        await setBookingFlowState(phone, configId, {
+          ...state,
+          step: "awaiting_turno_confirmation",
+          turnoSeleccionado: turnoNLU,
+        })
+        const nombrePaciente = state.patientName ? state.patientName.split(' ')[0] : ''
+        return { handled: true, type: "valid_turno", turno: turnoNLU, confirmationMessage: buildTurnoConfirmationMessage(turnoNLU, nombrePaciente) }
+      }
+    }
+
+    if (nluResult.outcome === 'ambiguous') {
+      logger.info("NLU detectó ambigüedad", { reasoning: nluResult.reasoning })
+      return { handled: true, type: "turno_selection_clarify", clarificationMessage: nluResult.clarificationMessage }
+    }
+
+    // outcome === 'unrelated' → continuar al handler de consultas intercaladas
+  }
+
+  // --- 6. Consulta intercalada (preguntas sobre precio, dirección, etc.) ---
+  const currentOptions = state.turnoOptions || options
+  const { buildFilteredTurnoListMessage: buildRelistMsg } = await import('./booking-turno-filter')
+  const relistMsg = currentOptions.length > 0
+    ? buildRelistMsg(currentOptions, 'las fechas disponibles', currentOptions.length)
+    : ''
+
+  const interruption = await detectFlowInterruption(
+    userMessage,
+    'awaiting_turno_selection',
+    { originalPromptMessage: relistMsg },
+    undefined,
+    phone,
+    configId
+  )
+
+  if (interruption.isInterruption && interruption.response) {
+    logger.info("Consulta intercalada detectada en selección de turno")
+    // Si el intent era cancel_flow, limpiar el booking
+    if (interruption.response.includes('Entendido.')) {
+      return { handled: true, type: "booking_exit_flow" }
+    }
+    return { handled: true, type: "turno_selection_question", response: interruption.response }
+  }
+
+  // --- 7. Última opción: extraer fechas para nueva búsqueda ---
+  const newDates = await extractNewSearchDates(userMessage)
+  if (newDates) {
+    logger.info("Fechas para nueva búsqueda detectadas", { fechaDesde: newDates.fechaDesde, fechaHasta: newDates.fechaHasta })
+    return {
+      handled: true,
+      type: "needs_new_date_search",
+      fechaDesde: newDates.fechaDesde,
+      fechaHasta: newDates.fechaHasta,
+      description: newDates.description,
+    }
+  }
+
+  // --- 8. Re-prompt genérico ---
+  logger.info("Mensaje no reconocido en selección de turno, re-prompting", { userMessage })
+  const maxNum = options.length > 0 ? Math.max(...options.map(o => o.numero)) : 1
+  return {
+    handled: true,
+    type: "invalid_selection",
+    errorMessage: `No entendí tu respuesta. Por favor, respondé con el *número* del turno que preferís (entre 1 y ${maxNum}), o indicame qué día u horario buscás.`,
   }
 }
 

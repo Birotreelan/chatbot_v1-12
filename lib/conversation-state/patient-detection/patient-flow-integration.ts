@@ -20,7 +20,9 @@ import {
   buildTurnosSummary,
   buildOtherInquiryMessage,
   buildTurnoIntentConfirmedMessage,
+  buildFamiliarDNIRequestContextualMessage,
 } from './patient-templates'
+import { detectFamiliarIntent } from './familiar-intent-detector'
 
 /**
  * Patient Detection Flow Integration
@@ -60,7 +62,8 @@ export async function initializePatientDetection(
   phoneNumber: string,
   configId: string,
   clienteId: string,
-  clinicName?: string
+  clinicName?: string,
+  firstMessage?: string
 ): Promise<PatientDetectionResult> {
   const logger = createConversationLogger(phoneNumber, configId, 'initial_detection_pending')
   logger.info('Initializing patient detection', {})
@@ -118,6 +121,27 @@ export async function initializePatientDetection(
         patientInfo: {
           isNewPatient: false,
         },
+      }
+    }
+
+    // Paciente existente: detectar intención de familiar en primer mensaje
+    if (firstMessage) {
+      const familiarIntent = detectFamiliarIntent(firstMessage)
+      if (familiarIntent.detected) {
+        console.log(`[v0] [INIT_DETECTION] Familiar intent detected: relation="${familiarIntent.relation}" from message="${firstMessage.substring(0, 60)}"`)
+        await updatePatientDetectionPhase(phoneNumber, 'awaiting_familiar_dni')
+        const callerFirstName = (detectionResult.patientName || 'Hola').split(' ')[0]
+        const firstName = callerFirstName.charAt(0).toUpperCase() + callerFirstName.slice(1).toLowerCase()
+        return {
+          handled: true,
+          message: buildFamiliarDNIRequestContextualMessage(firstName, familiarIntent.relation),
+          patientInfo: {
+            isNewPatient: false,
+            patientId: detectionResult.patientId,
+            patientName: detectionResult.patientName,
+            turnos: detectionResult.turnos,
+          },
+        }
       }
     }
 

@@ -6,6 +6,9 @@ import { getAllWhatsAppConfigs } from "./db"
 const APPOINTMENT_EVENT_PREFIX = "appointment_event:"
 const APPOINTMENT_STATS_PREFIX = "appointment_stats:"
 const TEMPLATE_TRACKING_PREFIX = "template_tracking:"
+/** Key determinística para el template más reciente de un cliente/teléfono.
+ *  Permite GET directo en O(1) sin usar KEYS ni SCAN. */
+const TEMPLATE_TRACKING_LATEST_PREFIX = "template_tracking_latest:"
 const PENDING_RESCHEDULE_PREFIX = "pending_reschedule:"
 const ACTIVE_USER_CONVERSATION_PREFIX = "active_user_conversation:"
 
@@ -487,8 +490,16 @@ export async function trackTemplateSent(
       appointmentInfo,
     }
 
-    // Guardar por 7 días (suficiente para respuestas)
-    await redis.set(trackingKey, JSON.stringify(trackingData), { ex: 60 * 60 * 24 * 7 })
+    const serialized = JSON.stringify(trackingData)
+    const ttl = 60 * 60 * 24 * 7 // 7 días
+
+    // Guardar key con timestamp (legacy, para compatibilidad)
+    await redis.set(trackingKey, serialized, { ex: ttl })
+
+    // Guardar key determinística — permite GET directo en getTemplateSentTime (sin KEYS/SCAN)
+    const latestKey = `${TEMPLATE_TRACKING_LATEST_PREFIX}${clienteId}_${phoneNumber}`
+    await redis.set(latestKey, serialized, { ex: ttl })
+
     console.log(`[APPOINTMENT_STATS] ✅ Template tracking guardado: ${trackingId}`)
 
     await trackAppointmentEvent({
@@ -514,29 +525,12 @@ export async function getTemplateSentTime(clienteId: string, phoneNumber: string
   }
 
   try {
-    console.log(`[APPOINTMENT_STATS] 📊 getTemplateSentTime llamado`)
-    console.log(`[APPOINTMENT_STATS] 📊 - clienteId: ${clienteId}`)
-    console.log(`[APPOINTMENT_STATS] 📊 - phoneNumber: ${phoneNumber}`)
+    // GET directo a la key determinística — O(1), sin KEYS ni SCAN
+    const latestKey = `${TEMPLATE_TRACKING_LATEST_PREFIX}${clienteId}_${phoneNumber}`
+    const trackingData = await redis.get(latestKey)
 
-    // Buscar el tracking más reciente para este cliente y teléfono
-    const pattern = `${TEMPLATE_TRACKING_PREFIX}${clienteId}_${phoneNumber}_*`
-    console.log(`[APPOINTMENT_STATS] 📊 - buscando patrón: ${pattern}`)
-
-    const keys = await redis.keys(pattern)
-    console.log(`[APPOINTMENT_STATS] 📊 - keys encontradas: ${keys.length}`)
-
-    if (keys.length === 0) {
-      console.log(`[APPOINTMENT_STATS] ⚠️ No se encontraron keys para el patrón`)
-      return null
-    }
-
-    // Ordenar por timestamp (más reciente primero)
-    keys.sort().reverse()
-    console.log(`[APPOINTMENT_STATS] 📊 - usando key más reciente: ${keys[0]}`)
-
-    const trackingData = await redis.get(keys[0])
     if (!trackingData) {
-      console.log(`[APPOINTMENT_STATS] ⚠️ Key encontrada pero sin datos`)
+      console.log(`[APPOINTMENT_STATS] ⚠️ No hay template previo para ${phoneNumber} (${clienteId})`)
       return null
     }
 

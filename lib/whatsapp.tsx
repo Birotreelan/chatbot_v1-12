@@ -69,6 +69,11 @@ import {
   buildBookingContextBlock,
 } from "./conversation-state/booking-flow-handler"
 import {
+  mapApiTurnosToOptions,
+  buildNewDateSearchTurnoListMessage,
+} from "./conversation-state/booking-turno-filter"
+import { obtenerTurnos } from "./api-tools/api-functions"
+import {
   fetchSedes,
   buildSedesMessage,
 } from "./conversation-state/shared/sede-handler"
@@ -2382,7 +2387,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         if (!detectionActive && !existingAppointmentCtx && !alreadyIdentified) {
           // No hay flujo activo ni contexto de template, iniciar detección
           // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage)
 
           console.log("[v0] [SPRINT9A] initializePatientDetection result:", JSON.stringify({ handled: detectionResult.handled, action: detectionResult.action, shouldCallOpenAI: detectionResult.shouldCallOpenAI }))
           
@@ -2977,6 +2982,116 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               searchType: bookingResult.searchType,
             })
             // Continua al enqueue con contexto enriquecido
+          }
+
+          // ------------------------------------------------------------------
+          // Nuevos tipos: manejo de texto libre en awaiting_turno_selection
+          // ------------------------------------------------------------------
+
+          if (bookingResult.type === "turno_filtered") {
+            bookingLogger.info("Lista de turnos filtrada, re-mostrando")
+            await sendDirectResponse(bookingCtx, bookingResult.message, "booking-flow-filter")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+
+          if (bookingResult.type === "no_filter_results") {
+            bookingLogger.info("Filtro sin resultados", { filterDesc: bookingResult.filterDesc })
+            // Re-mostrar lista completa con mensaje informativo
+            const currentBookingState = await getBookingFlowState(userPhoneNumber, config.id)
+            const fullOptions = currentBookingState?.fullTurnoOptions ?? currentBookingState?.turnoOptions ?? []
+            const { buildNoFilterResultsMessage } = await import("./conversation-state/booking-turno-filter")
+            const noResultsMsg = buildNoFilterResultsMessage(
+              bookingResult.filterDesc,
+              fullOptions,
+              config.displayName
+            )
+            await sendDirectResponse(bookingCtx, noResultsMsg, "booking-flow-filter")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+
+          if (bookingResult.type === "turno_selection_clarify") {
+            bookingLogger.info("NLU solicita aclaración para selección de turno")
+            await sendDirectResponse(bookingCtx, bookingResult.clarificationMessage, "booking-flow-clarify")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+
+          if (bookingResult.type === "turno_selection_question") {
+            bookingLogger.info("Consulta intercalada en selección de turno respondida")
+            await sendDirectResponse(bookingCtx, bookingResult.response, "booking-flow-question")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+
+          if (bookingResult.type === "booking_exit_flow") {
+            bookingLogger.info("Usuario salió del flujo de reserva")
+            const currentBookingState2 = await getBookingFlowState(userPhoneNumber, config.id)
+            if (currentBookingState2) {
+              await setBookingFlowState(userPhoneNumber, config.id, {
+                ...currentBookingState2,
+                step: null,
+              })
+            }
+            await sendDirectResponse(
+              bookingCtx,
+              "Entendido. Podés retomar el agendamiento cuando lo necesites. ¿En qué más te puedo ayudar?",
+              "booking-flow-exit"
+            )
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+
+          if (bookingResult.type === "needs_new_date_search") {
+            bookingLogger.info("Nueva búsqueda de turnos por fechas", {
+              fechaDesde: bookingResult.fechaDesde,
+              fechaHasta: bookingResult.fechaHasta,
+              description: bookingResult.description,
+            })
+            try {
+              const currentBookingStateForSearch = await getBookingFlowState(userPhoneNumber, config.id)
+              const searchResult = await obtenerTurnos(
+                config.cliente_id,
+                bookingResult.fechaDesde,
+                bookingResult.fechaHasta,
+                currentBookingStateForSearch?.profesionalId,
+                undefined,
+                false,
+                currentBookingStateForSearch?.sedeId,
+                currentBookingStateForSearch?.especialidadId,
+                currentBookingStateForSearch?.obraSocialId,
+              )
+
+              let newOptions = mapApiTurnosToOptions(searchResult.datos ?? searchResult)
+
+              if (newOptions.length === 0 && currentBookingStateForSearch) {
+                // Sin resultados: conservar lista anterior y avisar
+                const noResultMsg = `No encontré turnos disponibles para ${bookingResult.description}.\n\n¿Querés intentar con otras fechas o elegir de la lista anterior?`
+                await sendDirectResponse(bookingCtx, noResultMsg, "booking-flow-new-search")
+              } else {
+                // Guardar nuevas opciones en state
+                if (currentBookingStateForSearch) {
+                  await setBookingFlowState(userPhoneNumber, config.id, {
+                    ...currentBookingStateForSearch,
+                    step: "awaiting_turno_selection",
+                    turnoOptions: newOptions,
+                    fullTurnoOptions: currentBookingStateForSearch.fullTurnoOptions ?? currentBookingStateForSearch.turnoOptions,
+                  })
+                }
+                const newListMsg = buildNewDateSearchTurnoListMessage(
+                  newOptions,
+                  bookingResult.description,
+                  config.displayName
+                )
+                await sendDirectResponse(bookingCtx, newListMsg, "booking-flow-new-search")
+              }
+            } catch (searchErr) {
+              bookingLogger.error("Error en nueva búsqueda de turnos por fechas", searchErr as Error)
+              await sendDirectResponse(bookingCtx, "Hubo un problema al buscar turnos. Por favor intentá de nuevo.", "booking-flow-new-search-error")
+            }
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
           }
         }
       }
