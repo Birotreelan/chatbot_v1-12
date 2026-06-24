@@ -107,8 +107,24 @@ export async function buildDispatcherContext(
   historyLines: string = ''
 ): Promise<DispatcherContext> {
 
+  // ── Lecturas Redis en paralelo ────────────────────────────────────────────
+  // Antes: 4-6 awaits secuenciales (~150-300ms acumulados).
+  // Ahora: todas las lecturas independientes en un solo round-trip.
+  const [
+    identified,
+    existingActive,
+    newActive,
+    detectionActive,
+    bookingState,
+  ] = await Promise.all([
+    getIdentifiedPatient(phoneNumber),
+    isExistingPatientFlowActive(phoneNumber),
+    isNewPatientFlowActive(phoneNumber, configId),
+    isPatientDetectionFlowActive(phoneNumber),
+    getBookingFlowState(phoneNumber, configId),
+  ])
+
   // ── Paciente identificado ──────────────────────────────────────────────────
-  const identified = await getIdentifiedPatient(phoneNumber)
   const patient: PatientSnapshot = {
     identified: !!identified,
     name: identified?.patientName,
@@ -141,15 +157,15 @@ export async function buildDispatcherContext(
   }
 
   // ── Flujo activo ───────────────────────────────────────────────────────────
+  // Prioridad: existing_patient > new_patient > patient_detection > booking
   let activeFlow: ActiveFlowSnapshot = {
     type: 'none',
     phase: 'none',
     description: describePhase('none'),
   }
 
-  // Prioridad: existing_patient > new_patient > patient_detection > booking
-  const existingActive = await isExistingPatientFlowActive(phoneNumber)
   if (existingActive) {
+    // Solo leemos el estado detallado si el flujo está activo (evitar read innecesario)
     const existingState = await getExistingPatientState(phoneNumber)
     const phase = existingState?.phase ?? 'unknown'
     activeFlow = {
@@ -157,32 +173,23 @@ export async function buildDispatcherContext(
       phase,
       description: describePhase(phase),
     }
-  } else {
-    const newActive = await isNewPatientFlowActive(phoneNumber, configId)
-    if (newActive) {
-      activeFlow = {
-        type: 'new_patient',
-        phase: 'in_progress',
-        description: 'El paciente está en el flujo de registro como paciente nuevo',
-      }
-    } else {
-      const detectionActive = await isPatientDetectionFlowActive(phoneNumber)
-      if (detectionActive) {
-        activeFlow = {
-          type: 'patient_detection',
-          phase: 'detecting',
-          description: 'Se está identificando al paciente y mostrando el menú inicial',
-        }
-      } else {
-        const bookingState = await getBookingFlowState(phoneNumber, configId)
-        if (bookingState?.step) {
-          activeFlow = {
-            type: 'booking',
-            phase: bookingState.step,
-            description: describePhase(bookingState.step),
-          }
-        }
-      }
+  } else if (newActive) {
+    activeFlow = {
+      type: 'new_patient',
+      phase: 'in_progress',
+      description: 'El paciente está en el flujo de registro como paciente nuevo',
+    }
+  } else if (detectionActive) {
+    activeFlow = {
+      type: 'patient_detection',
+      phase: 'detecting',
+      description: 'Se está identificando al paciente y mostrando el menú inicial',
+    }
+  } else if (bookingState?.step) {
+    activeFlow = {
+      type: 'booking',
+      phase: bookingState.step,
+      description: describePhase(bookingState.step),
     }
   }
 

@@ -16,6 +16,8 @@ function getProxyUrl(): string {
 const CACHE_PREFIX = "api_cache:"
 // TTL para la caché (en segundos)
 const CACHE_TTL = 60 * 5 // 5 minutos
+// TTL extendido para datos cuasi-estáticos (sedes) — cambian raramente
+const CACHE_TTL_SEDES = 60 * 60 // 1 hora
 
 const NO_CACHE_ACTIONS = [
   "get_paciente", // Incluye turnos_proximos que pueden cambiar
@@ -70,14 +72,7 @@ async function fetchProxyApi<T>(
       ...params,
     }
 
-    console.log(`[API] 📤 ${action} → ${proxyUrl}`)
-    console.log(`[API-DEBUG] 🔍 Cliente_Id Details:`, {
-      clienteId,
-      clienteIdTrimmed: clienteId.trim(),
-      clienteIdLength: clienteId.trim().length,
-      isConfigId: clienteId.trim().length === 17,  // configId típicamente tiene 17 chars
-    })
-    console.log(`[API] 📋 Params: ${JSON.stringify(params)}`)
+    console.log(`[API] 📤 ${action}`)
 
     const response = await fetchWithTimeout(
       proxyUrl,
@@ -93,9 +88,8 @@ async function fetchProxyApi<T>(
 
     // Obtener el texto de la respuesta
     const responseText = await response.text()
-    console.log(`[API] 📥 ${response.status} Respuesta COMPLETA del proxy:`)
-    console.log(`[API] 📥 ${responseText}`)
-    console.log(`[API] 📥 Longitud total: ${responseText.length} caracteres`)
+    // Log reducido: solo estado HTTP y longitud (no loguear datos de pacientes en producción)
+    console.log(`[API] 📥 ${action} → ${response.status} (${responseText.length} chars)`)
 
     // Intentar parsear la respuesta como JSON
     let data
@@ -469,9 +463,19 @@ export async function validarObraSocial(
 
 // Función para obtener datos de una sede específica
 export async function obtenerDatosSede(clienteId: string, sedeId: string): Promise<SedeResponse | null> {
-  try {
-    console.log(`[API] 🏥 Obteniendo datos de sede: ${sedeId} para cliente: ${clienteId}`)
+  // Caché Redis — las sedes son cuasi-estáticas, TTL 1 hora
+  const redis = getRedisClient()
+  const cacheKey = `${CACHE_PREFIX}get_data_sede:${clienteId}:${sedeId}`
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey)
+      if (cached) {
+        return (typeof cached === 'string' ? JSON.parse(cached) : cached) as SedeResponse
+      }
+    } catch { /* cache miss — continuar con fetch */ }
+  }
 
+  try {
     const config = getClinicApiConfig()
 
     if (!config.baseUrl) {
@@ -485,40 +489,35 @@ export async function obtenerDatosSede(clienteId: string, sedeId: string): Promi
       sede_id: sedeId,
     }
 
-    console.log("[API] 📤 Enviando request:", requestBody)
-
     const response = await fetch(config.baseUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(config.timeout),
     })
 
     if (!response.ok) {
-      console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
+      console.error(`[API] ❌ Error HTTP sede: ${response.status}`)
       return null
     }
 
     const data = (await response.json()) as SedeResponse
-    console.log("[API] 📥 Respuesta recibida:", data)
 
     if (data.success && data.sede) {
-      console.log(`[API] ✅ Datos de sede obtenidos: ${data.sede.Nombre_Completo}`)
+      // Guardar en caché
+      if (redis) {
+        try { await redis.setex(cacheKey, CACHE_TTL_SEDES, JSON.stringify(data)) } catch { /* ignorar */ }
+      }
       return data
-    } else {
-      console.error("[API] ❌ Respuesta no exitosa:", data)
-      return null
     }
+    return null
   } catch (error) {
     console.error("[API] ❌ Error al obtener datos de sede:", error)
     return null
   }
 }
 
-// Función para obtener listado de todas las sedes
-export async function obtenerTodasLasSedes(clienteId: string): Promise<{
+type SedesListResult = {
   success: boolean
   sedes?: Array<{
     Id: string
@@ -533,10 +532,23 @@ export async function obtenerTodasLasSedes(clienteId: string): Promise<{
   }>
   total?: number
   error?: string
-}> {
-  try {
-    console.log(`[API] 🏥 Obteniendo listado de todas las sedes para cliente: ${clienteId}`)
+}
 
+// Función para obtener listado de todas las sedes
+export async function obtenerTodasLasSedes(clienteId: string): Promise<SedesListResult> {
+  // Caché Redis — las sedes son cuasi-estáticas, TTL 1 hora
+  const redis = getRedisClient()
+  const cacheKey = `${CACHE_PREFIX}get_data_sedes:${clienteId}`
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey)
+      if (cached) {
+        return (typeof cached === 'string' ? JSON.parse(cached) : cached) as SedesListResult
+      }
+    } catch { /* cache miss — continuar con fetch */ }
+  }
+
+  try {
     const config = getClinicApiConfig()
 
     if (!config.baseUrl) {
@@ -549,36 +561,33 @@ export async function obtenerTodasLasSedes(clienteId: string): Promise<{
       Action: "get_data_sedes",
     }
 
-    console.log("[API] 📤 Enviando request:", requestBody)
-
     const response = await fetch(config.baseUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(config.timeout),
     })
 
     if (!response.ok) {
-      console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
+      console.error(`[API] ❌ Error HTTP sedes: ${response.status}`)
       return { success: false, error: `Error HTTP: ${response.status}` }
     }
 
     const data = await response.json()
-    console.log("[API] 📥 Respuesta recibida:", data)
 
     if (data.success && data.sedes) {
-      console.log(`[API] ✅ Listado de sedes obtenido: ${data.sedes.length} sedes`)
-      return {
+      const result: SedesListResult = {
         success: true,
         sedes: data.sedes,
         total: data.total || data.sedes.length,
       }
-    } else {
-      console.error("[API] ❌ Respuesta no exitosa:", data)
-      return { success: false, error: data.error || "Error desconocido" }
+      // Guardar en caché
+      if (redis) {
+        try { await redis.setex(cacheKey, CACHE_TTL_SEDES, JSON.stringify(result)) } catch { /* ignorar */ }
+      }
+      return result
     }
+    return { success: false, error: data.error || "Error desconocido" }
   } catch (error) {
     console.error("[API] ❌ Error al obtener listado de sedes:", error)
     return { success: false, error: error instanceof Error ? error.message : "Error desconocido" }
@@ -615,8 +624,6 @@ export async function obtenerTurnosDisponibles(
       ...(profesionalId && { profesional_id: profesionalId }),
     }
 
-    console.log("[API] 📤 Enviando request:", requestBody)
-
     const response = await fetch(config.baseUrl, {
       method: "POST",
       headers: {
@@ -627,7 +634,7 @@ export async function obtenerTurnosDisponibles(
     })
 
     if (!response.ok) {
-      console.error(`[API] ❌ Error HTTP: ${response.status} ${response.statusText}`)
+      console.error(`[API] ❌ Error HTTP get_turnos_disponibles: ${response.status}`)
       return {
         exito: false,
         error: `Error HTTP ${response.status}`,
@@ -635,8 +642,6 @@ export async function obtenerTurnosDisponibles(
     }
 
     const data = await response.json()
-    console.log("[API] 📥 Respuesta recibida:", data)
-
     return data
   } catch (error) {
     console.error("[API] ❌ Error al obtener turnos:", error)
@@ -669,8 +674,7 @@ export async function confirmarTurno(
     paciente_datos: turnoData.paciente_datos,
   }
 
-  console.log(`[API] 🎯 Confirmando turno:`, turnoData)
-  console.log("[API] 📤 Enviando request:", requestBody)
+  console.log(`[API] 🎯 Confirmando turno — fecha: ${turnoData.fecha}, hora: ${turnoData.hora}`)
 
   let lastError: Error | null = null
 
@@ -756,8 +760,6 @@ export async function confirmarTurno(
         }
       }
 
-      console.log("[API] 📥 Respuesta recibida:", data)
-      
       // Si llegamos aquí, la respuesta fue exitosa
       if (attempt > 1) {
         console.log(`[API] ✅ Confirmación exitosa en el intento ${attempt}`)
@@ -811,8 +813,7 @@ export async function cancelarTurno(
     paciente_datos: turnoData.paciente_datos,
   }
 
-  console.log(`[API] ❌ Cancelando turno:`, turnoData)
-  console.log("[API] 📤 Enviando request de cancelación:", requestBody)
+  console.log(`[API] ❌ Cancelando turno — fecha: ${turnoData.fecha}`)
 
   let lastError: Error | null = null
 
@@ -898,8 +899,6 @@ export async function cancelarTurno(
         }
       }
 
-      console.log("[API] 📥 Respuesta de cancelación recibida:", data)
-      
       // Si llegamos aquí, la respuesta fue exitosa
       if (attempt > 1) {
         console.log(`[API] ✅ Cancelación exitosa en el intento ${attempt}`)

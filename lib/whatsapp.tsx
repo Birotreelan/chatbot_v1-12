@@ -3236,14 +3236,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         try {
           const dispatcherLogger = createConversationLogger(userPhoneNumber, config.id, "ai-dispatcher")
 
-          // Obtener contexto de turno e historial (pueden no estar en scope aquí)
-          const dispatcherAppCtx = await getAppointmentContext(userPhoneNumber, config.id).catch(() => null)
-          const dispatcherHistory = await import('./conversation-state/conversation-history')
-            .then(m => m.getHistory(userPhoneNumber))
-            .then(msgs => msgs.map((m: any) => `${m.role === 'user' ? 'Paciente' : 'Bot'}: ${m.content}`).join('\n'))
-            .catch(() => '')
+          // Obtener contexto de turno e historial en paralelo (antes: secuencial)
+          const [dispatcherAppCtx, dispatcherHistory] = await Promise.all([
+            getAppointmentContext(userPhoneNumber, config.id).catch(() => null),
+            import('./conversation-state/conversation-history')
+              .then(m => m.getHistory(userPhoneNumber))
+              .then(msgs => msgs.map((m: any) => `${m.role === 'user' ? 'Paciente' : 'Bot'}: ${m.content}`).join('\n'))
+              .catch(() => ''),
+          ])
 
           // Construir contexto completo del paciente
+          // (buildDispatcherContext ya paraleliza sus propias lecturas Redis internamente)
           const dispatcherCtx = await buildDispatcherContext(
             userPhoneNumber,
             config.id,
