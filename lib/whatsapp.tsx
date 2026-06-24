@@ -409,10 +409,15 @@ async function handlePendingFlowResponse(
       const confirmMsg = buildConfirmationMessage(chatbotData, turnoIndex)
       await sendDirectResponse(ctx, confirmMsg, "confirm_flow")
 
-      // Marcar turno como confirmado en estado y volver al menú
-      const updatedTurnosAfterConfirm = (chatbotData.turnos || []).map((t: any, i: number) =>
-        i === turnoIndex ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
-      )
+      // Marcar como confirmados el turno elegido y todos los de la misma fecha
+      // (el backend confirma todos los turnos de la misma fecha juntos)
+      const fechaConfirmada = chatbotData.turnos[turnoIndex]?.fecha || chatbotData.turnos[turnoIndex]?.Fecha
+      const updatedTurnosAfterConfirm = (chatbotData.turnos || []).map((t: any, i: number) => {
+        const tFecha = t.fecha || t.Fecha
+        return (i === turnoIndex || (fechaConfirmada && tFecha === fechaConfirmada))
+          ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' }
+          : t
+      })
       const menuMsgAfterConfirm = await returnPatientToMenu(userPhoneNumber, updatedTurnosAfterConfirm)
       if (menuMsgAfterConfirm) await sendDirectResponse(ctx, menuMsgAfterConfirm, "return_to_menu")
 
@@ -2771,6 +2776,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     agenda_id: t.Agenda_Id || t.agenda_id || '',
                     admite_reagendamiento: t.admite_reagendamiento || false,
                     tipo: t.Motivo_Nombre || t.tipo || 'consulta',
+                    estado: t.Estado || t.estado || '',
                   })),
                   cantidad_turnos: patientInfo.turnos.length,
                   sede_id: turno.Sede_Id || turno.sede_id || '',
@@ -2781,9 +2787,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 // Guardar el contexto para que el flujo de confirmación/cancelación lo use
                 await saveAppointmentContext(userPhoneNumber, config.id, chatbotData)
 
-                // Si el paciente tiene MÁS DE UN turno, primero debe elegir sobre cuál operar.
-                // Guardamos la acción pendiente y esperamos la selección numérica.
-                if (patientInfo.turnos.length > 1) {
+                // Si el paciente tiene MÁS DE UN turno, primero debe elegir sobre cuál operar,
+                // SALVO que todos sean en la misma fecha: el backend los confirma/cancela juntos.
+                const allSameDateDetect = patientInfo.turnos.every(
+                  (t: any) => (t.Fecha || t.fecha) === (patientInfo.turnos[0].Fecha || patientInfo.turnos[0].fecha)
+                )
+                if (patientInfo.turnos.length > 1 && !allSameDateDetect) {
                   await setFlowState(userPhoneNumber, config.id, {
                     type: 'awaiting_turno_selection',
                     createdAt: new Date().toISOString(),
@@ -2808,10 +2817,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     const confirmMsg = buildConfirmationMessage(chatbotData, 0)
                     await sendDirectResponse(detectionCtx, confirmMsg, "confirm_flow")
 
-                    // Marcar turno como confirmado y volver al menú
-                    const updatedTurnosDetect = (chatbotData.turnos || []).map((t: any, i: number) =>
-                      i === 0 ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
-                    )
+                    // Marcar TODOS los turnos como confirmados (el backend los confirma juntos)
+                    const updatedTurnosDetect = (chatbotData.turnos || []).map((t: any) => ({
+                      ...t, Estado: 'Confirmado', estado: 'Confirmado'
+                    }))
                     const menuAfterDetect = await returnPatientToMenu(userPhoneNumber, updatedTurnosDetect)
                     if (menuAfterDetect) await sendDirectResponse(detectionCtx, menuAfterDetect, "return_to_menu")
                   } else {

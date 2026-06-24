@@ -38,6 +38,7 @@ export interface ChatbotDataTurno {
   agenda_id: string
   admite_reagendamiento: boolean
   tipo: string
+  estado?: string
 }
 
 /**
