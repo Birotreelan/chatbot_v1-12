@@ -15,6 +15,7 @@ import { createConversationLogger } from "./logger"
 import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
 import { isWithinTemplateWindow } from "@/lib/appointment-stats"
+import { isAppointmentConfirmed, getAppointmentRef } from "@/lib/appointment-flow-state"
 
 // ============================================================================
 // PATRONES DE CONFIRMACIÓN
@@ -432,20 +433,41 @@ export async function detectDirectConfirmationPreFlow(
     appointmentId: appointmentContext.appointment_id,
   })
 
+  // Verificar si el turno ya fue confirmado (usando la marca en Redis, que es la fuente de verdad)
+  const appointmentRef = getAppointmentRef(appointmentContext as any)
+  const turnoYaConfirmado = await isAppointmentConfirmed(userPhone, configId, appointmentRef)
+
+  if (turnoYaConfirmado) {
+    logger.info("Turno ya confirmado — solo procesar cancelaciones explícitas", { appointmentRef })
+  }
+
   // Paso 2: Verificar patrones PUROS de confirmación (0ms latencia)
+  // Si el turno ya está confirmado, ignorar (no double-confirm)
   if (isDirectConfirmationPattern(message)) {
+    if (turnoYaConfirmado) {
+      logger.info("Confirmación PURA pero turno ya confirmado — ignorando")
+      return { detected: false }
+    }
     logger.info("Confirmación PURA detectada por patrón", { message })
     return { detected: true, action: "confirm", appointmentContext }
   }
 
   // Paso 3: Verificar patrones de cancelación PURA (0ms latencia)
+  // La cancelación siempre es válida, incluso si el turno ya estaba confirmado
   if (isDirectCancellationPattern(message)) {
     logger.info("Cancelación PURA detectada por patrón", { message })
     return { detected: true, action: "cancel", appointmentContext }
   }
 
+  // Si el turno ya está confirmado, los pasos siguientes (implícitos y ambiguos)
+  // no deben pedir confirmación — el mensaje es solo cortesía o consulta
+  if (turnoYaConfirmado) {
+    logger.info("Turno confirmado — no interceptar mensajes ambiguos, cediendo al flujo normal")
+    return { detected: false }
+  }
+
   // Paso 4: Verificar confirmación IMPLÍCITA — acuse de recibo, asistencia sin decir "confirmo"
-  // "recibido", "enterado", "allí estaré", "si estoy el viernes allí estaré", etc.
+  // "recibido", "enterado", "allí estaré", etc.
   if (isImplicitConfirmationPattern(message)) {
     logger.info("Confirmación IMPLÍCITA detectada por patrón", { message })
     return { detected: true, action: "confirm", appointmentContext }
