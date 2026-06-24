@@ -49,7 +49,7 @@ import { createConversationLogger } from "./conversation-state/logger"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
 import { handleFarewellIfDetected, detectFarewellPreFlow, detectReciprocalFarewellPreFlow } from "./conversation-state/farewell-handler"
 import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
-import { detectDirectConfirmationPreFlow, buildConfirmationSuccessResponse, buildCancelConfirmationPrompt, buildAskExplicitConfirmationMessage } from "./conversation-state/direct-confirmation-handler"
+import { detectDirectConfirmationPreFlow, buildCancelConfirmationPrompt, buildAskExplicitConfirmationMessage } from "./conversation-state/direct-confirmation-handler"
 import { detectInformationalQueryPreFlow } from "./conversation-state/informational-query-handler"
 import { detectPostActionContextPreFlow, savePostActionContext } from "./conversation-state/post-action-context"
 import { detectNLUFallbackPreFlow } from "./conversation-state/nlu-fallback-handler"
@@ -2013,7 +2013,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               }
 
               // Proxy confirmó con éxito — recién ahora enviamos el mensaje al usuario
-              const confirmResponse = buildConfirmationSuccessResponse(patientName)
+              const confirmResponse = buildConfirmationMessage(appointmentCtx, 0)
               await sendDirectResponse(confirmCtx, confirmResponse, "direct_confirm")
 
               // Marcar el turno como confirmado para no volver a ofrecer "Confirmar asistencia"
@@ -3142,14 +3142,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             }
 
             if (action.type === 'trigger_confirm_appointment') {
-              // Confirmar asistencia directo usando el buildConfirmationSuccessResponse existente
               if (dispatcherAppCtx) {
-                const { buildConfirmationSuccessResponse } = await import('./conversation-state/direct-confirmation-handler')
-                const turno = dispatcherCtx.turnos[0]
-                const turnoDetails = turno
-                  ? `📅 ${turno.fecha} a las ${turno.hora}\n👨‍⚕️ ${turno.profesional}\n📍 ${turno.sede}`
-                  : "Tu turno programado"
-                const confirmMsg = buildConfirmationSuccessResponse(turnoDetails)
+                const confirmMsg = buildConfirmationMessage(dispatcherAppCtx, 0)
                 await sendDirectResponse(dispatcherCtxDirect, confirmMsg, "ai-dispatcher-confirm")
               }
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
