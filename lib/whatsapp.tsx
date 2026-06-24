@@ -65,8 +65,13 @@ import {
 import {
   handleBookingSelectionIfPending,
   getBookingFlowState,
+  setBookingFlowState,
   buildBookingContextBlock,
 } from "./conversation-state/booking-flow-handler"
+import {
+  fetchSedes,
+  buildSedesMessage,
+} from "./conversation-state/shared/sede-handler"
 import {
   startRescheduleFlow,
   processRescheduleMessage,
@@ -2888,6 +2893,37 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             bookingLogger.info("Seleccion valida en booking flow", {
               step: bookingResult.nextStep,
             })
+
+            // Cuando se transiciona a awaiting_sede_selection, las sedes NO están
+            // guardadas en el estado del booking flow. Las buscamos ahora, las
+            // persistimos en el estado y las incluimos en el mensaje.
+            if (bookingResult.nextStep === "awaiting_sede_selection") {
+              try {
+                const sedesResult = await fetchSedes(config.cliente_id)
+                if (sedesResult.success && sedesResult.sedes && sedesResult.sedes.length > 0) {
+                  const currentBookingState = await getBookingFlowState(userPhoneNumber, config.id)
+                  if (currentBookingState) {
+                    await setBookingFlowState(userPhoneNumber, config.id, {
+                      ...currentBookingState,
+                      sedeOptions: sedesResult.sedes.map(s => ({
+                        numero: s.numero,
+                        id: s.id,
+                        nombre: s.nombre,
+                        domicilio: s.domicilio,
+                        localidad: s.localidad,
+                        provincia: s.provincia,
+                      })),
+                    })
+                  }
+                  const sedeListMsg = `${bookingResult.confirmationMessage}\n\n${buildSedesMessage(sedesResult.sedes)}`
+                  await sendDirectResponse(bookingCtx, sedeListMsg, "booking-flow")
+                  return
+                }
+              } catch (err) {
+                bookingLogger.warn("Error prefetching sedes for booking flow", err as Error)
+              }
+            }
+
             await sendDirectResponse(bookingCtx, bookingResult.confirmationMessage, "booking-flow")
             return
           }

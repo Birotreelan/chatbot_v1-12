@@ -39,11 +39,14 @@ export function classifyTurnoEstado(turno: any): TurnoEstadoCategoria {
 /**
  * ¿Debe ofrecerse la opción "Confirmar asistencia" para este turno?
  *
- * Sí cuando el turno está confirmado (ya confirmado) o "No confirmado"
- * (el paciente todavía puede confirmar su asistencia).
- * No cuando está pendiente de aprobación por la clínica.
+ * Solo cuando el turno está en estado "No confirmado" — es decir, el paciente
+ * TODAVÍA NO confirmó su asistencia y puede hacerlo.
+ *
+ * No se ofrece cuando:
+ *  - "Confirmado": el paciente ya confirmó, mostrar de nuevo confundiría.
+ *  - "Pendiente de aprobación": la clínica todavía no aprobó el turno.
  */
 export function shouldOfferConfirmation(turno: any): boolean {
   const categoria = classifyTurnoEstado(turno)
-  return categoria === 'confirmado' || categoria === 'no_confirmado'
+  return categoria === 'no_confirmado'
 }

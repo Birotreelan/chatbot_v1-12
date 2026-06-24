@@ -92,6 +92,19 @@ export async function detectNLUFallbackPreFlow(
       return { shouldHandle: false }
     }
 
+    // Antes de clasificar, detectar casos que NUNCA deben interceptarse aquí:
+    // 1. Saludos puros ("Hola", "buenas") → mostrar menú de detección de paciente
+    // 2. Solicitudes de nuevo turno ("Necesito turno", "Quiero sacarme un turno") → idem
+    const msgNorm = userMessage.trim().toLowerCase()
+    if (isPureGreeting(msgNorm)) {
+      logger.info(`[Sprint 18] Saludo puro detectado — no interceptar, dejar al flujo de detección`, { userMessage })
+      return { shouldHandle: false }
+    }
+    if (isNewBookingRequest(msgNorm)) {
+      logger.info(`[Sprint 18] Solicitud de nuevo turno detectada — no interceptar, dejar al flujo de detección`, { userMessage })
+      return { shouldHandle: false }
+    }
+
     // El turno ya fue cancelado: el contexto persiste en Redis (con turno_cancelado)
     // pero no hay un turno ACTIVO. Si lo tratáramos como activo, intents como
     // "reagendar_turno"/"confirmar_asistencia" generarían menús con datos vacíos
@@ -445,11 +458,28 @@ function isContextualExplanation(msg: string): boolean {
   return /\b(esta (enferm|internado|internada|convalec)|estuv(e|o) (enferm|internado|internada)|me (opero|opere|lastim|cai|accidente)|se (mudo|fallecio|murio|accidento|lastimo)|fallecio|por (motivos de salud|salud|enfermedad|problemas de salud|trabajo|viaje|mudanza)|viaje (de trabajo|imprevisto|urgente)|surgio algo|se complico|no me dan (el dia|permiso)|me cancelaron (el vuelo|el trabajo)|situacion (familiar|personal|laboral|medica))\b/.test(msg)
 }
 
+/**
+ * Saludo PURO ("Hola", "buenas tardes") — sin contenido adicional.
+ * Estos mensajes deben ir al flujo de detección de paciente para mostrar el menú,
+ * NO ser capturados por el NLU fallback con una respuesta de despedida.
+ */
+function isPureGreeting(msg: string): boolean {
+  return /^(hola|buenas?|buenos?\s*d[ií]as?|buenas?\s*tardes?|buenas?\s*noches?|saludos|hi|hey)[.!\s]*$/.test(msg)
+}
+
+/**
+ * Solicitud de nuevo turno — el paciente quiere agendar, no gestionar el turno existente.
+ * Deben pasar al flujo de detección de paciente, no recibir el mensaje de "fuera de scope".
+ */
+function isNewBookingRequest(msg: string): boolean {
+  return /\b(necesito (un |sacar |pedir |solicitar )?turno|quiero (un |sacar |pedir |solicitar )?turno|sacar( un)? turno|pedir( un)? turno|solicitar( un)? turno|agenda(r)?( un)?( nuevo)? turno|reservar( un)?( nuevo)? turno|turno (para|con|de)\b|nuevo turno|otro turno|gestionar (un )?turno|turno m[eé]dico)\b/.test(msg)
+}
+
 /** Saludo o despedida */
 function isSalutationOrFarewell(msg: string): boolean {
-  const greet = /^(hola|buenas|buenos dias|buenas tardes|buen dia|saludos|hi|hey)\b/
+  // Solo despedidas y agradecimientos — los saludos puros se manejan antes con isPureGreeting
   const bye = /\b(gracias|muchas gracias|chau|chao|adios|hasta luego|bye|hasta pronto|nos vemos|fue todo|era todo|nada mas|eso era todo|igualmente|de nada|un placer)\b/
-  return greet.test(msg) || bye.test(msg)
+  return bye.test(msg)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

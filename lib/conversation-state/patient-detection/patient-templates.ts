@@ -260,13 +260,12 @@ function buildSingleTurnoGreeting(
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
 
   if (categoria === 'confirmado') {
-    // Turno ya confirmado por el paciente.
-    mensaje += `*Veo que ya tenés un turno médico agendado y con la asistencia confirmada para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
-    mensaje += `¿En qué te podemos ayudar?\n\n`
-    mensaje += `1- Confirmar asistencia al turno médico (ya confirmado)\n`
-    mensaje += `2- Cancelar el turno médico confirmado\n`
-    mensaje += `3- Cancelar el turno médico y solicitar uno nuevo\n`
-    mensaje += `4- Realizar otra consulta\n\n`
+    // Turno ya confirmado por el paciente → no ofrecer "Confirmar asistencia" de nuevo.
+    mensaje += `*Tu asistencia al turno del ${fecha} a las ${hora} con ${profesional} en la sede ${sede} ya está confirmada.*\n\n`
+    mensaje += `¿En qué más te podemos ayudar?\n\n`
+    mensaje += `1- Cancelar el turno\n`
+    mensaje += `2- Cancelar el turno y solicitar uno nuevo\n`
+    mensaje += `3- Realizar otra consulta\n\n`
   } else if (categoria === 'no_confirmado') {
     // Turno agendado pero el paciente todavía NO confirmó su asistencia:
     // se ofrece la opción de confirmar.
@@ -518,14 +517,23 @@ export function buildPostActionMenu(
 
     if (cat === 'no_confirmado') {
       msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+      msg += `1- Confirmar asistencia al turno médico\n`
+      msg += `2- Cancelar turno médico\n`
+      msg += `3- Cancelar el turno médico y solicitar uno nuevo\n`
+      msg += `4- Realizar otra consulta\n\n`
+    } else if (cat === 'confirmado') {
+      // Turno ya confirmado → no ofrecer "Confirmar asistencia" de nuevo
+      msg += `Tu turno del ${fecha} a las ${hora} con ${prof} en ${sede} *ya está confirmado*.\n\n`
+      msg += `1- Cancelar el turno\n`
+      msg += `2- Cancelar el turno y solicitar uno nuevo\n`
+      msg += `3- Realizar otra consulta\n\n`
     } else {
-      msg += `Tenés un turno agendado: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+      // pendiente_aprobacion
+      msg += `Tenés un turno pendiente de aprobación: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+      msg += `1- Cancelar el turno\n`
+      msg += `2- Cancelar el turno y solicitar uno nuevo\n`
+      msg += `3- Realizar otra consulta\n\n`
     }
-
-    msg += `1- Confirmar asistencia al turno médico\n`
-    msg += `2- Cancelar turno médico\n`
-    msg += `3- Cancelar el turno médico y solicitar uno nuevo\n`
-    msg += `4- Realizar otra consulta\n\n`
   } else {
     msg += `*Tus turnos agendados:*\n\n`
     turnos.forEach((t, idx) => {
