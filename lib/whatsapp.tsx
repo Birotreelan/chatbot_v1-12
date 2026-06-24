@@ -3233,15 +3233,55 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                 return
               }
-              // Sin flujo activo reconocido: caer al enqueue
+              // Sin flujo activo reconocido: mostrar menú principal
+              const noFlowResult = await initializePatientDetection(
+                userPhoneNumber, config.id, config.cliente_id, config.displayName
+              )
+              if (noFlowResult?.handled && noFlowResult.message) {
+                await sendDirectResponse(dispatcherCtxDirect, noFlowResult.message, "ai-dispatcher-no-flow-menu")
+              }
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
             }
 
-            // action.type === 'passthrough' → caer al enqueue normal
+            // action.type === 'passthrough' → con dispatcher activo, mostrar menú principal
+            // en lugar de caer a OpenAI (que puede inventar información incorrecta)
+            if (action.type === 'passthrough') {
+              createConversationLogger(userPhoneNumber, config.id, "ai-dispatcher")
+                .info('[Dispatcher] Passthrough — mostrando menú principal')
+              const passthroughResult = await initializePatientDetection(
+                userPhoneNumber, config.id, config.cliente_id, config.displayName
+              )
+              if (passthroughResult?.handled && passthroughResult.message) {
+                await sendDirectResponse(dispatcherCtxDirect, passthroughResult.message, "ai-dispatcher-passthrough-menu")
+              }
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
           }
         } catch (dispatcherError) {
           createConversationLogger(userPhoneNumber, config.id, "ai-dispatcher")
-            .error('[Dispatcher] Error crítico — fallback a enqueue normal', dispatcherError as Error)
-          // Continúa al enqueueUserMessage de abajo
+            .error('[Dispatcher] Error crítico — mostrando menú principal como fallback', dispatcherError as Error)
+          // Con dispatcher activo, ante error mostramos el menú en lugar de caer a OpenAI
+          try {
+            const errorCtxDirect: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+            const errorResult = await initializePatientDetection(
+              userPhoneNumber, config.id, config.cliente_id, config.displayName
+            )
+            if (errorResult?.handled && errorResult.message) {
+              await sendDirectResponse(errorCtxDirect, errorResult.message, "ai-dispatcher-error-menu")
+            }
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          } catch {
+            // Si incluso el fallback falla, caer al enqueue como último recurso
+          }
         }
       }
     }
