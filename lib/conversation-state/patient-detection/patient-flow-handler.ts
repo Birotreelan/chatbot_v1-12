@@ -10,6 +10,7 @@ import {
   EXISTING_PATIENT_MULTIPLE_TURNOS_MENU,
 } from './menu-option-detector'
 import { shouldOfferConfirmation } from './turno-estado'
+import { buildPostActionMenu } from './patient-templates'
 
 /**
  * Patient Detection Flow Handler
@@ -171,6 +172,9 @@ export async function startPatientDetectionFlow(
     // Caso 1: Respuesta con warning "pacientes_multiples" (estructura real de la API)
     if (patientData.warning === 'pacientes_multiples' && Array.isArray(patientData.pacientes)) {
       multiplePatients = patientData.pacientes
+      // turnos_qx y turnos_proximos también vienen al nivel raíz en este caso
+      turnosQxFromResponse = patientData.turnos_qx || []
+      turnosFromResponse = patientData.turnos_proximos || []
       logger.info('Multiple patients found by phone (pacientes_multiples)', {
         count: patientData.total_pacientes || multiplePatients.length,
         phone: phoneNumber,
@@ -244,7 +248,8 @@ export async function startPatientDetectionFlow(
 
     // Paciente encontrado - normalizar campos (API usa mayusculas: Id, Nrodoc, Apellido, Nombres)
     const patientId = patient.paciente_id || patient.Id || patient.id
-    const patientName = patient.nombre || patient.Nombres || `${patient.Nombres || ''} ${patient.Apellido || ''}`.trim()
+    // Construir nombre completo siempre: Nombres + Apellido (evitar short-circuit que trunca el apellido)
+    const patientName = `${(patient.Nombres || patient.nombre || patient.nombres || '').trim()} ${(patient.Apellido || patient.apellido || '').trim()}`.trim()
     const patientDNI = patient.dni || patient.Nrodoc
     const patientFirstName = (patient.Nombres || patient.nombres || '').trim()
     const patientLastName = (patient.Apellido || patient.apellido || '').trim()
@@ -259,37 +264,14 @@ export async function startPatientDetectionFlow(
       patientName: patientName,
     })
 
-    // Usar turnos de la respuesta inicial si existen, sino buscar
+    // Los turnos vienen directamente en turnos_proximos del get_paciente response.
+    // get_turnos_paciente no existe en el proxy, y get_turnos devuelve slots disponibles
+    // (no turnos reservados del paciente), por lo que no se usa como fallback.
     let turnos: any[] = turnosFromResponse
-    
-    // Si no hay turnos en la respuesta, intentar buscarlos
-    if (turnos.length === 0 && patientDNI) {
-      try {
-        const dateRange = getDefaultDateRange()
 
-        const turnosResponse = await clinicAPI.obtenerTurnos(
-          dateRange.desde,
-          dateRange.hasta,
-          undefined,
-          patientDNI
-        )
-
-        if (turnosResponse.exito && turnosResponse.datos) {
-          turnos = Array.isArray(turnosResponse.datos)
-            ? turnosResponse.datos
-            : turnosResponse.datos.turnos || []
-        }
-      } catch (e) {
-        logger.warn('Error fetching turns', {
-          error: String(e),
-          patientId,
-        })
-      }
-    }
-
-    // Filtrar turnos cancelados
+    // Filtrar turnos cancelados (Estado es string: "Cancelado", "No confirmado", "Confirmado")
     turnos = turnos.filter(
-      (t: any) => t.estado !== 'cancelado' && t.status !== 'cancelado' && t.Estado !== 'Cancelado'
+      (t: any) => t.Estado !== 'Cancelado' && t.estado !== 'cancelado' && t.status !== 'cancelado'
     )
 
     // Crear estado para paciente existente
@@ -818,25 +800,25 @@ export async function processPatientDetectionMessage(
         const hasTurnosQx = state.turnosQx && state.turnosQx.length > 0
         const soloQx = !hasTurnos && hasTurnosQx
 
-        // Turno pendiente de aprobación: se omite "Confirmar asistencia" y se renumera.
         const singleTurno = hasTurnos && state.turnos!.length === 1 ? state.turnos![0] : null
         const singleTurnoSinConfirmacion =
           !!singleTurno && !shouldOfferConfirmation(singleTurno)
 
+        // Action map unificado con Layer 1 (numérico)
         let actionMap: Record<number, string>
 
         if (hasTurnos) {
           if (singleTurnoSinConfirmacion) {
             actionMap = {
               1: 'cancel_appointment',
-              2: 'book_new_appointment',
+              2: 'cancel_and_book_new_appointment',
               3: 'other_inquiry_intent',
             }
           } else {
             actionMap = {
               1: 'confirm_appointment',
               2: 'cancel_appointment',
-              3: 'book_new_appointment',
+              3: 'cancel_and_book_new_appointment',
               4: 'other_inquiry_intent',
             }
           }
@@ -988,6 +970,39 @@ export async function updatePatientDetectionPhase(
   state.phase = newPhase
   await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
   return true
+}
+
+/**
+ * Actualiza los turnos del paciente en el estado de detección y
+ * restablece la fase a 'awaiting_action_selection' para que el menú
+ * de retorno sea procesado correctamente.
+ * Devuelve el mensaje de menú a enviar, o null si no hay estado activo.
+ */
+export async function returnPatientToMenu(
+  phoneNumber: string,
+  turnosUpdated?: any[]
+): Promise<string | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+
+  const state = await getPatientDetectionState(phoneNumber)
+  if (!state) return null
+
+  // Actualizar turnos si se proveen
+  if (turnosUpdated !== undefined) {
+    state.turnos = turnosUpdated
+  }
+
+  // Resetear fase para que la próxima respuesta del paciente sea tratada como selección de acción
+  state.phase = 'awaiting_action_selection'
+
+  const stateKey = `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`
+  await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+
+  const firstName =
+    state.patientFirstName ||
+    (state.patientName ? state.patientName.split(' ')[0] : 'Paciente')
+  return buildPostActionMenu(firstName, state.turnos || [])
 }
 
 /**

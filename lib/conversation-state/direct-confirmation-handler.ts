@@ -16,10 +16,6 @@ import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
 import { isWithinTemplateWindow } from "@/lib/appointment-stats"
 
-// ID del asistente NLU para confirmación/cancelación
-// Configurado con el system prompt: route_to_direct_action_nlu.md
-const DIRECT_ACTION_NLU_ASSISTANT_ID = "asst_MF6oPGm2Be7Hlb2c40WICsJs"
-
 // ============================================================================
 // PATRONES DE CONFIRMACIÓN
 // ============================================================================
@@ -193,7 +189,8 @@ interface NLUResult {
 }
 
 /**
- * Llama al NLU de OpenAI para clasificar la intención del mensaje
+ * Clasifica la intención del mensaje: confirmación, cancelación o consulta.
+ * Híbrido: reglas primero (gratis), GPT-4o-mini solo para casos ambiguos.
  */
 export async function classifyDirectActionWithNLU(
   message: string,
@@ -202,55 +199,46 @@ export async function classifyDirectActionWithNLU(
 ): Promise<NLUResult> {
   const logger = createConversationLogger(userPhone, configId, "direct-action-nlu")
 
-  // Si no hay asistente configurado, usar fallback por reglas
-  if (!DIRECT_ACTION_NLU_ASSISTANT_ID) {
-    logger.info("NLU no configurado, usando fallback por reglas")
-    return classifyByRules(message)
+  // 1. Reglas determinísticas (sin costo, instantáneo)
+  const rulesResult = classifyByRules(message)
+  if (rulesResult.confidence >= 0.75) {
+    logger.info("Clasificado por reglas", { intent: rulesResult.intent, confidence: rulesResult.confidence })
+    return rulesResult
   }
 
+  // 2. Caso ambiguo → GPT-4o-mini Chat Completions (no Assistants)
+  logger.info("Caso ambiguo, escalando a GPT-4o-mini", { message: message.substring(0, 50) })
+
   try {
-    const thread = await openai.beta.threads.create()
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `Clasificá la intención de un mensaje de WhatsApp en el contexto de un chatbot de turnos médicos.
 
-    await openai.beta.threads.messages.create(thread.id, {
-      role: "user",
-      content: `Clasifica el siguiente mensaje:\n\n"${message}"`,
+El paciente recibió un recordatorio de turno. Clasificá su respuesta en:
+- "confirmar_asistencia": confirma que va a ir al turno (ej: "si estaré", "ahi voy", "voy a ir", "la confirmo", "confirmo", incluso con typos)
+- "cancelar_turno": quiere cancelar (ej: "no puedo ir", "cancelo", "no voy a poder", "quiero cancelar")
+- "consulta_con_cortesia": pregunta o solicita algo distinto a confirmar/cancelar (ej: "¿puedo cambiar el horario?", "¿cuánto cuesta?")
+- "otro": no encaja en ninguna categoría
+
+IMPORTANTE: Aunque haya typos o lenguaje informal, si la intención es clara, clasificar correctamente.
+
+Respondé SOLO con JSON: {"intent": "confirmar_asistencia"|"cancelar_turno"|"consulta_con_cortesia"|"otro", "confidence": 0.0-1.0, "reasoning": "..."}`,
+        },
+        { role: "user", content: `"${message}"` },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0,
+      max_tokens: 100,
     })
 
-    const run = await openai.beta.threads.runs.createAndPoll(thread.id, {
-      assistant_id: DIRECT_ACTION_NLU_ASSISTANT_ID,
-    })
+    const text = response.choices[0]?.message?.content
+    if (!text) throw new Error("No response")
 
-    if (run.status !== "completed") {
-      logger.error("Run no completado", { status: run.status })
-      return classifyByRules(message)
-    }
-
-    const messages = await openai.beta.threads.messages.list(thread.id)
-    const assistantMessage = messages.data
-      .filter((msg) => msg.role === "assistant")
-      .at(0)
-
-    if (!assistantMessage) {
-      logger.error("No se encontró mensaje del asistente")
-      return classifyByRules(message)
-    }
-
-    const responseContent = assistantMessage.content[0]
-    if (responseContent.type !== "text") {
-      return classifyByRules(message)
-    }
-
-    let cleanJson = responseContent.text.value.trim()
-    if (cleanJson.startsWith("```")) {
-      cleanJson = cleanJson.replace(/```json?\n?/g, "").replace(/```/g, "").trim()
-    }
-
-    const parsed = JSON.parse(cleanJson)
-    
-    logger.info("NLU clasificación exitosa", {
-      intent: parsed.intent,
-      confidence: parsed.confidence,
-    })
+    const parsed = JSON.parse(text)
+    logger.info("GPT-4o-mini clasificación", { intent: parsed.intent, confidence: parsed.confidence })
 
     return {
       intent: parsed.intent as DirectActionIntent,
@@ -258,8 +246,8 @@ export async function classifyDirectActionWithNLU(
       reasoning: parsed.reasoning || "",
     }
   } catch (error) {
-    logger.error("Error en NLU de acción directa", error as Error)
-    return classifyByRules(message)
+    logger.warn("GPT-4o-mini falló, usando resultado de reglas", { error })
+    return rulesResult
   }
 }
 
@@ -510,16 +498,3 @@ export function buildCancelConfirmationPrompt(
   return `${patientName}, entendemos que querés cancelar tu turno:\n\n${appointmentDetails}\n\n¿Confirmás la cancelación?\n\n1- Sí, cancelar el turno\n2- No, mantener el turno`
 }
 
-/**
- * Configura el ID del asistente NLU
- */
-export function setDirectActionNLUAssistantId(assistantId: string): void {
-  DIRECT_ACTION_NLU_ASSISTANT_ID = assistantId
-}
-
-/**
- * Obtiene el ID del asistente NLU configurado
- */
-export function getDirectActionNLUAssistantId(): string {
-  return DIRECT_ACTION_NLU_ASSISTANT_ID
-}

@@ -12,10 +12,7 @@
 import { createConversationLogger } from "./logger"
 import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
-import { getArgentinaHour, getTimeBasedGreeting } from "@/lib/utils/date-utils"
-
-// ID del asistente NLU de despedida creado en OpenAI Platform
-const FAREWELL_NLU_ASSISTANT_ID = "asst_68NiTYXUNHnyqyvY04VrZLk7"
+import { getArgentinaHour } from "@/lib/utils/date-utils"
 
 const FAREWELL_KEYWORDS = [
   "gracias",
@@ -161,7 +158,8 @@ export function mightBeFarewell(message: string): boolean {
 export type FarewellIntent = "despedida_pura" | "consulta_con_cortesia" | "otro"
 
 /**
- * Llama al NLU de OpenAI para clasificar si es despedida pura o consulta con cortesía
+ * Clasifica si el mensaje es una despedida pura o consulta con cortesía.
+ * Híbrido: reglas primero (gratis), GPT-4o-mini solo para casos ambiguos.
  */
 export async function classifyFarewellWithNLU(
   message: string,
@@ -170,56 +168,42 @@ export async function classifyFarewellWithNLU(
 ): Promise<{ intent: FarewellIntent; confidence: number; reasoning: string }> {
   const logger = createConversationLogger(userPhone, configId, "farewell-nlu")
 
-  // Si no hay asistente configurado, usar fallback por reglas
-  if (!FAREWELL_NLU_ASSISTANT_ID) {
-    logger.info("NLU no configurado, usando fallback por reglas")
-    return classifyFarewellByRules(message)
+  // 1. Reglas determinísticas (sin costo, instantáneo)
+  const rulesResult = classifyFarewellByRules(message)
+  if (rulesResult.confidence >= 0.75) {
+    logger.info("Clasificado por reglas", { intent: rulesResult.intent, confidence: rulesResult.confidence })
+    return rulesResult
   }
 
+  // 2. Caso ambiguo → GPT-4o-mini Chat Completions (no Assistants)
+  logger.info("Caso ambiguo, escalando a GPT-4o-mini", { message: message.substring(0, 50) })
+
   try {
-    // Crear thread para la clasificación
-    const thread = await openai.beta.threads.create()
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `Clasificá si el siguiente mensaje es una despedida pura o una consulta con cortesía en un chatbot de turnos médicos.
 
-    await openai.beta.threads.messages.create(thread.id, {
-      role: "user",
-      content: `Clasifica el siguiente mensaje:\n\n"${message}"`,
+- "despedida_pura": el usuario SOLO se despide o agradece, sin pedir ni preguntar nada (ej: "gracias", "chau", "ok gracias", "hasta luego", "igualmente")
+- "consulta_con_cortesia": el usuario pregunta o solicita algo aunque use palabras amables (ej: "gracias, ¿puedo cancelar?", "ok, ¿cómo cambio el turno?")
+- "otro": no queda claro
+
+Respondé SOLO con JSON: {"intent": "despedida_pura"|"consulta_con_cortesia"|"otro", "confidence": 0.0-1.0, "reasoning": "..."}`,
+        },
+        { role: "user", content: `"${message}"` },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0,
+      max_tokens: 100,
     })
 
-    const run = await openai.beta.threads.runs.createAndPoll(thread.id, {
-      assistant_id: FAREWELL_NLU_ASSISTANT_ID,
-    })
+    const text = response.choices[0]?.message?.content
+    if (!text) throw new Error("No response")
 
-    if (run.status !== "completed") {
-      logger.error("Run no completado", { status: run.status })
-      return classifyFarewellByRules(message)
-    }
-
-    const messages = await openai.beta.threads.messages.list(thread.id)
-    const assistantMessage = messages.data
-      .filter((msg) => msg.role === "assistant")
-      .at(0)
-
-    if (!assistantMessage) {
-      logger.error("No se encontró mensaje del asistente")
-      return classifyFarewellByRules(message)
-    }
-
-    const responseContent = assistantMessage.content[0]
-    if (responseContent.type !== "text") {
-      return classifyFarewellByRules(message)
-    }
-
-    let cleanJson = responseContent.text.value.trim()
-    if (cleanJson.startsWith("```")) {
-      cleanJson = cleanJson.replace(/```json?\n?/g, "").replace(/```/g, "").trim()
-    }
-
-    const parsed = JSON.parse(cleanJson)
-    
-    logger.info("NLU clasificación exitosa", {
-      intent: parsed.intent,
-      confidence: parsed.confidence,
-    })
+    const parsed = JSON.parse(text)
+    logger.info("GPT-4o-mini clasificación", { intent: parsed.intent, confidence: parsed.confidence })
 
     return {
       intent: parsed.intent as FarewellIntent,
@@ -227,8 +211,8 @@ export async function classifyFarewellWithNLU(
       reasoning: parsed.reasoning,
     }
   } catch (error) {
-    logger.error("Error en NLU de despedida", error as Error)
-    return classifyFarewellByRules(message)
+    logger.warn("GPT-4o-mini falló, usando resultado de reglas", { error })
+    return rulesResult
   }
 }
 
@@ -607,10 +591,3 @@ function buildSimpleFarewellResponse(): string {
   return `${randomGreeting} ${timeGreeting}`
 }
 
-/**
- * Configura el ID del asistente NLU de despedida
- */
-export function setFarewellNLUAssistantId(assistantId: string): void {
-  // @ts-ignore - Permitir asignación a constante en runtime
-  FAREWELL_NLU_ASSISTANT_ID = assistantId
-}

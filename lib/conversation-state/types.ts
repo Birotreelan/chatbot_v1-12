@@ -169,10 +169,6 @@ export interface FeatureFlags {
   // Maneja reserva completa de turnos para pacientes ya registrados
   directExistingPatientFlow: boolean
 
-  // Flujo paciente nuevo (Sprint 9c)
-  // Maneja registro completo y primera reserva de turno
-  directPacienteNuevo: boolean
-
   // NLU Contextual para flujos pendientes (Sprint 10)
   // Detecta intención cuando usuario responde con texto libre en medio de un flujo
   // y genera respuestas que reconocen la intención pero mantienen el flujo actual
@@ -245,7 +241,6 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   directSelectionExtraction: false,
   directPatientDetection: false,
   directExistingPatientFlow: false,
-  directPacienteNuevo: false,
   pendingFlowContextualNLU: false,
   directFarewellDetection: false,
   directWrongNumberDetection: false,

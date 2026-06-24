@@ -348,7 +348,43 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     }
   }
 
-  // Crear estado inicial
+  const primerNombre = getFirstName(patientName)
+  const welcomeMessage = `Hola ${primerNombre}, te ayudo a agendar un nuevo turno.`
+
+  // Si solo hay una sede, seleccionarla automáticamente y saltar al siguiente paso
+  if (sedesResult.sedes.length === 1) {
+    const unicaSede = sedesResult.sedes[0]
+    logger.info('Single sede — auto-selecting', { sedeId: unicaSede.id, sedeName: unicaSede.nombre })
+
+    const state: ExistingPatientFlowState = {
+      phase: 'awaiting_search_type',
+      patientId,
+      patientName,
+      patientFirstName: finalPatientFirstName,
+      patientLastName: finalPatientLastName,
+      patientDNI: finalPatientDNI,
+      patientEmail,
+      patientPhone: phoneNumber,
+      obraSocialId: finalObraSocialId,
+      obraSocialNombre: finalObraSocialNombre,
+      sedesOpciones: sedesResult.sedes,
+      sedeId: unicaSede.id,
+      sedeNombre: unicaSede.nombre,
+      attempts: 0,
+      createdAt: Date.now(),
+      lastUpdated: Date.now(),
+    }
+
+    await saveFlowState(phoneNumber, state)
+
+    return {
+      handled: true,
+      message: `${welcomeMessage}\n\n${buildSearchOptionsMessage(unicaSede.nombre, undefined)}`,
+      nextPhase: 'awaiting_search_type',
+    }
+  }
+
+  // Crear estado inicial con selección de sede pendiente
   const state: ExistingPatientFlowState = {
     phase: 'awaiting_sede',
     patientId,
@@ -368,9 +404,6 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
 
   await saveFlowState(phoneNumber, state)
 
-  // Construir mensaje de bienvenida + sedes
-  const primerNombre = getFirstName(patientName)
-  const welcomeMessage = `Hola ${primerNombre}, te ayudo a agendar un nuevo turno.`
   const sedesMessage = buildSedesMessage(sedesResult.sedes)
 
   logger.info('Flow initialized', { sedesCount: sedesResult.sedes.length })

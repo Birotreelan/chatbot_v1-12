@@ -70,7 +70,6 @@ import {
   startRescheduleFlow,
   processRescheduleMessage,
   isRescheduleFlowActive,
-  RESCHEDULE_NLU_ASSISTANT_ID,
 } from "./conversation-state/reschedule-flow-integration"
 import { getEffectiveFeatureFlags as getFeatureFlagsForReschedule } from "./conversation-state/feature-flags"
 import {
@@ -83,6 +82,7 @@ import {
   updatePatientDetectionPhase,
   getIdentifiedPatient,
   clearPatientDetectionFlow,
+  returnPatientToMenu,
 } from "./conversation-state/patient-detection/patient-flow-integration"
 import {
   initializeExistingPatientFlow,
@@ -396,6 +396,14 @@ async function handlePendingFlowResponse(
 
       const confirmMsg = buildConfirmationMessage(chatbotData, turnoIndex)
       await sendDirectResponse(ctx, confirmMsg, "confirm_flow")
+
+      // Marcar turno como confirmado en estado y volver al menú
+      const updatedTurnosAfterConfirm = (chatbotData.turnos || []).map((t: any, i: number) =>
+        i === turnoIndex ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
+      )
+      const menuMsgAfterConfirm = await returnPatientToMenu(userPhoneNumber, updatedTurnosAfterConfirm)
+      if (menuMsgAfterConfirm) await sendDirectResponse(ctx, menuMsgAfterConfirm, "return_to_menu")
+
       return true
     }
 
@@ -740,6 +748,15 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
 
         const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
         await sendDirectResponse(ctx, successMsg, "awaiting_cancel_confirmation")
+
+        // Si no hay flujo de reagendamiento, el turno quedó cancelado → volver al menú sin él
+        if (!admiteReagendamiento) {
+          const cancelledIdx = flowState.turnoIndex || 0
+          const remainingAfterCancel = (chatbotData.turnos || []).filter((_: any, i: number) => i !== cancelledIdx)
+          const menuAfterCancel = await returnPatientToMenu(userPhoneNumber, remainingAfterCancel)
+          if (menuAfterCancel) await sendDirectResponse(ctx, menuAfterCancel, "return_to_menu")
+        }
+
         return true
       } catch (error) {
         logger.error("Error al cancelar via proxy", error as Error)
@@ -751,6 +768,11 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
       await clearFlowState(userPhoneNumber, config.id)
       const keepMsg = buildKeepAppointmentMessage(chatbotData, flowState.turnoIndex || 0)
       await sendDirectResponse(ctx, keepMsg, "awaiting_cancel_confirmation")
+
+      // Turno se mantiene → volver al menú con el mismo estado de turnos
+      const menuAfterKeep = await returnPatientToMenu(userPhoneNumber)
+      if (menuAfterKeep) await sendDirectResponse(ctx, menuAfterKeep, "return_to_menu")
+
       return true
     } else {
       // Respuesta no reconocida como 1/2 - usar NLU contextual si está habilitado
@@ -867,6 +889,15 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
 
         const confirmMsg = buildConfirmationMessage(chatbotData, flowState.turnoIndex || 0)
         await sendDirectResponse(ctx, confirmMsg, "awaiting_cancel_and_reschedule_confirm")
+
+        // Marcar turno como confirmado → volver al menú
+        const turnoIdxCR = flowState.turnoIndex || 0
+        const updatedTurnosCR = (chatbotData.turnos || []).map((t: any, i: number) =>
+          i === turnoIdxCR ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
+        )
+        const menuAfterCR = await returnPatientToMenu(userPhoneNumber, updatedTurnosCR)
+        if (menuAfterCR) await sendDirectResponse(ctx, menuAfterCR, "return_to_menu")
+
         return true
       } catch (error) {
         logger.error("Error al confirmar via proxy (menú reagendar)", error as Error)
@@ -917,13 +948,22 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         turnoIndex: flowState.turnoIndex || 0
       }
     } else if (choice === 'no_reschedule') {
-      // No reagendar: solo enviar despedida. No necesitamos chatbotData.
+      // No reagendar: turno fue cancelado previamente → volver al menú sin él
       logger.info("Usuario no quiere reagendar")
       await clearFlowState(userPhoneNumber, config.id)
       const noRescheduleMsg = chatbotData
         ? buildNoRescheduleMessage(chatbotData)
         : buildNoRescheduleMessageFallback()
       await sendDirectResponse(ctx, noRescheduleMsg, "awaiting_reschedule_choice")
+
+      // Remover el turno cancelado del estado y volver al menú
+      const cancelledIdxNR = flowState.turnoIndex || 0
+      const remainingAfterNR = chatbotData
+        ? (chatbotData.turnos || []).filter((_: any, i: number) => i !== cancelledIdxNR)
+        : []
+      const menuAfterNR = await returnPatientToMenu(userPhoneNumber, remainingAfterNR)
+      if (menuAfterNR) await sendDirectResponse(ctx, menuAfterNR, "return_to_menu")
+
       return true
     } else {
       // Respuesta no reconocida como 1/2 - usar NLU contextual si está habilitado
@@ -1369,13 +1409,19 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
                   
                   const confirmMsg = buildConfirmationMessage(chatbotDataConfirm, 0)
                   const sentConfirm = await sendDirectResponse(ctxConfirm, confirmMsg)
-                  
+
                   if (sentConfirm) {
+                    // Marcar turno como confirmado y volver al menú si hay estado activo
+                    const updatedTurnosTemplate = (chatbotDataConfirm.turnos || []).map((t: any, i: number) =>
+                      i === 0 ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
+                    )
+                    const menuAfterTemplate = await returnPatientToMenu(userPhoneNumber, updatedTurnosTemplate)
+                    if (menuAfterTemplate) await sendDirectResponse(ctxConfirm, menuAfterTemplate, "return_to_menu")
 
                     return // Salir, no pasar a OpenAI
                   }
                 }
-                
+
                 // Fallback a OpenAI
                 userMessage = `El paciente confirmó su turno presionando "${originalMessage}".
 
@@ -1521,6 +1567,12 @@ Responde de manera apropiada según la acción realizada.`
                       const sentSimple = await sendDirectResponse(ctxSimple, confirmMsgSimple, "awaiting_confirmation")
                       if (sentSimple) {
                         confirmLogger.info("Confirmacion enviada directamente, saliendo de OpenAI")
+                        // Marcar turno como confirmado y volver al menú si hay estado activo
+                        const updatedTurnosSimple = (chatbotDataSimple.turnos || []).map((t: any, i: number) =>
+                          i === 0 ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
+                        )
+                        const menuAfterSimple = await returnPatientToMenu(userPhoneNumber, updatedTurnosSimple)
+                        if (menuAfterSimple) await sendDirectResponse(ctxSimple, menuAfterSimple, "return_to_menu")
                         return
                       }
                     } else {
@@ -2705,6 +2757,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   if (proxySuccess) {
                     const confirmMsg = buildConfirmationMessage(chatbotData, 0)
                     await sendDirectResponse(detectionCtx, confirmMsg, "confirm_flow")
+
+                    // Marcar turno como confirmado y volver al menú
+                    const updatedTurnosDetect = (chatbotData.turnos || []).map((t: any, i: number) =>
+                      i === 0 ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' } : t
+                    )
+                    const menuAfterDetect = await returnPatientToMenu(userPhoneNumber, updatedTurnosDetect)
+                    if (menuAfterDetect) await sendDirectResponse(detectionCtx, menuAfterDetect, "return_to_menu")
                   } else {
                     await sendDirectResponse(
                       detectionCtx,
@@ -2713,7 +2772,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     )
                   }
                 } else {
-                  // Un solo turno, cancelaci��n (o cancelar+solicitar nuevo): mostrar doble confirmación
+                  // Un solo turno, cancelación (o cancelar+solicitar nuevo): mostrar doble confirmación
                   const wantsBookNew = detectionResult.action === 'cancel_and_book_new_appointment'
 
                   // Setear estado de flujo para esperar confirmación.
@@ -3195,10 +3254,9 @@ ${JSON.stringify(functionArgs, null, 2)}`
         return
       }
       
-      // Si necesita fallback a OpenAI para NLU
+      // Si necesita fallback a OpenAI para NLU, continuar con flujo normal
       if (rescheduleResult.fallbackToOpenAI && rescheduleResult.fallbackContext) {
-        // TODO: Implementar llamada a asistente NLU (RESCHEDULE_NLU_ASSISTANT_ID)
-        // Por ahora, continuar con flujo normal
+        // El flujo normal (asst_router) se encarga del procesamiento libre
       }
     }
 

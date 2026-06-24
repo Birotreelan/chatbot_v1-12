@@ -15,7 +15,6 @@
  */
 
 import { createConversationLogger } from "./logger"
-import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
 
 const logger = createConversationLogger("nlu-fallback-handler")
@@ -116,23 +115,23 @@ export async function detectNLUFallbackPreFlow(
       hasAppointmentContext: !!appointmentContext,
     })
 
-    const classificationResult = await classifyIntentWithNLU(
+    const classificationResult = await classifyIntent(
       userMessage,
       appointmentContext,
-      conversationHistory,
     )
 
     logger.info(`[Sprint 18] Clasificación NLU completada`, classificationResult)
 
-    // Si confidence es baja, no procesamos
+    // Si confidence es baja tras ambas capas, no procesamos
     if (classificationResult.confidence < 0.6) {
       logger.info(`[Sprint 18] Confidence bajo (${classificationResult.confidence}), continuar con flujo normal`)
       return { shouldHandle: false }
     }
 
-    // Si es "otro", no procesamos
+    // Si es "otro" tras reglas + GPT → mensaje de derivación (fuera del scope del bot)
     if (classificationResult.intent === "otro") {
-      return { shouldHandle: false }
+      const response = buildOutOfScopeResponse(escalationPhoneNumber)
+      return { shouldHandle: true, result: classificationResult, response }
     }
 
     // Si es confirmación → activar acción directa de confirmación
@@ -264,189 +263,311 @@ export async function detectNLUFallbackPreFlow(
 }
 
 // ============================================================================
-// NLU CLASSIFICATION
+// NLU CLASSIFICATION — híbrido: reglas (gratis) → GPT-4o-mini (edge cases)
 // ============================================================================
 
 /**
- * Usa Chat Completions con GPT-4o-mini para clasificar intención
- * Retorna JSON con intención, confidence y reasoning
+ * Orquestador híbrido:
+ * 1. Clasificador de reglas (instantáneo, sin costo)
+ * 2. Si confianza < 0.7 → GPT-4o-mini Chat Completions como fallback inteligente
+ *
+ * Solo se llama a la API cuando las reglas no tienen confianza suficiente.
+ * Elimina completamente los OpenAI Assistants — no requiere crear assistants.
  */
-async function classifyIntentWithNLU(
+async function classifyIntent(
   userMessage: string,
   appointmentContext: any,
-  conversationHistory?: string,
 ): Promise<FallbackIntentResult> {
-  const systemPrompt = buildSystemPrompt()
-  const userPrompt = buildUserPrompt(userMessage, appointmentContext, conversationHistory)
+  const rulesResult = classifyIntentWithRules(userMessage)
+
+  if (rulesResult.confidence >= 0.7) {
+    logger.info(`[Sprint 18] Clasificado por reglas: ${rulesResult.intent} (conf: ${rulesResult.confidence})`)
+    return rulesResult
+  }
+
+  logger.info(`[Sprint 18] Reglas: baja confianza (${rulesResult.confidence}), escalando a GPT-4o-mini`)
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.1, // Consistencia: queremos clasificación determinística
-      max_tokens: 500,
-    })
-
-    const responseText = response.choices[0]?.message?.content
-    if (!responseText) {
-      throw new Error("No response from OpenAI")
-    }
-
-    const parsed = JSON.parse(responseText) as FallbackIntentResult
-    return parsed
+    const gptResult = await classifyIntentWithGPT(userMessage, appointmentContext)
+    logger.info(`[Sprint 18] GPT-4o-mini: ${gptResult.intent} (conf: ${gptResult.confidence})`)
+    return gptResult
   } catch (error) {
-    logger.error(`[Sprint 18] Error en classificación NLU:`, { error })
-    // Fallback a regex simple si falla NLU
-    return classifyIntentWithRegex(userMessage)
+    logger.warn(`[Sprint 18] GPT fallback falló, usando resultado de reglas`, { error })
+    return rulesResult
   }
 }
 
 /**
- * Fallback a regex simple si falla NLU
+ * Fallback inteligente: GPT-4o-mini via Chat Completions (NO Assistants).
+ * Solo se llama cuando las reglas tienen confianza < 0.7.
+ * Prompt compacto y temperatura 0 para clasificación determinística.
  */
-function classifyIntentWithRegex(userMessage: string): FallbackIntentResult {
-  const msg = userMessage.toLowerCase().trim()
+async function classifyIntentWithGPT(
+  userMessage: string,
+  appointmentContext: any,
+): Promise<FallbackIntentResult> {
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
 
-  // Confirmación
-  if (/\b(confirmo|confirmado|voy|iré|ire|ahi estare|ahí estaré|de acuerdo|ok|dale|listo|si|sí|asistiré|asisto)\b/.test(msg)) {
+  const systemPrompt = `Sos un clasificador de intenciones para un chatbot de turnos médicos de WhatsApp.
+Clasificá el mensaje en UNA de estas categorías:
+
+- confirmar_asistencia: el paciente confirma que va a ir al turno ("si estaré", "ahi voy", "dale", typos incluidos)
+- cancelar_turno: quiere cancelar ("no puedo ir", "cancelo", "tengo que cancelar")
+- reagendar_turno: quiere cambiar fecha/hora ("quiero otro horario", "cambiar la fecha")
+- consulta_informativa: pregunta por datos del turno que tenemos (dirección, hora, profesional)
+- consulta_no_disponible: pregunta administrativa que NO podemos responder (costo, cobertura, documentación)
+- consulta_medica_prohibida: CRÍTICO — cualquier consulta médica (síntomas, medicamentos, diagnósticos, tratamientos, recetas, estudios). NUNCA responder. PRIORIDAD MÁXIMA.
+- queja_frustracion: expresa frustración o queja por el servicio
+- explicacion_contextual: explica un motivo o situación personal (enfermedad, viaje, trabajo)
+- saludo_despedida: saludo, despedida, agradecimiento
+- numero_equivocado: no es la persona buscada
+- otro: no encaja en ninguna categoría anterior
+
+Turno activo del paciente:
+- Fecha: ${fecha || 'no disponible'}
+- Hora: ${hora || 'no disponible'}
+- Profesional: ${profesional || 'no disponible'}
+- Sede: ${sede || 'no disponible'}
+
+Respondé SOLO con JSON:
+{"intent": "...", "confidence": 0.0-1.0, "reasoning": "...", "response": "respuesta empática breve en español rioplatense (1-2 oraciones), omitir para consulta_medica_prohibida"}`
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Mensaje del paciente: "${userMessage}"` },
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0,
+    max_tokens: 200,
+  })
+
+  const responseText = response.choices[0]?.message?.content
+  if (!responseText) throw new Error("No response from GPT-4o-mini")
+
+  return JSON.parse(responseText) as FallbackIntentResult
+}
+
+
+
+/**
+ * Normaliza texto: minúsculas + quitar tildes para matching robusto.
+ * Preserva también el mensaje original para patterns de mayúsculas/contexto.
+ */
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Detectores por categoría (orden = prioridad de evaluación)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * PRIORIDAD MÁXIMA: consultas médicas que JAMÁS debemos responder.
+ * Amplio vocabulario para minimizar falsos negativos.
+ */
+function isMedicalQuery(msg: string): boolean {
+  // Medicamentos, dosis, administración
+  if (/\b(medicamento|medicina|pastilla|comprimido|capsula|ibuprofeno|paracetamol|aspirina|antibiotico|antibioticos|vacuna|dosis|gotas (oculares|para|del)|pomada|crema|jarabe|inyeccion|suero|prescripcion|receta medica|me den una receta|necesito receta)\b/.test(msg)) return true
+
+  // Síntomas físicos
+  if (/\b(dolor|ardor|picazon|hinchazon|inflamacion|fiebre|temperatura (alta|elevada)|mareo|nausea|vomito|diarrea|constipacion|sangrado|herida|golpe|fractura|quemadura|alergia|sarpullido|erupcion|tos|gripe|covid|infeccion|bacteria|virus|hongo|vision borrosa|ojo (rojo|lastimado|hinchado)|oido|escucho mal|sordera|perdida de vision|perdida de audicion|sangre)\b/.test(msg)) return true
+
+  // Diagnóstico y consulta clínica
+  if (/\b(diagnostico|que tengo|que me pasa|que le pasa|enfermedad|condicion medica|es grave|es normal que|tengo que tomar|curable|cronico|agudo|benigno|maligno|cancer|tumor|quiste|calcul|opera|cirugia|tratamiento|terapia|rehabilitacion|curar|sanar|puedo tomar|debo tomar|deberia tomar|hay que tomar|puedo hacer|que hago (si|con|para)|que hago si me|me recomienda)\b/.test(msg)) return true
+
+  // Estudios y resultados clínicos
+  if (/\b(analisis (de sangre|clinico|de orina)|estudio medico|resultado (del analisis|del estudio)|laboratorio|radiografia|ecografia|tomografia|resonancia|biopsia|cultivo|plaqueta|hemograma|colesterol|glucosa|glucemia|hormona|examen medico|informe medico)\b/.test(msg)) return true
+
+  // Preguntas de dosificación / uso / efectos
+  if (/\b(cuantas (gotas|pastillas|veces al dia)|cuanto (tomar|tiempo tomar|tiempo usar)|cuando (tomar|empezar|terminar)|como (tomar|aplicar|usar)|para que sirve (este|ese|el)|efecto secundario|contraindicacion|interaccion (medicamentosa)?)\b/.test(msg)) return true
+
+  // Emergencias
+  if (/\b(emergencia|guardia medica|sala de guardia|ambulancia|llamen al|urgencia medica)\b/.test(msg)) return true
+
+  return false
+}
+
+/** Consultas administrativas que no podemos responder (derivar a clínica) */
+function isAdministrativeQuery(msg: string): boolean {
+  return /\b(cuanto cuesta|costo|precio|arancel|honorarios|cuanto sale|pagar|pago|abono|abona|efectivo|tarjeta|mercado pago|transferencia|factura|facturacion|cobertura|cubre|obra social|prepaga|pami|ioma|osde|swiss medical|plan medico|documentacion|que traer|que llevar|que necesito traer|como llegar|estacionamiento|parking|ascensor|acceso (sin escaleras|para discapacitados))\b/.test(msg)
+}
+
+/** Número equivocado */
+function isWrongNumber(msg: string): boolean {
+  return /\b(se equivocaron|numero equivocado|no soy (esa persona|esa|el|ella|quien buscan)|no tengo turno|no es mi numero|no conozco (a esa|a ese)|creo que se equivocaron|equivocacion|numero incorrecto|no es para mi)\b/.test(msg)
+}
+
+/** Confirmación de asistencia al turno */
+function isConfirmation(msg: string): boolean {
+  // Frase completa de confirmación
+  const strong = /\b(confirmo|confirmado|confirmar( mi)? (asistencia|turno)|si (estare|voy|asistire|ire)|ahi estare|ahi voy|voy a ir|asistiré|asistire|estare ahi|alla estare|la confirmo|mi asistencia esta confirmada|cuento con el turno)\b/
+  if (strong.test(msg)) return true
+
+  // Afirmación corta sin negación — acepta typos comunes
+  const simple = /^(si|ok|dale|listo|claro|bueno|de acuerdo|por supuesto|obvio|correcto|exacto|afirmo|acepto|entendido|genial|perfecto|sip|sep|va|va bien|ahi estaré)[\s!.]*$/
+  if (simple.test(msg)) return true
+
+  // Afirmación con refuerzo
+  const contextual = /\b(si (claro|por supuesto|dale|listo|confirmo|asisto|voy)|claro que (si|voy)|por supuesto que (si|voy)|confirmo que (si|voy|asisto|estare))\b/
+  if (contextual.test(msg)) return true
+
+  return false
+}
+
+/** Cancelación del turno */
+function isCancellation(msg: string): boolean {
+  return /\b(cancelo|cancelar( el turno)?|tengo que cancelar|quiero cancelar|no puedo (ir|asistir|concurrir)|no (voy|ire|asistire)|no voy a poder|no podre ir|no podré ir|baja el turno|bajar el turno|dar de baja el turno)\b/.test(msg)
+}
+
+/** Reagendamiento */
+function isReschedule(msg: string): boolean {
+  return /\b(reagend|cambiar (la )?(fecha|turno|horario)|otra fecha|otro horario|distinto horario|mover (el )?turno|postergar( el turno)?|adelantar( el turno)?|cambio de (fecha|horario)|diferente fecha|nuevo horario|otro dia para|otro momento para)\b/.test(msg)
+}
+
+/** Consulta informativa sobre datos del turno (dirección, hora, profesional) */
+function isInformationalQuery(msg: string): boolean {
+  return /\b(donde (queda|es|esta) (la sede|el consultorio|el lugar)?|a que hora (es|tengo)|con quien (es|tengo)|cual es la (direccion|sede|lugar)|como llego (a la sede|al consultorio)?|la direccion( exacta)?|la hora (del turno|es)?|fecha (del turno|exacta)?|quien es (el|la) (medico|profesional|doctor)|en que (sede|consultorio|lugar))\b/.test(msg)
+}
+
+/** Queja o frustración */
+function isComplaint(msg: string): boolean {
+  return /\b(estuve (llamando|intentando|tratando)|nunca (atienden|funcionan|me atendieron|me respondieron)|siempre igual|imposible (comunicarse|contactarlos|hablar)|nadie (atiende|responde|contesta)|dias (llamando|esperando|tratando)|horas (esperando|llamando)|muy (mal|malo)|pesimo|nefasto|terrible|horrible|un desastre|no funciona(n)?|mal servicio|paciencia|no es posible que|increible que)\b/.test(msg)
+}
+
+/** Explicación contextual — el paciente informa un motivo */
+function isContextualExplanation(msg: string): boolean {
+  return /\b(esta (enferm|internado|internada|convalec)|estuv(e|o) (enferm|internado|internada)|me (opero|opere|lastim|cai|accidente)|se (mudo|fallecio|murio|accidento|lastimo)|fallecio|por (motivos de salud|salud|enfermedad|problemas de salud|trabajo|viaje|mudanza)|viaje (de trabajo|imprevisto|urgente)|surgio algo|se complico|no me dan (el dia|permiso)|me cancelaron (el vuelo|el trabajo)|situacion (familiar|personal|laboral|medica))\b/.test(msg)
+}
+
+/** Saludo o despedida */
+function isSalutationOrFarewell(msg: string): boolean {
+  const greet = /^(hola|buenas|buenos dias|buenas tardes|buen dia|saludos|hi|hey)\b/
+  const bye = /\b(gracias|muchas gracias|chau|chao|adios|hasta luego|bye|hasta pronto|nos vemos|fue todo|era todo|nada mas|eso era todo|igualmente|de nada|un placer)\b/
+  return greet.test(msg) || bye.test(msg)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clasificador principal
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Clasifica la intención del usuario de forma determinística.
+ * Sin llamadas externas — resultado instantáneo y predecible.
+ */
+function classifyIntentWithRules(
+  userMessage: string,
+): FallbackIntentResult {
+  const msg = normalizeText(userMessage)
+
+  // 1. PRIORIDAD MÁXIMA: consulta médica prohibida
+  if (isMedicalQuery(msg)) {
+    return {
+      intent: "consulta_medica_prohibida",
+      confidence: 0.95,
+      reasoning: "Consulta médica detectada — derivar a profesional de salud",
+    }
+  }
+
+  // 2. Número equivocado
+  if (isWrongNumber(msg)) {
+    return {
+      intent: "numero_equivocado",
+      confidence: 0.85,
+      reasoning: "Usuario indica que el número es incorrecto",
+      response: "¡Disculpá la confusión! Debe ser un error.",
+    }
+  }
+
+  // 3. Consulta administrativa (costos, pagos, cobertura, etc.)
+  if (isAdministrativeQuery(msg)) {
+    return {
+      intent: "consulta_no_disponible",
+      confidence: 0.8,
+      reasoning: "Consulta administrativa que no podemos responder",
+      response: "Esa información no la tengo disponible en este momento.",
+    }
+  }
+
+  // 4. Confirmación de asistencia
+  if (isConfirmation(msg)) {
     return {
       intent: "confirmar_asistencia",
-      confidence: 0.7,
-      reasoning: "Regex fallback: patrones de confirmación detectados",
+      confidence: 0.85,
+      reasoning: "Señales de confirmación de asistencia detectadas",
     }
   }
 
-  // Cancelación
-  if (/\b(cancelo|cancelado|no puedo|no voy|no asistiré|no ire|no iré|no pueda)\b/.test(msg)) {
+  // 5. Cancelación del turno
+  if (isCancellation(msg)) {
     return {
       intent: "cancelar_turno",
-      confidence: 0.7,
-      reasoning: "Regex fallback: patrones de cancelación detectados",
+      confidence: 0.85,
+      reasoning: "Señales de cancelación detectadas",
+      response: "Entendemos que necesitás cancelar el turno.",
     }
   }
 
-  // Queja
-  if (/\b(nunca|imposible|intenté|intente|estuve|3 dias|tres dias|no atienden|nunca me|difícil|dificil)\b/.test(msg)) {
+  // 6. Reagendamiento
+  if (isReschedule(msg)) {
+    return {
+      intent: "reagendar_turno",
+      confidence: 0.85,
+      reasoning: "Señales de reagendamiento detectadas",
+      response: "Entendemos que necesitás cambiar la fecha del turno.",
+    }
+  }
+
+  // 7. Consulta informativa sobre el turno (dirección, hora, etc.)
+  if (isInformationalQuery(msg)) {
+    return {
+      intent: "consulta_informativa",
+      confidence: 0.8,
+      reasoning: "Consulta sobre datos del turno detectada",
+    }
+  }
+
+  // 8. Queja / frustración
+  if (isComplaint(msg)) {
     return {
       intent: "queja_frustracion",
-      confidence: 0.6,
-      reasoning: "Regex fallback: patrones de queja detectados",
+      confidence: 0.75,
+      reasoning: "Señales de queja o frustración detectadas",
+      response: "Lamentamos los inconvenientes que hayas tenido. Estamos para ayudarte.",
     }
   }
 
+  // 9. Explicación contextual (motivo, situación personal)
+  if (isContextualExplanation(msg)) {
+    return {
+      intent: "explicacion_contextual",
+      confidence: 0.7,
+      reasoning: "El paciente explica una situación o motivo",
+      response: "Gracias por avisarnos. Esperamos que todo se resuelva pronto.",
+    }
+  }
+
+  // 10. Saludo o despedida
+  if (isSalutationOrFarewell(msg)) {
+    return {
+      intent: "saludo_despedida",
+      confidence: 0.8,
+      reasoning: "Saludo o despedida detectado",
+      response: "¡Un placer! Si necesitás algo más, estoy acá para ayudarte.",
+    }
+  }
+
+  // Sin clasificación clara
   return {
     intent: "otro",
     confidence: 0.3,
-    reasoning: "Regex fallback: no se detectó patrón claro",
+    reasoning: "No se pudo clasificar el mensaje con claridad",
   }
-}
-
-// ============================================================================
-// SYSTEM PROMPT
-// ============================================================================
-
-function buildSystemPrompt(): string {
-  return `Eres un clasificador de intenciones para un chatbot médico de WhatsApp.
-
-Tu tarea es analizar mensajes de pacientes y:
-1. Clasificar su intención en una categoría
-2. Generar una respuesta empática y contextualizada (1-2 oraciones máximo)
-
-**CATEGORÍAS DE INTENCIÓN:**
-
-1. **confirmar_asistencia**: El paciente confirma que asistirá al turno
-   - Ejemplos: "Si estaré ese día", "Ahi voy", "Dale, allá estaré", "La confirmo"
-   - IMPORTANTE: Aunque tenga typos ("Si estaré ede dia"), si la intención es confirmar, clasificar así
-
-2. **cancelar_turno**: El paciente quiere cancelar el turno
-   - Ejemplos: "No puedo ir", "Cancelo", "Tengo que cancelar"
-
-3. **reagendar_turno**: El paciente quiere cambiar la fecha/hora
-   - Ejemplos: "Quiero cambiar el turno", "Otra fecha", "En otro horario"
-
-4. **consulta_informativa**: El paciente pregunta por detalles del turno QUE TENEMOS (dirección, hora, profesional)
-   - Ejemplos: "¿Donde queda?", "¿A qué hora es?", "¿Con quién es?"
-   - SOLO clasificar así si la información está en el contexto del turno
-
-5. **consulta_no_disponible**: El paciente pregunta algo ADMINISTRATIVO que NO podemos responder (costos, pagos, cobertura, documentación, etc.)
-   - Ejemplos: "¿Cuánto cuesta la consulta?", "¿Se debe abonar algo?", "¿Aceptan tarjeta?", "¿Qué documentación llevo?", "¿Cubren PAMI?", "¿Tienen estacionamiento?"
-   - Respuesta debe indicar que no tenemos esa información y derivar a la clínica
-
-6. **consulta_medica_prohibida**: 🚨 CRÍTICO - El paciente hace una consulta MÉDICA que JAMÁS debemos responder
-   - DETECTAR: Cualquier pregunta sobre síntomas, diagnósticos, tratamientos, medicamentos, dosis, efectos secundarios, pronósticos, o consejos de salud
-   - Ejemplos: "¿Qué me pasa si tengo visión borrosa?", "¿Debo tomar algún medicamento?", "¿Es grave mi condición?", "¿Qué tratamiento me recomiendan?", "¿Puedo tomar ibuprofeno?", "¿Cuántas gotas me pongo?", "¿Es normal que me duela?", "¿Qué hago si me arde el ojo?"
-   - También incluye: solicitud de recetas, estudios médicos, resultados de análisis, guardia/emergencias
-   - 🚨 NUNCA generar respuesta médica - SIEMPRE derivar a profesional médico
-   - Esta categoría tiene PRIORIDAD MÁXIMA sobre cualquier otra clasificación
-
-7. **queja_frustracion**: El paciente expresa frustración o queja
-   - Ejemplos: "Estuve 3 días tratando de llamar", "Nunca me atendieron"
-   - Respuesta debe ser empática y pedir disculpas
-
-7. **explicacion_contextual**: El paciente explica un motivo (enfermedad, mudanza, etc.)
-   - Ejemplos: "Está con neumonía", "Se mudó", "Cambié de obra social", "Por motivos de salud"
-   - Respuesta debe ser empática y comprensiva
-
-8. **saludo_despedida**: El paciente se despide o saluda
-   - Ejemplos: "Gracias", "Chau", "Igualmente"
-
-9. **numero_equivocado**: No es la persona buscada
-   - Ejemplos: "Se equivocaron", "No soy esa persona"
-
-10. **otro**: No encaja en ninguna categoría
-
-**INSTRUCCIONES PARA LA RESPUESTA:**
-- Para "queja_frustracion": Pedir disculpas sinceras por los inconvenientes, mostrar empatía
-- Para "explicacion_contextual": Mostrar comprensión y empatía por la situación
-- Para "cancelar_turno" o "reagendar_turno": Confirmar que entendiste su necesidad
-- Para "consulta_no_disponible": Indicar amablemente que no tenés esa información
-- Para "consulta_medica_prohibida": NO generar ninguna respuesta médica (el sistema lo maneja automáticamente)
-- La respuesta debe ser breve (1-2 oraciones), cálida y profesional
-- NO incluir el menú de opciones en la respuesta (eso se agrega después)
-- NO incluir información del turno en la respuesta (eso se agrega después)
-- NO incluir número de teléfono de derivación (eso se agrega después)
-
-**SALIDA JSON:**
-{
-  "intent": "confirmar_asistencia" | "cancelar_turno" | "reagendar_turno" | "consulta_informativa" | "consulta_no_disponible" | "consulta_medica_prohibida" | "queja_frustracion" | "explicacion_contextual" | "saludo_despedida" | "numero_equivocado" | "otro",
-  "confidence": 0.0-1.0,
-  "reasoning": "Explicación breve",
-  "response": "Respuesta empática contextualizada (NO generar para consulta_medica_prohibida)"
-}`
-}
-
-function buildUserPrompt(
-  userMessage: string,
-  appointmentContext: any,
-  conversationHistory?: string,
-): string {
-  const appointmentInfo = appointmentContext
-    ? `Turno activo:
-- Fecha: ${appointmentContext.fecha}
-- Hora: ${appointmentContext.hora}
-- Profesional: ${appointmentContext.profesional}
-- Sede: ${appointmentContext.sede}
-- Dirección: ${appointmentContext.direccion || "No disponible"}
-`
-    : "No hay turno activo"
-
-  const history = conversationHistory
-    ? `Historial reciente de conversación:
-${conversationHistory}
-
-`
-    : ""
-
-  return `${history}${appointmentInfo}
-
-Mensaje del paciente a clasificar:
-"${userMessage}"
-
-Clasifica la intención y retorna JSON.`
 }
 
 // ============================================================================
@@ -637,6 +758,18 @@ ${derivacionMsg}
 Tu turno sigue confirmado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
 
 Si necesitás ayuda con tu turno (confirmar, cancelar o reagendar), con gusto te ayudo.`
+}
+
+/**
+ * Respuesta para mensajes completamente fuera del scope del bot (intent = "otro").
+ * Este canal es exclusivo para gestión de turnos — cualquier otra consulta se deriva.
+ */
+function buildOutOfScopeResponse(escalationPhoneNumber?: string): string {
+  const phoneMsg = escalationPhoneNumber
+    ? `Para otro tipo de consultas, por favor contactanos al *${escalationPhoneNumber}*.`
+    : `Para otro tipo de consultas, por favor contactate directamente con la clínica.`
+
+  return `Este canal de WhatsApp es exclusivo para la gestión de turnos médicos.\n\n${phoneMsg}\n\nSi en algún momento necesitás gestionar un turno, escribime y con gusto te ayudo.`
 }
 
 /**

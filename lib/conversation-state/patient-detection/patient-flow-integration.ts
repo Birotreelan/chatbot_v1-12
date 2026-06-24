@@ -21,7 +21,6 @@ import {
   buildOtherInquiryMessage,
   buildTurnoIntentConfirmedMessage,
 } from './patient-templates'
-import { extractIntent, mapIntentToAction } from './intent-extractor'
 
 /**
  * Patient Detection Flow Integration
@@ -379,68 +378,6 @@ export async function getPatientContextForOpenAI(
   return context
 }
 
-/**
- * Procesa mensaje con NLU para extraer intención
- */
-export async function processMessageWithNLU(
-  phoneNumber: string,
-  userMessage: string,
-  clientId: string
-): Promise<PatientDetectionResult> {
-  const logger = createConversationLogger(phoneNumber, clientId, 'nlu_processing')
-  logger.info('Processing with NLU', { message: userMessage.substring(0, 50) })
-
-  const patientInfo = await getDetectedPatientInfo(phoneNumber)
-
-  if (!patientInfo) {
-    logger.warn('No patient info found', { phone: phoneNumber })
-    return {
-      handled: false,
-      shouldCallOpenAI: true,
-      openAIContext: 'No patient context available',
-    }
-  }
-
-  try {
-    // Llamar al extractor de intenciones
-    const intentResult = await extractIntent(userMessage, phoneNumber, clientId, {
-      isNewPatient: patientInfo.isNewPatient,
-      patientName: patientInfo.patientName,
-      patientTurnos: patientInfo.turnos,
-    })
-
-    if (!intentResult) {
-      logger.warn('Intent extraction failed', {})
-      return {
-        handled: false,
-        shouldCallOpenAI: true,
-        openAIContext: 'NLU error, fallback to full router',
-      }
-    }
-
-    logger.info('Intent extracted', {
-      intent: intentResult.intent,
-      confidence: intentResult.confidence,
-    })
-
-    // Mapear intención a acción
-    const action = mapIntentToAction(intentResult.intent, patientInfo.isNewPatient)
-
-    return {
-      handled: true,
-      message: `Entendido: ${intentResult.reasoning}`,
-      action,
-      patientInfo: patientInfo,
-    }
-  } catch (error) {
-    logger.error('Error in NLU processing', error as Error)
-    return {
-      handled: false,
-      shouldCallOpenAI: true,
-      openAIContext: 'NLU error',
-    }
-  }
-}
 
 /**
  * Procesa DNI cuando hay múltiples pacientes
@@ -548,33 +485,5 @@ export async function handleDNIForMultiplePatients(
  * Procesa el DNI del familiar ingresado por el usuario
  * Busca al familiar en el sistema y arranca el flujo de paciente existente o nuevo
  */
-export async function handleFamiliarDNI(
-  phoneNumber: string,
-  dniMessage: string,
-  configId: string,
-  clienteId: string,
-  clinicName?: string
-): Promise<PatientDetectionResult> {
-  const logger = createConversationLogger(phoneNumber, configId, 'familiar_dni')
-  logger.info('Processing familiar DNI', {})
-
-  const dniOnly = dniMessage.trim().replace(/[^0-9]/g, '')
-
-  if (dniOnly.length < 7 || dniOnly.length > 9) {
-    return {
-      handled: true,
-      message:
-        'El DNI no parece válido. Por favor, indicame el DNI del familiar (7 u 8 dígitos) sin puntos ni espacios.',
-    }
-  }
-
-  return {
-    handled: false,
-    shouldCallOpenAI: false,
-    action: 'familiar_dni_resolved',
-    patientInfo: { isNewPatient: false },
-  }
-}
-
 // Re-export functions from handler so they can be imported from this module
-export { isPatientDetectionFlowActive, getDetectedPatientInfo, clearPatientDetectionFlow, updatePatientDetectionPhase, getIdentifiedPatient, clearIdentifiedPatient } from './patient-flow-handler'
+export { isPatientDetectionFlowActive, getDetectedPatientInfo, clearPatientDetectionFlow, updatePatientDetectionPhase, getIdentifiedPatient, clearIdentifiedPatient, returnPatientToMenu } from './patient-flow-handler'

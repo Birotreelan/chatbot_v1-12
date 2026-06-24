@@ -41,9 +41,6 @@ import { clearPostActionContext } from "./post-action-context"
 // CONSTANTES
 // ============================================================================
 
-// ID del asistente NLU en OpenAI (solo para interpretar texto libre)
-export const RESCHEDULE_NLU_ASSISTANT_ID = "asst_mPwf9BxPNwWAOoSJZY6UtXii"
-
 // ============================================================================
 // CONTEXT PARA ENVIOS DE MENSAJES
 // ============================================================================

@@ -8,6 +8,11 @@ import { DEFAULT_FEATURE_FLAGS, FeatureFlags } from "./types"
 
 const FEATURE_FLAGS_PREFIX = "feature_flags:"
 
+// Caché en memoria con TTL de 5 segundos para evitar múltiples roundtrips a Redis
+// por mensaje (getEffectiveFeatureFlags se llama ~15 veces por mensaje en whatsapp.tsx)
+const flagsCache = new Map<string, { flags: FeatureFlags; expiresAt: number }>()
+const FLAGS_CACHE_TTL_MS = 5000
+
 /**
  * Obtener feature flags para un cliente específico
  * Si no existen flags específicos, busca flags GLOBALES
@@ -183,6 +188,13 @@ export async function resetGlobalFeatureFlags(): Promise<void> {
  * si no tiene, usa los flags globales (que pueden diferir de los defaults)
  */
 export async function getEffectiveFeatureFlags(configId: string): Promise<FeatureFlags> {
+  // Devolver de caché si aún es válido
+  const now = Date.now()
+  const cached = flagsCache.get(configId)
+  if (cached && cached.expiresAt > now) {
+    return cached.flags
+  }
+
   try {
     const redis = getRedisClient()
     if (!redis) return DEFAULT_FEATURE_FLAGS
@@ -191,12 +203,16 @@ export async function getEffectiveFeatureFlags(configId: string): Promise<Featur
     const clientData = await redis.get(clientKey)
 
     // Si tiene flags específicos, úsalos
+    let flags: FeatureFlags
     if (clientData) {
-      return (typeof clientData === "string" ? JSON.parse(clientData) : clientData) as FeatureFlags
+      flags = (typeof clientData === "string" ? JSON.parse(clientData) : clientData) as FeatureFlags
+    } else {
+      // Si no, usar flags globales
+      flags = await getGlobalFeatureFlags()
     }
 
-    // Si no, usar flags globales
-    return await getGlobalFeatureFlags()
+    flagsCache.set(configId, { flags, expiresAt: now + FLAGS_CACHE_TTL_MS })
+    return flags
   } catch (err) {
     console.error(`[FEATURE-FLAGS] Error obteniendo flags efectivos para ${configId}:`, err)
     return DEFAULT_FEATURE_FLAGS

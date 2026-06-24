@@ -1,30 +1,28 @@
 /**
  * Contextual Intent Handler para flujos pendientes
- * 
- * Analiza el mensaje del usuario cuando está en medio de un flujo (ej: confirmación de cancelación)
- * y responde con texto libre en lugar de las opciones esperadas.
- * 
+ *
+ * Analiza el mensaje del usuario cuando está en medio de un flujo (ej: confirmación
+ * de cancelación) y responde con texto libre en lugar de las opciones esperadas.
+ *
+ * Implementación: clasificador determinístico de regex/keyword — sin llamadas a OpenAI.
  * El NLU entiende AMBAS cosas:
- * 1. La intención del usuario (qué quiere hacer)
- * 2. El contexto del flujo actual (qué acción está pendiente)
- * 
- * Y genera respuestas que reconocen la intención pero guían al usuario a completar el flujo actual.
+ *   1. La intención del usuario (qué quiere hacer)
+ *   2. El contexto del flujo actual (qué acción está pendiente)
+ *
+ * Y genera respuestas que reconocen la intención pero guían al usuario a completar
+ * el flujo actual.
  */
 
-import { openai } from "../../openai"
 import { createConversationLogger } from "../logger"
 import type { ChatbotData, ChatbotDataTurno } from "../../appointment-flow-state"
 import type { FlowState } from "../../appointment-flow-state"
 import { buildContextualResponseTemplates, type PendingFlowType } from "./response-templates"
 
-// ID del asistente NLU contextual creado en OpenAI Platform
-const PENDING_FLOW_NLU_ASSISTANT_ID = "asst_BbKf8VdJurpmXvEK2YgkFhjn"
-
 // ============================================================================
 // TIPOS
 // ============================================================================
 
-export type DetectedIntent = 
+export type DetectedIntent =
   | "solicitar_turno"      // Usuario quiere agendar un nuevo turno
   | "cancelar_turno"       // Usuario quiere cancelar (puede ser confirmación implícita)
   | "confirmar_turno"      // Usuario quiere confirmar asistencia
@@ -41,14 +39,14 @@ export interface ContextualIntentResult {
   detectedIntent: DetectedIntent
   confidence: number
   reasoning: string
-  
+
   // La acción que debe tomar el sistema
-  action: 
+  action:
     | "maintain_flow_with_response"  // Mantener flujo actual, enviar respuesta contextual
     | "process_as_confirmation"      // Tratar como confirmación (1)
     | "process_as_rejection"         // Tratar como rechazo (2)
     | "abandon_flow"                 // Abandonar flujo (baja confianza, error, etc)
-  
+
   // Respuesta contextual generada (solo si action = "maintain_flow_with_response")
   contextualResponse?: string
 }
@@ -58,37 +56,147 @@ interface FlowContext {
   turno: ChatbotDataTurno | null
   turnoIndex: number
   patientName: string
-  options: string[]  // ["1- Sí, cancelar", "2- No, mantener"]
+  options: string[]
 }
 
 // ============================================================================
-// PROMPT USER
+// NORMALIZACIÓN
 // ============================================================================
 
-function buildUserPrompt(userMessage: string, context: FlowContext): string {
-  const flowDescriptions: Record<PendingFlowType, string> = {
-    awaiting_cancel_confirmation: "CONFIRMACIÓN DE CANCELACIÓN - esperando que confirme (1) o rechace (2) cancelar su turno",
-    awaiting_reschedule_choice: "OPCIÓN DE REAGENDAMIENTO - esperando que elija (1) reagendar o (2) no reagendar",
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // quitar tildes
+    .trim()
+}
+
+// ============================================================================
+// PATTERNS
+// ============================================================================
+
+// Afirmación: sí / dale / ok / claro / etc.
+const RE_YES =
+  /\b(si|dale|ok|okay|claro|bueno|listo|obvio|por supuesto|adelante|procede|afirmo|acepto|correcto|exacto|confirmado|confirmo|sip|sep|si por favor|yes|yep|q si|que si)\b/
+
+// Negación: no / mejor no / etc.
+const RE_NO =
+  /\b(no|nope|para nada|mejor no|no quiero|no gracias|prefiero no|de ninguna manera|jamas|olvida|olvidalo|no por favor|claro que no)\b/
+
+// Despedida
+const RE_FAREWELL =
+  /\b(chau|chao|adios|hasta luego|bye|hasta pronto|nos vemos|me voy|buenas noches)\b/
+
+// Cancelar turno
+const RE_CANCEL =
+  /\b(cancelo|cancelar|tengo que cancelar|quiero cancelar|no puedo (ir|asistir|concurrir)|no voy|no ire|no asistire|baja el turno)\b/
+
+// Reagendar
+const RE_RESCHEDULE =
+  /\b(reagend|cambiar (la )?(fecha|turno|horario)|otra fecha|otro horario|distinto horario|mover (el )?turno|postergar|adelantar|cambio de (fecha|horario))\b/
+
+// Solicitar turno nuevo
+const RE_BOOK =
+  /\b(turno nuevo|nuevo turno|pedir (un )?turno|sacar (un )?turno|reservar|quiero (un )?turno|necesito (un )?turno|agendar)\b/
+
+// Confirmar asistencia (diferente de confirmar_accion)
+const RE_CONFIRM_ATTEND =
+  /\b(confirmar( (asistencia|turno))?|confirmo (asistencia|turno)|voy a ir|ahi estare|ahi voy|asistiré|asistire|estare ahi|alla estare)\b/
+
+// Consulta informativa sobre el turno
+const RE_INFO =
+  /\b(horario|direccion|donde queda|como llego|ubicacion|telefono|a que hora|con quien|que dia|cual es la (sede|direccion)|cuanto falta)\b/
+
+// Saludo
+const RE_GREETING =
+  /^(hola|buenas|buenos dias|buenas tardes|buen dia|saludos|hey|hi)\b/
+
+// Queja / frustración
+const RE_COMPLAINT =
+  /\b(no entiendo|molest|enojad|frustrad|bronca|hart(o|a)|cansad(o|a)|nunca (funcionan|atienden)|siempre igual|nadie atiende|no funciona|un desastre)\b/
+
+// ============================================================================
+// CLASIFICADOR DETERMINÍSTICO
+// ============================================================================
+
+function extractIntentWithRules(
+  userMessage: string,
+  context: FlowContext,
+): { intent: DetectedIntent; confidence: number; reasoning: string } {
+  const msg = normalizeText(userMessage)
+
+  // --- Despedida → abandonar flujo ---
+  if (RE_FAREWELL.test(msg)) {
+    return { intent: "despedida", confidence: 0.85, reasoning: "Despedida detectada" }
   }
-  
-  let prompt = `## Contexto del flujo actual
-- Flujo: ${flowDescriptions[context.flowType]}
-- Paciente: ${context.patientName}`
 
-  if (context.turno) {
-    prompt += `
-- Turno pendiente: ${context.turno.fecha} a las ${context.turno.hora} con ${context.turno.profesional} en ${context.turno.sede}`
+  // --- Flujo de confirmación de cancelación ---
+  if (context.flowType === "awaiting_cancel_confirmation") {
+    // "cancelar" es afirmación en este flujo
+    if (RE_CANCEL.test(msg)) {
+      return { intent: "confirmar_accion", confidence: 0.85, reasoning: "Intención de cancelar en flujo de cancelación → confirmar acción" }
+    }
+    if (RE_YES.test(msg) && !RE_NO.test(msg)) {
+      return { intent: "confirmar_accion", confidence: 0.85, reasoning: "Afirmación en flujo de cancelación" }
+    }
+    if (RE_NO.test(msg)) {
+      return { intent: "rechazar_accion", confidence: 0.85, reasoning: "Negación en flujo de cancelación" }
+    }
   }
 
-  prompt += `
-- Opciones mostradas: ${context.options.join(" / ")}
+  // --- Flujo de elección de reagendamiento ---
+  if (context.flowType === "awaiting_reschedule_choice") {
+    // "reagendar" o "turno nuevo" = afirmación (opción 1)
+    if (RE_RESCHEDULE.test(msg) || RE_BOOK.test(msg)) {
+      return { intent: "confirmar_accion", confidence: 0.85, reasoning: "Intención de reagendar en flujo de reagendamiento → confirmar acción" }
+    }
+    if (RE_YES.test(msg) && !RE_NO.test(msg)) {
+      return { intent: "confirmar_accion", confidence: 0.85, reasoning: "Afirmación en flujo de reagendamiento" }
+    }
+    if (RE_NO.test(msg)) {
+      return { intent: "rechazar_accion", confidence: 0.85, reasoning: "Negación en flujo de reagendamiento" }
+    }
+  }
 
-## Mensaje del usuario
-"${userMessage}"
+  // --- Clasificación general ---
 
-Analiza la intención del usuario considerando el contexto del flujo.`
+  if (RE_YES.test(msg) && !RE_NO.test(msg)) {
+    return { intent: "confirmar_accion", confidence: 0.8, reasoning: "Afirmación genérica" }
+  }
 
-  return prompt
+  if (RE_NO.test(msg) && !RE_YES.test(msg)) {
+    return { intent: "rechazar_accion", confidence: 0.8, reasoning: "Negación genérica" }
+  }
+
+  if (RE_CANCEL.test(msg)) {
+    return { intent: "cancelar_turno", confidence: 0.8, reasoning: "Intención de cancelación" }
+  }
+
+  if (RE_RESCHEDULE.test(msg)) {
+    return { intent: "reagendar", confidence: 0.8, reasoning: "Intención de reagendamiento" }
+  }
+
+  if (RE_BOOK.test(msg)) {
+    return { intent: "solicitar_turno", confidence: 0.75, reasoning: "Solicitud de nuevo turno" }
+  }
+
+  if (RE_CONFIRM_ATTEND.test(msg)) {
+    return { intent: "confirmar_turno", confidence: 0.75, reasoning: "Confirmación de asistencia al turno" }
+  }
+
+  if (RE_INFO.test(msg)) {
+    return { intent: "consulta_info", confidence: 0.7, reasoning: "Consulta informativa sobre el turno" }
+  }
+
+  if (RE_GREETING.test(msg)) {
+    return { intent: "saludo", confidence: 0.75, reasoning: "Saludo detectado" }
+  }
+
+  if (RE_COMPLAINT.test(msg)) {
+    return { intent: "queja_frustracion", confidence: 0.7, reasoning: "Queja o frustración detectada" }
+  }
+
+  return { intent: "otro", confidence: 0.3, reasoning: "No se pudo clasificar el mensaje" }
 }
 
 // ============================================================================
@@ -107,18 +215,17 @@ export async function handleContextualIntent(
   configId: string
 ): Promise<ContextualIntentResult> {
   const logger = createConversationLogger(phoneNumber, configId, "contextual_nlu")
-  
+
   try {
-    logger.info("Analizando intención contextual", {
+    logger.info("Analizando intención contextual (reglas)", {
       userMessage: userMessage.substring(0, 50),
       flowType: flowState.type,
     })
 
-    // Construir contexto del flujo
     const turnoIndex = flowState.turnoIndex || 0
     const turno = chatbotData.turnos?.[turnoIndex] || null
     const flowType = flowState.type as PendingFlowType
-    
+
     const context: FlowContext = {
       flowType,
       turno,
@@ -127,27 +234,15 @@ export async function handleContextualIntent(
       options: getFlowOptions(flowType),
     }
 
-    // Llamar a OpenAI para extraer intención
-    const intentResult = await extractIntentWithOpenAI(userMessage, context, logger)
-    
-    if (!intentResult) {
-      logger.warn("No se pudo extraer intención, abandonando flujo")
-      return {
-        detectedIntent: "otro",
-        confidence: 0,
-        reasoning: "Error al procesar con NLU",
-        action: "abandon_flow",
-      }
-    }
+    const intentResult = extractIntentWithRules(userMessage, context)
 
-    logger.info("Intención extraída", {
+    logger.info("Intención clasificada", {
       intent: intentResult.intent,
       confidence: intentResult.confidence,
     })
 
-    // Determinar acción basada en la intención
     const result = determineAction(intentResult, context, chatbotData)
-    
+
     logger.info("Acción determinada", {
       action: result.action,
       hasResponse: !!result.contextualResponse,
@@ -170,109 +265,22 @@ export async function handleContextualIntent(
 // HELPERS
 // ============================================================================
 
-async function extractIntentWithOpenAI(
-  userMessage: string,
-  context: FlowContext,
-  logger: ReturnType<typeof createConversationLogger>
-): Promise<{ intent: DetectedIntent; confidence: number; reasoning: string } | null> {
-  try {
-    // Crear un thread para la conversación
-    const thread = await openai.beta.threads.create()
-    
-    logger.debug("Thread creado", { threadId: thread.id })
-
-    // Agregar el mensaje del usuario al thread
-    const userPrompt = buildUserPrompt(userMessage, context)
-    
-    await openai.beta.threads.messages.create(thread.id, {
-      role: "user",
-      content: userPrompt,
-    })
-
-    // Ejecutar el asistente
-    const run = await openai.beta.threads.runs.createAndPoll(thread.id, {
-      assistant_id: PENDING_FLOW_NLU_ASSISTANT_ID,
-    })
-
-    logger.debug("Run completado", { runStatus: run.status })
-
-    if (run.status !== "completed") {
-      logger.error("Run no completado", { status: run.status })
-      return null
-    }
-
-    // Obtener los mensajes del thread
-    const messages = await openai.beta.threads.messages.list(thread.id)
-    
-    // El último mensaje debe ser la respuesta del asistente
-    const assistantMessage = messages.data
-      .filter((msg) => msg.role === "assistant")
-      .at(0)
-
-    if (!assistantMessage) {
-      logger.error("No se encontró mensaje del asistente")
-      return null
-    }
-
-    const responseContent = assistantMessage.content[0]
-    if (responseContent.type !== "text") {
-      logger.error("Respuesta del asistente no es texto", { type: responseContent.type })
-      return null
-    }
-
-    // responseContent.text es un objeto { value: string, annotations: [] }, no un string directo
-    const responseText = responseContent.text.value
-
-    logger.debug("Respuesta del asistente", {
-      response: responseText.substring(0, 100),
-    })
-
-    // Parsear JSON - intentar limpiar si viene con markdown
-    let cleanJson = responseText.trim()
-    if (cleanJson.startsWith("```")) {
-      cleanJson = cleanJson.replace(/```json?\n?/g, "").replace(/```/g, "").trim()
-    }
-
-    const parsed = JSON.parse(cleanJson)
-
-    return {
-      intent: parsed.intent as DetectedIntent,
-      confidence: parsed.confidence,
-      reasoning: parsed.reasoning,
-    }
-  } catch (error) {
-    logger.error("Error en extractIntentWithOpenAI", error as Error)
-    return null
-  }
-}
-
 function determineAction(
   intentResult: { intent: DetectedIntent; confidence: number; reasoning: string },
   context: FlowContext,
   chatbotData: ChatbotData
 ): ContextualIntentResult {
   const { intent, confidence, reasoning } = intentResult
-  
-  // Si es confirmación/rechazo explícito con alta confianza, procesarlo
+
   if (intent === "confirmar_accion" && confidence >= 0.7) {
-    return {
-      detectedIntent: intent,
-      confidence,
-      reasoning,
-      action: "process_as_confirmation",
-    }
+    return { detectedIntent: intent, confidence, reasoning, action: "process_as_confirmation" }
   }
-  
+
   if (intent === "rechazar_accion" && confidence >= 0.7) {
-    return {
-      detectedIntent: intent,
-      confidence,
-      reasoning,
-      action: "process_as_rejection",
-    }
+    return { detectedIntent: intent, confidence, reasoning, action: "process_as_rejection" }
   }
-  
-  // Si es cancelar_turno y estamos en flujo de cancelación, tratar como confirmación
+
+  // Cancelar en flujo de cancelación → confirmar
   if (intent === "cancelar_turno" && context.flowType === "awaiting_cancel_confirmation" && confidence >= 0.6) {
     return {
       detectedIntent: intent,
@@ -281,45 +289,24 @@ function determineAction(
       action: "process_as_confirmation",
     }
   }
-  
-  // Si es despedida, abandonar flujo
+
+  // Despedida → abandonar flujo
   if (intent === "despedida" && confidence >= 0.7) {
-    return {
-      detectedIntent: intent,
-      confidence,
-      reasoning,
-      action: "abandon_flow",
-    }
+    return { detectedIntent: intent, confidence, reasoning, action: "abandon_flow" }
   }
-  
-  // Para cambios de intención (solicitar turno, reagendar, etc), mantener flujo con respuesta contextual
+
+  // Cambios de intención → mantener flujo con respuesta contextual
   if (["solicitar_turno", "reagendar", "confirmar_turno", "consulta_info", "saludo", "queja_frustracion"].includes(intent)) {
     const templates = buildContextualResponseTemplates(context.flowType)
-    const contextualResponse = templates.buildResponse(
-      intent,
-      chatbotData,
-      context.turnoIndex
-    )
-    
-    return {
-      detectedIntent: intent,
-      confidence,
-      reasoning,
-      action: "maintain_flow_with_response",
-      contextualResponse,
-    }
+    const contextualResponse = templates.buildResponse(intent, chatbotData, context.turnoIndex)
+    return { detectedIntent: intent, confidence, reasoning, action: "maintain_flow_with_response", contextualResponse }
   }
-  
-  // Confianza muy baja o intención no clasificable: abandonar flujo
+
+  // Confianza baja o no clasificable → abandonar flujo
   if (confidence < 0.5 || intent === "otro") {
-    return {
-      detectedIntent: intent,
-      confidence,
-      reasoning,
-      action: "abandon_flow",
-    }
+    return { detectedIntent: intent, confidence, reasoning, action: "abandon_flow" }
   }
-  
+
   // Default: mantener flujo con respuesta genérica
   const templates = buildContextualResponseTemplates(context.flowType)
   return {

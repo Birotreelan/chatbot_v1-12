@@ -483,6 +483,79 @@ export function buildDNINotFoundInMultipleMessage(attempts: number): string {
 }
 
 /**
+ * Menú de retorno después de cada acción (confirmar, cancelar, reagendar, etc.)
+ * Se muestra en lugar de cerrar la conversación.
+ * Adapta las opciones según los turnos restantes del paciente.
+ */
+export function buildPostActionMenu(
+  firstName: string,
+  turnos: any[],
+  clinicName: string = DEFAULT_CLINIC_NAME
+): string {
+  const hasTurnos = turnos && turnos.length > 0
+
+  if (!hasTurnos) {
+    return (
+      `¿En qué más puedo ayudarte?\n\n` +
+      `1- Solicitar un turno médico\n` +
+      `2- Solicitar turno para un familiar\n` +
+      `3- Realizar otra consulta\n\n` +
+      `Respondé con el número de opción que prefieras.`
+    )
+  }
+
+  let msg = `¿En qué más puedo ayudarte?\n\n`
+
+  if (turnos.length === 1) {
+    const t = turnos[0]
+    const fecha = formatearFecha(t.Fecha || t.fecha)
+    const hora = formatearHora(t.Hora || t.hora || '')
+    const prof = formatearProfesional(
+      t.Profesional_Nombre || t.profesional_nombre || t.profesional || ''
+    )
+    const sede = t.Centro_Nombre || t.sede || clinicName
+    const cat = classifyTurnoEstado(t)
+
+    if (cat === 'no_confirmado') {
+      msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+    } else {
+      msg += `Tenés un turno agendado: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+    }
+
+    msg += `1- Confirmar asistencia al turno médico\n`
+    msg += `2- Cancelar turno médico\n`
+    msg += `3- Cancelar el turno médico y solicitar uno nuevo\n`
+    msg += `4- Realizar otra consulta\n\n`
+  } else {
+    msg += `*Tus turnos agendados:*\n\n`
+    turnos.forEach((t, idx) => {
+      const fecha = formatearFecha(t.Fecha || t.fecha)
+      const hora = formatearHora(t.Hora || t.hora || '')
+      const prof = formatearProfesional(
+        t.Profesional_Nombre || t.profesional_nombre || t.profesional || ''
+      )
+      const cat = classifyTurnoEstado(t)
+      const estadoTexto =
+        cat === 'confirmado'
+          ? ' ✓ Confirmado'
+          : cat === 'no_confirmado'
+            ? ' (sin confirmar)'
+            : ' (pendiente de aprobación)'
+      msg += `${idx + 1}. ${fecha} a las ${hora}\n`
+      msg += `   ${prof}${estadoTexto}\n\n`
+    })
+
+    msg += `1- Confirmar asistencia a un turno\n`
+    msg += `2- Cancelar un turno\n`
+    msg += `3- Cancelar un turno y solicitar uno nuevo\n`
+    msg += `4- Realizar otra consulta\n\n`
+  }
+
+  msg += `Respondé con el número de opción que prefieras.`
+  return msg
+}
+
+/**
  * Mensaje de resumen de turnos
  */
 export function buildTurnosSummary(turnos: any[]): string {

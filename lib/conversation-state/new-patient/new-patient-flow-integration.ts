@@ -812,12 +812,28 @@ async function transitionToSedes(
   }
 
   state.sedesOpciones = sedesResult.sedes
-  state.phase = 'awaiting_sede'
-  await saveFlowState(phone, state)
 
   logger.info('Transitioned to sedes', { count: sedesResult.sedes.length })
 
   const nombreCompleto = `${state.nombre} ${state.apellido}`
+
+  // Si solo hay una sede, seleccionarla automáticamente y saltar al siguiente paso
+  if (sedesResult.sedes.length === 1) {
+    const unicaSede = sedesResult.sedes[0]
+    logger.info('Single sede — auto-selecting', { sedeId: unicaSede.id, sedeName: unicaSede.nombre })
+    state.sedeId = unicaSede.id
+    state.sedeNombre = unicaSede.nombre
+    state.phase = 'awaiting_search_type'
+    await saveFlowState(phone, state)
+    return {
+      handled: true,
+      message: buildSearchOptionsMessage(unicaSede.nombre, undefined),
+      patientInfo: { dni: state.dni, name: nombreCompleto, healthInsurance: state.obraSocialNombre },
+    }
+  }
+
+  state.phase = 'awaiting_sede'
+  await saveFlowState(phone, state)
 
   // Para familiar: el encabezado del mensaje menciona al familiar, no al que escribe
   let sedesMsg: string
