@@ -222,6 +222,23 @@ export interface FeatureFlags {
   // y responde sin perder el estado del flujo actual, re-mostrando las opciones al final.
   // Si el feature está OFF, el comportamiento original (mensaje de error) se mantiene.
   flowInterruptionHandler: boolean
+
+  // Extracción de entidades / Slot Filling (Sprint 50)
+  // Al recibir el primer mensaje libre en un flujo, extrae nombre, apellido, DNI,
+  // profesional y obra social del texto via GPT-4o-mini (structured output).
+  // El flujo pre-llena los campos detectados y solo pide lo que falta.
+  entityExtraction: boolean
+
+  // Historial conversacional en Redis (Sprint 51)
+  // Guarda los últimos 10 mensajes (user + bot) por número de teléfono.
+  // Se usa como contexto en entity extractor y response generator.
+  conversationHistory: boolean
+
+  // Respuestas humanizadas (Sprint 52)
+  // En lugar de templates fijos, GPT-4o-mini genera el texto de las respuestas
+  // a partir de datos estructurados + historial conversacional.
+  // Fallback siempre al template original si GPT falla.
+  humanizedResponses: boolean
 }
 
 /**
@@ -250,6 +267,9 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   postActionContextHandler: false,
   nluFallbackRouter: false,
   flowInterruptionHandler: false,
+  entityExtraction: true,
+  conversationHistory: true,
+  humanizedResponses: true,
 }
 
 /**

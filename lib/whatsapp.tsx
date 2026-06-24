@@ -53,6 +53,7 @@ import { detectDirectConfirmationPreFlow, buildConfirmationSuccessResponse, buil
 import { detectInformationalQueryPreFlow } from "./conversation-state/informational-query-handler"
 import { detectPostActionContextPreFlow, savePostActionContext } from "./conversation-state/post-action-context"
 import { detectNLUFallbackPreFlow } from "./conversation-state/nlu-fallback-handler"
+import { appendToHistory } from "./conversation-state/conversation-history"
 import {
   handleTurnSelectionIfPending,
   buildInvalidSelectionMessage,
@@ -202,6 +203,9 @@ async function sendDirectResponse(
       phoneNumber: ctx.userPhoneNumber,
       configId: ctx.configId,
     })
+
+    // Guardar en historial conversacional (para entity extractor y response generator)
+    appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: message, timestamp: Date.now() }).catch(() => {})
 
     await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
 
@@ -1262,6 +1266,9 @@ export async function handleMessage(value: any) {
       phoneNumber: userPhoneNumber,
       configId: config.id,
     })
+
+    // Guardar en historial conversacional (fire-and-forget, no bloquea el flujo)
+    appendToHistory(userPhoneNumber, { role: 'user', text: userMessage, timestamp: Date.now() }).catch(() => {})
 
     if (message.type === "button" && message.button) {
       // Detectar si es un botón de cancelación
@@ -2524,7 +2531,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           if (!patientResponse.exito || !patientResponse.datos) {
             // Familiar NO encontrado → iniciar flujo de paciente nuevo con ese DNI (modo familiar)
-            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, true)
+            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, true, userMessage)
             if (newPatientResult?.handled && newPatientResult.message) {
               await sendDirectResponse(detectionCtx, newPatientResult.message, "familiar_new_patient")
               await completePatientDetectionFlow(userPhoneNumber, config.id)
@@ -2582,7 +2589,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         if (detectionResult?.action === 'new_patient_dni_pending') {
           // Paciente nuevo ingresó DNI — derivar al flujo de paciente nuevo
           const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
-          const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id)
+          const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, false, userMessage)
           if (newPatientResult?.handled && newPatientResult.message) {
             await sendDirectResponse(detectionCtx, newPatientResult.message, "new_patient_flow")
             await completePatientDetectionFlow(userPhoneNumber, config.id)

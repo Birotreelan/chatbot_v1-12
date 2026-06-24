@@ -20,6 +20,9 @@ import { getEffectiveFeatureFlags } from '../feature-flags'
 import { validarObraSocial } from '@/lib/api-tools/api-functions'
 import { extractSelection } from '../selection-extractor'
 import { getFirstName } from '@/lib/utils/name-utils'
+import { extractEntities } from '../entity-extractor'
+import { getHistory, appendToHistory } from '../conversation-history'
+import { generateWelcomeMessage, generateObraSocialRequest } from '../response-generator'
 
 // Importar handlers compartidos
 import {
@@ -188,7 +191,8 @@ export async function initializeNewPatientFlow(
   dni: string,
   phone: string,
   clientId: string,
-  esFamiliar?: boolean
+  esFamiliar?: boolean,
+  initialMessage?: string
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'new_patient_init')
   logger.info('Initializing new patient flow', { dni, esFamiliar })
@@ -202,7 +206,6 @@ export async function initializeNewPatientFlow(
     }
   }
 
-  // Crear estado inicial - primer paso: solicitar nombre
   const state: NewPatientFlowState = {
     phase: 'awaiting_name',
     dni,
@@ -214,13 +217,59 @@ export async function initializeNewPatientFlow(
     lastUpdated: Date.now(),
   }
 
-  await saveFlowState(phone, state)
+  // --- Slot filling: extraer entidades del mensaje inicial si está disponible ---
+  if (initialMessage && flags.entityExtraction) {
+    try {
+      const history = flags.conversationHistory ? await getHistory(phone) : []
+      const extraction = await extractEntities(initialMessage, history, true)
 
+      if (extraction.hasData) {
+        logger.info('Entity extraction on init', { entities: extraction.entities })
+
+        if (extraction.entities.nombre) state.nombre = extraction.entities.nombre
+        if (extraction.entities.apellido) state.apellido = extraction.entities.apellido
+        if (extraction.entities.profesional) {
+          // Guardamos el nombre mencionado — se usará como búsqueda en awaiting_professional_name
+          // (el flujo ya busca por nombre de texto libre)
+          ;(state as any)._profesionalMencionado = extraction.entities.profesional
+        }
+        // obra_social y motivo se usan como hints pero requieren validación API — no pre-llenar
+      }
+    } catch (err) {
+      logger.error('Entity extraction failed during init', err as Error)
+    }
+  }
+
+  // Determinar el primer paso según datos ya disponibles
+  if (state.nombre && state.apellido) {
+    // Ya tenemos nombre completo → saltar al pedido de obra social
+    state.phase = 'awaiting_obra_social'
+    await saveFlowState(phone, state)
+    logger.info('Skipping name phase (already extracted)', { nombre: state.nombre, apellido: state.apellido })
+
+    const history = flags.conversationHistory ? await getHistory(phone) : []
+    const mensaje = flags.humanizedResponses
+      ? await generateObraSocialRequest(state.nombre, state.esFamiliar, history)
+      : state.esFamiliar
+        ? `Gracias. Ahora necesito saber la obra social o prepaga de *${state.nombre}*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tiene cobertura.`
+        : `Gracias ${state.nombre}. Ahora necesito saber tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenés cobertura.`
+
+    return {
+      handled: true,
+      message: mensaje,
+      patientInfo: { dni, name: `${state.nombre} ${state.apellido}` },
+    }
+  }
+
+  await saveFlowState(phone, state)
   logger.info('Flow initialized, requesting name', {})
 
-  const mensaje = esFamiliar
-    ? `Veo que es la primera vez con nosotros. Para registrarlo y agendar un turno, necesito algunos datos.\n\nPor favor, escribi el *nombre y apellido completo* de la persona que agendará el turno.`
-    : `Veo que es tu primera vez con nosotros. Para registrarte y agendar un turno, necesito algunos datos.\n\nPor favor, escribi tu *nombre y apellido completo*.`
+  const history = flags.conversationHistory ? await getHistory(phone) : []
+  const mensaje = flags.humanizedResponses
+    ? await generateWelcomeMessage(state.esFamiliar, history)
+    : state.esFamiliar
+      ? `Veo que es la primera vez con nosotros. Para registrarlo y agendar un turno, necesito algunos datos.\n\nPor favor, escribi el *nombre y apellido completo* de la persona que agendará el turno.`
+      : `Veo que es tu primera vez con nosotros. Para registrarte y agendar un turno, necesito algunos datos.\n\nPor favor, escribi tu *nombre y apellido completo*.`
 
   return {
     handled: true,
