@@ -1002,7 +1002,7 @@ export async function updatePatientDetectionPhase(
 export async function returnPatientToMenu(
   phoneNumber: string,
   turnosUpdated?: any[],
-  postActionContext?: 'just_confirmed'
+  postActionContext?: 'just_confirmed' | 'just_cancelled'
 ): Promise<string | null> {
   const redis = getRedisClient()
   if (!redis) return null

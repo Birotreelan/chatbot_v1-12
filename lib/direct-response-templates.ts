@@ -114,7 +114,7 @@ export function buildCancelDoubleConfirmMessage(
 ): string {
   const nombre = formatPatientName(chatbotData)
   const turno = chatbotData.turnos[turnoIndex]
-  
+
   if (!turno) {
     return `${nombre}, recibimos tu pedido de cancelación.
 
@@ -123,12 +123,34 @@ Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
 1- Sí, cancelar el turno
 2- No, mantener el turno`
   }
-  
-  const fechaCompleta = formatFullDate(turno.fecha)
-  const hora = formatTime(turno.hora)
-  const profesional = turno.profesional // Mantener como viene para este mensaje
+
+  const fechaBase = turno.fecha
+  const fechaCompleta = formatFullDate(fechaBase)
   const sede = turno.sede
-  
+
+  // Agrupar todos los turnos del mismo día (el backend los cancela juntos)
+  const turnosDelMismoDia = chatbotData.turnos.filter(
+    (t) => t.fecha === fechaBase
+  )
+
+  if (turnosDelMismoDia.length > 1) {
+    // Listar cada turno del día
+    const lineas = turnosDelMismoDia
+      .map((t) => `  • ${formatTime(t.hora)} con ${t.profesional}`)
+      .join('\n')
+    return `${nombre}, recibimos tu pedido de cancelar los ${turnosDelMismoDia.length} turnos del ${fechaCompleta} en la sede ${sede}:
+
+${lineas}
+
+Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
+
+1- Sí, cancelar los turnos
+2- No, mantener los turnos`
+  }
+
+  const hora = formatTime(turno.hora)
+  const profesional = turno.profesional
+
   return `${nombre}, recibimos tu pedido de cancelar el turno del ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede}.
 
 Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
@@ -159,20 +181,56 @@ export function buildTurnoSelectionMessage(
         ? "cancelar (para luego solicitar uno nuevo)"
         : "cancelar"
 
-  const lineasTurnos = chatbotData.turnos
-    .map((turno, i) => {
-      const fechaCompleta = formatFullDate(turno.fecha)
-      const hora = formatTime(turno.hora)
-      const profesional = turno.profesional || ""
-      const sede = turno.sede || ""
-      return `${i + 1}- ${fechaCompleta} a las ${hora} con ${profesional}${sede ? ` (${sede})` : ""}`
-    })
-    .join("\n")
-
-  // Para las acciones de cancelación ofrecemos además "cancelar todos" como última opción.
   const esCancelacion = accion === "cancel_appointment" || accion === "cancel_and_book_new_appointment"
+
+  let lineasTurnos: string
+  let totalOpciones: number
+
+  if (esCancelacion) {
+    // Para cancelación: agrupar turnos del mismo día en una sola opción
+    // (el backend cancela todos los turnos de un día juntos)
+    const grupos: Map<string, typeof chatbotData.turnos> = new Map()
+    for (const turno of chatbotData.turnos) {
+      const fecha = turno.fecha
+      if (!grupos.has(fecha)) grupos.set(fecha, [])
+      grupos.get(fecha)!.push(turno)
+    }
+
+    const opcionesGrupo: string[] = []
+    let idx = 1
+    for (const [fecha, turnos] of grupos) {
+      const fechaCompleta = formatFullDate(fecha)
+      const sede = turnos[0].sede || ""
+      if (turnos.length === 1) {
+        const hora = formatTime(turnos[0].hora)
+        const profesional = turnos[0].profesional || ""
+        opcionesGrupo.push(`${idx}- ${fechaCompleta} a las ${hora} con ${profesional}${sede ? ` (${sede})` : ""}`)
+      } else {
+        const horas = turnos.map((t) => formatTime(t.hora)).join(' y ')
+        opcionesGrupo.push(`${idx}- ${fechaCompleta} a las ${horas}${sede ? ` (${sede})` : ""} — *se cancelan juntos*`)
+      }
+      idx++
+    }
+
+    lineasTurnos = opcionesGrupo.join("\n")
+    totalOpciones = grupos.size
+  } else {
+    // Para confirmación: mostrar individualmente
+    lineasTurnos = chatbotData.turnos
+      .map((turno, i) => {
+        const fechaCompleta = formatFullDate(turno.fecha)
+        const hora = formatTime(turno.hora)
+        const profesional = turno.profesional || ""
+        const sede = turno.sede || ""
+        return `${i + 1}- ${fechaCompleta} a las ${hora} con ${profesional}${sede ? ` (${sede})` : ""}`
+      })
+      .join("\n")
+    totalOpciones = chatbotData.turnos.length
+  }
+
+  // Para cancelación ofrecemos también "cancelar todos" como última opción
   const opcionCancelarTodos = esCancelacion
-    ? `\n${chatbotData.turnos.length + 1}- Cancelar todos los turnos agendados.`
+    ? `\n${totalOpciones + 1}- Cancelar todos los turnos agendados.`
     : ""
 
   return `${nombre}, tenés más de un turno agendado. ¿Cuál querés ${verbo}?

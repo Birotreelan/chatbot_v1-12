@@ -361,9 +361,23 @@ async function handlePendingFlowResponse(
 
     const pendingAction = flowState.pendingAction || 'cancel_appointment'
     const esCancelacion = pendingAction === 'cancel_appointment' || pendingAction === 'cancel_and_book_new_appointment'
-    // Para las acciones de cancelación existe una opción extra "cancelar todos" al final
-    const opcionCancelarTodos = esCancelacion ? chatbotData.turnos.length + 1 : null
-    const maxOpcion = opcionCancelarTodos ?? chatbotData.turnos.length
+
+    // Para cancelación, los turnos se agrupan por fecha (el backend cancela el día completo).
+    // Calculamos cuántas opciones hay realmente en el menú mostrado.
+    let gruposFechaOrdenados: string[] = []
+    if (esCancelacion) {
+      const fechasUnicas: string[] = []
+      for (const t of chatbotData.turnos) {
+        const f = t.fecha || t.Fecha
+        if (f && !fechasUnicas.includes(f)) fechasUnicas.push(f)
+      }
+      gruposFechaOrdenados = fechasUnicas
+    }
+
+    const totalOpciones = esCancelacion ? gruposFechaOrdenados.length : chatbotData.turnos.length
+    // Para cancelación, existe una opción extra "cancelar todos" al final
+    const opcionCancelarTodos = esCancelacion ? totalOpciones + 1 : null
+    const maxOpcion = opcionCancelarTodos ?? totalOpciones
 
     // Extraer el primer número del mensaje (ej: "2", "el 2", "quiero el 2")
     const match = userMessage.match(/\d+/)
@@ -395,7 +409,16 @@ async function handlePendingFlowResponse(
       return true
     }
 
-    const turnoIndex = seleccion - 1
+    // Mapear la opción elegida al índice real del turno
+    // Para cancelación: la opción corresponde a un grupo de fecha → primer turno de ese grupo
+    let turnoIndex: number
+    if (esCancelacion && gruposFechaOrdenados.length > 0) {
+      const fechaElegida = gruposFechaOrdenados[seleccion - 1]
+      turnoIndex = chatbotData.turnos.findIndex((t: any) => (t.fecha || t.Fecha) === fechaElegida)
+      if (turnoIndex < 0) turnoIndex = seleccion - 1 // fallback
+    } else {
+      turnoIndex = seleccion - 1
+    }
 
     if (pendingAction === 'confirm_appointment') {
       // Confirmar asistencia al turno elegido — primero impactar en el sistema externo (proxy)
@@ -774,8 +797,14 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         // Si no hay flujo de reagendamiento, el turno quedó cancelado → volver al menú sin él
         if (!admiteReagendamiento) {
           const cancelledIdx = flowState.turnoIndex || 0
-          const remainingAfterCancel = (chatbotData.turnos || []).filter((_: any, i: number) => i !== cancelledIdx)
-          const menuAfterCancel = await returnPatientToMenu(userPhoneNumber, remainingAfterCancel)
+          // El backend cancela todos los turnos del mismo día juntos → filtrar por fecha
+          const cancelledFecha = chatbotData.turnos[cancelledIdx]?.fecha
+          const remainingAfterCancel = (chatbotData.turnos || []).filter((t: any, i: number) => {
+            if (i === cancelledIdx) return false
+            if (cancelledFecha && (t.fecha || t.Fecha) === cancelledFecha) return false
+            return true
+          })
+          const menuAfterCancel = await returnPatientToMenu(userPhoneNumber, remainingAfterCancel, 'just_cancelled')
           if (menuAfterCancel) await sendDirectResponse(ctx, menuAfterCancel, "return_to_menu")
         }
 
@@ -983,11 +1012,17 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
       await sendDirectResponse(ctx, noRescheduleMsg, "awaiting_reschedule_choice")
 
       // Remover el turno cancelado del estado y volver al menú
+      // El backend cancela todos los turnos del mismo día juntos → filtrar por fecha
       const cancelledIdxNR = flowState.turnoIndex || 0
+      const cancelledFechaNR = chatbotData?.turnos?.[cancelledIdxNR]?.fecha
       const remainingAfterNR = chatbotData
-        ? (chatbotData.turnos || []).filter((_: any, i: number) => i !== cancelledIdxNR)
+        ? (chatbotData.turnos || []).filter((t: any, i: number) => {
+            if (i === cancelledIdxNR) return false
+            if (cancelledFechaNR && (t.fecha || t.Fecha) === cancelledFechaNR) return false
+            return true
+          })
         : []
-      const menuAfterNR = await returnPatientToMenu(userPhoneNumber, remainingAfterNR)
+      const menuAfterNR = await returnPatientToMenu(userPhoneNumber, remainingAfterNR, 'just_cancelled')
       if (menuAfterNR) await sendDirectResponse(ctx, menuAfterNR, "return_to_menu")
 
       return true

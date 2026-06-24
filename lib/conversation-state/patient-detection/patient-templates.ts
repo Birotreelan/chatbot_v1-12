@@ -506,7 +506,7 @@ export function buildPostActionMenu(
   firstName: string,
   turnos: any[],
   clinicName: string = DEFAULT_CLINIC_NAME,
-  postActionContext?: 'just_confirmed'
+  postActionContext?: 'just_confirmed' | 'just_cancelled'
 ): string {
   const hasTurnos = turnos && turnos.length > 0
 
@@ -538,6 +538,19 @@ export function buildPostActionMenu(
       msg += `Tu turno del ${fecha} a las ${hora} con ${prof} en ${sede} *ya está confirmado*. ✓\n\n`
       msg += `1- Realizar otra consulta\n`
       msg += `0- Volver al menú anterior\n\n`
+    } else if (postActionContext === 'just_cancelled') {
+      // El paciente acaba de cancelar: no ofrecer cancelación nuevamente de inmediato.
+      // Menú mínimo: confirmar si el turno lo requiere, o solo consulta / menú completo.
+      if (cat === 'no_confirmado') {
+        msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+        msg += `1- Confirmar asistencia al turno médico\n`
+        msg += `2- Realizar otra consulta\n`
+        msg += `0- Volver al menú anterior\n\n`
+      } else {
+        msg += `Tu turno del ${fecha} a las ${hora} con ${prof} en ${sede} *ya está confirmado*.\n\n`
+        msg += `1- Realizar otra consulta\n`
+        msg += `0- Volver al menú anterior\n\n`
+      }
     } else if (cat === 'no_confirmado') {
       msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
       msg += `1- Confirmar asistencia al turno médico\n`
@@ -576,10 +589,17 @@ export function buildPostActionMenu(
       msg += `   ${prof}${estadoTexto}\n\n`
     })
 
-    msg += `1- Confirmar asistencia a un turno\n`
-    msg += `2- Cancelar un turno\n`
-    msg += `3- Cancelar un turno y solicitar uno nuevo\n`
-    msg += `4- Realizar otra consulta\n\n`
+    if (postActionContext === 'just_cancelled') {
+      // Acaba de cancelar un turno — no ofrecer cancelación nuevamente de inmediato
+      msg += `1- Confirmar asistencia a un turno\n`
+      msg += `2- Realizar otra consulta\n`
+      msg += `0- Volver al menú anterior\n\n`
+    } else {
+      msg += `1- Confirmar asistencia a un turno\n`
+      msg += `2- Cancelar un turno\n`
+      msg += `3- Cancelar un turno y solicitar uno nuevo\n`
+      msg += `4- Realizar otra consulta\n\n`
+    }
   }
 
   msg += `Respondé con el número de opción que prefieras.`
