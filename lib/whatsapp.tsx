@@ -49,7 +49,7 @@ import { createConversationLogger } from "./conversation-state/logger"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
 import { handleFarewellIfDetected, detectFarewellPreFlow, detectReciprocalFarewellPreFlow } from "./conversation-state/farewell-handler"
 import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
-import { detectDirectConfirmationPreFlow, buildConfirmationSuccessResponse, buildCancelConfirmationPrompt } from "./conversation-state/direct-confirmation-handler"
+import { detectDirectConfirmationPreFlow, buildConfirmationSuccessResponse, buildCancelConfirmationPrompt, buildAskExplicitConfirmationMessage } from "./conversation-state/direct-confirmation-handler"
 import { detectInformationalQueryPreFlow } from "./conversation-state/informational-query-handler"
 import { detectPostActionContextPreFlow, savePostActionContext } from "./conversation-state/post-action-context"
 import { detectNLUFallbackPreFlow } from "./conversation-state/nlu-fallback-handler"
@@ -1878,12 +1878,24 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         )
         
         if (reciprocalResult.shouldSilence) {
-          
-          // Trackear evento para analytics
-          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-          
-          // NO enviar ninguna respuesta - silencio total
-          return
+
+          // Verificar si hay un recordatorio pendiente de respuesta.
+          // Si el paciente todavía no confirmó ni canceló su turno, NO silenciar:
+          // el Sprint 14 debe tener la oportunidad de pedir la confirmación explícita.
+          let hasPendingReminder = false
+          if (config.cliente_id) {
+            const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+            hasPendingReminder = templateSentAt !== null
+          }
+
+          if (!hasPendingReminder) {
+            // Trackear evento para analytics
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            // NO enviar ninguna respuesta - silencio total
+            return
+          }
+          // Si hay reminder pendiente → caer al Sprint 14 para pedir confirmación
+          console.info("[SPRINT-15] Reminder pendiente detectado, omitiendo silencio para obtener confirmación del turno")
         }
       }
     }
@@ -2043,6 +2055,27 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             })
             
             await sendDirectResponse(cancelCtx, cancelPrompt, "direct_cancel_prompt")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+
+          if (directActionResult.action === "ask_explicit") {
+
+            const turnoDetailsExplicit = appointmentCtx.turno
+              ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n📍 ${appointmentCtx.turno.sede}`
+              : "Tu turno programado"
+
+            const askExplicitMessage = buildAskExplicitConfirmationMessage(turnoDetailsExplicit)
+
+            const askExplicitCtx: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+
+            await sendDirectResponse(askExplicitCtx, askExplicitMessage, "ask_explicit_confirmation")
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
@@ -2575,7 +2608,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 obraSocialId: familiarObraSocialId,
                 obraSocialNombre: familiarObraSocialNombre,
               },
-              config.escalationPhoneNumber
+              config.escalationPhoneNumber,
+              userMessage
             )
             if (existingResult?.handled && existingResult.message) {
               await sendDirectResponse(detectionCtx, existingResult.message, "familiar_existing_patient")
@@ -2683,7 +2717,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 config.cliente_id,
                 // No pasar additionalPatientData - serán recuperados del estado de detección en initializeExistingPatientFlow
                 undefined,
-                config.escalationPhoneNumber
+                config.escalationPhoneNumber,
+                userMessage // Para entity extraction del mensaje que disparó el flujo
               )
               if (existingResult?.handled && existingResult.message) {
                 await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")

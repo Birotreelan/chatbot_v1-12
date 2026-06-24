@@ -76,6 +76,37 @@ const PURE_CONFIRMATION_PATTERNS = [
 ]
 
 /**
+ * Patrones de confirmación IMPLÍCITA (alta confianza en contexto de template)
+ * El paciente no dice "confirmo" pero claramente acusa recibo o indica que asistirá
+ */
+const IMPLICIT_CONFIRMATION_PATTERNS = [
+  // Acuse de recibo
+  /\brecibido\b/i,                                   // "recibido", "recibido gracias", "recibido grasia"
+  /\benterado\b|\benterada\b/i,                       // "enterado", "enterada"
+  /\benterado[sa]?\b/i,                               // variantes
+  /\bya\s+(?:lo\s+)?s[eé]\b/i,                       // "ya sé", "ya lo sé"
+  /\bto[nm]ado\s*nota\b/i,                            // "tomado nota"
+
+  // Asistencia implícita sin decir "confirmo"
+  /\bsi\b.{0,30}\b(?:estar[eé]|estoy|alli|allí|voy\s+a\s+ir|voy\s+a\s+estar)\b/i,  // "si estaré allí"
+  /\b(?:alli|allí)\s*(?:estar[eé]|estar[ée])\b/i,    // "allí estaré"
+  /\b(?:estar[eé]|estar[ée])\s*(?:alli|allí)\b/i,    // "estaré allí"
+  /\bno\s+(?:hay\s+)?problema\b/i,                    // "no hay problema", "no problema"
+  /\bperfecto\s*gracias\b/i,                          // "perfecto gracias"
+  /\bclaro\s*(?:que\s+si|gracias)?\b/i,               // "claro", "claro que si", "claro gracias"
+]
+
+/**
+ * Patrones ambiguos: probablemente confirmación pero pedir confirmación explícita
+ * (el paciente agradeció o saludó pero no fue explícito)
+ */
+const AMBIGUOUS_ACK_PATTERNS = [
+  /^(?:buen\s*d[ií]a|buenos?\s*d[ií]as?|buenas?\s*tardes?|buenas?\s*noches?)\s*(?:gracias|gracia|grasias)?\.?$/i,  // "buen día gracias"
+  /^(?:muchas?\s+)?(?:gracias|gracia|grasias|grasias|grasia)\.?$/i,                                                 // "gracias", "muchas gracias"
+  /^(?:ok|dale|okey|okay)\s*(?:gracias|gracia|grasias)?\.?$/i,                                                      // "ok gracias"
+]
+
+/**
  * Keywords que podrían indicar confirmación (requiere NLU para casos largos)
  */
 const CONFIRMATION_KEYWORDS = [
@@ -91,6 +122,11 @@ const CONFIRMATION_KEYWORDS = [
   "ahí estaré",
   "ahi estare",
   "de acuerdo",
+  "recibido",
+  "enterado",
+  "enterada",
+  "estaré",
+  "estare",
 ]
 
 // ============================================================================
@@ -146,6 +182,42 @@ const CANCELLATION_KEYWORDS = [
 export function isDirectConfirmationPattern(message: string): boolean {
   const cleanMessage = message.trim()
   return PURE_CONFIRMATION_PATTERNS.some((pattern) => pattern.test(cleanMessage))
+}
+
+/**
+ * Detecta si el mensaje es una confirmación IMPLÍCITA (acuse de recibo, asistencia sin "confirmo")
+ * Alta confianza en el contexto de respuesta a un template de confirmación
+ */
+export function isImplicitConfirmationPattern(message: string): boolean {
+  const cleanMessage = message.trim()
+  return IMPLICIT_CONFIRMATION_PATTERNS.some((pattern) => pattern.test(cleanMessage))
+}
+
+/**
+ * Detecta si el mensaje es ambiguo (saludo + gracias) — pedir confirmación explícita
+ */
+export function isAmbiguousAck(message: string): boolean {
+  const cleanMessage = message.trim()
+  return AMBIGUOUS_ACK_PATTERNS.some((pattern) => pattern.test(cleanMessage))
+}
+
+/**
+ * Detecta despedidas y saludos puros.
+ * Usado como paso 5b cuando hay un reminder pendiente: en lugar de despedirse,
+ * el bot pide confirmación explícita del turno para no perder la respuesta.
+ */
+export function isFarewellOrGreetingInContext(msg: string): boolean {
+  const m = msg.trim()
+  // Farewells puros (sin "confirmo" ni "cancelo")
+  if (/^(?:chau|chao|bye|adios|adiós|hasta\s*luego|hasta\s*pronto|hasta\s*mañana|hasta\s*manana|nos\s*vemos|hasta\s*la\s*vista|hasta\s*la\s*pr[oó]xima)\s*[.!]?$/i.test(m)) return true
+  // Saludos cortos sin contenido
+  if (/^(?:hola|buenas?)\s*[.!]?$/i.test(m)) return true
+  // Saludos temporales puros
+  if (/^(?:buen\s*d[ií]a|buenos?\s*d[ií]as?|buenas?\s*tardes?|buenas?\s*noches?)\s*[.!]?$/i.test(m)) return true
+  // Farewell + gracias (variantes que no captura isAmbiguousAck)
+  if (/^(?:chau|chao|bye|adios|adiós|hasta\s*luego|hasta\s*pronto)[,\s]+(?:muchas?\s+)?(?:gracias|gracia|grasias?)\s*[.!]?$/i.test(m)) return true
+  if (/^(?:muchas?\s+)?(?:gracias|gracia|grasias?)[,\s]+(?:chau|chao|bye|hasta\s*luego)\s*[.!]?$/i.test(m)) return true
+  return false
 }
 
 /**
@@ -315,7 +387,8 @@ function classifyByRules(message: string): NLUResult {
 
 export interface DirectActionResult {
   detected: boolean
-  action?: "confirm" | "cancel"
+  /** confirm: confirmar turno | cancel: cancelar turno | ask_explicit: pedir confirmación con opciones numeradas */
+  action?: "confirm" | "cancel" | "ask_explicit"
   appointmentContext?: Record<string, unknown>
   response?: string
 }
@@ -359,86 +432,74 @@ export async function detectDirectConfirmationPreFlow(
     appointmentId: appointmentContext.appointment_id,
   })
 
-  // Paso 2: Verificar patrones PUROS (0ms latencia)
+  // Paso 2: Verificar patrones PUROS de confirmación (0ms latencia)
   if (isDirectConfirmationPattern(message)) {
     logger.info("Confirmación PURA detectada por patrón", { message })
-    return {
-      detected: true,
-      action: "confirm",
-      appointmentContext,
-    }
+    return { detected: true, action: "confirm", appointmentContext }
   }
 
+  // Paso 3: Verificar patrones de cancelación PURA (0ms latencia)
   if (isDirectCancellationPattern(message)) {
     logger.info("Cancelación PURA detectada por patrón", { message })
-    return {
-      detected: true,
-      action: "cancel",
-      appointmentContext,
-    }
+    return { detected: true, action: "cancel", appointmentContext }
   }
 
-  // Paso 3: Si no parece confirmación ni cancelación, salir rápido
-  const mightConfirm = mightBeConfirmation(message)
-  const mightCancel = mightBeCancellation(message)
-  
-  if (!mightConfirm && !mightCancel) {
-    logger.info("No parece confirmación ni cancelación, continuando flujo normal")
-    return { detected: false }
+  // Paso 4: Verificar confirmación IMPLÍCITA — acuse de recibo, asistencia sin decir "confirmo"
+  // "recibido", "enterado", "allí estaré", "si estoy el viernes allí estaré", etc.
+  if (isImplicitConfirmationPattern(message)) {
+    logger.info("Confirmación IMPLÍCITA detectada por patrón", { message })
+    return { detected: true, action: "confirm", appointmentContext }
   }
 
-  // Paso 4: Caso ambiguo - usar NLU si está habilitado
+  // Paso 5: Acuse ambiguo (saludo + gracias) → pedir confirmación explícita con opciones
+  // "buen día gracias", "muchas gracias", "ok gracias"
+  if (isAmbiguousAck(message)) {
+    logger.info("Acuse ambiguo — solicitando confirmación explícita", { message })
+    return { detected: true, action: "ask_explicit", appointmentContext }
+  }
+
+  // Paso 5b: Despedida o saludo puro con reminder pendiente → pedir confirmación explícita
+  // "chau", "hasta luego", "buen día", etc. NO deben cerrar la conversación cuando
+  // el paciente todavía no respondió el recordatorio del turno.
+  if (isFarewellOrGreetingInContext(message)) {
+    logger.info("Despedida/saludo con reminder pendiente — solicitando confirmación explícita", { message })
+    return { detected: true, action: "ask_explicit", appointmentContext }
+  }
+
+  // Paso 6: Si no hay keywords de ningún tipo, usar NLU sobre el mensaje completo
+  // DENTRO de la ventana de template, cualquier mensaje que no sea médico/equivocado
+  // puede ser una confirmación implícita — GPT lo clasifica con contexto
   if (useNLU) {
-    logger.info("Caso ambiguo, usando NLU", { 
-      message,
-      mightConfirm,
-      mightCancel,
-    })
-    
+    logger.info("Sin patrón claro, escalando a GPT-4o-mini", { message })
+
     const classification = await classifyDirectActionWithNLU(message, userPhone, configId)
-    
+
     logger.info("Clasificación NLU", {
       intent: classification.intent,
       confidence: classification.confidence,
     })
 
     if (classification.intent === "confirmar_asistencia" && classification.confidence >= 0.70) {
-      return {
-        detected: true,
-        action: "confirm",
-        appointmentContext,
-      }
+      return { detected: true, action: "confirm", appointmentContext }
     }
 
     if (classification.intent === "cancelar_turno" && classification.confidence >= 0.70) {
-      return {
-        detected: true,
-        action: "cancel",
-        appointmentContext,
-      }
+      return { detected: true, action: "cancel", appointmentContext }
     }
 
-    // consulta_con_cortesia u otro = continuar flujo normal
+    // GPT clasifica como consulta u otro → continuar flujo normal
     return { detected: false }
   }
 
-  // Paso 5: Sin NLU, usar fallback por reglas para casos ambiguos
-  const fallback = classifyByRules(message)
-  
-  if (fallback.intent === "confirmar_asistencia" && fallback.confidence >= 0.75) {
-    return {
-      detected: true,
-      action: "confirm",
-      appointmentContext,
-    }
-  }
+  // Paso 7: Sin NLU — usar reglas para los pocos casos que llegan acá
+  const mightConfirm = mightBeConfirmation(message)
+  const mightCancel = mightBeCancellation(message)
 
-  if (fallback.intent === "cancelar_turno" && fallback.confidence >= 0.75) {
-    return {
-      detected: true,
-      action: "cancel",
-      appointmentContext,
-    }
+  if (mightConfirm) {
+    return { detected: true, action: "confirm", appointmentContext }
+  }
+  if (mightCancel) {
+    return { detected: true, action: "cancel", appointmentContext }
   }
 
   return { detected: false }
@@ -486,6 +547,14 @@ export function buildConfirmationSuccessResponse(patientName: string): string {
     `¡Excelente ${patientName}! Tu cita está confirmada. Te esperamos.`,
   ]
   return responses[Math.floor(Math.random() * responses.length)]
+}
+
+/**
+ * Construye el mensaje para pedir confirmación explícita cuando el mensaje fue ambiguo
+ * (ej: "buen día gracias", "muchas gracias")
+ */
+export function buildAskExplicitConfirmationMessage(appointmentDetails: string): string {
+  return `Gracias por tu mensaje. Para confirmar, ¿asistirás al siguiente turno?\n\n${appointmentDetails}\n\n1- Sí, confirmo\n2- No, quiero cancelar`
 }
 
 /**
