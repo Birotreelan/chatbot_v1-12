@@ -54,6 +54,71 @@ export function getArgentinaDateTime(): string {
 }
 
 /**
+ * Estado temporal de un turno respecto al momento actual en Argentina.
+ *
+ * - futuro:     más de 4 horas en el futuro (o fecha futura)
+ * - proximo:    hoy, dentro de las próximas 4 horas
+ * - en_curso:   hoy, pasó hace 0-60 minutos (paciente puede llegar tarde)
+ * - pasado_hoy: hoy, pasó hace más de 60 minutos
+ * - pasado:     fecha anterior a hoy
+ */
+export type TurnoTemporalStatus = 'futuro' | 'proximo' | 'en_curso' | 'pasado_hoy' | 'pasado'
+
+/**
+ * Obtiene la fecha y hora actual en Argentina como partes discretas.
+ */
+function getArgentinaDateParts(): { date: string; totalMinutes: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date())
+
+  const p: Record<string, string> = {}
+  parts.forEach(part => { p[part.type] = part.value })
+
+  // en-CA produce YYYY-MM-DD directamente
+  const date = `${p.year}-${p.month}-${p.day}`
+  const totalMinutes = parseInt(p.hour, 10) * 60 + parseInt(p.minute, 10)
+  return { date, totalMinutes }
+}
+
+/**
+ * Determina el estado temporal de un turno respecto al momento actual.
+ * @param fecha - Fecha del turno en formato YYYY-MM-DD
+ * @param hora  - Hora del turno en formato HH:MM o HH:MM:SS (opcional)
+ */
+export function getTurnoTemporalStatus(fecha: string, hora?: string): TurnoTemporalStatus {
+  try {
+    const { date: today, totalMinutes: nowMinutes } = getArgentinaDateParts()
+
+    if (fecha < today) return 'pasado'
+    if (fecha > today) {
+      // Fecha futura: verificar si es mañana muy temprano vs. hoy tarde de noche
+      return 'futuro'
+    }
+
+    // Mismo día — comparar horas
+    if (!hora) return 'en_curso'
+
+    const [hh, mm] = hora.split(":").map(Number)
+    const turnoMinutes = hh * 60 + mm
+    const diffMinutes = turnoMinutes - nowMinutes  // positivo = futuro, negativo = pasado
+
+    if (diffMinutes > 240) return 'futuro'     // más de 4h en el futuro
+    if (diffMinutes > 0)   return 'proximo'    // hoy, dentro de las próximas 4h
+    if (diffMinutes >= -60) return 'en_curso'  // pasó hace 0-60 min
+    return 'pasado_hoy'                        // pasó hace más de 60 min hoy
+  } catch {
+    return 'futuro' // en caso de error, asumir futuro (más seguro)
+  }
+}
+
+/**
  * Formatea una fecha con el día de la semana en español usando la zona horaria de Argentina
  * @param dateString - Fecha en formato ISO (YYYY-MM-DD) o cualquier formato parseable
  * @returns String con formato: "día_de_semana DD de mes de YYYY" (ej: "viernes 7 de noviembre de 2025")

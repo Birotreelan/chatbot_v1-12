@@ -16,6 +16,7 @@
 
 import { createConversationLogger } from "./logger"
 import { openai } from "@/lib/openai"
+import { getTurnoTemporalStatus } from "@/lib/utils/date-utils"
 
 const logger = createConversationLogger("nlu-fallback-handler")
 
@@ -32,6 +33,8 @@ export type FallbackIntent =
   | "consulta_medica_prohibida" // CRÍTICO: Consultas médicas que JAMÁS debemos responder (síntomas, diagnósticos, medicamentos, tratamientos)
   | "queja_frustracion"         // "estuve 3 dias llamando...", "nunca atienden"
   | "explicacion_contextual"    // "Esta con neumonia", "por motivos de salud"
+  | "llego_tarde"               // "voy llegando", "ya salí", "estoy en camino"
+  | "no_asisti"                 // "me olvidé", "no pude ir", "falté al turno"
   | "saludo_despedida"          // "gracias", "chau", "igualmente"
   | "numero_equivocado"         // "no soy esa persona", "se equivocaron"
   | "otro"                      // → Continuar al flujo normal
@@ -247,6 +250,36 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
+    // Turno pasado: "voy llegando tarde" → respuesta empática + contacto clínica
+    if (classificationResult.intent === "llego_tarde") {
+      const { fecha, hora } = extractTurnoData(appointmentContext)
+      const turnoStatus = getTurnoTemporalStatus(fecha, hora)
+      const response = buildLlegoTardeResponse(appointmentContext, turnoStatus, classificationResult.response, escalationPhoneNumber)
+      return { shouldHandle: true, result: classificationResult, response }
+    }
+
+    // Turno pasado: "no asistí / me olvidé" → respuesta empática + ofrecer reagendar
+    if (classificationResult.intent === "no_asisti") {
+      const { fecha, hora } = extractTurnoData(appointmentContext)
+      const turnoStatus = getTurnoTemporalStatus(fecha, hora)
+      // Si el turno es futuro o próximo, re-clasificar como cancelación
+      if (turnoStatus === 'futuro' || turnoStatus === 'proximo') {
+        const response = buildMenuResponse(appointmentContext, classificationResult.response)
+        return {
+          shouldHandle: true,
+          result: { ...classificationResult, intent: "cancelar_turno" },
+          response,
+        }
+      }
+      const response = buildNoAsistiResponse(appointmentContext, turnoStatus, classificationResult.response)
+      return {
+        shouldHandle: true,
+        result: classificationResult,
+        response,
+        flowStateDirective: { type: "awaiting_cancel_and_reschedule_confirm" },
+      }
+    }
+
     // Saludo/despedida → distinguir entre saludo de apertura y cierre de conversación.
     // Los saludos de apertura ("hola", "buenos días") deben pasar al flujo normal
     // para que el chatbot muestre el menú de bienvenida.
@@ -339,6 +372,8 @@ Clasificá el mensaje en UNA de estas categorías:
 - consulta_informativa: pregunta por datos del turno que tenemos (dirección, hora, profesional)
 - consulta_no_disponible: pregunta administrativa que NO podemos responder (costo, cobertura, documentación)
 - consulta_medica_prohibida: CRÍTICO — cualquier consulta médica (síntomas, medicamentos, diagnósticos, tratamientos, recetas, estudios). NUNCA responder. PRIORIDAD MÁXIMA.
+- llego_tarde: paciente indica que está en camino o llega tarde ("ya salí", "voy llegando", "unos minutos más")
+- no_asisti: paciente indica que ya no asistió al turno ("me olvidé", "no pude ir", "falté")
 - queja_frustracion: expresa frustración o queja por el servicio
 - explicacion_contextual: explica un motivo o situación personal (enfermedad, viaje, trabajo)
 - saludo_despedida: saludo, despedida, agradecimiento
@@ -484,6 +519,16 @@ function isNewBookingRequest(msg: string): boolean {
   return /\b(necesito (un |sacar |pedir |solicitar )?turno|quiero (un |sacar |pedir |solicitar )?turno|sacar( un)? turno|pedir( un)? turno|solicitar( un)? turno|agenda(r)?( un)?( nuevo)? turno|reservar( un)?( nuevo)? turno|turno (para|con|de)\b|nuevo turno|otro turno|gestionar (un )?turno|turno m[eé]dico)\b/.test(msg)
 }
 
+/** Llego tarde / estoy en camino */
+function isLlegoTarde(msg: string): boolean {
+  return /\b(voy (llegando|en camino|tarde|para alla|yendo|saliendo)|ya (sali|salgo|voy|estoy llegando|me fui)|estoy (llegando|en camino|yendo|saliendo)|unos (minutos?|momentos?) (mas|de retraso)|me (retrase|tarde|demoré|demoro)|llegaré? (en|dentro de)? (unos|pocos) (minutos?|momentos?)|ya llego|llego enseguida|llego en)\b/.test(msg)
+}
+
+/** No asistí / me olvidé del turno (evento ya ocurrido) */
+function isNoAsisti(msg: string): boolean {
+  return /\b(me (olvide|olvidé|olvido) (del? )?turno?|no (pude|fui|asisti|asistí|llegue|llegué|concurri) (al turno)?|falte|falté (al turno)?|no (me) (presente|presento)|no asisti|no fui al turno|no llegue al turno|se me paso|se me olvidó?|no pude ir|no puedo haber ido)\b/.test(msg)
+}
+
 /** Saludo o despedida */
 function isSalutationOrFarewell(msg: string): boolean {
   // Solo despedidas y agradecimientos — los saludos puros se manejan antes con isPureGreeting
@@ -530,6 +575,26 @@ function classifyIntentWithRules(
       confidence: 0.8,
       reasoning: "Consulta administrativa que no podemos responder",
       response: "Esa información no la tengo disponible en este momento.",
+    }
+  }
+
+  // 4a. "Llego tarde / ya voy" — verificado antes de confirmación para evitar falsos positivos
+  if (isLlegoTarde(msg)) {
+    return {
+      intent: "llego_tarde",
+      confidence: 0.85,
+      reasoning: "Paciente indica que está en camino o llega tarde",
+      response: "Entendemos que estás en camino.",
+    }
+  }
+
+  // 4b. "No asistí / me olvidé" — verificado antes de cancelación (distinto semántica)
+  if (isNoAsisti(msg)) {
+    return {
+      intent: "no_asisti",
+      confidence: 0.85,
+      reasoning: "Paciente indica que no asistió o no pudo ir al turno",
+      response: "Entendemos que no pudiste asistir.",
     }
   }
 
@@ -760,13 +825,18 @@ function buildDerivationResponse(appointmentContext: any, gptResponse?: string, 
   const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
   const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
 
-  // Usar respuesta de GPT si existe, sino usar fallback
   const empaticResponse = gptResponse || "Esa información no la tengo disponible en este momento."
-
-  // Construir mensaje de derivación con número si está disponible
   const derivacionMsg = escalationPhoneNumber
     ? `Para esa consulta te recomiendo comunicarte directamente con la clínica al *${escalationPhoneNumber}*.`
     : `Para esa consulta te recomiendo comunicarte directamente con la clínica.`
+
+  // No mencionar el turno si ya pasó — no es relevante para la consulta
+  const turnoStatus = getTurnoTemporalStatus(fecha, hora)
+  const turnoEsPasado = turnoStatus === 'pasado' || turnoStatus === 'pasado_hoy'
+
+  if (turnoEsPasado) {
+    return `${empaticResponse}\n\n${derivacionMsg}`
+  }
 
   return `${empaticResponse}
 
@@ -785,10 +855,17 @@ function buildMedicalDerivationResponse(appointmentContext: any, escalationPhone
   const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
   const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
 
-  // Número de derivación
   const derivacionMsg = escalationPhoneNumber
     ? `Para consultas médicas, por favor comunicate directamente con la clínica al *${escalationPhoneNumber}* o consultalo con tu médico en tu próxima visita.`
     : `Para consultas médicas, por favor consultalo directamente con tu médico en tu próxima visita o comunicate con la clínica.`
+
+  // No mencionar el turno si ya pasó — no es relevante para la consulta médica
+  const turnoStatus = getTurnoTemporalStatus(fecha, hora)
+  const turnoEsPasado = turnoStatus === 'pasado' || turnoStatus === 'pasado_hoy'
+
+  if (turnoEsPasado) {
+    return `No podemos brindar información médica, ya que ese tipo de consultas deben ser respondidas por un profesional de la salud.\n\n${derivacionMsg}`
+  }
 
   return `No puedo brindarte información médica, ya que ese tipo de consultas deben ser respondidas por un profesional de la salud.
 
@@ -797,6 +874,78 @@ ${derivacionMsg}
 Tu turno sigue confirmado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
 
 Si necesitás ayuda con tu turno (confirmar, cancelar o reagendar), con gusto te ayudo.`
+}
+
+/**
+ * Respuesta cuando el paciente indica que está llegando tarde o en camino.
+ */
+function buildLlegoTardeResponse(
+  appointmentContext: any,
+  turnoStatus: import("@/lib/utils/date-utils").TurnoTemporalStatus,
+  gptResponse?: string,
+  escalationPhoneNumber?: string
+): string {
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  const fechaFormateada = fecha ? formatDate(fecha) : 'la fecha indicada'
+
+  const empaticResponse = gptResponse || "Entendemos que estás en camino."
+
+  // Si el turno ya pasó hace rato, es posible que no puedan atenderlo
+  if (turnoStatus === 'pasado_hoy' || turnoStatus === 'pasado') {
+    const contactMsg = escalationPhoneNumber
+      ? `Te recomendamos llamar a la clínica al *${escalationPhoneNumber}* para consultar si aún pueden atenderte o coordinar un nuevo turno.`
+      : `Te recomendamos comunicarte con la clínica para consultar si aún pueden atenderte.`
+    return `${empaticResponse}\n\nEl turno era el ${fechaFormateada} a las ${hora || 'hora indicada'} con ${profesional || 'el profesional'} en ${sede || 'la sede'}.\n\n${contactMsg}`
+  }
+
+  // Turno en curso (puede que aún lleguen)
+  const contactMsg = escalationPhoneNumber
+    ? `Si querés avisarle a la clínica, podés llamar al *${escalationPhoneNumber}*.`
+    : `Si podés, avisale a la clínica que estás en camino.`
+
+  return `${empaticResponse} ¡Te esperamos!\n\nRecordá que tu turno es el ${fechaFormateada} a las *${hora || 'hora indicada'}* con ${profesional || 'el profesional'} en ${sede || 'la sede'}.\n\n${contactMsg}`
+}
+
+/**
+ * Respuesta cuando el paciente indica que no asistió o no pudo ir al turno.
+ * Ofrece la posibilidad de reagendar.
+ */
+function buildNoAsistiResponse(
+  appointmentContext: any,
+  turnoStatus: import("@/lib/utils/date-utils").TurnoTemporalStatus,
+  gptResponse?: string
+): string {
+  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+
+  const empaticResponse = gptResponse || "Entendemos que no pudiste asistir."
+
+  // Determinar referencia temporal natural: "hoy", "ayer", o el día de la semana
+  let referenciaFecha: string
+  if (turnoStatus === 'pasado_hoy' || turnoStatus === 'en_curso') {
+    referenciaFecha = `hoy a las ${hora || 'la hora indicada'}`
+  } else {
+    // turno 'pasado' — calcular si fue ayer o antes
+    const hoy = new Date()
+    const ayer = new Date(hoy)
+    ayer.setDate(hoy.getDate() - 1)
+    const ayerStr = ayer.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }) // YYYY-MM-DD
+
+    if (fecha === ayerStr) {
+      referenciaFecha = `ayer a las ${hora || 'la hora indicada'}`
+    } else {
+      const diaSemana = fecha ? formatDate(fecha) : 'la fecha indicada'
+      referenciaFecha = `el ${diaSemana} a las ${hora || 'la hora indicada'}`
+    }
+  }
+
+  return `${empaticResponse}
+
+Veo que tenías un turno agendado para ${referenciaFecha} con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
+
+Si querés solicitar un nuevo turno, puedo ayudarte a gestionarlo:
+
+1- Sí, quiero un nuevo turno
+2- No, por ahora no`
 }
 
 /**
