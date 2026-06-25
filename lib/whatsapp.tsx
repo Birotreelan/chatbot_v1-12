@@ -817,6 +817,10 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
     } else if (isKeepAppointmentResponse(userMessage)) {
       logger.info("Usuario decide mantener turno")
       await clearFlowState(userPhoneNumber, config.id)
+
+      // El paciente eligió mantener el turno → se considera confirmada la asistencia
+      await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(chatbotData))
+
       const keepMsg = buildKeepAppointmentMessage(chatbotData, flowState.turnoIndex || 0)
       await sendDirectResponse(ctx, keepMsg, "awaiting_cancel_confirmation")
 
@@ -2314,7 +2318,20 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     const nluFallbackFlags = await getEffectiveFeatureFlags(config.id)
     
     if (nluFallbackFlags.nluFallbackRouter) {
-      
+
+      // Si el paciente está en un flujo de asistente especializado (ej: reagendamiento),
+      // saltear el NLU fallback para no interceptar sus respuestas al asistente OpenAI.
+      const nluRedis = getRedisClient()
+      const specializedAssistantFlow = nluRedis
+        ? await nluRedis.get(`specialized_assistant_active:${config.id}:${userPhoneNumber}`)
+        : null
+
+      if (specializedAssistantFlow) {
+        logger.info("[NLU-FALLBACK] Saltando NLU fallback — paciente en flujo de asistente especializado", {
+          specializedFlow: specializedAssistantFlow,
+        })
+      } else {
+
       // Obtener el appointmentContext si existe
       const appointmentData = await getAppointmentContext(userPhoneNumber, config.id)
 
@@ -2388,9 +2405,11 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
         return
       }
+
+      } // end else (no specialized assistant flow)
     }
   }
-  
+
   // ============================================================================
   // NEW: INTERCEPTAR DETECCION INICIAL DE PACIENTE (Sin recordatorio previo)
     // Sprint 9a-c: Nuevo flujo deterministico de deteccion e intake

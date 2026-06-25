@@ -121,7 +121,7 @@ export function buildCancelDoubleConfirmMessage(
 Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
 
 1- Sí, cancelar el turno
-2- No, mantener el turno`
+2- No, mantener el turno y confirmar asistencia.`
   }
 
   const fechaBase = turno.fecha
@@ -145,7 +145,7 @@ ${lineas}
 Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
 
 1- Sí, cancelar los turnos
-2- No, mantener los turnos`
+2- No, mantener los turnos y confirmar asistencia.`
   }
 
   const hora = formatTime(turno.hora)
@@ -156,7 +156,7 @@ Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
 Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
 
 1- Sí, cancelar el turno
-2- No, mantener el turno`
+2- No, mantener el turno y confirmar asistencia.`
 }
 
 /**

@@ -427,6 +427,16 @@ async function handleAssistantSwitch(
     await updateThreadId(userPhoneNumber, config.id, newThread.id, newAssistantId)
     console.info(`[OPENAI-SWITCH] Switch ${functionName}: ${oldThreadId} -> ${newThread.id} (assistant: ${newAssistantId})`)
 
+    // Marcar que el paciente está en un flujo de asistente especializado.
+    // Esto previene que el NLU fallback intercepte sus respuestas durante el flujo.
+    if (functionName === "route_to_reagendamiento") {
+      const redisFlag = getRedisClient()
+      if (redisFlag) {
+        await redisFlag.setex(`specialized_assistant_active:${config.id}:${userPhoneNumber}`, 7200, 'reagendamiento')
+        console.info(`[OPENAI-SWITCH] Flag flujo especializado seteado: ${config.id}:${userPhoneNumber}`)
+      }
+    }
+
     const { getArgentinaDateTime } = await import("@/lib/utils/date-utils") // import moved here
     const fechaHora = getArgentinaDateTime()
 

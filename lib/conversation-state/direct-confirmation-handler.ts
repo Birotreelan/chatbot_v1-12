@@ -472,9 +472,21 @@ export async function detectDirectConfirmationPreFlow(
     return { detected: true, action: "cancel", appointmentContext }
   }
 
-  // Si el turno ya está confirmado, los pasos siguientes (implícitos y ambiguos)
-  // no deben pedir confirmación — el mensaje es solo cortesía o consulta
+  // Si el turno ya está confirmado, los pasos de confirmación implícita y ambigua
+  // no aplican — pero sí hay que detectar intención de CANCELACIÓN expresada de forma
+  // conversacional (ej: "no podré asistir hoy", "tuve un problema de salud").
+  // Sin este NLU check, el mensaje pasa a OpenAI, que cancela directo sin doble confirmación.
   if (turnoYaConfirmado) {
+    if (useNLU) {
+      const cancelCheck = await classifyDirectActionWithNLU(message, userPhone, configId)
+      if (cancelCheck.intent === "cancelar_turno" && cancelCheck.confidence >= 0.70) {
+        logger.info("Cancelación conversacional detectada por NLU (turno ya confirmado)", {
+          message: message.substring(0, 60),
+          confidence: cancelCheck.confidence,
+        })
+        return { detected: true, action: "cancel", appointmentContext }
+      }
+    }
     logger.info("Turno confirmado — no interceptar mensajes ambiguos, cediendo al flujo normal")
     return { detected: false }
   }
@@ -599,6 +611,6 @@ export function buildCancelConfirmationPrompt(
   patientName: string,
   appointmentDetails: string
 ): string {
-  return `${patientName}, entendemos que querés cancelar tu turno:\n\n${appointmentDetails}\n\n¿Confirmás la cancelación?\n\n1- Sí, cancelar el turno\n2- No, mantener el turno`
+  return `${patientName}, entendemos que querés cancelar tu turno:\n\n${appointmentDetails}\n\n¿Confirmás la cancelación?\n\n1- Sí, cancelar el turno\n2- No, mantener el turno y confirmar asistencia.`
 }
 

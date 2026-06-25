@@ -723,7 +723,7 @@ Tu turno del *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${
 ¿Confirmás la cancelación del turno?
 
 1- Sí, cancelar el turno
-2- No, mantener el turno`
+2- No, mantener el turno y confirmar asistencia.`
 }
 
 /**

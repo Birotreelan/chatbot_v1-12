@@ -101,7 +101,7 @@ function buildCancelConfirmationTemplates(): ResponseTemplates {
 Necesitamos que confirmes tu decisión:
 
 1- Sí, cancelar el turno
-2- No, mantener el turno`
+2- No, mantener el turno y confirmar asistencia.`
       }
       
       // Para reagendar, similar
@@ -109,7 +109,7 @@ Necesitamos que confirmes tu decisión:
         return `${nombre}, ${ack}. Para poder hacerlo, primero necesitamos que confirmes si querés cancelar ${turnoDesc}.
 
 1- Sí, cancelar el turno
-2- No, mantener el turno`
+2- No, mantener el turno y confirmar asistencia.`
       }
       
       // Para consultas de info
@@ -118,7 +118,7 @@ Necesitamos que confirmes tu decisión:
 
 Por favor, indicame:
 1- Sí, cancelar el turno
-2- No, mantener el turno
+2- No, mantener el turno y confirmar asistencia.
 
 Una vez resuelto, podré ayudarte con tu consulta.`
       }
@@ -130,7 +130,7 @@ Una vez resuelto, podré ayudarte con tu consulta.`
 ¿Querés cancelar ${turnoDesc}?
 
 1- Sí, cancelar el turno
-2- No, mantener el turno`
+2- No, mantener el turno y confirmar asistencia.`
       }
       
       // Para quejas/frustración
@@ -140,7 +140,7 @@ Una vez resuelto, podré ayudarte con tu consulta.`
 Solo necesito que me confirmes si querés cancelar ${turnoDesc}:
 
 1- Sí, cancelar el turno
-2- No, mantener el turno`
+2- No, mantener el turno y confirmar asistencia.`
       }
       
       // Para confirmar turno (contradicción)
@@ -150,14 +150,14 @@ Solo necesito que me confirmes si querés cancelar ${turnoDesc}:
 Si querés mantener el turno y confirmar tu asistencia, elegí la opción 2:
 
 1- Sí, cancelar el turno
-2- No, mantener el turno`
+2- No, mantener el turno y confirmar asistencia.`
       }
       
       // Default para "otro" o intenciones no manejadas
       return `${nombre}, ${ack}. Para poder continuar, necesito que me indiques qué querés hacer con ${turnoDesc}:
 
 1- Sí, cancelar el turno
-2- No, mantener el turno`
+2- No, mantener el turno y confirmar asistencia.`
     }
   }
 }
