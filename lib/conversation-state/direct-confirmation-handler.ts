@@ -428,6 +428,19 @@ export async function detectDirectConfirmationPreFlow(
     return { detected: false }
   }
 
+  // Paso 1b: Si el template es puramente informacional (la clínica notifica al paciente),
+  // NO interceptar — el mensaje del paciente es solo una respuesta cortés o consulta libre.
+  // Tipos informacionales: confirmar_turno_solicitado, cancelar_turno_solicitado (y variantes).
+  const INFORMATIONAL_TIPO_MENSAJES = [
+    'turno_confirmado_clinica',  // confirmar_turno_solicitado — clínica acepta el turno pedido
+    'turno_cancelado_clinica',   // cancelar_turno_solicitado — clínica cancela el turno
+  ]
+  const tipoMensaje = appointmentContext.tipo_mensaje as string | undefined
+  if (tipoMensaje && INFORMATIONAL_TIPO_MENSAJES.includes(tipoMensaje)) {
+    logger.info("Template informacional — no aplica detección de confirmación directa", { tipoMensaje })
+    return { detected: false }
+  }
+
   logger.info("Contexto de cita encontrado, verificando patrones", {
     message,
     appointmentId: appointmentContext.appointment_id,
