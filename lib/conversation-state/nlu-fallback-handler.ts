@@ -247,8 +247,17 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Saludo/despedida → respuesta de cortesía y cortar flujo (no iniciar detección de paciente)
+    // Saludo/despedida → distinguir entre saludo de apertura y cierre de conversación.
+    // Los saludos de apertura ("hola", "buenos días") deben pasar al flujo normal
+    // para que el chatbot muestre el menú de bienvenida.
+    // Solo los cierres/agradecimientos ("chau", "gracias", "igualmente") se responden directamente.
     if (classificationResult.intent === "saludo_despedida") {
+      const normalized = message.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
+      const isOpeningGreeting = /^(hola|buenos?\s*(dias?|tardes?|noches?)|buenas?|buen\s*dia|hey\b|hi\b|hello\b)/.test(normalized)
+      if (isOpeningGreeting) {
+        logger.info("[Sprint 18] Saludo de apertura — cediendo al flujo normal (no interceptar)")
+        return { shouldHandle: false }
+      }
       const response = classificationResult.response || "¡Un placer! Si necesitás algo más, estoy acá para ayudarte."
       return {
         shouldHandle: true,
