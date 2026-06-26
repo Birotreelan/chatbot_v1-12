@@ -28,6 +28,11 @@ import {
   setPendingHumanSupportOffer,
 } from "./human-support"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
+import {
+  getHumanSupportSchedule,
+  isWithinHumanSupportHours,
+  formatSupportHoursForPatient,
+} from "./human-support-schedule"
 import { formatScheduleForSystemBlock } from "@/lib/utils/schedule-formatter" // Import added
 
 // Re-export functions for compatibility
@@ -1975,15 +1980,30 @@ async function executeToolCall(
         }
         await setPendingHumanSupportOffer(config.id, finalPhoneNumber, offerParams)
 
-        const offerMessage =
-          `Entiendo que necesitás más ayuda. ¿Querés que te conecte con alguien del equipo de ${config.displayName || "la clínica"}?\n\n` +
+        // Check if within support hours to potentially add an out-of-hours note
+        const schedule = await getHumanSupportSchedule(config.id)
+        const timezone = config.timezone || "America/Argentina/Buenos_Aires"
+        const withinHours = isWithinHumanSupportHours(schedule, timezone)
+        const clinicName = config.displayName || "la clínica"
+
+        let offerMessage =
+          `Entiendo que necesitás más ayuda. ¿Querés que te conecte con alguien del equipo de ${clinicName}?\n\n` +
           `1. Sí, quiero atención humana\n` +
           `2. No, gracias`
+
+        if (!withinHours && schedule.length > 0) {
+          const hoursStr = formatSupportHoursForPatient(schedule)
+          if (hoursStr) {
+            offerMessage += `\n\n_El horario de atención es ${hoursStr}. Te derivaremos, pero recibirás respuesta dentro de ese horario._`
+          }
+        }
+
         await sendWhatsAppMessage(phoneNumberId, accessToken, finalPhoneNumber, offerMessage)
 
         return JSON.stringify({
           success: true,
           message: "Oferta de atención humana enviada al paciente",
+          withinHours,
         })
       }
 
