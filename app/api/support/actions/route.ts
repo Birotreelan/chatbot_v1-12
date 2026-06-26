@@ -286,7 +286,7 @@ async function handleAssign(sessionId: string, session: SessionData) {
       console.log("[v0] [ASSIGN] Obteniendo config:", supportSession.configId)
       const config = await getWhatsAppConfigById(supportSession.configId)
       if (config) {
-        const message = `Un agente está ahora contigo y te ayudará en breve. 👋`
+        const message = `Una persona está conectada y te ayudará en breve`
         await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, supportSession.phoneNumber, message)
         console.log("[v0] [ASSIGN] Mensaje enviado exitosamente")
       } else {
@@ -369,7 +369,7 @@ El agente cerró la sesión. Retomá la conversación teniendo en cuenta lo que 
     try {
       const config = await getWhatsAppConfigById(supportSession.configId)
       if (config) {
-        const message = `Has sido reconectado con el asistente virtual. ¡Gracias por tu paciencia! 🤖`
+        const message = `Has sido reconectado al asistente virtual. Si enviás un nuevo mensaje, la respuesta será generada automáticamente.`
         await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, supportSession.phoneNumber, message)
       }
     } catch (error) {
