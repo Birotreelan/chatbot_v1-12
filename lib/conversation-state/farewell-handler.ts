@@ -536,6 +536,14 @@ export async function detectFarewellPreFlow(
     return { isFarewell: true, response }
   }
 
+  // Paso 0: Guard — saludos de apertura NUNCA son despedidas.
+  // Necesario porque "bueno" está en FAREWELL_KEYWORDS y matchea "buenos días" como substring.
+  const OPENING_GREETING_RE = /^(hola|buenas?|buenos?\s*(?:d[ií]as?|tardes?|noches?)|buen\s*d[ií]a|saludos|hi|hey|hello)[\s!.,\u{1F300}-\u{1FAFF}]*$/iu
+  if (OPENING_GREETING_RE.test(message.trim())) {
+    logger.info("Saludo de apertura detectado — no es despedida", { message })
+    return { isFarewell: false }
+  }
+
   // Paso 1: Verificar patrón puro (0ms latencia)
   if (isPureFarewellPattern(message)) {
     logger.info("Despedida pura detectada por patrón", { message })

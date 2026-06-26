@@ -313,7 +313,7 @@ export async function handlePatientDetectionMessage(
     }
   }
 
-  // Selección numérica válida procesada
+  // Selección numérica válida procesada (o consulta informativa interceptada)
   logger.info('Valid selection processed', {
     action: processResult.action,
   })
@@ -322,6 +322,7 @@ export async function handlePatientDetectionMessage(
   return {
     handled: true,
     action: processResult.action,
+    message: processResult.message,
     patientInfo: processResult.data,
   }
 }

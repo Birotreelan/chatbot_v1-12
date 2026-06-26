@@ -691,3 +691,76 @@ export function buildBriefFarewellMessage(
   ]
   return firstName ? variants[0] : variants[2]
 }
+
+// ─── Información de turno inline ─────────────────────────────────────────────
+
+// Regex para detectar preguntas informativas sobre turno/hora/confirmación
+const TURNO_INFO_QUERY_RE = /\b(hora|horario|confirmad[ao]?|confirm|tengo.*turno|mi.*turno|ciru|el turno|qu[eé] hora|a qu[eé] hora|cu[aá]ndo|d[ií]a|fecha|cuando es|si tengo|si est[aá]|est[aá] confirmad|la hora|el horario|el d[ií]a|la fecha|vivo lejos|lejos|distanc)\b/i
+
+/**
+ * Responde una pregunta informativa sobre turno/cirugía usando los datos del estado.
+ * Retorna null si el mensaje no parece ser una consulta de datos del turno.
+ */
+export function buildTurnoInfoResponse(
+  userMessage: string,
+  patientFirstName: string,
+  turnos: any[],
+  turnosQx: any[]
+): string | null {
+  if (!TURNO_INFO_QUERY_RE.test(userMessage)) return null
+
+  const hasTurnos = turnos && turnos.length > 0
+  const hasTurnosQx = turnosQx && turnosQx.length > 0
+
+  if (!hasTurnos && !hasTurnosQx) return null
+
+  const firstName = patientFirstName || 'Paciente'
+  let response = ''
+
+  if (hasTurnos) {
+    if (turnos.length === 1) {
+      const t = turnos[0]
+      const fecha = formatearFecha(t.Fecha || t.fecha)
+      const hora = formatearHora(t.Hora || t.hora || '')
+      const profesional = formatearProfesional(t.Profesional_Nombre || t.profesional_nombre || '')
+      const estado = normalizeName(t.Estado || t.estado || '')
+      response += `${firstName}, tu turno médico está agendado:\n\n`
+      response += `Fecha: ${fecha}${hora ? ` a las ${hora}` : ''}\n`
+      if (profesional && profesional !== 'el profesional') response += `Profesional: ${profesional}\n`
+      if (estado) response += `Estado: ${estado}\n`
+      response += '\n'
+    } else {
+      response += `${firstName}, tus turnos médicos agendados son:\n\n`
+      turnos.forEach((t, idx) => {
+        const fecha = formatearFecha(t.Fecha || t.fecha)
+        const hora = formatearHora(t.Hora || t.hora || '')
+        const profesional = formatearProfesional(t.Profesional_Nombre || t.profesional_nombre || '')
+        response += `${idx + 1}. Fecha: ${fecha}${hora ? ` a las ${hora}` : ''}\n`
+        if (profesional && profesional !== 'el profesional') response += `   Profesional: ${profesional}\n`
+      })
+      response += '\n'
+    }
+  }
+
+  if (hasTurnosQx) {
+    if (!hasTurnos) {
+      response += `${firstName}, tu cirugía está confirmada:\n\n`
+    } else {
+      response += `_Además, tenés ${turnosQx.length === 1 ? 'una cirugía agendada' : `${turnosQx.length} cirugías agendadas`}:_\n\n`
+    }
+    turnosQx.forEach((qx, idx) => {
+      const fecha = formatearFecha(qx.Fecha || qx.fecha)
+      const hora = formatearHora(qx.Hora || qx.hora || '')
+      const cirugiaName = normalizeName(qx.Cirugia_Nombre || qx.cirugia_nombre || qx.Descripcion || qx.descripcion || 'Cirugía')
+      const cirujano = formatearProfesional(qx.Profesional_Nombre || qx.profesional_nombre || qx.Cirujano || qx.cirujano || '')
+      if (turnosQx.length > 1) response += `${idx + 1}. `
+      response += `Cirugía: ${cirugiaName}\n`
+      if (cirujano && cirujano !== 'el profesional') response += `Cirujano: ${cirujano}\n`
+      response += `Fecha: ${fecha}${hora ? ` a las ${hora}` : ''}\n\n`
+    })
+    response += `_La gestión de turnos quirúrgicos debe realizarse directamente con la clínica._\n\n`
+  }
+
+  response += `¿Hay algo más en lo que pueda ayudarte?`
+  return response
+}

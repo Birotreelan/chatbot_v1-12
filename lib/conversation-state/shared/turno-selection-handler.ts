@@ -12,6 +12,8 @@
 import { createConversationLogger } from '../logger'
 import { openai } from '@/lib/openai'
 import { detectFlowInterruption } from './flow-interruption-handler'
+import { detectTurnoFilter } from './turno-filter-extractor'
+import { buildTurnosFilteredMessage, buildTurnosWindowMessage, SEARCH_DAYS } from './turnos-handler'
 import type { TurnoOption, HandlerResult, SearchType } from './types'
 import { parseOptionNumber } from '../selection-extractor'
 
@@ -419,8 +421,22 @@ export interface TurnoInterruptionOptions {
 }
 
 /**
- * Maneja la seleccion de turno por parte del usuario
- * IMPORTANTE: Mapea por campo 'numero', NO por indice de array
+ * Maneja la seleccion de turno por parte del usuario.
+ *
+ * Árbol de decisión:
+ *   1. Número directo → seleccionar de turnosOpciones
+ *   2. Hora HH:MM     → seleccionar por hora
+ *   3. Texto con letras:
+ *      a. Resolución determinística (ordinal, día+hora → 1 turno único)
+ *      b. NLU GPT → resolved / ambiguous
+ *      c. Si unrelated → detectTurnoFilter:
+ *           - show_more  → el caller muestra la próxima ventana
+ *           - show_all   → el caller vuelve a la lista sin filtro
+ *           - filtered   → retorna filteredTurnos + filteredMessage
+ *           - no_results → mensaje de sin resultados
+ *           - not_a_filter → flow interruption o mensaje de opción inválida
+ *
+ * IMPORTANTE: turnosOpciones es el array COMPLETO de 60 días con numeración permanente.
  */
 export async function handleTurnoSelection(
   userInput: string,
@@ -428,8 +444,17 @@ export async function handleTurnoSelection(
   phoneNumber: string,
   clientId: string,
   searchType?: SearchType,
-  interruptionOptions?: TurnoInterruptionOptions
-): Promise<HandlerResult & { selectedTurno?: TurnoOption; requestedRebusqueda?: boolean; noMoreTurnos?: boolean }> {
+  interruptionOptions?: TurnoInterruptionOptions,
+  profesionalNombre?: string
+): Promise<HandlerResult & {
+  selectedTurno?: TurnoOption
+  requestedRebusqueda?: boolean
+  noMoreTurnos?: boolean
+  showMore?: boolean
+  showAll?: boolean
+  filteredTurnos?: TurnoOption[]
+  filteredMessage?: string
+}> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turno_selection')
 
   // Normalizar input
@@ -578,12 +603,54 @@ export async function handleTurnoSelection(
       }
     }
 
-    // outcome === 'unrelated' o error → verificar si es consulta intercalada antes de mostrar error
-    logger.info('NLU OpenAI: input sin relacion con seleccion de turno', {
+    // outcome === 'unrelated' → intentar interpretar como filtro o navegación
+    logger.info('NLU OpenAI: input sin relación con selección de turno — evaluando como filtro', {
       input: userInput,
       reasoning: nluResult.reasoning,
     })
 
+    const filterResult = await detectTurnoFilter(userInput, turnosOpciones)
+
+    if (filterResult.type === 'show_more') {
+      logger.info('Paciente pidió ver más turnos')
+      return { handled: true, showMore: true }
+    }
+
+    if (filterResult.type === 'show_all') {
+      logger.info('Paciente pidió volver a lista completa')
+      return { handled: true, showAll: true }
+    }
+
+    if (filterResult.type === 'filtered') {
+      logger.info('Filtro aplicado', {
+        descripcion: filterResult.criteria.descripcion,
+        resultados: filterResult.turnos.length,
+      })
+      const msg = buildTurnosFilteredMessage(
+        filterResult.turnos,
+        filterResult.criteria.descripcion,
+        turnosOpciones.length,
+        profesionalNombre
+      )
+      return {
+        handled: true,
+        filteredTurnos: filterResult.turnos,
+        filteredMessage: msg,
+        nextPhase: 'awaiting_turno_selection',
+      }
+    }
+
+    if (filterResult.type === 'no_results') {
+      logger.info('Filtro sin resultados', { descripcion: filterResult.criteria.descripcion })
+      const msg = buildTurnosFilteredMessage([], filterResult.criteria.descripcion, turnosOpciones.length)
+      return {
+        handled: true,
+        message: msg,
+        nextPhase: 'awaiting_turno_selection',
+      }
+    }
+
+    // not_a_filter → verificar si es consulta intercalada antes de mostrar error
     if (interruptionOptions) {
       const interruption = await detectFlowInterruption(
         userInput,
@@ -595,7 +662,7 @@ export async function handleTurnoSelection(
       )
 
       if (interruption.isInterruption && interruption.response) {
-        logger.info('Consulta intercalada en seleccion de turno, respondiendo sin cambiar fase')
+        logger.info('Consulta intercalada en selección de turno, respondiendo sin cambiar fase')
         return {
           handled: true,
           message: interruption.response,

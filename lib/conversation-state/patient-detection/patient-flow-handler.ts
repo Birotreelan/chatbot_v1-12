@@ -10,7 +10,7 @@ import {
   EXISTING_PATIENT_MULTIPLE_TURNOS_MENU,
 } from './menu-option-detector'
 import { shouldOfferConfirmation } from './turno-estado'
-import { buildPostActionMenu } from './patient-templates'
+import { buildPostActionMenu, buildTurnoInfoResponse } from './patient-templates'
 import { parseOptionNumber } from '../selection-extractor'
 
 /**
@@ -548,6 +548,7 @@ export async function processPatientDetectionMessage(
   clientId: string
 ): Promise<{
   handled: boolean
+  message?: string
   action?: string
   nextPhase?: string
   data?: any
@@ -899,6 +900,31 @@ export async function processPatientDetectionMessage(
       error: String(error),
     })
     // Continuar con NLU fallback
+  }
+
+  // ========================================================================
+  // CAPA 2.5: Consulta informativa sobre turno/cirugía (sin NLU externo)
+  // Intercepta preguntas como "¿a qué hora es?", "¿está confirmada la hora?"
+  // respondiendo con los datos del estado antes de caer en OpenAI.
+  // ========================================================================
+  if (state.phase === 'awaiting_action_selection') {
+    const firstName = state.patientFirstName || (state.patientName ? state.patientName.split(' ')[0] : '')
+    const infoMsg = buildTurnoInfoResponse(
+      userMessage,
+      firstName,
+      state.turnos || [],
+      state.turnosQx || []
+    )
+    if (infoMsg) {
+      logger.info('Consulta informativa interceptada — respondiendo desde estado', { message: userMessage.substring(0, 50) })
+      return {
+        handled: true,
+        message: infoMsg,
+        action: 'turno_info_response',
+        nextPhase: 'awaiting_action_selection',
+        data: {},
+      }
+    }
   }
 
   // ========================================================================

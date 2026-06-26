@@ -52,9 +52,12 @@ import {
   type ProfessionalInterruptionOptions,
 } from '../shared/professional-handler'
 import {
-  searchTurnosAcumulativo,
-  buildTurnosListMessage,
+  searchTurnosFull,
+  getNextWindow,
+  buildTurnosWindowMessage,
+  buildTurnosFilteredMessage,
   buildNoTurnosMessage,
+  buildTurnosListMessage,
 } from '../shared/turnos-handler'
 import {
   handleTurnoSelection,
@@ -95,7 +98,7 @@ const NEW_PATIENT_FLOW_TTL = 86400 // 24 horas
 
 // Estado del flujo de paciente nuevo
 export interface NewPatientFlowState {
-  phase: FlowPhase | 'awaiting_name' | 'awaiting_obra_social' | 'awaiting_obra_social_selection'
+  phase: FlowPhase | 'awaiting_obra_social' | 'awaiting_obra_social_selection'
   dni: string
   phone: string
   
@@ -131,7 +134,10 @@ export interface NewPatientFlowState {
   especialidadesOpciones?: SpecialtyOption[]
   
   // Turnos
+  /** Array completo de 60 días con numeración 1..N permanente */
   turnosOpciones?: TurnoOption[]
+  /** Turnos mostrados al paciente hasta ahora (paginación) */
+  turnosMostrados: number
   turnoSeleccionado?: TurnoOption
   
   // Email (obligatorio para paciente nuevo)
@@ -207,12 +213,13 @@ export async function initializeNewPatientFlow(
   }
 
   const state: NewPatientFlowState = {
-    phase: 'awaiting_name',
+    phase: 'awaiting_apellido',
     dni,
     phone,
     obraSocialValidada: false,
     esFamiliar: esFamiliar === true,
     attempts: 0,
+    turnosMostrados: 0,
     createdAt: Date.now(),
     lastUpdated: Date.now(),
   }
@@ -242,10 +249,10 @@ export async function initializeNewPatientFlow(
 
   // Determinar el primer paso según datos ya disponibles
   if (state.nombre && state.apellido) {
-    // Ya tenemos nombre completo → saltar al pedido de obra social
+    // Ya tenemos ambos datos → saltar al pedido de obra social
     state.phase = 'awaiting_obra_social'
     await saveFlowState(phone, state)
-    logger.info('Skipping name phase (already extracted)', { nombre: state.nombre, apellido: state.apellido })
+    logger.info('Skipping name phases (both extracted)', { nombre: state.nombre, apellido: state.apellido })
 
     const history = flags.conversationHistory ? await getHistory(phone) : []
     const mensaje = flags.humanizedResponses
@@ -261,15 +268,26 @@ export async function initializeNewPatientFlow(
     }
   }
 
+  if (state.apellido && !state.nombre) {
+    // Ya tenemos apellido → saltar directo a solicitar el nombre
+    state.phase = 'awaiting_nombre'
+    await saveFlowState(phone, state)
+    logger.info('Skipping apellido phase (already extracted)', { apellido: state.apellido })
+    const msgNombre = state.esFamiliar
+      ? `Gracias. Ahora escribí el *nombre completo* del familiar (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+      : `Gracias. Ahora escribí tu *nombre completo* (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+    return { handled: true, message: msgNombre, patientInfo: { dni } }
+  }
+
   await saveFlowState(phone, state)
-  logger.info('Flow initialized, requesting name', {})
+  logger.info('Flow initialized, requesting apellido', {})
 
   const history = flags.conversationHistory ? await getHistory(phone) : []
   const mensaje = flags.humanizedResponses
     ? await generateWelcomeMessage(state.esFamiliar, history)
     : state.esFamiliar
-      ? `Veo que es la primera vez con nosotros. Para registrarlo y agendar un turno, necesito algunos datos.\n\nPor favor, escribi el *nombre y apellido completo* de la persona que agendará el turno.`
-      : `Veo que es tu primera vez con nosotros. Para registrarte y agendar un turno, necesito algunos datos.\n\nPor favor, escribi tu *nombre y apellido completo*.`
+      ? `Veo que es la primera vez con nosotros. Para registrarlo y agendar un turno, necesito algunos datos.\n\nPrimero, escribí el *apellido* de la persona que agendará el turno.\n\nPor ejemplo: *Pérez*`
+      : `Veo que es tu primera vez con nosotros. Para registrarte y agendar un turno, necesito algunos datos.\n\nPrimero, escribí tu *apellido*.\n\nPor ejemplo: *Pérez*`
 
   return {
     handled: true,
@@ -310,8 +328,12 @@ export async function handleNewPatientMessage(
   // Router por fase
   let result: NewPatientResult
   switch (state.phase) {
-    case 'awaiting_name':
-      result = await handleNamePhase(phone, userMessage, clientId, state)
+    case 'awaiting_apellido':
+      result = await handleApellidoPhase(phone, userMessage, clientId, state)
+      break
+
+    case 'awaiting_nombre':
+      result = await handleNombrePhase(phone, userMessage, clientId, state)
       break
 
     case 'awaiting_obra_social':
@@ -413,19 +435,31 @@ async function handleBackNavigation(
   })
 
   switch (prev) {
-    case 'awaiting_name': {
+    case 'awaiting_apellido': {
       state.nombre = undefined
       state.apellido = undefined
       state.obraSocialId = undefined
       state.obraSocialNombre = undefined
       state.obraSocialValidada = false
       state.obraSocialOpciones = undefined
-      state.phase = 'awaiting_name'
+      state.phase = 'awaiting_apellido'
+      state.attempts = 0
       await saveFlowState(phone, state)
       const msg = state.esFamiliar
-        ? `Por favor, escribi el *nombre y apellido completo* de la persona que agendará el turno.`
-        : `Por favor, escribi tu *nombre y apellido completo*.`
-      return reRender(msg, 'awaiting_name')
+        ? `Por favor, escribí el *apellido* de la persona que agendará el turno.\n\nPor ejemplo: *Pérez*`
+        : `Por favor, escribí tu *apellido*.\n\nPor ejemplo: *Pérez*`
+      return reRender(msg, 'awaiting_apellido')
+    }
+
+    case 'awaiting_nombre': {
+      state.nombre = undefined
+      state.phase = 'awaiting_nombre'
+      state.attempts = 0
+      await saveFlowState(phone, state)
+      const msg = state.esFamiliar
+        ? `Por favor, escribí el *nombre completo* del familiar (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+        : `Por favor, escribí tu *nombre completo* (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+      return reRender(msg, 'awaiting_nombre')
     }
 
     case 'awaiting_obra_social': {
@@ -435,6 +469,7 @@ async function handleBackNavigation(
       state.obraSocialOpciones = undefined
       state.sedeId = undefined
       state.sedeNombre = undefined
+      state.attempts = 0
       state.phase = 'awaiting_obra_social'
       await saveFlowState(phone, state)
       const msg = state.esFamiliar
@@ -560,63 +595,103 @@ async function handleBackNavigation(
 }
 
 /**
- * Fase: Nombre y apellido (especifica de paciente nuevo)
+ * Fase 1 de nombre: captura SOLO el apellido.
  */
-async function handleNamePhase(
+async function handleApellidoPhase(
   phone: string,
   userMessage: string,
   clientId: string,
   state: NewPatientFlowState
 ): Promise<NewPatientResult> {
-  const logger = createConversationLogger(phone, clientId, 'name_phase')
+  const logger = createConversationLogger(phone, clientId, 'apellido_phase')
 
+  const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
   const input = userMessage.trim()
-  const parts = input.split(/\s+/)
+  const parts = input.split(/\s+/).filter(Boolean)
 
-  if (parts.length < 2) {
+  // Validar: solo letras y espacios, al menos 2 caracteres
+  const soloLetras = /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s'-]+$/
+  if (!soloLetras.test(input) || input.length < 2) {
     state.attempts += 1
     await saveFlowState(phone, state)
-
     if (state.attempts >= 3) {
-      return {
-        handled: false,
-        shouldCallOpenAI: true,
-        openAIContext: 'Patient cannot provide valid name format',
-      }
+      return { handled: false, shouldCallOpenAI: true, openAIContext: 'Patient cannot provide valid apellido' }
     }
-
-    const ejemploMsg = state.esFamiliar
-      ? 'Necesito el nombre y apellido completo del familiar. Por ejemplo: *Juan Perez*'
-      : 'Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*'
-
-    return {
-      handled: true,
-      message: ejemploMsg,
-    }
+    const msg = state.esFamiliar
+      ? `Por favor, escribí solo el *apellido* del familiar.\n\nPor ejemplo: *Pérez*`
+      : `Por favor, escribí solo tu *apellido*.\n\nPor ejemplo: *Pérez*`
+    return { handled: true, message: msg }
   }
 
-  // Capitalizar nombre y apellido
+  // Si ingresó más de 2 palabras, advertir que solo se necesita el apellido
+  if (parts.length > 2) {
+    state.attempts += 1
+    await saveFlowState(phone, state)
+    if (state.attempts >= 3) {
+      return { handled: false, shouldCallOpenAI: true, openAIContext: 'Patient entering full name in apellido step' }
+    }
+    const msg = state.esFamiliar
+      ? `Necesito *solo el apellido* del familiar (sin el nombre). Por ejemplo: *Pérez*`
+      : `Necesito *solo tu apellido* (sin el nombre). Por ejemplo: *Pérez*`
+    return { handled: true, message: msg }
+  }
+
+  state.apellido = parts.map(capitalize).join(' ')
+  state.phase = 'awaiting_nombre'
+  state.attempts = 0
+  await saveFlowState(phone, state)
+  logger.info('Apellido captured', { apellido: state.apellido })
+
+  const msg = state.esFamiliar
+    ? `Gracias. Ahora escribí el *nombre completo* del familiar (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+    : `Gracias. Ahora escribí tu *nombre completo* (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+
+  return { handled: true, message: msg }
+}
+
+/**
+ * Fase 2 de nombre: captura SOLO el nombre (sin apellido).
+ */
+async function handleNombrePhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'nombre_phase')
+
   const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
-  
-  state.nombre = capitalize(parts[0])
-  state.apellido = parts.slice(1).map(capitalize).join(' ')
+  const input = userMessage.trim()
+  const parts = input.split(/\s+/).filter(Boolean)
+
+  // Validar: solo letras y espacios, al menos 2 caracteres
+  const soloLetras = /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s'-]+$/
+  if (!soloLetras.test(input) || input.length < 2) {
+    state.attempts += 1
+    await saveFlowState(phone, state)
+    if (state.attempts >= 3) {
+      return { handled: false, shouldCallOpenAI: true, openAIContext: 'Patient cannot provide valid nombre' }
+    }
+    const msg = state.esFamiliar
+      ? `Por favor, escribí solo el *nombre completo* del familiar (sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+      : `Por favor, escribí solo tu *nombre completo* (sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+    return { handled: true, message: msg }
+  }
+
+  state.nombre = parts.map(capitalize).join(' ')
   state.phase = 'awaiting_obra_social'
   state.attempts = 0
   await saveFlowState(phone, state)
-
-  logger.info('Name captured', { nombre: state.nombre, apellido: state.apellido })
+  logger.info('Nombre captured', { nombre: state.nombre, apellido: state.apellido })
 
   const obraSocialMsg = state.esFamiliar
     ? `Gracias. Ahora necesito saber la obra social o prepaga de *${state.nombre}*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tiene cobertura.`
-    : `Gracias ${state.nombre}. Ahora necesito saber tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenes cobertura.`
+    : `Gracias ${state.nombre}. Ahora necesito saber tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenés cobertura.`
 
   return {
     handled: true,
     message: obraSocialMsg,
-    patientInfo: {
-      dni: state.dni,
-      name: `${state.nombre} ${state.apellido}`,
-    },
+    patientInfo: { dni: state.dni, name: `${state.nombre} ${state.apellido || ''}`.trim() },
   }
 }
 
@@ -1249,21 +1324,36 @@ async function searchAndShowTurnos(
     }
   }
 
+  // Guardar array completo de 60 días y mostrar primera ventana de 15 días
   state.turnosOpciones = result.turnos
+  state.turnosMostrados = 0
   state.phase = 'awaiting_turno_selection'
   await saveFlowState(phone, state)
 
-  logger.info('[TURNOS] Turnos encontrados', { count: result.turnos.length, rango: result.rangoUtilizado })
+  logger.info('[TURNOS] Turnos encontrados', { total: result.turnos.length })
 
-  const nombreCompleto = `${state.nombre} ${state.apellido}`
+  const window = getNextWindow(result.turnos, 0)
+  state.turnosMostrados = window.newShownCount
+  await saveFlowState(phone, state)
+
+  const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
   return {
     handled: true,
-    message: buildTurnosListMessage(result.turnos, nombreCompleto, state.sedeNombre, state.profesionalNombre, result.rangoUtilizado),
+    message: buildTurnosWindowMessage(
+      window.turnos,
+      result.turnos.length,
+      window.hasMore,
+      nombreCompleto || undefined,
+      state.sedeNombre,
+      state.profesionalNombre,
+      true
+    ),
   }
 }
 
 /**
- * Fase: Seleccion de turno
+ * Fase: Selección de turno.
+ * Maneja selección directa, paginación y filtros de texto libre.
  */
 async function handleTurnoPhase(
   phone: string,
@@ -1277,50 +1367,92 @@ async function handleTurnoPhase(
     return { handled: false, shouldCallOpenAI: true }
   }
 
-  const interruptionOptions: TurnoInterruptionOptions | undefined = flowInterruptionEnabled && state.turnosOpciones.length > 0
+  const interruptionOptions: TurnoInterruptionOptions | undefined = flowInterruptionEnabled
     ? {
         originalTurnosMessage: buildInvalidSelectionMessage(state.turnosOpciones, state.searchType),
         escalationPhone: escalationPhoneNumber,
       }
     : undefined
 
-  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phone, clientId, state.searchType, interruptionOptions)
+  const result = await handleTurnoSelection(
+    userMessage,
+    state.turnosOpciones,
+    phone,
+    clientId,
+    state.searchType,
+    interruptionOptions,
+    state.profesionalNombre
+  )
 
-  // Si solicito rebusqueda con cualquier medico
-  if (result.requestedRebusqueda) {
-    state.searchType = 'cualquier_medico'
-    state.profesionalId = undefined
-    state.profesionalNombre = undefined
-    state.especialidadId = undefined
-    state.especialidadNombre = undefined
-    state.turnosOpciones = undefined
+  // ── "Ver más": mostrar la siguiente ventana de 15 días ──────────────────
+  if (result.showMore) {
+    const window = getNextWindow(state.turnosOpciones, state.turnosMostrados)
+    if (window.turnos.length === 0) {
+      return {
+        handled: true,
+        message: `_Esos son todos los turnos disponibles en los próximos 60 días. ¿Cuál deseás elegir?_`,
+      }
+    }
+    state.turnosMostrados = window.newShownCount
     await saveFlowState(phone, state)
-    
-    // Iniciar busqueda con cualquier medico
-    return await searchAndShowTurnos(phone, clientId, state, escalationPhoneNumber)
+    return {
+      handled: true,
+      message: buildTurnosWindowMessage(
+        window.turnos,
+        state.turnosOpciones.length,
+        window.hasMore,
+        undefined,
+        state.sedeNombre,
+        state.profesionalNombre,
+        false
+      ),
+    }
   }
 
+  // ── "Ver todos": volver a la primera ventana sin filtro ─────────────────
+  if (result.showAll) {
+    const window = getNextWindow(state.turnosOpciones, 0)
+    state.turnosMostrados = window.newShownCount
+    await saveFlowState(phone, state)
+    const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
+    return {
+      handled: true,
+      message: buildTurnosWindowMessage(
+        window.turnos,
+        state.turnosOpciones.length,
+        window.hasMore,
+        nombreCompleto || undefined,
+        state.sedeNombre,
+        state.profesionalNombre,
+        true
+      ),
+    }
+  }
+
+  // ── Resultado filtrado: mostrar subconjunto con números originales ───────
+  if (result.filteredTurnos && result.filteredMessage) {
+    // No avanzamos turnosMostrados — el filtro no es paginación
+    return { handled: true, message: result.filteredMessage }
+  }
+
+  // ── Turno seleccionado ───────────────────────────────────────────────────
   if (result.selectedTurno) {
     state.turnoSeleccionado = result.selectedTurno
     state.attempts = 0
 
-    // Paciente nuevo requiere email antes de confirmar
     if (!state.email) {
       state.phase = 'awaiting_email'
       await saveFlowState(phone, state)
       const emailMsg = state.esFamiliar
-        ? `Para confirmar el turno, necesito el *correo electronico* de ${state.nombre || 'el familiar'}.\n\nPor favor, escribi su email para enviarle la confirmacion del turno.`
+        ? `Para confirmar el turno, necesito el *correo electrónico* de ${state.nombre || 'el familiar'}.\n\nPor favor, escribí su email para enviarle la confirmación del turno.`
         : buildEmailRequestMessage()
-      return {
-        handled: true,
-        message: emailMsg,
-      }
+      return { handled: true, message: emailMsg }
     }
 
     state.phase = 'awaiting_confirmation'
     await saveFlowState(phone, state)
 
-    const nombreCompleto = `${state.nombre} ${state.apellido}`
+    const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
     return {
       handled: true,
       message: buildConfirmationMessage(
@@ -1328,20 +1460,12 @@ async function handleTurnoPhase(
         nombreCompleto,
         state.sedeNombre,
         state.obraSocialNombre,
-        {
-          apellido: state.apellido,
-          nombre: state.nombre,
-          dni: state.dni,
-          telefono: state.telefono,
-        }
+        { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: state.telefono }
       ),
     }
   }
 
-  return {
-    handled: true,
-    message: result.message,
-  }
+  return { handled: true, message: result.message }
 }
 
 /**

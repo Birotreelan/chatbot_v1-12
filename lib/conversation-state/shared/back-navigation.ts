@@ -76,7 +76,7 @@ const TERMINAL_PHASES = new Set(['completed', 'abandoned', 'error'])
 /** Primer paso (sin paso previo) de cada flujo. */
 const FIRST_STEP: Record<FlowKind, string> = {
   existing: 'awaiting_sede',
-  new: 'awaiting_name',
+  new: 'awaiting_apellido',
 }
 
 /**
@@ -157,8 +157,10 @@ export function getPreviousPhase(
 
   switch (currentPhase) {
     // --- Flujo nuevo (pasos previos a la sede) ---
+    case 'awaiting_nombre':
+      return 'awaiting_apellido'
     case 'awaiting_obra_social':
-      return 'awaiting_name'
+      return 'awaiting_nombre'
     case 'awaiting_obra_social_selection':
       return 'awaiting_obra_social'
     case 'awaiting_sede':

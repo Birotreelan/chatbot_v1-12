@@ -67,7 +67,8 @@ export type SearchType = 'medico_particular' | 'especialidad' | 'cualquier_medic
 // Fases del flujo
 export type FlowPhase =
   | 'awaiting_dni'
-  | 'awaiting_name'
+  | 'awaiting_apellido'
+  | 'awaiting_nombre'
   | 'awaiting_obra_social'
   | 'awaiting_obra_social_selection'
   | 'awaiting_sede'
@@ -122,8 +123,12 @@ export interface SharedFlowState {
   especialidadesOpciones?: SpecialtyOption[]
 
   // Turnos
+  /** Array completo de 60 días con numeración 1..N permanente */
   turnosOpciones?: TurnoOption[]
   turnoSeleccionado?: TurnoOption
+  /** Cantidad de turnos mostrados al paciente hasta ahora (para paginación) */
+  turnosMostrados: number
+  /** @deprecated — reemplazado por búsqueda fija a 60 días */
   rangoActual: number
 
   // Control de flujo

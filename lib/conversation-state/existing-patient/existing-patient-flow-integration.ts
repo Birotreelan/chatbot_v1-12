@@ -9,6 +9,8 @@ import { getEffectiveFeatureFlags } from '../feature-flags'
 import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
 import { validarObraSocial } from '@/lib/api-tools/api-functions' // 🆕 IMPORT PARA VALIDAR OBRA SOCIAL
 import { getFirstName } from '@/lib/utils/name-utils'
+import { extractEntities } from '../entity-extractor'
+import { getHistory } from '../conversation-history'
 
 // Importar handlers compartidos
 import {
@@ -39,9 +41,12 @@ import {
   type ProfessionalInterruptionOptions,
 } from '../shared/professional-handler'
 import {
-  searchTurnosAcumulativo,
-  buildTurnosListMessage,
+  searchTurnosFull,
+  getNextWindow,
+  buildTurnosWindowMessage,
+  buildTurnosFilteredMessage,
   buildNoTurnosMessage,
+  buildTurnosListMessage,
 } from '../shared/turnos-handler'
 import {
   handleTurnoSelection,
@@ -114,7 +119,10 @@ export interface ExistingPatientFlowState {
   especialidadesOpciones?: SpecialtyOption[]
 
   // Turnos
+  /** Array completo de 60 días con numeración 1..N permanente */
   turnosOpciones?: TurnoOption[]
+  /** Turnos mostrados al paciente hasta ahora (paginación) */
+  turnosMostrados: number
   turnoSeleccionado?: TurnoOption
 
   // Control
@@ -257,7 +265,8 @@ export async function initializeExistingPatientFlow(
     obraSocialId?: string
     obraSocialNombre?: string
   },
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  initialMessage?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_init')
   logger.info('Initializing existing patient flow', { patientId, patientName })
@@ -337,6 +346,25 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     }
   }
 
+  // --- Entity extraction del mensaje inicial ---
+  let profesionalMencionado: string | null = null
+  let cualquierSede = false
+
+  if (initialMessage && flags.entityExtraction) {
+    try {
+      const history = flags.conversationHistory ? await getHistory(phoneNumber) : []
+      const extraction = await extractEntities(initialMessage, history, true)
+      if (extraction.hasData) {
+        logger.info('Entity extraction on existing patient init', { entities: extraction.entities })
+        profesionalMencionado = extraction.entities.profesional
+      }
+    } catch (err) {
+      logger.error('Entity extraction failed during existing patient init', err as Error)
+    }
+    // Detectar "cualquier sede" con regex (no necesita GPT)
+    cualquierSede = /cualquier\s*(sede|lugar|sucursal|consultorio)?|indistint|no.*importa.*sede|todas\s*las\s*sedes/i.test(initialMessage)
+  }
+
   // Obtener sedes desde la API
   const sedesResult = await fetchSedes(clientId)
   if (!sedesResult.success || !sedesResult.sedes) {
@@ -351,10 +379,86 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
   const primerNombre = getFirstName(patientName)
   const welcomeMessage = `Hola ${primerNombre}, te ayudo a agendar un nuevo turno.`
 
-  // Si solo hay una sede, seleccionarla automáticamente y saltar al siguiente paso
-  if (sedesResult.sedes.length === 1) {
-    const unicaSede = sedesResult.sedes[0]
-    logger.info('Single sede — auto-selecting', { sedeId: unicaSede.id, sedeName: unicaSede.nombre })
+  // Determinar sede: auto-seleccionar si hay solo una o si el paciente dijo "cualquier sede"
+  const autoSelectSede = sedesResult.sedes.length === 1 || cualquierSede
+  const sedeFastPath = autoSelectSede ? sedesResult.sedes[0] : null
+
+  // --- FAST PATH: profesional + (cualquier sede o sede única) ---
+  // Salta sede, search_type y professional_name, va directo a la búsqueda
+  if (sedeFastPath && profesionalMencionado) {
+    logger.info('Fast path: auto-selecting sede + searching professional', {
+      sede: sedeFastPath.nombre,
+      profesional: profesionalMencionado,
+      cualquierSede,
+    })
+
+    const state: ExistingPatientFlowState = {
+      phase: 'awaiting_professional_name',
+      patientId,
+      patientName,
+      patientFirstName: finalPatientFirstName,
+      patientLastName: finalPatientLastName,
+      patientDNI: finalPatientDNI,
+      patientEmail,
+      patientPhone: phoneNumber,
+      obraSocialId: finalObraSocialId,
+      obraSocialNombre: finalObraSocialNombre,
+      sedesOpciones: sedesResult.sedes,
+      sedeId: sedeFastPath.id,
+      sedeNombre: sedeFastPath.nombre,
+      searchType: 'medico_particular',
+      attempts: 0,
+      turnosMostrados: 0,
+      createdAt: Date.now(),
+      lastUpdated: Date.now(),
+    }
+    await saveFlowState(phoneNumber, state)
+
+    // Auto-submit el nombre del profesional
+    const profResult = await handleProfessionalNameInput(profesionalMencionado, clientId, phoneNumber)
+
+    if (profResult.profesionales && profResult.profesionales.length > 0) {
+      state.profesionalesOpciones = profResult.profesionales
+
+      if (profResult.profesionales.length === 1) {
+        // Único resultado → ir directo a turnos
+        state.profesionalId = profResult.profesionales[0].id
+        state.profesionalNombre = profResult.profesionales[0].nombre
+        await saveFlowState(phoneNumber, state)
+        const turnosResult = await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
+        if (turnosResult.handled && turnosResult.message) {
+          return {
+            handled: true,
+            message: `${welcomeMessage}\n\n${turnosResult.message}`,
+            nextPhase: turnosResult.nextPhase,
+          }
+        }
+        return turnosResult
+      }
+
+      // Múltiples profesionales → mostrar lista para selección
+      state.phase = 'awaiting_professional_selection'
+      await saveFlowState(phoneNumber, state)
+      return {
+        handled: true,
+        message: `${welcomeMessage}\n\n${profResult.message}`,
+        nextPhase: 'awaiting_professional_selection',
+      }
+    }
+
+    // No se encontró el profesional → pedir nombre manualmente
+    state.phase = 'awaiting_professional_name'
+    await saveFlowState(phoneNumber, state)
+    return {
+      handled: true,
+      message: `${welcomeMessage}\n\nNo encontré ningún profesional con el nombre "${profesionalMencionado}". ¿Podés escribir el apellido nuevamente?`,
+      nextPhase: 'awaiting_professional_name',
+    }
+  }
+
+  // --- AUTO-SELECT sede (única o "cualquier") sin profesional conocido ---
+  if (sedeFastPath) {
+    logger.info('Auto-selecting sede', { sede: sedeFastPath.nombre, cualquierSede })
 
     const state: ExistingPatientFlowState = {
       phase: 'awaiting_search_type',
@@ -368,23 +472,23 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
       obraSocialId: finalObraSocialId,
       obraSocialNombre: finalObraSocialNombre,
       sedesOpciones: sedesResult.sedes,
-      sedeId: unicaSede.id,
-      sedeNombre: unicaSede.nombre,
+      sedeId: sedeFastPath.id,
+      sedeNombre: sedeFastPath.nombre,
+      turnosMostrados: 0,
       attempts: 0,
       createdAt: Date.now(),
       lastUpdated: Date.now(),
     }
-
     await saveFlowState(phoneNumber, state)
 
     return {
       handled: true,
-      message: `${welcomeMessage}\n\n${buildSearchOptionsMessage(unicaSede.nombre, undefined)}`,
+      message: `${welcomeMessage}\n\n${buildSearchOptionsMessage(sedeFastPath.nombre, undefined)}`,
       nextPhase: 'awaiting_search_type',
     }
   }
 
-  // Crear estado inicial con selección de sede pendiente
+  // --- Flujo normal: múltiples sedes, sin fast-path ---
   const state: ExistingPatientFlowState = {
     phase: 'awaiting_sede',
     patientId,
@@ -397,20 +501,24 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     obraSocialId: finalObraSocialId,
     obraSocialNombre: finalObraSocialNombre,
     sedesOpciones: sedesResult.sedes,
+    turnosMostrados: 0,
     attempts: 0,
     createdAt: Date.now(),
     lastUpdated: Date.now(),
   }
 
+  // Si mencionó un profesional pero no eligió sede, guardar hint en estado
+  if (profesionalMencionado) {
+    ;(state as any)._profesionalMencionado = profesionalMencionado
+  }
+
   await saveFlowState(phoneNumber, state)
 
-  const sedesMessage = buildSedesMessage(sedesResult.sedes)
-
-  logger.info('Flow initialized', { sedesCount: sedesResult.sedes.length })
+  logger.info('Flow initialized', { sedesCount: sedesResult.sedes.length, profesionalMencionado })
 
   return {
     handled: true,
-    message: `${welcomeMessage}\n\n${sedesMessage}`,
+    message: `${welcomeMessage}\n\n${buildSedesMessage(sedesResult.sedes)}`,
     nextPhase: 'awaiting_sede',
   }
 }
@@ -999,7 +1107,7 @@ async function searchAndShowTurnos(
     obraSocialId: state.obraSocialId,
   })
 
-  const result = await searchTurnosAcumulativo(
+  const result = await searchTurnosFull(
     clientId,
     {
       sedeId: state.sedeId!,
@@ -1013,7 +1121,6 @@ async function searchAndShowTurnos(
   logger.info('[TURNOS] Resultado de busqueda', {
     success: result.success,
     turnosCount: result.turnos?.length || 0,
-    rangoUtilizado: result.rangoUtilizado,
     error: result.error,
   })
 
@@ -1021,7 +1128,7 @@ async function searchAndShowTurnos(
     // Guardar nombres para el mensaje ANTES de limpiar
     const mensajeProfesional = state.profesionalNombre
     const mensajeEspecialidad = state.especialidadNombre
-    
+
     logger.info('[TURNOS] No se encontraron turnos - mostrando opciones alternativas', {
       sedeNombre: state.sedeNombre,
       profesionalNombre: mensajeProfesional,
@@ -1031,7 +1138,7 @@ async function searchAndShowTurnos(
       searchType: state.searchType,
       infoSinTurnos: result.infoSinTurnos ? 'present' : 'absent',
     })
-    
+
     // Limpiar datos del profesional/especialidad anterior para nueva busqueda
     state.profesionalId = undefined
     state.profesionalNombre = undefined
@@ -1042,7 +1149,7 @@ async function searchAndShowTurnos(
     state.turnosOpciones = undefined
     state.phase = 'awaiting_search_type'
     await saveFlowState(phoneNumber, state)
-    
+
     const noTurnosMessage = buildNoTurnosMessage(
       state.sedeNombre,
       mensajeProfesional,
@@ -1055,23 +1162,38 @@ async function searchAndShowTurnos(
     logger.info('[TURNOS] Mensaje enviado al usuario', {
       messagePreview: noTurnosMessage.substring(0, 100) + '...',
     })
-    
+
     return {
       handled: true,
       message: noTurnosMessage,
-      nextPhase: 'awaiting_search_type', // Volver a opciones de busqueda
+      nextPhase: 'awaiting_search_type',
     }
   }
 
+  // Guardar todos los turnos con numeración permanente
   state.turnosOpciones = result.turnos
+  state.turnosMostrados = 0
   state.phase = 'awaiting_turno_selection'
   await saveFlowState(phoneNumber, state)
 
-  logger.info('Turnos found', { count: result.turnos.length, rango: result.rangoUtilizado })
+  // Mostrar primera ventana de 15 días
+  const window = getNextWindow(result.turnos, 0)
+  state.turnosMostrados = window.newShownCount
+  await saveFlowState(phoneNumber, state)
+
+  logger.info('Turnos found', { total: result.turnos.length, firstWindow: window.turnos.length })
 
   return {
     handled: true,
-    message: buildTurnosListMessage(result.turnos, state.patientName, state.sedeNombre, state.profesionalNombre, result.rangoUtilizado),
+    message: buildTurnosWindowMessage(
+      window.turnos,
+      result.turnos.length,
+      window.hasMore,
+      state.patientName,
+      state.sedeNombre,
+      state.profesionalNombre,
+      true
+    ),
     nextPhase: 'awaiting_turno_selection',
   }
 }
@@ -1098,7 +1220,63 @@ async function handleTurnoPhase(
       }
     : undefined
 
-  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phoneNumber, clientId, state.searchType, interruptionOptions)
+  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phoneNumber, clientId, state.searchType, interruptionOptions, state.profesionalNombre)
+
+  // Paginación: ver más (siguiente ventana de 15 días)
+  if (result.showMore) {
+    const nextWindow = getNextWindow(state.turnosOpciones, state.turnosMostrados ?? 0)
+    if (nextWindow.turnos.length === 0) {
+      return {
+        handled: true,
+        message: `_Esos son todos los turnos disponibles en los próximos 60 días._`,
+        nextPhase: 'awaiting_turno_selection',
+      }
+    }
+    state.turnosMostrados = nextWindow.newShownCount
+    await saveFlowState(phoneNumber, state)
+    return {
+      handled: true,
+      message: buildTurnosWindowMessage(
+        nextWindow.turnos,
+        state.turnosOpciones.length,
+        nextWindow.hasMore,
+        state.patientName,
+        state.sedeNombre,
+        state.profesionalNombre,
+        false
+      ),
+      nextPhase: 'awaiting_turno_selection',
+    }
+  }
+
+  // Ver todos: volver a la primera ventana
+  if (result.showAll) {
+    const firstWindow = getNextWindow(state.turnosOpciones, 0)
+    state.turnosMostrados = firstWindow.newShownCount
+    await saveFlowState(phoneNumber, state)
+    return {
+      handled: true,
+      message: buildTurnosWindowMessage(
+        firstWindow.turnos,
+        state.turnosOpciones.length,
+        firstWindow.hasMore,
+        state.patientName,
+        state.sedeNombre,
+        state.profesionalNombre,
+        true
+      ),
+      nextPhase: 'awaiting_turno_selection',
+    }
+  }
+
+  // Filtro por texto libre (en memoria, sin nueva API call)
+  if (result.filteredTurnos && result.filteredMessage) {
+    return {
+      handled: true,
+      message: result.filteredMessage,
+      nextPhase: 'awaiting_turno_selection',
+    }
+  }
 
   // Si solicito rebusqueda con cualquier medico
   if (result.requestedRebusqueda) {
@@ -1108,8 +1286,9 @@ async function handleTurnoPhase(
     state.especialidadId = undefined
     state.especialidadNombre = undefined
     state.turnosOpciones = undefined
+    state.turnosMostrados = 0
     await saveFlowState(phoneNumber, state)
-    
+
     // Iniciar busqueda con cualquier medico
     return await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
   }
