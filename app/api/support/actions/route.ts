@@ -7,10 +7,13 @@ import {
   assignSessionToAgent,
   closeSession,
   saveSupportMessage,
+  createSupportSession,
+  getActiveSessionByPhone,
 } from "@/lib/human-support"
 import { getConversationMessages, getAllConversationMessages } from "@/lib/conversations"
-import { getWhatsAppConfigById } from "@/lib/db"
+import { getWhatsAppConfigById, getThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
+import { openai } from "@/lib/openai"
 import { nanoid } from "nanoid"
 import type { HumanSupportMessage } from "@/lib/types"
 
@@ -98,7 +101,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { action, sessionId, message, note } = body
+    const { action, sessionId, message, note, phoneNumber, configId } = body
 
     console.log("[v0] [API SUPPORT ACTIONS] Datos recibidos:", { action, sessionId })
 
@@ -106,11 +109,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Falta parámetro 'action'" }, { status: 400 })
     }
 
-    if (!sessionId) {
+    // "initiate" doesn't need a sessionId — it creates one
+    if (action !== "initiate" && !sessionId) {
       return NextResponse.json({ success: false, error: "Falta parámetro 'sessionId'" }, { status: 400 })
     }
 
     switch (action) {
+      case "initiate":
+        return await handleInitiate(phoneNumber, configId, userSession)
+
       case "assign":
         return await handleAssign(sessionId, userSession)
 
@@ -133,6 +140,77 @@ export async function POST(request: Request) {
       },
       { status: 500 },
     )
+  }
+}
+
+// Initiate: manually start a support session from the monitor (without AI tool)
+async function handleInitiate(phoneNumber: string, configId: string, session: SessionData) {
+  try {
+    console.log("[v0] [INITIATE] Iniciando para phone:", phoneNumber, "config:", configId)
+
+    if (session.role !== "support_agent") {
+      return NextResponse.json({ success: false, error: "Se requiere rol de agente de soporte" }, { status: 403 })
+    }
+
+    if (!phoneNumber || !configId) {
+      return NextResponse.json({ success: false, error: "Faltan parámetros phoneNumber o configId" }, { status: 400 })
+    }
+
+    // Check if there's already an active session
+    const existing = await getActiveSessionByPhone(configId, phoneNumber)
+    if (existing && (existing.status === "pending" || existing.status === "in_progress")) {
+      console.log("[v0] [INITIATE] Ya existe sesión activa:", existing.id)
+      return NextResponse.json({ success: false, error: "Ya existe una sesión activa para este número", sessionId: existing.id }, { status: 409 })
+    }
+
+    const config = await getWhatsAppConfigById(configId)
+    if (!config) {
+      return NextResponse.json({ success: false, error: "Configuración no encontrada" }, { status: 404 })
+    }
+
+    // Verify tenant
+    if (session.tenantId && config.cliente_id !== session.tenantId) {
+      return NextResponse.json({ success: false, error: "No autorizado para esta configuración" }, { status: 403 })
+    }
+
+    // Get or create a thread for this user (needed for session)
+    const { threadId } = await getThreadForUser(phoneNumber, configId)
+
+    // Create the support session
+    const supportSession = await createSupportSession({
+      phoneNumber,
+      configId,
+      tenantId: config.cliente_id,
+      threadId,
+      assistantId: config.whatsappAssistantId || "",
+      displayName: config.displayName || config.alias || configId,
+      reason: "Intervención manual del agente",
+      priority: "medium",
+      summary: "Un agente ha iniciado la atención desde el monitor de conversaciones.",
+    })
+
+    console.log("[v0] [INITIATE] Sesión creada:", supportSession.id)
+
+    // Auto-assign to the initiating agent
+    await assignSessionToAgent(supportSession.id, session.userId)
+
+    // Notify the patient
+    try {
+      const notification = `Una persona de atención al paciente de ${config.displayName || "la clínica"} está hablando ahora contigo.`
+      await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, phoneNumber, notification)
+      console.log("[v0] [INITIATE] Notificación enviada al paciente")
+    } catch (err) {
+      console.error("[v0] [INITIATE] Error enviando notificación:", err)
+    }
+
+    return NextResponse.json({
+      success: true,
+      sessionId: supportSession.id,
+      message: "Sesión iniciada y asignada correctamente",
+    })
+  } catch (error: any) {
+    console.error("[v0] [INITIATE] Error:", error)
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }
 
@@ -242,13 +320,52 @@ async function handleClose(sessionId: string, session: SessionData, note?: strin
       return NextResponse.json({ success: false, error: "No estás asignado a esta sesión" }, { status: 403 })
     }
 
+    // Collect human support messages BEFORE closing
+    const supportMessages = await getSupportMessages(sessionId)
+
     const closed = await closeSession(sessionId, note)
 
     if (!closed) {
       return NextResponse.json({ success: false, error: "No se pudo cerrar la sesión" }, { status: 500 })
     }
 
-    // Enviar mensaje automático
+    // Inject human conversation context into OpenAI thread so AI has context on resume
+    if (supportMessages.length > 0 && supportSession.threadId) {
+      try {
+        const agentLines = supportMessages
+          .filter((m) => m.role === "agent")
+          .map((m) => `Agente: ${m.content}`)
+          .join("\n")
+
+        const userLines = supportMessages
+          .filter((m) => m.role === "user")
+          .map((m) => `Paciente: ${m.content}`)
+          .join("\n")
+
+        const allLines = supportMessages
+          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+          .map((m) => `${m.role === "agent" ? "Agente" : "Paciente"}: ${m.content}`)
+          .join("\n")
+
+        const contextBlock = `[ATENCION_HUMANA]
+Un agente humano atendió al paciente. A continuación el resumen de la conversación:
+
+${allLines}
+
+El agente cerró la sesión. Retomá la conversación teniendo en cuenta lo que se habló.
+[/ATENCION_HUMANA]`
+
+        await openai.beta.threads.messages.create(supportSession.threadId, {
+          role: "user",
+          content: contextBlock,
+        })
+        console.log("[CLOSE] Contexto de sesión humana inyectado en thread:", supportSession.threadId)
+      } catch (err) {
+        console.error("[CLOSE] Error inyectando contexto:", err)
+      }
+    }
+
+    // Enviar mensaje automático al paciente
     try {
       const config = await getWhatsAppConfigById(supportSession.configId)
       if (config) {

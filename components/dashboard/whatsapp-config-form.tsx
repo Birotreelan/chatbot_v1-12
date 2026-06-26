@@ -16,7 +16,7 @@ import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 import type { WhatsAppConfig, AdditionalAssistant } from "@/lib/types"
-import { Plus, Trash2, Info } from "lucide-react"
+import { Plus, Trash2, Info, Users, Bot } from "lucide-react"
 import { ScheduleConfigurator } from "./schedule-configurator"
 import { WhatsAppTemplates } from "./whatsapp-templates"
 
@@ -76,6 +76,12 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
   })
 
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [humanSupportFlags, setHumanSupportFlags] = useState({
+    humanSupport: false,
+    humanSupportOfferToPatient: false,
+  })
+  const [flagsLoading, setFlagsLoading] = useState(false)
+  const [flagsSaving, setFlagsSaving] = useState(false)
 
   useEffect(() => {
     if (config) {
@@ -85,6 +91,41 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
       }))
     }
   }, [config])
+
+  // Cargar feature flags del cliente cuando hay un config guardado
+  useEffect(() => {
+    if (!config?.id) return
+    setFlagsLoading(true)
+    fetch(`/api/dashboard/feature-flags/${config.id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.flags) {
+          setHumanSupportFlags({
+            humanSupport: !!data.flags.humanSupport,
+            humanSupportOfferToPatient: !!data.flags.humanSupportOfferToPatient,
+          })
+        }
+      })
+      .catch(console.error)
+      .finally(() => setFlagsLoading(false))
+  }, [config?.id])
+
+  const saveHumanSupportFlag = async (key: string, value: boolean) => {
+    if (!config?.id) return
+    setFlagsSaving(true)
+    try {
+      await fetch(`/api/dashboard/feature-flags/${config.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flags: { [key]: value } }),
+      })
+      setHumanSupportFlags((prev) => ({ ...prev, [key]: value }))
+    } catch (err) {
+      toast({ title: "Error", description: "No se pudo guardar la configuración.", variant: "destructive" })
+    } finally {
+      setFlagsSaving(false)
+    }
+  }
 
   const addAdditionalAssistant = () => {
     const newAssistant: AdditionalAssistant = {
@@ -214,10 +255,11 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="widget">Widget</TabsTrigger>
+          <TabsTrigger value="support">Atención</TabsTrigger>
           <TabsTrigger value="advanced">Avanzado</TabsTrigger>
         </TabsList>
 
@@ -963,6 +1005,99 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                     placeholder="Powered by AI"
                   />
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="support" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                Atención al Paciente
+              </CardTitle>
+              <CardDescription>
+                Configura la funcionalidad de atención humana para este cliente. Los agentes podrán monitorear
+                conversaciones e intervenir cuando sea necesario.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {!config ? (
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    Guardá esta configuración primero para poder gestionar las opciones de atención al paciente.
+                  </AlertDescription>
+                </Alert>
+              ) : flagsLoading ? (
+                <p className="text-sm text-muted-foreground">Cargando configuración...</p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                        <Label htmlFor="humanSupport" className="text-base font-medium cursor-pointer">
+                          Soporte Humano
+                        </Label>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Habilita que los agentes puedan intervenir manualmente en conversaciones, pausar la IA y
+                        chatear directamente con el paciente.
+                      </p>
+                    </div>
+                    <Switch
+                      id="humanSupport"
+                      checked={humanSupportFlags.humanSupport}
+                      disabled={flagsSaving}
+                      onCheckedChange={(checked) => saveHumanSupportFlag("humanSupport", checked)}
+                    />
+                  </div>
+
+                  <div className={`flex items-center justify-between rounded-lg border p-4 transition-opacity ${!humanSupportFlags.humanSupport ? "opacity-50 pointer-events-none" : ""}`}>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-4 w-4 text-muted-foreground" />
+                        <Label htmlFor="humanSupportOfferToPatient" className="text-base font-medium cursor-pointer">
+                          Ofrecer al Paciente
+                        </Label>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Cuando el chatbot no pueda responder una consulta, le ofrece automáticamente al paciente la
+                        opción de ser atendido por un humano.
+                      </p>
+                    </div>
+                    <Switch
+                      id="humanSupportOfferToPatient"
+                      checked={humanSupportFlags.humanSupportOfferToPatient}
+                      disabled={flagsSaving || !humanSupportFlags.humanSupport}
+                      onCheckedChange={(checked) => saveHumanSupportFlag("humanSupportOfferToPatient", checked)}
+                    />
+                  </div>
+
+                  {flagsSaving && (
+                    <p className="text-sm text-muted-foreground text-right">Guardando...</p>
+                  )}
+
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertDescription className="space-y-1">
+                      <p>
+                        <strong>Modo A</strong> (ambos OFF): Solo monitoreo. Los agentes ven las conversaciones
+                        pero no pueden intervenir.
+                      </p>
+                      <p>
+                        <strong>Modo B</strong> (Soporte ON, Ofrecer OFF): Los agentes pueden intervenir
+                        manualmente, pero el bot no le ofrece esta opción al paciente.
+                      </p>
+                      <p>
+                        <strong>Modo C</strong> (ambos ON): Intervención manual + oferta automática al paciente
+                        cuando el bot no puede responder.
+                      </p>
+                    </AlertDescription>
+                  </Alert>
+                </>
               )}
             </CardContent>
           </Card>

@@ -23,7 +23,11 @@ import { trackAppointmentEvent, checkAndClearPendingReschedule, trackRescheduleS
 import { getAssistantIdByFunction } from "./assistant-utils"
 import { logError } from "./logging" // Assuming logError is in './logging'
 import { incrementMetric } from "./metrics" // Assuming incrementMetric is in './metrics'
-import { createSupportSession } from "./human-support"
+import {
+  createSupportSession,
+  setPendingHumanSupportOffer,
+} from "./human-support"
+import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
 import { formatScheduleForSystemBlock } from "@/lib/utils/schedule-formatter" // Import added
 
 // Re-export functions for compatibility
@@ -1944,6 +1948,46 @@ async function executeToolCall(
         })
       }
 
+      // Check feature flags for this client
+      const flags = await getEffectiveFeatureFlags(config.id)
+
+      if (!flags.humanSupport) {
+        // Human support not configured for this client — fall back to generic message
+        const fallbackMsg =
+          "Entiendo tu consulta. En este momento no puedo ayudarte con esto desde aquí. Te recomiendo comunicarte directamente con la clínica."
+        await sendWhatsAppMessage(phoneNumberId, accessToken, finalPhoneNumber, fallbackMsg)
+        return JSON.stringify({ success: false, message: "Human support not enabled for this client" })
+      }
+
+      if (flags.humanSupportOfferToPatient) {
+        // Mode C: offer the patient a choice first, don't create session yet
+        const offerParams = {
+          configId: config.id,
+          tenantId: config.cliente_id || "unknown",
+          threadId,
+          assistantId: config.whatsappAssistantId,
+          displayName: config.displayName,
+          reason: functionArgs.reason,
+          priority: (functionArgs.priority as "low" | "medium" | "high") || "medium",
+          summary: functionArgs.summary,
+          phoneNumberId,
+          accessToken,
+        }
+        await setPendingHumanSupportOffer(config.id, finalPhoneNumber, offerParams)
+
+        const offerMessage =
+          `Entiendo que necesitás más ayuda. ¿Querés que te conecte con alguien del equipo de ${config.displayName || "la clínica"}?\n\n` +
+          `1. Sí, quiero atención humana\n` +
+          `2. No, gracias`
+        await sendWhatsAppMessage(phoneNumberId, accessToken, finalPhoneNumber, offerMessage)
+
+        return JSON.stringify({
+          success: true,
+          message: "Oferta de atención humana enviada al paciente",
+        })
+      }
+
+      // Mode B: create session directly (no offer to patient)
       const session = await createSupportSession({
         phoneNumber: finalPhoneNumber,
         configId: config.id,

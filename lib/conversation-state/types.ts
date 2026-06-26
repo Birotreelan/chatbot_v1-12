@@ -247,6 +247,19 @@ export interface FeatureFlags {
   // las capacidades del sistema.
   // OFF por defecto — activar por cliente vía Redis flags.
   aiDispatcher: boolean
+
+  // Soporte Humano (Human Support)
+  // Habilita la funcionalidad de atención humana para este cliente:
+  // - Monitor puede intervenir manualmente pausando la IA
+  // - Agentes pueden enviar/recibir mensajes directamente con el paciente
+  // Requiere que el cliente tenga agentes de soporte configurados.
+  humanSupport: boolean
+
+  // Oferta de Soporte Humano al Paciente
+  // Cuando la IA no puede responder (tool request_human_support), ofrece al
+  // paciente la opción de ser atendido por un humano.
+  // Solo tiene efecto si humanSupport: true.
+  humanSupportOfferToPatient: boolean
 }
 
 /**
@@ -279,6 +292,8 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   conversationHistory: true,
   humanizedResponses: true,
   aiDispatcher: true,
+  humanSupport: false,
+  humanSupportOfferToPatient: false,
 }
 
 /**

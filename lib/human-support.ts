@@ -326,3 +326,62 @@ export async function hasActiveSession(configId: string, phoneNumber: string): P
   const session = await getActiveSessionByPhone(configId, phoneNumber)
   return session !== null && (session.status === "pending" || session.status === "in_progress")
 }
+
+// ─── Pending Human Support Offer ────────────────────────────────────────────
+// When humanSupportOfferToPatient is ON, we store the pending params in Redis
+// and send the patient a choice before creating the session.
+
+const HUMAN_SUPPORT_OFFER_PREFIX = "human_support_offer:"
+const HUMAN_SUPPORT_OFFER_TTL = 60 * 60 // 1 hora
+
+export interface HumanSupportOfferParams {
+  configId: string
+  tenantId: string
+  threadId: string
+  assistantId: string
+  displayName: string
+  reason: string
+  priority: "low" | "medium" | "high"
+  summary: string
+  phoneNumberId: string
+  accessToken: string
+}
+
+export async function setPendingHumanSupportOffer(
+  configId: string,
+  phoneNumber: string,
+  params: HumanSupportOfferParams,
+): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  const key = `${HUMAN_SUPPORT_OFFER_PREFIX}${configId}:${phoneNumber}`
+  await redis.set(key, JSON.stringify(params))
+  await redis.expire(key, HUMAN_SUPPORT_OFFER_TTL)
+  console.log(`[HUMAN_SUPPORT] 📬 Oferta pendiente guardada para ${phoneNumber}`)
+}
+
+export async function getPendingHumanSupportOffer(
+  configId: string,
+  phoneNumber: string,
+): Promise<HumanSupportOfferParams | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+  const key = `${HUMAN_SUPPORT_OFFER_PREFIX}${configId}:${phoneNumber}`
+  const raw = await redis.get(key)
+  if (!raw) return null
+  try {
+    return typeof raw === "string" ? JSON.parse(raw) : (raw as HumanSupportOfferParams)
+  } catch {
+    return null
+  }
+}
+
+export async function clearPendingHumanSupportOffer(
+  configId: string,
+  phoneNumber: string,
+): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  const key = `${HUMAN_SUPPORT_OFFER_PREFIX}${configId}:${phoneNumber}`
+  await redis.del(key)
+}

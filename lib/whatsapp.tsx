@@ -10,7 +10,14 @@ import { saveConversationMessage, isConversationPaused, type ConversationMessage
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData } from "./appointment-stats"
-import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
+import {
+  getActiveSessionByPhone,
+  addPendingMessageToSession,
+  saveSupportMessage,
+  getPendingHumanSupportOffer,
+  clearPendingHumanSupportOffer,
+  createSupportSession,
+} from "./human-support"
 import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 import {
@@ -1311,6 +1318,75 @@ export async function handleMessage(value: any) {
       }
     }
     // </CHANGE>
+
+    // Check if there's a pending human support offer awaiting patient response (Mode C)
+    const pendingOffer = await getPendingHumanSupportOffer(config.id, userPhoneNumber)
+    if (pendingOffer) {
+      const normalized = userMessage.trim()
+      if (normalized === "1") {
+        // Patient accepted — create session and notify
+        await clearPendingHumanSupportOffer(config.id, userPhoneNumber)
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: userMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
+        try {
+          await createSupportSession({
+            phoneNumber: userPhoneNumber,
+            configId: pendingOffer.configId,
+            tenantId: pendingOffer.tenantId,
+            threadId: pendingOffer.threadId,
+            assistantId: pendingOffer.assistantId,
+            displayName: pendingOffer.displayName,
+            reason: pendingOffer.reason,
+            priority: pendingOffer.priority,
+            summary: pendingOffer.summary,
+          })
+          const confirmMsg = `Hemos derivado la conversación a atención humana de ${pendingOffer.displayName || "la clínica"}. En unos instantes serás atendido.`
+          await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, confirmMsg)
+        } catch (err) {
+          console.error("[WHATSAPP] Error creando sesión desde oferta:", err)
+        }
+        await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+        return
+      } else if (normalized === "2") {
+        // Patient declined — clear offer and let them continue with AI
+        await clearPendingHumanSupportOffer(config.id, userPhoneNumber)
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: userMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
+        const declineMsg = "Entendido. Seguís con el asistente virtual. Si necesitás algo más, avisame."
+        await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, declineMsg)
+        await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+        return
+      } else {
+        // Unrecognized response — re-send the offer
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: userMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
+        const reOfferMsg =
+          `Por favor elegí una opción:\n\n` +
+          `1. Sí, quiero atención humana\n` +
+          `2. No, gracias`
+        await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, reOfferMsg)
+        await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+        return
+      }
+    }
 
     const conversationPaused = await isConversationPaused(config.id, userPhoneNumber)
     if (conversationPaused) {
