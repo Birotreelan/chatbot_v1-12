@@ -9,7 +9,7 @@ import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
-import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule } from "./appointment-stats"
+import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData } from "./appointment-stats"
 import { getActiveSessionByPhone, addPendingMessageToSession, saveSupportMessage } from "./human-support"
 import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
@@ -34,6 +34,7 @@ import {
 } from "./appointment-flow-state"
 import {
   buildConfirmationMessage,
+  buildConfirmationMessageNoName,
   buildCancelDoubleConfirmMessage,
   buildCancellationSuccessMessage,
   buildTurnoSelectionMessage,
@@ -1652,7 +1653,27 @@ Responde de manera apropiada según la acción realizada.`
                         return
                       }
                     } else {
-                      confirmLogger.warn("directConfirmation ON pero no hay chatbotData, pasando a OpenAI")
+                      // No hay Chatbot_Data — usar info del template tracking para
+                      // responder directamente sin nombre del paciente (evita usar
+                      // el apellido del médico como nombre del paciente).
+                      const trackingData = await getTemplateTrackingData(config.cliente_id, userPhoneNumber)
+                      if (trackingData?.appointmentInfo) {
+                        confirmLogger.info("Sin chatbotData — usando appointmentInfo del template tracking para respuesta directa")
+                        const ctxNoData: DirectResponseContext = {
+                          phoneNumberId: value.metadata.phone_number_id,
+                          accessToken: config.accessToken,
+                          userPhoneNumber,
+                          configId: config.id,
+                          clienteId: config.cliente_id,
+                        }
+                        const msgNoData = buildConfirmationMessageNoName(trackingData.appointmentInfo)
+                        const sentNoData = await sendDirectResponse(ctxNoData, msgNoData, "awaiting_confirmation_no_chatbot_data")
+                        if (sentNoData) {
+                          confirmLogger.info("Confirmacion enviada directamente (sin chatbotData)")
+                          return
+                        }
+                      }
+                      confirmLogger.warn("directConfirmation ON pero no hay chatbotData ni trackingData, pasando a OpenAI")
                     }
                   } else {
                     confirmLogger.info("directConfirmation flag OFF, pasando a OpenAI")
@@ -2384,22 +2405,19 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
         }
 
-        // Si fue reagendar con turno activo → estado de flujo según la directiva del handler.
-        // - Turno NO confirmado: menú de 2 opciones (1-Confirmar asistencia / 2-Cancelar y solicitar uno nuevo)
-        // - Turno YA confirmado: doble confirmación de cancelación directa (postCancelAction='reschedule')
-        if (nluFallbackResult.result?.intent === "reagendar_turno" && nluFallbackResult.flowStateDirective) {
-          if (appointmentData) {
-            const turnoIdx = (appointmentData.turnos && appointmentData.turnos.length > 0) ? 0 : undefined
-            const directive = nluFallbackResult.flowStateDirective
-            await setFlowState(userPhoneNumber, config.id, {
-              type: directive.type,
-              createdAt: new Date().toISOString(),
-              turnoIndex: turnoIdx,
-              ...(directive.type === "awaiting_cancel_confirmation" && directive.postCancelAction
-                ? { postCancelAction: directive.postCancelAction }
-                : {}),
-            })
-          }
+        // Si el handler devolvió una directiva de flujo, establecer estado.
+        // Aplica a cualquier intent (reagendar_turno, explicacion_contextual, no_asisti, etc.)
+        if (nluFallbackResult.flowStateDirective && appointmentData) {
+          const turnoIdx = (appointmentData.turnos && appointmentData.turnos.length > 0) ? 0 : undefined
+          const directive = nluFallbackResult.flowStateDirective
+          await setFlowState(userPhoneNumber, config.id, {
+            type: directive.type,
+            createdAt: new Date().toISOString(),
+            turnoIndex: turnoIdx,
+            ...(directive.type === "awaiting_cancel_confirmation" && directive.postCancelAction
+              ? { postCancelAction: directive.postCancelAction }
+              : {}),
+          })
         }
         
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -2441,7 +2459,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         if (!detectionActive && !existingAppointmentCtx && !alreadyIdentified) {
           // No hay flujo activo ni contexto de template, iniciar detección
           // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage)
+          const detectionTemplateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+          const detectionHasReminder = detectionTemplateSentAt !== null
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, detectionHasReminder)
 
           console.log("[v0] [SPRINT9A] initializePatientDetection result:", JSON.stringify({ handled: detectionResult.handled, action: detectionResult.action, shouldCallOpenAI: detectionResult.shouldCallOpenAI }))
           
@@ -2468,7 +2488,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // bloque isDetectionActive, nunca por OpenAI.
           console.log("[v0] [SPRINT9A] Rehidratando detección de paciente identificado (alreadyIdentified)")
 
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+          const rehydrationTemplateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
+          const rehydrationHasReminder = rehydrationTemplateSentAt !== null
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, rehydrationHasReminder)
 
           if (detectionResult.handled && detectionResult.message) {
             const detectionCtx: DirectResponseContext = {
@@ -2621,9 +2643,26 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           return
         }
 
+        // Paciente envió "0" (volver) desde el submenú de DNI del familiar
+        if (detectionResult?.action === 'familiar_back_to_main') {
+          const backMenuResult = await initializePatientDetection(
+            userPhoneNumber,
+            config.id,
+            config.cliente_id,
+            config.displayName
+          )
+          if (backMenuResult?.handled && backMenuResult.message) {
+            await sendDirectResponse(detectionCtx, backMenuResult.message, "familiar_back_to_main_menu")
+          } else {
+            await sendDirectResponse(detectionCtx, 'Volvamos al inicio. ¿En qué puedo ayudarte?', "familiar_back_fallback")
+          }
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+
         // Paciente ingresó el DNI del familiar
         if (detectionResult?.action === 'familiar_dni_pending') {
-          // "Volver al menú principal" desde el submenú de DNI del familiar
+          // "Volver al menú principal" desde el submenú de DNI del familiar (fallback vía isBackCommand)
           const { isBackCommand } = await import('./conversation-state/shared/back-navigation')
           if (isBackCommand(userMessage)) {
             const mainMenuResult = await initializePatientDetection(
@@ -3637,7 +3676,11 @@ export async function processIndividualMessage(
               primerNombre,
               turnoData.profesional
             )
-            await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, noTurnosMsg)
+            await sendDirectResponse(
+              { phoneNumberId, accessToken: config.accessToken, userPhoneNumber, configId: config.id, clienteId: config.cliente_id },
+              noTurnosMsg,
+              "reagendamiento-no-turnos"
+            )
 
             // Guardar estado awaiting_search_type con datos del paciente y turno cancelado
             await buildNoTurnosSaveSearchTypeState(
@@ -3646,8 +3689,6 @@ export async function processIndividualMessage(
               turnoData,
               pacienteData
             )
-
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
           

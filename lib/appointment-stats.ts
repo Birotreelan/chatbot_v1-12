@@ -543,6 +543,27 @@ export async function getTemplateSentTime(clienteId: string, phoneNumber: string
   }
 }
 
+/**
+ * Retorna el objeto completo del tracking del template (incluye appointmentInfo).
+ * Útil cuando no hay Chatbot_Data pero se necesita info del turno para responder.
+ */
+export async function getTemplateTrackingData(
+  clienteId: string,
+  phoneNumber: string
+): Promise<{ sentAt: string; appointmentInfo?: { fecha?: string; hora?: string; profesional?: string; lugar?: string } } | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+
+  try {
+    const latestKey = `${TEMPLATE_TRACKING_LATEST_PREFIX}${clienteId}_${phoneNumber}`
+    const trackingData = await redis.get(latestKey)
+    if (!trackingData) return null
+    return typeof trackingData === "string" ? JSON.parse(trackingData) : trackingData
+  } catch {
+    return null
+  }
+}
+
 // Constante para la ventana de 24 horas en milisegundos
 const TEMPLATE_WINDOW_MS = 24 * 60 * 60 * 1000 // 24 horas
 

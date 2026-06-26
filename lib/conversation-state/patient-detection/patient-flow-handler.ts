@@ -102,6 +102,7 @@ interface PatientDetectionState {
   turnosQx?: any[]           // Turnos de cirugía (solo informativos, no gestionables)
   multiplePatients?: any[] // Array de pacientes si hay múltiples
   postActionContext?: 'just_confirmed' // Contexto post-acción para adaptar el menú de retorno
+  hasReminder?: boolean      // true si se envió un recordatorio de turno (template WhatsApp) sin respuesta
   detectedAt: number
   attempts: number
 }
@@ -684,21 +685,22 @@ export async function processPatientDetectionMessage(
       // está "Pendiente de aprobación" por la clínica, se omite la opción 1 y se renumera.
       const singleTurno = hasTurnos && state.turnos!.length === 1 ? state.turnos![0] : null
       const singleTurnoSinConfirmacion =
-        !!singleTurno && !shouldOfferConfirmation(singleTurno)
+        !!singleTurno && !shouldOfferConfirmation(singleTurno, state.hasReminder ?? false)
 
       let actionMap: Record<number, string>
 
       if (hasTurnos) {
         if (singleTurnoSinConfirmacion) {
-          // Turno pendiente de aprobación: 1-Cancelar, 2-Cancelar y solicitar uno nuevo, 3-Otra consulta
+          // Turno pendiente de aprobación o sin recordatorio enviado:
+          // 1-Cancelar, 2-Cancelar y solicitar uno nuevo, 3-Otra consulta
           actionMap = {
             1: 'cancel_appointment',
             2: 'cancel_and_book_new_appointment',
             3: 'other_inquiry_intent',
           }
         } else {
-          // Paciente con turnos médicos confirmados: 1-Confirmar, 2-Cancelar,
-          // 3-Cancelar y solicitar uno nuevo (debe cancelar antes de poder agendar), 4-Otra consulta
+          // Turno no confirmado CON recordatorio: 1-Confirmar, 2-Cancelar,
+          // 3-Cancelar y solicitar uno nuevo, 4-Otra consulta
           actionMap = {
             1: 'confirm_appointment',
             2: 'cancel_appointment',
@@ -773,7 +775,7 @@ export async function processPatientDetectionMessage(
     } else if (state.phase === 'awaiting_action_selection') {
       const hasTurnos = state.turnos && state.turnos.length > 0
       if (hasTurnos && state.turnos!.length === 1) {
-        menuOptions = shouldOfferConfirmation(state.turnos![0])
+        menuOptions = shouldOfferConfirmation(state.turnos![0], state.hasReminder ?? false)
           ? EXISTING_PATIENT_SINGLE_TURNO_MENU
           : EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU
       } else if (hasTurnos && state.turnos!.length > 1) {
@@ -832,7 +834,7 @@ export async function processPatientDetectionMessage(
 
         const singleTurno = hasTurnos && state.turnos!.length === 1 ? state.turnos![0] : null
         const singleTurnoSinConfirmacion =
-          !!singleTurno && !shouldOfferConfirmation(singleTurno)
+          !!singleTurno && !shouldOfferConfirmation(singleTurno, state.hasReminder ?? false)
 
         // Action map unificado con Layer 1 (numérico)
         let actionMap: Record<number, string>
@@ -1019,10 +1021,32 @@ export async function updatePatientDetectionPhase(
 
   const stateKey = `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`
   const state = await getPatientDetectionState(phoneNumber)
-  
+
   if (!state) return false
 
   state.phase = newPhase
+  await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+  return true
+}
+
+/**
+ * Actualiza el campo hasReminder en el estado de detección de paciente.
+ * Se llama tras inicializar la detección, una vez que se sabe si existe un
+ * recordatorio de template enviado para este teléfono.
+ */
+export async function updatePatientDetectionHasReminder(
+  phoneNumber: string,
+  hasReminder: boolean
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+
+  const stateKey = `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`
+  const state = await getPatientDetectionState(phoneNumber)
+
+  if (!state) return false
+
+  state.hasReminder = hasReminder
   await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
   return true
 }

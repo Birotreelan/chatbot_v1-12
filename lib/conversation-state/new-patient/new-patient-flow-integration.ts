@@ -712,7 +712,16 @@ async function handleObraSocialPhase(
   try {
     const result = await validarObraSocial(clientId, input)
 
-    if (!result.exito || !result.datos || result.datos.total_encontradas === 0) {
+    // Error de API (conexión, timeout, etc.) — no confundir con "no encontrado"
+    if (!result.exito) {
+      logger.warn('API error al buscar obra social', { error: result.error })
+      return {
+        handled: true,
+        message: `Hubo un problema técnico al consultar las obras sociales. Por favor, intentá de nuevo en unos minutos.\n\n0. *Volver al paso anterior*`,
+      }
+    }
+
+    if (!result.datos || result.datos.total_encontradas === 0) {
       state.attempts += 1
       state.lastInvalidInput = input
       await saveFlowState(phone, state)
@@ -1260,7 +1269,7 @@ async function searchAndShowTurnos(
     obraSocialNombre: state.obraSocialNombre,
   })
 
-  const result = await searchTurnosAcumulativo(
+  const result = await searchTurnosFull(
     clientId,
     {
       sedeId: state.sedeId!,
@@ -1707,7 +1716,15 @@ async function handleModifyObraSocialPhase(
   try {
     const result = await validarObraSocial(clientId, input)
 
-    if (!result.exito || !result.datos || result.datos.total_encontradas === 0) {
+    if (!result.exito) {
+      logger.warn('API error al buscar obra social (modify)', { error: result.error })
+      return {
+        handled: true,
+        message: `Hubo un problema técnico al consultar las obras sociales. Por favor, intentá de nuevo en unos minutos.\n\n0. *Volver al paso anterior*`,
+      }
+    }
+
+    if (!result.datos || result.datos.total_encontradas === 0) {
       const noEncontradoModify = state.esFamiliar
         ? `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de la obra social del familiar e intenta nuevamente.\n\nSi no tiene cobertura, escribi *Particular*.`
         : `No encontre "${input}" en nuestro sistema. Por favor, verifica el nombre de tu obra social e intenta nuevamente.\n\nSi no tenes cobertura, escribi *Particular*.`

@@ -17,6 +17,7 @@
 import { createConversationLogger } from "./logger"
 import { openai } from "@/lib/openai"
 import { getTurnoTemporalStatus } from "@/lib/utils/date-utils"
+import { getRedisClient } from "@/lib/redis"
 
 const logger = createConversationLogger("nlu-fallback-handler")
 
@@ -126,6 +127,22 @@ export async function detectNLUFallbackPreFlow(
       return { shouldHandle: false }
     }
 
+    // Si el turno fue cancelado recientemente vía OpenAI (flag con TTL 30 min),
+    // no mostrar el menú de cancelación con datos viejos — dejar pasar a OpenAI
+    // que tiene el contexto completo de la conversación.
+    try {
+      const redis = getRedisClient()
+      if (redis) {
+        const recentlyCancelled = await redis.get(`turno_recently_cancelled:${configId}:${userPhoneNumber}`)
+        if (recentlyCancelled) {
+          logger.info(`[Sprint 18] Turno recientemente cancelado vía OpenAI — no interceptar, dejar al asistente`)
+          return { shouldHandle: false }
+        }
+      }
+    } catch {
+      // Si falla el check de Redis, continuar normalmente
+    }
+
     logger.info(`[Sprint 18] Clasificando mensaje con NLU fallback`, {
       userMessage,
       hasAppointmentContext: !!appointmentContext,
@@ -209,14 +226,16 @@ export async function detectNLUFallbackPreFlow(
       }
     }
 
-    // Si es explicación contextual → solo respuesta empática, sin menú
-    // El paciente está informando un motivo, no tomando una acción sobre el turno
+    // Si es explicación contextual → empathía + menú de opciones.
+    // El paciente informa un motivo (imprevisto, personal, salud) que implica que
+    // puede no asistir. Mostramos las opciones para que pueda actuar directamente.
     if (classificationResult.intent === "explicacion_contextual") {
-      const response = classificationResult.response || "Entendemos la situación, gracias por avisarnos. Si necesitás hacer algún cambio en tu turno, podés indicarnos qué preferís."
+      const response = buildCancelAndRescheduleMenuResponse(appointmentContext, classificationResult.response)
       return {
         shouldHandle: true,
         result: classificationResult,
         response,
+        flowStateDirective: { type: "awaiting_cancel_and_reschedule_confirm" },
       }
     }
 
@@ -285,7 +304,7 @@ export async function detectNLUFallbackPreFlow(
     // para que el chatbot muestre el menú de bienvenida.
     // Solo los cierres/agradecimientos ("chau", "gracias", "igualmente") se responden directamente.
     if (classificationResult.intent === "saludo_despedida") {
-      const normalized = message.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
+      const normalized = userMessage.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
       const isOpeningGreeting = /^(hola|buenos?\s*(dias?|tardes?|noches?)|buenas?|buen\s*dia|hey\b|hi\b|hello\b)/.test(normalized)
       if (isOpeningGreeting) {
         logger.info("[Sprint 18] Saludo de apertura — cediendo al flujo normal (no interceptar)")

@@ -39,14 +39,18 @@ export function classifyTurnoEstado(turno: any): TurnoEstadoCategoria {
 /**
  * ¿Debe ofrecerse la opción "Confirmar asistencia" para este turno?
  *
- * Solo cuando el turno está en estado "No confirmado" — es decir, el paciente
- * TODAVÍA NO confirmó su asistencia y puede hacerlo.
+ * Solo cuando el turno está en estado "No confirmado" Y se le envió previamente
+ * un recordatorio de turno (template de WhatsApp) que todavía no fue respondido.
  *
  * No se ofrece cuando:
  *  - "Confirmado": el paciente ya confirmó, mostrar de nuevo confundiría.
  *  - "Pendiente de aprobación": la clínica todavía no aprobó el turno.
+ *  - No se envió recordatorio: el turno está lejos y no tiene sentido confirmar aún.
+ *
+ * @param turno - Objeto turno de la API
+ * @param hasReminder - true si se envió un template de recordatorio para este teléfono/cliente
  */
-export function shouldOfferConfirmation(turno: any): boolean {
+export function shouldOfferConfirmation(turno: any, hasReminder: boolean = false): boolean {
   const categoria = classifyTurnoEstado(turno)
-  return categoria === 'no_confirmado'
+  return categoria === 'no_confirmado' && hasReminder
 }

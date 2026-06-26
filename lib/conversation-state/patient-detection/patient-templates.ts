@@ -80,7 +80,8 @@ export function buildExistingPatientGreeting(
   patientName: string,
   turnos: any[],
   clinicName: string = DEFAULT_CLINIC_NAME,
-  turnosQx: any[] = []
+  turnosQx: any[] = [],
+  hasReminder: boolean = false
 ): string {
   const firstName = getFirstName(patientName)
   const hasTurnos = turnos && turnos.length > 0
@@ -100,7 +101,7 @@ export function buildExistingPatientGreeting(
   // Construir el saludo médico base y agregar sección de cirugías si corresponde
   let mensaje: string
   if (turnos.length === 1) {
-    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName)
+    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName, hasReminder)
   } else {
     mensaje = buildMultipleTurnosGreeting(firstName, turnos, clinicName)
   }
@@ -262,7 +263,8 @@ export function buildFamiliarDNIRequestContextualMessage(
 function buildSingleTurnoGreeting(
   firstName: string,
   turno: any,
-  clinicName: string
+  clinicName: string,
+  hasReminder: boolean = false
 ): string {
   const fecha = formatearFecha(turno.Fecha || turno.fecha)
   const hora = formatearHora(turno.Hora || turno.hora || '')
@@ -282,15 +284,21 @@ function buildSingleTurnoGreeting(
     mensaje += `1- Cancelar el turno\n`
     mensaje += `2- Cancelar el turno y solicitar uno nuevo\n`
     mensaje += `3- Realizar otra consulta\n\n`
-  } else if (categoria === 'no_confirmado') {
-    // Turno agendado pero el paciente todavía NO confirmó su asistencia:
-    // se ofrece la opción de confirmar.
+  } else if (categoria === 'no_confirmado' && hasReminder) {
+    // Turno no confirmado Y se envió recordatorio → ofrecer confirmación.
     mensaje += `*Veo que tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}, pero todavía no confirmaste tu asistencia.*\n\n`
     mensaje += `¿En qué te podemos ayudar?\n\n`
     mensaje += `1- Confirmar asistencia al turno médico\n`
     mensaje += `2- Cancelar turno médico\n`
     mensaje += `3- Cancelar el turno médico y solicitar uno nuevo\n`
     mensaje += `4- Realizar otra consulta\n\n`
+  } else if (categoria === 'no_confirmado') {
+    // Turno no confirmado pero sin recordatorio enviado → no ofrecer confirmación todavía.
+    mensaje += `*Veo que tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
+    mensaje += `¿En qué te podemos ayudar?\n\n`
+    mensaje += `1- Cancelar turno médico\n`
+    mensaje += `2- Cancelar el turno médico y solicitar uno nuevo\n`
+    mensaje += `3- Realizar otra consulta\n\n`
   } else {
     // Pendiente de aprobación por la clínica (o estado desconocido): la confirmación
     // de asistencia NO está disponible, por eso se omite esa opción.

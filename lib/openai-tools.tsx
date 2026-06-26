@@ -1989,6 +1989,27 @@ async function executeToolCall(
   }
 
   const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
+
+  // Después de una cancelación exitosa, marcar en Redis para que el NLU fallback
+  // no muestre el menú de cancelación con datos del turno ya cancelado.
+  if (functionName === "cancelar_turno" && userPhoneNumber) {
+    try {
+      const parsedResult = typeof toolResult === "string" ? JSON.parse(toolResult) : toolResult
+      if (parsedResult?.exito === true) {
+        const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
+        if (config) {
+          const redis = getRedisClient()
+          if (redis) {
+            await redis.setex(`turno_recently_cancelled:${config.id}:${userPhoneNumber}`, 1800, '1')
+            console.info(`[OPENAI-TOOLS] Flag turno_recently_cancelled seteado: ${config.id}:${userPhoneNumber}`)
+          }
+        }
+      }
+    } catch {
+      // No crítico — si falla el flag, el NLU fallback lo manejará con el contexto de la conversación
+    }
+  }
+
   return JSON.stringify(toolResult)
 }
 

@@ -101,8 +101,50 @@ Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}`
 }
 
 /**
+ * Mensaje de confirmación cuando no hay Chatbot_Data (Chatbot_Data: false).
+ * Usa la info del template (fecha en formato "DD/MM/YYYY", hora, profesional, lugar)
+ * sin mencionar el nombre del paciente para evitar confusión con el apellido del médico.
+ */
+export function buildConfirmationMessageNoName(appointmentInfo: {
+  fecha?: string
+  hora?: string
+  profesional?: string
+  lugar?: string
+}): string {
+  const { fecha, hora, profesional, lugar } = appointmentInfo
+
+  if (!fecha && !hora && !profesional) {
+    return `Gracias, tu confirmación fue recibida correctamente. Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}`
+  }
+
+  // Convertir fecha "DD/MM/YYYY" → formato largo "viernes, 26 de junio de 2026"
+  let fechaFormateada = fecha || ''
+  if (fecha && /^\d{2}\/\d{2}\/\d{4}$/.test(fecha)) {
+    const [dia, mes, anio] = fecha.split('/')
+    const isoDate = `${anio}-${mes}-${dia}`
+    try {
+      const d = new Date(isoDate + 'T12:00:00')
+      fechaFormateada = new Intl.DateTimeFormat('es-AR', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+      }).format(d)
+    } catch {
+      fechaFormateada = fecha
+    }
+  }
+
+  const partes: string[] = []
+  if (fechaFormateada) partes.push(`el ${fechaFormateada}`)
+  if (hora) partes.push(`a las ${hora}`)
+  if (profesional) partes.push(`con ${profesional}`)
+  if (lugar) partes.push(`en ${lugar}`)
+
+  const detalle = partes.join(' ')
+  return `Gracias, tu confirmación para el turno ${detalle} fue recibida correctamente. Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}`
+}
+
+/**
  * Mensaje de doble confirmacion para cancelacion
- * Ejemplo: "Rosa, recibimos tu pedido de cancelar el turno del jueves, 28 de mayo de 2026 
+ * Ejemplo: "Rosa, recibimos tu pedido de cancelar el turno del jueves, 28 de mayo de 2026
  *           a las 15:10 con ANDREA PAUCAR en la sede SALUD OCULAR CALLAO.
  *           Para evitar cancelaciones accidentales, necesitamos que confirmes tu decision.
  *           1- Si, cancelar el turno

@@ -9,6 +9,7 @@ import {
   processDNIForDisambiguation,
   getPatientDetectionState,
   updatePatientDetectionPhase,
+  updatePatientDetectionHasReminder,
 } from './patient-flow-handler'
 import {
   buildExistingPatientGreeting,
@@ -63,7 +64,8 @@ export async function initializePatientDetection(
   configId: string,
   clienteId: string,
   clinicName?: string,
-  firstMessage?: string
+  firstMessage?: string,
+  hasReminder: boolean = false
 ): Promise<PatientDetectionResult> {
   const logger = createConversationLogger(phoneNumber, configId, 'initial_detection_pending')
   logger.info('Initializing patient detection', {})
@@ -146,11 +148,16 @@ export async function initializePatientDetection(
     }
 
     // Paciente existente: mostrar saludo con turnos
+    // Persistir hasReminder en el estado para que processPatientDetectionMessage
+    // use el mismo valor al construir el action map.
+    await updatePatientDetectionHasReminder(phoneNumber, hasReminder)
+
     const greeting = buildExistingPatientGreeting(
       detectionResult.patientName || 'Paciente',
       detectionResult.turnos || [],
       clinicName,
-      detectionResult.turnosQx || []
+      detectionResult.turnosQx || [],
+      hasReminder
     )
 
     return {
@@ -219,6 +226,17 @@ export async function handlePatientDetectionMessage(
   // --- Fase: Espera de DNI del familiar ---
   if (state.phase === 'awaiting_familiar_dni') {
     logger.info('Processing familiar DNI input', {})
+
+    // "0" = volver al menú principal
+    if (userMessage.trim() === '0') {
+      return {
+        handled: false,
+        shouldCallOpenAI: false,
+        action: 'familiar_back_to_main',
+        patientInfo: { isNewPatient: false },
+      }
+    }
+
     const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
 
     if (dniOnly.length < 7 || dniOnly.length > 9) {
@@ -487,11 +505,16 @@ export async function handleDNIForMultiplePatients(
     patientName: result.patientName,
   })
 
+  // Recuperar hasReminder del estado previo (fue guardado al iniciar la detección)
+  const currentState = await getPatientDetectionState(phoneNumber)
+  const hasReminderFromState = currentState?.hasReminder ?? false
+
   const greeting = buildExistingPatientGreeting(
     result.patientName || 'Paciente',
     result.turnos || [],
     clinicName,
-    result.turnosQx || []
+    result.turnosQx || [],
+    hasReminderFromState
   )
 
   return {
