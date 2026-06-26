@@ -11,6 +11,7 @@ import {
 } from './menu-option-detector'
 import { shouldOfferConfirmation } from './turno-estado'
 import { buildPostActionMenu } from './patient-templates'
+import { parseOptionNumber } from '../selection-extractor'
 
 /**
  * Patient Detection Flow Handler
@@ -575,14 +576,21 @@ export async function processPatientDetectionMessage(
     ? stateStr as PatientDetectionState
     : JSON.parse(stateStr as string)
 
-  // Detectar selección numérica (0-4); el 0 es "Volver al menú anterior" post-acción
+  // Detectar selección numérica (0-4); el 0 es "Volver al menú anterior" post-acción.
+  // También acepta frases como "opcion 1", "OPCION1", "Opción 2".
   const numMatch = userMessage.trim().match(/^[0-4]$/)
+  const optionPhraseNum = !numMatch ? parseOptionNumber(userMessage) : null
+  const numericSelection = numMatch
+    ? parseInt(numMatch[0], 10)
+    : (optionPhraseNum !== null && optionPhraseNum >= 0 && optionPhraseNum <= 9)
+      ? optionPhraseNum
+      : null
 
-  if (numMatch) {
+  if (numericSelection !== null) {
     // ========================================================================
     // CAPA 1: Detección numérica pura (0ms latencia)
     // ========================================================================
-    const selection = parseInt(numMatch[0], 10)
+    const selection = numericSelection
 
     logger.info('Numeric selection detected', {
       selection,

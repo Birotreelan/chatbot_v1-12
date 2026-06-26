@@ -5,6 +5,7 @@
 
 import { createConversationLogger } from '../logger'
 import type { SearchType, HandlerResult } from './types'
+import { parseOptionNumber } from '../selection-extractor'
 
 export interface SearchOptionsConfig {
   enableSearchByProfessional?: boolean
@@ -106,11 +107,16 @@ export async function handleSearchTypeSelection(
   // Normalizar input
   const inputNormalizado = userInput.trim().toLowerCase()
 
+  // Extraer número canónico: maneja "1", "opcion 1", "OPCION1", "Opción 2", etc.
+  const rawNumber = /^[0-9]+$/.test(inputNormalizado)
+    ? parseInt(inputNormalizado, 10)
+    : parseOptionNumber(userInput)
+
   // Opcion "Buscar en otra sede": es la opcion N+1 (despues de las busquedas disponibles).
   // Solo se ofrece en el mensaje de "no hay turnos" (buildNoTurnosMessage), pero la
   // detectamos aqui para reusar el mismo handler de seleccion de tipo de busqueda.
   const cambiarSedeNumber = availableOptions.length + 1
-  if (inputNormalizado === cambiarSedeNumber.toString()) {
+  if (rawNumber === cambiarSedeNumber) {
     logger.info('Tipo de busqueda: cambiar_sede', {})
     return {
       handled: true,
@@ -119,8 +125,10 @@ export async function handleSearchTypeSelection(
     }
   }
 
-  // Detectar opcion por numero
-  const optionByNumber = availableOptions.find((opt) => opt.number.toString() === inputNormalizado)
+  // Detectar opcion por numero (incluye frases "opcion N")
+  const optionByNumber = rawNumber !== null
+    ? availableOptions.find((opt) => opt.number === rawNumber)
+    : undefined
   if (optionByNumber) {
     logger.info(`Tipo de busqueda: ${optionByNumber.key}`, {})
     

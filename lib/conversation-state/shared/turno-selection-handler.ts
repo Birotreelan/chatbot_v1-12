@@ -13,6 +13,7 @@ import { createConversationLogger } from '../logger'
 import { openai } from '@/lib/openai'
 import { detectFlowInterruption } from './flow-interruption-handler'
 import type { TurnoOption, HandlerResult, SearchType } from './types'
+import { parseOptionNumber } from '../selection-extractor'
 
 /**
  * Formatea fecha para mostrar al usuario (formato argentino)
@@ -434,11 +435,15 @@ export async function handleTurnoSelection(
   // Normalizar input
   const inputNormalizado = userInput.trim().toLowerCase()
 
-  // Intentar extraer numero
+  // Intentar extraer numero — también acepta "opcion 1", "OPCION1", "Opción 2"
   const numeroMatch = inputNormalizado.match(/^\d+$/)
+  const optionPhraseNum = !numeroMatch ? parseOptionNumber(userInput) : null
+  const extractedNumber = numeroMatch
+    ? parseInt(numeroMatch[0], 10)
+    : optionPhraseNum
 
-  if (numeroMatch) {
-    const numero = parseInt(numeroMatch[0], 10)
+  if (extractedNumber !== null) {
+    const numero = extractedNumber
     
     // Verificar si eligio la opcion extra (N+1 = rebusqueda)
     const opcionExtra = turnosOpciones.length + 1

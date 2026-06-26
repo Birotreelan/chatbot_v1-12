@@ -6,6 +6,7 @@ import { createConversationLogger } from '../logger'
 import { reservarTurno } from '../../api-tools/api-functions'
 import { getFirstName } from '../../utils/name-utils'
 import type { TurnoOption, HandlerResult, SharedFlowState } from './types'
+import { parseOptionNumber } from '../selection-extractor'
 
 /**
  * Formatea fecha para mostrar al usuario (formato argentino)
@@ -200,23 +201,28 @@ export type ModifyDataOption = 'nombre' | 'dni' | 'obra_social' | 'turno' | null
 export function detectModifyDataOption(userInput: string): ModifyDataOption {
   const input = userInput.trim().toLowerCase()
 
+  // Extraer número canónico — soporta "1", "opcion 1", "OPCION1", "Opción 2"
+  const rawNum = /^[1-4]$/.test(input)
+    ? parseInt(input, 10)
+    : parseOptionNumber(userInput)
+
   // Opcion 1 - Nombre y Apellido
-  if (/^1$/.test(input) || input.includes('nombre') || input.includes('apellido')) {
+  if (rawNum === 1 || input.includes('nombre') || input.includes('apellido')) {
     return 'nombre'
   }
 
   // Opcion 2 - DNI
-  if (/^2$/.test(input) || input.includes('dni') || input.includes('documento')) {
+  if (rawNum === 2 || input.includes('dni') || input.includes('documento')) {
     return 'dni'
   }
 
   // Opcion 3 - Obra Social
-  if (/^3$/.test(input) || input.includes('obra') || input.includes('social') || input.includes('prepaga') || input.includes('cobertura')) {
+  if (rawNum === 3 || input.includes('obra') || input.includes('social') || input.includes('prepaga') || input.includes('cobertura')) {
     return 'obra_social'
   }
 
   // Opcion 4 - Turno
-  if (/^4$/.test(input) || input.includes('turno') || input.includes('fecha') || input.includes('hora') || input.includes('profesional') || input.includes('sede') || input.includes('reagendar')) {
+  if (rawNum === 4 || input.includes('turno') || input.includes('fecha') || input.includes('hora') || input.includes('profesional') || input.includes('sede') || input.includes('reagendar')) {
     return 'turno'
   }
 

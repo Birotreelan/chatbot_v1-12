@@ -349,6 +349,33 @@ export function extractSelection(
 }
 
 /**
+ * Parsea el número de opción de frases como "opcion 1", "OPCION1", "Opción 2", "option 3".
+ * Retorna el número si se detecta, null si no.
+ *
+ * Ejemplos reconocidos:
+ *   "OPCION 1" → 1
+ *   "Opcion1"  → 1
+ *   "Opción 2" → 2
+ *   "quiero la opcion 3" → 3
+ *   "option 1" → 1
+ */
+export function parseOptionNumber(input: string): number | null {
+  const normalized = input
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // Eliminar acentos
+    .trim()
+
+  // Matches: "opcion1", "opcion 1", "opción 2" (post-normalización), "option 3"
+  const match = normalized.match(/\bopci[o0]n\s*([0-9]+)\b|\boption\s*([0-9]+)\b/)
+  if (match) {
+    return parseInt(match[1] ?? match[2], 10)
+  }
+
+  return null
+}
+
+/**
  * Helper: Convierte un array de strings en SelectionOption[]
  */
 export function createOptionsFromLabels(labels: string[]): SelectionOption[] {
