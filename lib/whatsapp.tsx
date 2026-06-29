@@ -35,6 +35,9 @@ import {
   markAppointmentConfirmed,
   isAppointmentConfirmed,
   getAppointmentRef,
+  saveClinicaCancellationOffer,
+  getClinicaCancellationOffer,
+  clearClinicaCancellationOffer,
   type ChatbotData,
   type ChatbotDataTurno,
   type ChatbotDataTurnoCancelado,
@@ -2177,6 +2180,141 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
           // Si hay reminder pendiente → caer al Sprint 14 para pedir confirmación
           console.info("[SPRINT-15] Reminder pendiente detectado, omitiendo silencio para obtener confirmación del turno")
+        }
+      }
+    }
+
+    // ============================================================================
+    // SPRINT 14b-1: RESPUESTA DEL PACIENTE A OFERTA DE REAGENDAMIENTO POST-CANCELACIÓN
+    // Cuando la clínica canceló un turno y ofrecimos reagendar, el paciente responde "1" o "2".
+    // "1" → quiere nuevo turno: limpiamos el estado y dejamos caer a Sprint 9 (booking flow)
+    // "2" → no quiere: limpiamos el estado y enviamos despedida
+    // Otro → re-preguntamos
+    // ============================================================================
+    if (message.type === "text" && config.cliente_id) {
+      const hasPendingClinicaOffer = await getClinicaCancellationOffer(userPhoneNumber, config.id)
+      if (hasPendingClinicaOffer) {
+        const clinicaOfferCtx: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+        }
+        const trimmed = userMessage.trim()
+        const wantsNew = trimmed === '1' || /^\bsi\b/i.test(trimmed) || /\bquiero\b|\bnuevo turno\b/i.test(trimmed)
+        const doesntWant = trimmed === '2' || /^\bno\b/i.test(trimmed)
+
+        if (wantsNew) {
+          await clearClinicaCancellationOffer(userPhoneNumber, config.id)
+          // Caer al flujo normal de solicitud de turno (Sprint 9 maneja "1" como Solicitar turno)
+          // No hacemos return — el mensaje "1" será procesado por Sprint 9
+        } else if (doesntWant) {
+          await clearClinicaCancellationOffer(userPhoneNumber, config.id)
+          await sendDirectResponse(clinicaOfferCtx, "Entendido. Si en algún momento querés gestionar un turno, escribime. ¡Hasta pronto!", "clinica_cancellation_declined")
+          return
+        } else {
+          // Respuesta no reconocida — re-preguntar
+          const reaskMsg = "No entendí tu respuesta. Por favor respondé:\n\n1. Sí, quiero un nuevo turno\n2. No, gracias"
+          let reaskSent = false
+          try {
+            await sendWhatsAppInteractive(clinicaOfferCtx.phoneNumberId, clinicaOfferCtx.accessToken, clinicaOfferCtx.userPhoneNumber, reaskMsg, [
+              { id: "1", title: "Sí, quiero turno" },
+              { id: "2", title: "No, gracias" },
+            ])
+            await saveConversationMessage({ id: nanoid(), role: "assistant", content: reaskMsg, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
+            appendToHistory(userPhoneNumber, { role: 'bot', text: reaskMsg, timestamp: Date.now() }).catch(() => {})
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            reaskSent = true
+          } catch {
+            await sendDirectResponse(clinicaOfferCtx, reaskMsg, "clinica_cancellation_reask")
+          }
+          if (!reaskSent) { /* stats handled by sendDirectResponse fallback */ }
+          return
+        }
+      }
+    }
+
+    // ============================================================================
+    // SPRINT 14b-2: PRIMER MENSAJE DEL PACIENTE TRAS TEMPLATE INFORMACIONAL DE CLÍNICA
+    // turno_cancelado_clinica → informar cancelación + ofrecer reagendamiento si aplica
+    // turno_confirmado_clinica → confirmar que el turno está confirmado
+    // En ambos casos respondemos de forma determinista (sin OpenAI) y limpiamos el contexto.
+    // ============================================================================
+    if (message.type === "text" && config.cliente_id) {
+      const clinicaContext = await getAppointmentContext(userPhoneNumber, config.id)
+      const clinicaTipoMensaje = (clinicaContext as any)?.tipo_mensaje as string | undefined
+
+      if (clinicaTipoMensaje === 'turno_cancelado_clinica' || clinicaTipoMensaje === 'turno_confirmado_clinica') {
+        const clinicaInfoCtx: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+        }
+
+        // Extraer datos del contexto plano (viene del proxylistener, no tiene estructura ChatbotData estándar)
+        const rawCtx = clinicaContext as any
+        const fecha: string = rawCtx.fecha_formateada || rawCtx.fecha
+          || rawCtx.turnos?.[0]?.fecha_formateada || rawCtx.turnos?.[0]?.fecha || ''
+        const hora: string = rawCtx.hora_formateada || rawCtx.hora
+          || rawCtx.turnos?.[0]?.hora_formateada || rawCtx.turnos?.[0]?.hora || ''
+        const profesionalRaw: string = rawCtx.profesional || rawCtx.turnos?.[0]?.profesional || ''
+        // Formatear nombre del profesional: "CARO, YURANI" → "Caro, Yurani"
+        const profesional = profesionalRaw
+          ? profesionalRaw.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+          : ''
+        const admiteReagendamiento: boolean = rawCtx.admite_reagendamiento === true
+          || rawCtx.turnos?.[0]?.admite_reagendamiento === true
+        const telefonoContacto: string = rawCtx.telefono_contacto || ''
+
+        // Siempre limpiar el contexto — próximos mensajes van al flujo normal
+        await clearAppointmentContext(userPhoneNumber, config.id)
+
+        if (clinicaTipoMensaje === 'turno_cancelado_clinica') {
+          let responseMsg = 'Lamentamos que tu turno'
+          if (profesional) responseMsg += ` con *${profesional}*`
+          if (fecha) responseMsg += ` del *${fecha}*`
+          if (hora) responseMsg += ` a las *${hora}*`
+          responseMsg += ' haya sido cancelado por la clínica.'
+
+          if (admiteReagendamiento) {
+            responseMsg += '\n\nSi querés, podemos ayudarte a buscar un nuevo turno disponible.'
+            // Guardar estado de oferta para manejar la respuesta del paciente
+            await saveClinicaCancellationOffer(userPhoneNumber, config.id)
+            let interactiveSent = false
+            try {
+              await sendWhatsAppInteractive(clinicaInfoCtx.phoneNumberId, clinicaInfoCtx.accessToken, clinicaInfoCtx.userPhoneNumber, responseMsg, [
+                { id: "1", title: "Sí, quiero turno" },
+                { id: "2", title: "No, gracias" },
+              ])
+              await saveConversationMessage({ id: nanoid(), role: "assistant", content: responseMsg, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
+              appendToHistory(userPhoneNumber, { role: 'bot', text: responseMsg, timestamp: Date.now() }).catch(() => {})
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              interactiveSent = true
+            } catch {
+              // sendDirectResponse handles saveConversationMessage, appendToHistory, updateWhatsAppStats internally
+              await sendDirectResponse(clinicaInfoCtx, responseMsg + '\n\n1. Sí, quiero un nuevo turno\n2. No, gracias', "clinica_cancellation_info")
+            }
+            if (!interactiveSent) { /* stats handled by sendDirectResponse fallback */ }
+          } else {
+            if (telefonoContacto) responseMsg += `\n\nPara consultas, podés comunicarte con la clínica al ${telefonoContacto}.`
+            // sendDirectResponse handles saveConversationMessage, appendToHistory, updateWhatsAppStats internally
+            await sendDirectResponse(clinicaInfoCtx, responseMsg, "clinica_cancellation_info")
+          }
+
+          return
+        }
+
+        if (clinicaTipoMensaje === 'turno_confirmado_clinica') {
+          let responseMsg = '¡Tu turno está confirmado'
+          if (profesional) responseMsg += ` con *${profesional}*`
+          if (fecha) responseMsg += ` para el *${fecha}*`
+          if (hora) responseMsg += ` a las *${hora}*`
+          responseMsg += '! ✅\n\nSi necesitás algo más, no dudes en escribirme.'
+          await sendDirectResponse(clinicaInfoCtx, responseMsg, "clinica_confirmation_info")
+          return
         }
       }
     }

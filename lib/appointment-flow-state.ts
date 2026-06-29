@@ -471,6 +471,51 @@ export async function clearFlowState(
 }
 
 // ============================================================================
+// CLINICA CANCELLATION OFFER STATE
+// Rastrea si ofrecimos al paciente reagendar tras una cancelación iniciada por la clínica.
+// TTL corto (1 hora): si el paciente no responde rápido, el contexto expira.
+// ============================================================================
+
+const CLINICA_OFFER_PREFIX = "clinica_cancel_offer"
+const CLINICA_OFFER_TTL = 60 * 60 // 1 hora
+
+export async function saveClinicaCancellationOffer(
+  phone: string,
+  configId: string
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+  try {
+    await redis.set(`${CLINICA_OFFER_PREFIX}:${configId}:${phone}`, '1', { ex: CLINICA_OFFER_TTL })
+    return true
+  } catch { return false }
+}
+
+export async function getClinicaCancellationOffer(
+  phone: string,
+  configId: string
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+  try {
+    const val = await redis.get<string>(`${CLINICA_OFFER_PREFIX}:${configId}:${phone}`)
+    return val !== null
+  } catch { return false }
+}
+
+export async function clearClinicaCancellationOffer(
+  phone: string,
+  configId: string
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+  try {
+    await redis.del(`${CLINICA_OFFER_PREFIX}:${configId}:${phone}`)
+    return true
+  } catch { return false }
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
