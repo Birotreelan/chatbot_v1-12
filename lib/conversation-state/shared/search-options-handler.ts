@@ -50,7 +50,7 @@ function getAvailableOptions(config?: SearchOptionsConfig): Array<{ number: numb
     {
       number: 3,
       key: 'cualquier_medico',
-      label: 'Cualquier medico disponible',
+      label: 'Cualquier medico',
       description: 'Para ver los turnos mas proximos sin importar el profesional',
     },
   ]

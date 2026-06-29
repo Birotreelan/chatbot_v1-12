@@ -171,7 +171,7 @@ export async function initializePatientDetection(
       (!hasTurnos)
         ? [
             { id: "1", title: "Solicitar turno" },
-            { id: "2", title: "Turno familiar" },
+            { id: "2", title: "Turno para familiar" },
             { id: "3", title: "Otra consulta" },
           ]
         : undefined

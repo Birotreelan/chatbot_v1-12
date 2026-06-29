@@ -50,6 +50,7 @@ const VER_MAS_PATTERNS = [
   /\bsiguientes?\b/i,
   /\bver\s+m[aá]s\s+turnos?\b/i,
   /\bcargar\s+m[aá]s\b/i,
+  /^ver_mas$/i,   // ID del botón interactivo de WhatsApp
 ]
 
 const VER_TODOS_PATTERNS = [

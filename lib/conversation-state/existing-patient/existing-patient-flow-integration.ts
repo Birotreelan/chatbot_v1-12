@@ -143,6 +143,8 @@ export interface ExistingPatientResult {
   sedesListRows?: Array<{ id: string; title: string; description?: string }>
   /** Buttons for WhatsApp Reply Buttons — present when the message is a search type prompt */
   searchTypeButtons?: Array<{ id: string; title: string }>
+  /** True when there are more turnos to show — triggers a "Ver más" Reply Button */
+  verMasButton?: boolean
 }
 
 /**
@@ -1210,6 +1212,7 @@ async function searchAndShowTurnos(
       true
     ),
     nextPhase: 'awaiting_turno_selection',
+    verMasButton: window.hasMore,
   }
 }
 
@@ -1261,6 +1264,7 @@ async function handleTurnoPhase(
         false
       ),
       nextPhase: 'awaiting_turno_selection',
+      verMasButton: nextWindow.hasMore,
     }
   }
 

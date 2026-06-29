@@ -253,48 +253,50 @@ async function sendExistingPatientResult(
     message?: string
     sedesListRows?: Array<{ id: string; title: string; description?: string }>
     searchTypeButtons?: Array<{ id: string; title: string }>
+    verMasButton?: boolean
   },
   phase = "existing_patient_flow"
 ): Promise<void> {
   if (!result.message) return
 
-  // Intentar List Message para selección de sede
+  const _saveHistory = async (msg: string) => {
+    await saveConversationMessage({ id: nanoid(), role: "assistant", content: msg, timestamp: new Date().toISOString(), phoneNumber: ctx.userPhoneNumber, configId: ctx.configId })
+    appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: msg, timestamp: Date.now() }).catch(() => {})
+    await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
+  }
+
+  // List Message para selección de sede
   if (result.sedesListRows && result.sedesListRows.length > 0) {
     try {
-      await sendWhatsAppList(
-        ctx.phoneNumberId,
-        ctx.accessToken,
-        ctx.userPhoneNumber,
-        result.message,
-        "Ver sedes",
-        result.sedesListRows,
-        "Sedes disponibles"
-      )
-      await saveConversationMessage({ id: nanoid(), role: "assistant", content: result.message, timestamp: new Date().toISOString(), phoneNumber: ctx.userPhoneNumber, configId: ctx.configId })
-      appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: result.message, timestamp: Date.now() }).catch(() => {})
-      await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
+      await sendWhatsAppList(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, result.message, "Ver sedes", result.sedesListRows, "Sedes disponibles")
+      await _saveHistory(result.message)
       return
     } catch (listErr) {
       console.error("[WHATSAPP] Error enviando sede list message, fallback a texto:", listErr)
     }
   }
 
-  // Intentar Reply Buttons para tipo de búsqueda
+  // Reply Buttons para tipo de búsqueda
   if (result.searchTypeButtons && result.searchTypeButtons.length > 0) {
     try {
-      await sendWhatsAppInteractive(
-        ctx.phoneNumberId,
-        ctx.accessToken,
-        ctx.userPhoneNumber,
-        result.message,
-        result.searchTypeButtons
-      )
-      await saveConversationMessage({ id: nanoid(), role: "assistant", content: result.message, timestamp: new Date().toISOString(), phoneNumber: ctx.userPhoneNumber, configId: ctx.configId })
-      appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: result.message, timestamp: Date.now() }).catch(() => {})
-      await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
+      await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, result.message, result.searchTypeButtons)
+      await _saveHistory(result.message)
       return
     } catch (btnErr) {
       console.error("[WHATSAPP] Error enviando search type buttons, fallback a texto:", btnErr)
+    }
+  }
+
+  // Reply Button "Ver más" para paginación de turnos
+  if (result.verMasButton) {
+    try {
+      await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, result.message, [
+        { id: "ver_mas", title: "Ver más" },
+      ])
+      await _saveHistory(result.message)
+      return
+    } catch (btnErr) {
+      console.error("[WHATSAPP] Error enviando Ver más button, fallback a texto:", btnErr)
     }
   }
 
@@ -1232,9 +1234,9 @@ export async function handleMessage(value: any) {
     if (message.type === "interactive" && message.interactive?.type === "button_reply") {
       const _btnTitle = (message.interactive.button_reply?.title || "").toLowerCase().trim()
       const GLOBAL_MENU_BUTTONS: Record<string, string> = {
-        "solicitar turno": "1",
-        "turno familiar":  "2",
-        "otra consulta":   "3",
+        "solicitar turno":    "1",
+        "turno para familiar": "2",
+        "otra consulta":       "3",
       }
       const globalNumericId = GLOBAL_MENU_BUTTONS[_btnTitle]
       if (globalNumericId) {
@@ -2998,15 +3000,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
         if (detectionResult?.handled) {
           if (detectionResult.message) {
-            const _sedesRows = (detectionResult as any).sedesListRows
-            const _searchBtns = (detectionResult as any).searchTypeButtons
-            if (_sedesRows && _sedesRows.length > 0) {
-              await sendExistingPatientResult(detectionCtx, { message: detectionResult.message, sedesListRows: _sedesRows }, "detection_flow")
-            } else if (_searchBtns && _searchBtns.length > 0) {
-              await sendExistingPatientResult(detectionCtx, { message: detectionResult.message, searchTypeButtons: _searchBtns }, "detection_flow")
-            } else {
-              await sendDirectResponse(detectionCtx, detectionResult.message, "detection_flow")
-            }
+            const _dr = detectionResult as any
+            await sendExistingPatientResult(detectionCtx, {
+              message: detectionResult.message,
+              sedesListRows: _dr.sedesListRows,
+              searchTypeButtons: _dr.searchTypeButtons,
+              verMasButton: _dr.verMasButton,
+            }, "detection_flow")
           }
 
           // Cuando el paciente seleccionó una opción del menú inicial, derivar al flujo correcto

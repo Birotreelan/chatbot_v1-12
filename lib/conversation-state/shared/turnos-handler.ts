@@ -235,7 +235,7 @@ export function buildTurnosWindowMessage(
   message += `Respondé con el *número* del turno que preferís.`
 
   if (hasMore) {
-    message += `\n\nEscribí *"ver más"* para ver los siguientes turnos disponibles.`
+    message += `\n\nPresioná el botón *Ver más* o escribí *"ver más"* para ver los siguientes turnos disponibles.`
   } else {
     message += `\n\n_Esos son todos los turnos disponibles en los próximos ${SEARCH_DAYS} días._`
   }
