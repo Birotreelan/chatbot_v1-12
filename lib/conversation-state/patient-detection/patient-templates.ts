@@ -120,13 +120,20 @@ export function buildExistingPatientGreeting(
  */
 function insertCirugiaBlock(mensajeBase: string, turnosQx: any[]): string {
   const bloqueCirugias = buildBloqueCirugias(turnosQx)
-  const ancla = 'Respondé con el número de opción que prefieras.'
-  const idx = mensajeBase.lastIndexOf(ancla)
-  if (idx === -1) {
-    // Si no encontramos la ancla, simplemente agregamos al final
-    return mensajeBase + '\n\n' + bloqueCirugias
+  // Intentar ambas variantes del texto de cierre (con y sin botones)
+  const anclas = [
+    'Respondé con el número o presioná el botón de tu preferencia.',
+    'Respondé con el número de opción que prefieras.',
+    'Por favor, respondé con el número de opción que prefieras.',
+  ]
+  for (const ancla of anclas) {
+    const idx = mensajeBase.lastIndexOf(ancla)
+    if (idx !== -1) {
+      return mensajeBase.slice(0, idx) + bloqueCirugias + '\n\n' + mensajeBase.slice(idx)
+    }
   }
-  return mensajeBase.slice(0, idx) + bloqueCirugias + '\n\n' + mensajeBase.slice(idx)
+  // Si no encontramos ninguna ancla, agregar al final
+  return mensajeBase + '\n\n' + bloqueCirugias
 }
 
 /**
@@ -204,7 +211,7 @@ function buildSoloCirugiaGreeting(
   mensaje += `1- Solicitar un turno médico\n`
   mensaje += `2- Solicitar turno para un familiar\n`
   mensaje += `3- Realizar otra consulta\n\n`
-  mensaje += `Respondé con el número de opción que prefieras.`
+  mensaje += `Respondé con el número o presioná el botón de tu preferencia.`
 
   return mensaje
 }
@@ -226,7 +233,7 @@ function buildExistingPatientNoTurnosGreeting(
     `1- Solicitar turno médico\n` +
     `2- Solicitar turno para un familiar\n` +
     `3- Realizar otra consulta\n\n` +
-    `Por favor, respondé con el número de opción que prefieras.`
+    `Respondé con el número o presioná el botón de tu preferencia.`
   )
 }
 

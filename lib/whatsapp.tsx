@@ -1,5 +1,5 @@
 import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId, clearAllConversationStates } from "@/lib/db"
-import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
+import { sendWhatsAppMessage, sendWhatsAppInteractive } from "@/lib/whatsapp-api"
 import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
 import { getAssistantResponse } from "@/lib/openai-tools"
 import { getArgentinaDateTime } from "@/lib/utils/date-utils"
@@ -75,6 +75,7 @@ import {
   getBookingFlowState,
   setBookingFlowState,
   buildBookingContextBlock,
+  clearBookingFlowState,
 } from "./conversation-state/booking-flow-handler"
 import {
   mapApiTurnosToOptions,
@@ -102,6 +103,8 @@ import {
   getIdentifiedPatient,
   clearPatientDetectionFlow,
   returnPatientToMenu,
+  resetDetectionToMainMenu,
+  restoreDetectionStateFromCache,
 } from "./conversation-state/patient-detection/patient-flow-integration"
 import {
   initializeExistingPatientFlow,
@@ -134,7 +137,7 @@ function extractMessageContent(message: any): { content: string; audioId?: strin
       return { content: message.button?.text || message.button?.payload || "" }
     case "interactive":
       if (message.interactive?.type === "button_reply") {
-        return { content: message.interactive.button_reply?.title || message.interactive.button_reply?.id || "" }
+        return { content: message.interactive.button_reply?.id || message.interactive.button_reply?.title || "" }
       } else if (message.interactive?.type === "list_reply") {
         return { content: message.interactive.list_reply?.title || message.interactive.list_reply?.id || "" }
       }
@@ -1161,10 +1164,46 @@ export async function handleMessage(value: any) {
     }
 
     // ============================================================================
+    // INTERCEPTOR GLOBAL DE BOTONES DE MENÚ PRINCIPAL
+    // Si el usuario presiona un botón del menú principal ("Solicitar turno", "Turno familiar",
+    // "Otra consulta") durante CUALQUIER sub-flujo activo, se interrumpe ese flujo y se
+    // ejecuta la acción del botón. Detectamos por TÍTULO (no ID) para evitar colisiones.
+    // ============================================================================
+    if (message.type === "interactive" && message.interactive?.type === "button_reply") {
+      const _btnTitle = (message.interactive.button_reply?.title || "").toLowerCase().trim()
+      const GLOBAL_MENU_BUTTONS: Record<string, string> = {
+        "solicitar turno": "1",
+        "turno familiar":  "2",
+        "otra consulta":   "3",
+      }
+      const globalNumericId = GLOBAL_MENU_BUTTONS[_btnTitle]
+      if (globalNumericId) {
+        console.log(`[v0] [GLOBAL_BTN] Botón global detectado: "${_btnTitle}" → id="${globalNumericId}"`)
+        // Limpiar TODOS los sub-flujos activos
+        await clearFlowState(userPhoneNumber, config.id)
+        await clearBookingFlowState(userPhoneNumber, config.id)
+        await clearExistingPatientFlow(userPhoneNumber)
+        await clearNewPatientFlow(userPhoneNumber, config.id)
+        // Intentar resetear el flujo de detección al menú principal
+        let resetOk = await resetDetectionToMainMenu(userPhoneNumber)
+        if (!resetOk) {
+          // Estado de detección expirado: restaurar desde caché identified_patient
+          resetOk = await restoreDetectionStateFromCache(userPhoneNumber)
+        }
+        console.log(`[v0] [GLOBAL_BTN] resetOk=${resetOk}, userMessage será "${globalNumericId}"`)
+        if (resetOk) {
+          // Sobrescribir userMessage con el ID numérico para que el handler de detección lo procese
+          userMessage = globalNumericId
+        }
+        // Si resetOk=false: el bloque SPRINT9A re-detectará al paciente y mostrará el menú
+      }
+    }
+
+    // ============================================================================
     // INTERCEPTAR RESPUESTAS DE FLUJOS PENDIENTES (doble confirmacion cancelacion, etc)
     // Esto permite responder directamente sin pasar por OpenAI
     // ============================================================================
-    if (message.type === "text" || message.type === "button") {
+    if (message.type === "text" || message.type === "button" || message.type === "interactive") {
       // Verificar si hay un flujo pendiente activo antes de invocar el handler,
       // para guardar el mensaje del usuario PRIMERO y así preservar el orden correcto
       // en el monitor de conversaciones (usuario → bot, no bot → usuario).
@@ -2508,7 +2547,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
   // NEW: INTERCEPTAR DETECCION INICIAL DE PACIENTE (Sin recordatorio previo)
     // Sprint 9a-c: Nuevo flujo deterministico de deteccion e intake
     // ============================================================================
-    if (message.type === "text") {
+    if (message.type === "text" || message.type === "interactive") {
       const detectionFlags = await getEffectiveFeatureFlags(config.id)
       
       // Verificar si debe usar detección de paciente
@@ -2549,8 +2588,26 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               configId: config.id,
               clienteId: config.cliente_id,
             }
-            
-            await sendDirectResponse(detectionCtx, detectionResult.message || "", "initial_detection_pending")
+
+            const greetingText = detectionResult.message || ""
+            if (detectionResult.buttons && detectionResult.buttons.length > 0) {
+              // Enviar como mensaje interactivo con Reply Buttons
+              try {
+                await sendWhatsAppInteractive(
+                  value.metadata.phone_number_id,
+                  config.accessToken,
+                  userPhoneNumber,
+                  greetingText,
+                  detectionResult.buttons,
+                )
+              } catch (btnErr) {
+                // Fallback a mensaje de texto si interactive falla
+                console.warn("[v0] [SPRINT9A] Interactive send failed, fallback to text:", btnErr)
+                await sendDirectResponse(detectionCtx, greetingText, "initial_detection_pending")
+              }
+            } else {
+              await sendDirectResponse(detectionCtx, greetingText, "initial_detection_pending")
+            }
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
@@ -2577,7 +2634,22 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               clienteId: config.cliente_id,
             }
 
-            await sendDirectResponse(detectionCtx, detectionResult.message, "rehydrated_patient_detection")
+            if (detectionResult.buttons && detectionResult.buttons.length > 0) {
+              try {
+                await sendWhatsAppInteractive(
+                  value.metadata.phone_number_id,
+                  config.accessToken,
+                  userPhoneNumber,
+                  detectionResult.message,
+                  detectionResult.buttons,
+                )
+              } catch (btnErr) {
+                console.warn("[v0] [SPRINT9A] Interactive send failed (rehydration), fallback to text:", btnErr)
+                await sendDirectResponse(detectionCtx, detectionResult.message, "rehydrated_patient_detection")
+              }
+            } else {
+              await sendDirectResponse(detectionCtx, detectionResult.message, "rehydrated_patient_detection")
+            }
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
@@ -2588,7 +2660,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // ============================================================================
     // INTERCEPTAR FLUJOS ACTIVOS: Detección inicial, Paciente Existente o Nuevo (Sprint 9a-c)
     // ============================================================================
-    if (message.type === "text") {
+    if (message.type === "text" || message.type === "interactive") {
       // Si hay un booking flow activo (Sprint 6-8), tiene prioridad sobre el flujo de paciente nuevo.
       // El booking flow se procesa más adelante (línea ~2083) con handleBookingSelectionIfPending.
       // Evitamos que new_patient_flow intercepte mensajes que le pertenecen al booking flow.
@@ -3066,7 +3138,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // INTERCEPTAR FLUJO DE RESERVA (Sprint 6-8: Paciente Nuevo/Existente)
     // Si hay un booking flow activo con selección numérica, resolver directamente
     // ============================================================================
-    if (message.type === "text") {
+    if (message.type === "text" || message.type === "interactive") {
       const bookingFlags = await getEffectiveFeatureFlags(config.id)
       if (bookingFlags.directBookingFlow) {
         const bookingResult = await handleBookingSelectionIfPending(userMessage, userPhoneNumber, config.id)
@@ -3270,7 +3342,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // INTERCEPTAR SELECCION DE TURNO (Sprint 4: Selección de Turnos por Número)
     // Si hay un estado awaiting_turn_selection activo, resolver directamente
     // ============================================================================
-    if (message.type === "text") {
+    if (message.type === "text" || message.type === "interactive") {
       const turnFlags = await getEffectiveFeatureFlags(config.id)
       if (turnFlags.directTurnSelection) {
         const turnResult = await handleTurnSelectionIfPending(userMessage, userPhoneNumber, config.id)

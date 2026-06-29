@@ -91,6 +91,60 @@ export async function sendWhatsAppMessage(
   }
 }
 
+/**
+ * Envía un mensaje interactivo con Reply Buttons a WhatsApp.
+ * Los botones permiten al usuario responder con un toque en lugar de escribir.
+ * Límites: máximo 3 botones, título máximo 20 caracteres.
+ */
+export async function sendWhatsAppInteractive(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  body: string,
+  buttons: Array<{ id: string; title: string }>,
+): Promise<any> {
+  try {
+    const normalizedPhone = normalizePhoneNumber(to)
+    const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
+    const payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: normalizedPhone,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: body },
+        action: {
+          buttons: buttons.slice(0, 3).map(b => ({
+            type: "reply",
+            reply: { id: b.id, title: b.title.substring(0, 20) },
+          })),
+        },
+      },
+    }
+    console.log("[v0] [WHATSAPP_API] 📤 Interactive message payload:", JSON.stringify(payload, null, 2))
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      console.error("[v0] [WHATSAPP_API] ❌ Error interactive:", JSON.stringify(error, null, 2))
+      throw new Error(`WhatsApp Interactive API error: ${JSON.stringify(error)}`)
+    }
+    const data = await response.json()
+    console.log("[v0] [WHATSAPP_API] ✅ Interactive message sent:", JSON.stringify(data, null, 2))
+    return data
+  } catch (error) {
+    console.error("[v0] [WHATSAPP_API] ❌ Error en sendWhatsAppInteractive:", error)
+    throw error
+  }
+}
+
 export async function sendWhatsAppTemplate(
   phoneNumberId: string,
   accessToken: string,

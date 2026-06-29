@@ -34,6 +34,7 @@ import { detectFamiliarIntent } from './familiar-intent-detector'
 export interface PatientDetectionResult {
   handled: boolean
   message?: string
+  buttons?: Array<{ id: string; title: string }>
   action?: string
   patientInfo?: {
     isNewPatient: boolean
@@ -152,6 +153,9 @@ export async function initializePatientDetection(
     // use el mismo valor al construir el action map.
     await updatePatientDetectionHasReminder(phoneNumber, hasReminder)
 
+    const hasTurnos = detectionResult.turnos && detectionResult.turnos.length > 0
+    const hasTurnosQx = detectionResult.turnosQx && detectionResult.turnosQx.length > 0
+
     const greeting = buildExistingPatientGreeting(
       detectionResult.patientName || 'Paciente',
       detectionResult.turnos || [],
@@ -160,9 +164,22 @@ export async function initializePatientDetection(
       hasReminder
     )
 
+    // Incluir botones interactivos para los casos con exactamente 3 opciones:
+    // - Sin turnos (ni médicos ni quirúrgicos)
+    // - Solo cirugías (sin turnos médicos)
+    const greetingButtons: Array<{ id: string; title: string }> | undefined =
+      (!hasTurnos)
+        ? [
+            { id: "1", title: "Solicitar turno" },
+            { id: "2", title: "Turno familiar" },
+            { id: "3", title: "Otra consulta" },
+          ]
+        : undefined
+
     return {
       handled: true,
       message: greeting,
+      buttons: greetingButtons,
       patientInfo: {
         isNewPatient: false,
         patientId: detectionResult.patientId,
@@ -534,4 +551,4 @@ export async function handleDNIForMultiplePatients(
  * Busca al familiar en el sistema y arranca el flujo de paciente existente o nuevo
  */
 // Re-export functions from handler so they can be imported from this module
-export { isPatientDetectionFlowActive, getDetectedPatientInfo, clearPatientDetectionFlow, updatePatientDetectionPhase, getIdentifiedPatient, clearIdentifiedPatient, returnPatientToMenu } from './patient-flow-handler'
+export { isPatientDetectionFlowActive, getDetectedPatientInfo, clearPatientDetectionFlow, updatePatientDetectionPhase, getIdentifiedPatient, clearIdentifiedPatient, returnPatientToMenu, resetDetectionToMainMenu, restoreDetectionStateFromCache } from './patient-flow-handler'

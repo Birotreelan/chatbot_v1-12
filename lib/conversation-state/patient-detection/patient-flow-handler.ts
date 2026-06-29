@@ -1030,6 +1030,50 @@ export async function updatePatientDetectionPhase(
 }
 
 /**
+ * Resetea la fase del flujo de detección al menú principal (awaiting_action_selection)
+ * sin tocar los datos del paciente. Devuelve false si no hay estado activo.
+ */
+export async function resetDetectionToMainMenu(phoneNumber: string): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+  const state = await getPatientDetectionState(phoneNumber)
+  if (!state || !state.patientId) return false
+  state.phase = 'awaiting_action_selection'
+  delete (state as any).postActionContext
+  const stateKey = `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`
+  await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+  return true
+}
+
+/**
+ * Restaura un estado mínimo de detección desde la caché identified_patient
+ * cuando el estado de detección ya expiró pero el paciente sigue identificado.
+ * Devuelve false si no hay caché disponible.
+ */
+export async function restoreDetectionStateFromCache(phoneNumber: string): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+  const cached = await getIdentifiedPatient(phoneNumber)
+  if (!cached || !cached.patientId) return false
+  const restoredState: PatientDetectionState = {
+    phase: 'awaiting_action_selection',
+    patientPhone: phoneNumber,
+    patientId: cached.patientId,
+    patientName: cached.patientName,
+    patientDNI: cached.patientDNI,
+    obraSocialId: cached.obraSocialId,
+    obraSocialNombre: cached.obraSocialNombre,
+    turnos: [], // Desconocido tras expirar; seguro para botones globales
+    turnosQx: [],
+    detectedAt: Date.now(),
+    attempts: 0,
+  }
+  const stateKey = `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`
+  await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(restoredState))
+  return true
+}
+
+/**
  * Actualiza el campo hasReminder en el estado de detección de paciente.
  * Se llama tras inicializar la detección, una vez que se sabe si existe un
  * recordatorio de template enviado para este teléfono.
