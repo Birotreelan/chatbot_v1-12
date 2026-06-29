@@ -145,6 +145,67 @@ export async function sendWhatsAppInteractive(
   }
 }
 
+/**
+ * Envía un mensaje interactivo de tipo Lista (List Message) a WhatsApp.
+ * Soporta hasta 10 filas. Útil para menús con más de 3 opciones (ej: sedes).
+ * Límites: buttonLabel max 20 chars, row.title max 24 chars, row.description max 72 chars.
+ */
+export async function sendWhatsAppList(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  body: string,
+  buttonLabel: string,
+  rows: Array<{ id: string; title: string; description?: string }>,
+  sectionTitle: string = "Opciones",
+): Promise<any> {
+  try {
+    const normalizedPhone = normalizePhoneNumber(to)
+    const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
+    const payload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: normalizedPhone,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: body },
+        action: {
+          button: buttonLabel.substring(0, 20),
+          sections: [{
+            title: sectionTitle.substring(0, 24),
+            rows: rows.slice(0, 10).map(r => ({
+              id: r.id,
+              title: r.title.substring(0, 24),
+              ...(r.description ? { description: r.description.substring(0, 72) } : {}),
+            })),
+          }],
+        },
+      },
+    }
+    console.log("[v0] [WHATSAPP_API] 📤 List message payload:", JSON.stringify(payload, null, 2))
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      console.error("[v0] [WHATSAPP_API] ❌ Error list message:", JSON.stringify(error, null, 2))
+      throw new Error(`WhatsApp List API error: ${JSON.stringify(error)}`)
+    }
+    const data = await response.json()
+    console.log("[v0] [WHATSAPP_API] ✅ List message sent:", JSON.stringify(data, null, 2))
+    return data
+  } catch (error) {
+    console.error("[v0] [WHATSAPP_API] ❌ Error en sendWhatsAppList:", error)
+    throw error
+  }
+}
+
 export async function sendWhatsAppTemplate(
   phoneNumberId: string,
   accessToken: string,

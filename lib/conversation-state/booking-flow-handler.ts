@@ -308,7 +308,7 @@ export async function handleBookingSelectionIfPending(
           type: "valid_selection",
           selectedOption: found,
           nextStep: "awaiting_search_type_selection",
-          confirmationMessage: `Perfecto, buscaremos turnos en ${found.nombre}. Necesito saber si querés un turno con un médico en particular, por especialidad, o con cualquier médico. Por favor, indicame si preferís:\n\n1. Solicitar turno con un médico en particular\n2. Solicitar turno por especialidad\n3. Solicitar turno con cualquier médico`,
+          confirmationMessage: `Perfecto, elegiste *${found.nombre}*.\n\nAhora decime, ¿cómo te gustaría buscar tu turno?\n\n1. Médico en particular — si ya sabés con qué profesional querés atenderte\n2. Por especialidad — para elegir una especialidad y ver los profesionales disponibles\n3. Cualquier médico disponible — para ver los turnos más próximos\n\nPresioná el botón o respondé con el número.`,
         }
       }
 
@@ -324,7 +324,7 @@ export async function handleBookingSelectionIfPending(
           return {
             handled: true,
             type: "invalid_selection",
-            errorMessage: `No entendí tu selección. Por favor, indicame el número de la opción que preferís:\n\n1. Solicitar turno con un médico en particular\n2. Solicitar turno por especialidad\n3. Solicitar turno con cualquier médico`,
+            errorMessage: `No entendí tu selección. Por favor, respondé con 1, 2 o 3:\n\n1. Médico en particular\n2. Por especialidad\n3. Cualquier médico disponible`,
           }
         }
         await setBookingFlowState(phone, configId, {

@@ -1,5 +1,5 @@
 import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId, clearAllConversationStates } from "@/lib/db"
-import { sendWhatsAppMessage, sendWhatsAppInteractive } from "@/lib/whatsapp-api"
+import { sendWhatsAppMessage, sendWhatsAppInteractive, sendWhatsAppList } from "@/lib/whatsapp-api"
 import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
 import { getAssistantResponse } from "@/lib/openai-tools"
 import { getArgentinaDateTime } from "@/lib/utils/date-utils"
@@ -139,7 +139,7 @@ function extractMessageContent(message: any): { content: string; audioId?: strin
       if (message.interactive?.type === "button_reply") {
         return { content: message.interactive.button_reply?.id || message.interactive.button_reply?.title || "" }
       } else if (message.interactive?.type === "list_reply") {
-        return { content: message.interactive.list_reply?.title || message.interactive.list_reply?.id || "" }
+        return { content: message.interactive.list_reply?.id || message.interactive.list_reply?.title || "" }
       }
       return { content: "" }
     case "audio":
@@ -3181,26 +3181,69 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               try {
                 const sedesResult = await fetchSedes(config.cliente_id)
                 if (sedesResult.success && sedesResult.sedes && sedesResult.sedes.length > 0) {
+                  const sedesMapped = sedesResult.sedes.map(s => ({
+                    numero: s.numero,
+                    id: s.id,
+                    nombre: s.nombre,
+                    domicilio: s.domicilio,
+                    localidad: s.localidad,
+                    provincia: s.provincia,
+                  }))
                   const currentBookingState = await getBookingFlowState(userPhoneNumber, config.id)
                   if (currentBookingState) {
                     await setBookingFlowState(userPhoneNumber, config.id, {
                       ...currentBookingState,
-                      sedeOptions: sedesResult.sedes.map(s => ({
-                        numero: s.numero,
-                        id: s.id,
-                        nombre: s.nombre,
-                        domicilio: s.domicilio,
-                        localidad: s.localidad,
-                        provincia: s.provincia,
-                      })),
+                      sedeOptions: sedesMapped,
                     })
                   }
-                  const sedeListMsg = `${bookingResult.confirmationMessage}\n\n${buildSedesMessage(sedesResult.sedes)}`
-                  await sendDirectResponse(bookingCtx, sedeListMsg, "booking-flow")
+                  // Intentar enviar como lista interactiva (soporta hasta 10 sedes)
+                  try {
+                    const listRows = sedesResult.sedes.map(s => ({
+                      id: String(s.numero),
+                      title: s.nombre.substring(0, 24),
+                      description: [s.domicilio, s.localidad].filter(Boolean).join(', ').substring(0, 72),
+                    }))
+                    // Cuerpo completo: confirmación de obra social + lista numerada + instrucción híbrida
+                    const listBody = `${bookingResult.confirmationMessage}\n\n${buildSedesMessage(sedesResult.sedes)}`
+                    await sendWhatsAppList(
+                      value.metadata.phone_number_id,
+                      config.accessToken,
+                      userPhoneNumber,
+                      listBody,
+                      "Ver sedes",
+                      listRows,
+                      "Sedes disponibles",
+                    )
+                  } catch (listErr) {
+                    // Fallback a texto plano con lista numerada
+                    bookingLogger.warn("List message failed, fallback to text", listErr as Error)
+                    const sedeListMsg = `${bookingResult.confirmationMessage}\n\n${buildSedesMessage(sedesResult.sedes)}`
+                    await sendDirectResponse(bookingCtx, sedeListMsg, "booking-flow")
+                  }
                   return
                 }
               } catch (err) {
                 bookingLogger.warn("Error prefetching sedes for booking flow", err as Error)
+              }
+            }
+
+            // Cuando se transiciona a awaiting_search_type_selection, enviar con Reply Buttons
+            if (bookingResult.nextStep === "awaiting_search_type_selection") {
+              try {
+                await sendWhatsAppInteractive(
+                  value.metadata.phone_number_id,
+                  config.accessToken,
+                  userPhoneNumber,
+                  bookingResult.confirmationMessage,
+                  [
+                    { id: "1", title: "Médico particular" },
+                    { id: "2", title: "Por especialidad" },
+                    { id: "3", title: "Cualquier médico" },
+                  ],
+                )
+                return
+              } catch (intErr) {
+                bookingLogger.warn("Interactive failed for search type, fallback to text", intErr as Error)
               }
             }
 

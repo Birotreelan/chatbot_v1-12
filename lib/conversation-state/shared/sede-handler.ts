@@ -103,7 +103,7 @@ export function buildSedesMessage(
     message += `${sedeInfo}\n`
   })
 
-  message += `\nResponde con el *numero* de la sede que prefieras.`
+  message += `\nRespondé con el número de la sede que preferís o usá el listado para seleccionar una.`
   return message
 }
 
