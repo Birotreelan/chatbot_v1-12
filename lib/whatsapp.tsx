@@ -253,7 +253,9 @@ async function sendExistingPatientResult(
     message?: string
     sedesListRows?: Array<{ id: string; title: string; description?: string }>
     searchTypeButtons?: Array<{ id: string; title: string }>
-    verMasButton?: boolean
+    turnosButtons?: Array<{ id: string; title: string }>
+    confirmationButtons?: boolean
+    atrasButton?: boolean
   },
   phase = "existing_patient_flow"
 ): Promise<void> {
@@ -263,6 +265,17 @@ async function sendExistingPatientResult(
     await saveConversationMessage({ id: nanoid(), role: "assistant", content: msg, timestamp: new Date().toISOString(), phoneNumber: ctx.userPhoneNumber, configId: ctx.configId })
     appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: msg, timestamp: Date.now() }).catch(() => {})
     await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
+  }
+
+  const _tryInteractive = async (buttons: Array<{ id: string; title: string }>, label: string): Promise<boolean> => {
+    try {
+      await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, result.message!, buttons)
+      await _saveHistory(result.message!)
+      return true
+    } catch (err) {
+      console.error(`[WHATSAPP] Error enviando ${label}, fallback a texto:`, err)
+      return false
+    }
   }
 
   // List Message para selección de sede
@@ -276,28 +289,29 @@ async function sendExistingPatientResult(
     }
   }
 
-  // Reply Buttons para tipo de búsqueda
+  // Reply Buttons para tipo de búsqueda (3 opciones de busqueda — texto ya incluye "0. Volver al paso anterior")
   if (result.searchTypeButtons && result.searchTypeButtons.length > 0) {
-    try {
-      await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, result.message, result.searchTypeButtons)
-      await _saveHistory(result.message)
-      return
-    } catch (btnErr) {
-      console.error("[WHATSAPP] Error enviando search type buttons, fallback a texto:", btnErr)
-    }
+    if (await _tryInteractive(result.searchTypeButtons, "search type buttons")) return
   }
 
-  // Reply Button "Ver más" para paginación de turnos
-  if (result.verMasButton) {
-    try {
-      await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, result.message, [
-        { id: "ver_mas", title: "Ver más" },
-      ])
-      await _saveHistory(result.message)
-      return
-    } catch (btnErr) {
-      console.error("[WHATSAPP] Error enviando Ver más button, fallback a texto:", btnErr)
-    }
+  // Reply Buttons para paginación de turnos ("Ver más" y/o "Volver a paso ant.")
+  if (result.turnosButtons && result.turnosButtons.length > 0) {
+    if (await _tryInteractive(result.turnosButtons, "turnos buttons")) return
+  }
+
+  // Reply Buttons para confirmación de turno
+  if (result.confirmationButtons) {
+    const btns = [
+      { id: "1", title: "Sí, confirmar" },
+      { id: "2", title: "No, modificar" },
+      { id: "0", title: "Volver a paso ant." },
+    ]
+    if (await _tryInteractive(btns, "confirmation buttons")) return
+  }
+
+  // Reply Button "Volver a paso anterior" para nombre de profesional (texto libre)
+  if (result.atrasButton) {
+    if (await _tryInteractive([{ id: "0", title: "Volver a paso ant." }], "atras button")) return
   }
 
   await sendDirectResponse(ctx, result.message, phase)
@@ -3005,7 +3019,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               message: detectionResult.message,
               sedesListRows: _dr.sedesListRows,
               searchTypeButtons: _dr.searchTypeButtons,
-              verMasButton: _dr.verMasButton,
+              turnosButtons: _dr.turnosButtons,
+              confirmationButtons: _dr.confirmationButtons,
+              atrasButton: _dr.atrasButton,
             }, "detection_flow")
           }
 

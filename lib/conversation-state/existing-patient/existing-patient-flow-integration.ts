@@ -143,8 +143,12 @@ export interface ExistingPatientResult {
   sedesListRows?: Array<{ id: string; title: string; description?: string }>
   /** Buttons for WhatsApp Reply Buttons — present when the message is a search type prompt */
   searchTypeButtons?: Array<{ id: string; title: string }>
-  /** True when there are more turnos to show — triggers a "Ver más" Reply Button */
-  verMasButton?: boolean
+  /** Buttons for turnos pagination: "Ver más" (when hasMore) + "Volver a paso ant." */
+  turnosButtons?: Array<{ id: string; title: string }>
+  /** True when message is a confirmation prompt — triggers 3 Reply Buttons */
+  confirmationButtons?: boolean
+  /** True when message is a professional name prompt — triggers "Volver a paso ant." button */
+  atrasButton?: boolean
 }
 
 /**
@@ -718,6 +722,7 @@ async function handleBackNavigation(
         handled: true,
         message: withBackOption(buildProfessionalNameRequestMessage(), 'awaiting_professional_name', 'existing'),
         nextPhase: 'awaiting_professional_name',
+        atrasButton: true,
       }
     }
 
@@ -790,6 +795,7 @@ async function handleBackNavigation(
           'existing'
         ),
         nextPhase: 'awaiting_confirmation',
+        confirmationButtons: true,
       }
     }
 
@@ -896,6 +902,7 @@ async function handleSearchTypePhase(
         handled: true,
         message: buildProfessionalNameRequestMessage(),
         nextPhase: 'awaiting_professional_name',
+        atrasButton: true,
       }
     }
 
@@ -1212,7 +1219,9 @@ async function searchAndShowTurnos(
       true
     ),
     nextPhase: 'awaiting_turno_selection',
-    verMasButton: window.hasMore,
+    turnosButtons: window.hasMore
+      ? [{ id: "ver_mas", title: "Ver más" }, { id: "0", title: "Volver a paso ant." }]
+      : [{ id: "0", title: "Volver a paso ant." }],
   }
 }
 
@@ -1264,7 +1273,9 @@ async function handleTurnoPhase(
         false
       ),
       nextPhase: 'awaiting_turno_selection',
-      verMasButton: nextWindow.hasMore,
+      turnosButtons: nextWindow.hasMore
+        ? [{ id: "ver_mas", title: "Ver más" }, { id: "0", title: "Volver a paso ant." }]
+        : [{ id: "0", title: "Volver a paso ant." }],
     }
   }
 
@@ -1341,6 +1352,7 @@ async function handleTurnoPhase(
         }
       ),
       nextPhase: 'awaiting_confirmation',
+      confirmationButtons: true,
     }
   }
 
@@ -1391,6 +1403,7 @@ async function handleEmailPhase(
         }
       ),
       nextPhase: 'awaiting_confirmation',
+      confirmationButtons: true,
     }
   }
 
@@ -1588,6 +1601,7 @@ async function handleConfirmationPhase(
     handled: true,
     message: result.message,
     nextPhase: 'awaiting_confirmation',
+    confirmationButtons: true,
   }
 }
 
@@ -1640,6 +1654,7 @@ async function handleModifyNombrePhase(
       }
     ),
     nextPhase: 'awaiting_confirmation',
+    confirmationButtons: true,
   }
 }
 
@@ -1685,6 +1700,7 @@ async function handleModifyDniPhase(
       }
     ),
     nextPhase: 'awaiting_confirmation',
+    confirmationButtons: true,
   }
 }
 
@@ -1735,6 +1751,7 @@ async function handleModifyObraSocialPhase(
         }
       ),
       nextPhase: 'awaiting_confirmation',
+      confirmationButtons: true,
     }
   } catch (error) {
     logger.error('Error validating obra social', error as Error)

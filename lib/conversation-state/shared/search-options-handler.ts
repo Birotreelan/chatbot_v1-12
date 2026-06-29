@@ -100,7 +100,9 @@ Ahora decime, como te gustaria buscar tu turno?
 
 ${optionsText}
 
-Responde con el *numero* de la opcion que prefieras.`
+Presioná el botón o respondé con el *número* de la opción que prefieras.
+
+0. Volver al paso anterior`
 }
 
 /**
