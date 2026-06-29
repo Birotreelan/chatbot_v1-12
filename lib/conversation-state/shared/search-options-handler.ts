@@ -73,6 +73,17 @@ function getAvailableOptions(config?: SearchOptionsConfig): Array<{ number: numb
 }
 
 /**
+ * Devuelve los botones de tipo de búsqueda para WhatsApp Reply Buttons.
+ * Cada botón usa el número renumerado como id y el label como title (max 20 chars).
+ */
+export function buildSearchOptionsButtons(config?: SearchOptionsConfig): Array<{ id: string; title: string }> {
+  return getAvailableOptions(config).slice(0, 3).map(opt => ({
+    id: String(opt.number),
+    title: opt.label.substring(0, 20),
+  }))
+}
+
+/**
  * Construye el mensaje de opciones de busqueda
  */
 export function buildSearchOptionsMessage(sedeName: string, config?: SearchOptionsConfig): string {

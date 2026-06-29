@@ -242,6 +242,66 @@ async function sendDirectResponse(
 }
 
 /**
+ * Envía el resultado de initializeExistingPatientFlow o handleExistingPatientMessage.
+ * - Si tiene sedesListRows → WhatsApp List Message
+ * - Si tiene searchTypeButtons → WhatsApp Reply Buttons
+ * - De lo contrario → texto plano vía sendDirectResponse
+ */
+async function sendExistingPatientResult(
+  ctx: DirectResponseContext,
+  result: {
+    message?: string
+    sedesListRows?: Array<{ id: string; title: string; description?: string }>
+    searchTypeButtons?: Array<{ id: string; title: string }>
+  },
+  phase = "existing_patient_flow"
+): Promise<void> {
+  if (!result.message) return
+
+  // Intentar List Message para selección de sede
+  if (result.sedesListRows && result.sedesListRows.length > 0) {
+    try {
+      await sendWhatsAppList(
+        ctx.phoneNumberId,
+        ctx.accessToken,
+        ctx.userPhoneNumber,
+        result.message,
+        "Ver sedes",
+        result.sedesListRows,
+        "Sedes disponibles"
+      )
+      await saveConversationMessage({ id: nanoid(), role: "assistant", content: result.message, timestamp: new Date().toISOString(), phoneNumber: ctx.userPhoneNumber, configId: ctx.configId })
+      appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: result.message, timestamp: Date.now() }).catch(() => {})
+      await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
+      return
+    } catch (listErr) {
+      console.error("[WHATSAPP] Error enviando sede list message, fallback a texto:", listErr)
+    }
+  }
+
+  // Intentar Reply Buttons para tipo de búsqueda
+  if (result.searchTypeButtons && result.searchTypeButtons.length > 0) {
+    try {
+      await sendWhatsAppInteractive(
+        ctx.phoneNumberId,
+        ctx.accessToken,
+        ctx.userPhoneNumber,
+        result.message,
+        result.searchTypeButtons
+      )
+      await saveConversationMessage({ id: nanoid(), role: "assistant", content: result.message, timestamp: new Date().toISOString(), phoneNumber: ctx.userPhoneNumber, configId: ctx.configId })
+      appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: result.message, timestamp: Date.now() }).catch(() => {})
+      await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
+      return
+    } catch (btnErr) {
+      console.error("[WHATSAPP] Error enviando search type buttons, fallback a texto:", btnErr)
+    }
+  }
+
+  await sendDirectResponse(ctx, result.message, phase)
+}
+
+/**
  * Confirma un turno contra el sistema externo (proxy).
  * Devuelve true solo si el proxy respondió success === true.
  * Centraliza el payload de "confirmar_turno" para que todos los caminos de
@@ -758,7 +818,7 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
           )
 
           if (bookingResult?.handled && bookingResult.message) {
-            await sendDirectResponse(ctx, bookingResult.message, "cancel_and_book_new")
+            await sendExistingPatientResult(ctx, bookingResult, "cancel_and_book_new")
           }
           return true
         }
@@ -2883,7 +2943,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               userMessage
             )
             if (existingResult?.handled && existingResult.message) {
-              await sendDirectResponse(detectionCtx, existingResult.message, "familiar_existing_patient")
+              await sendExistingPatientResult(detectionCtx, existingResult, "familiar_existing_patient")
               await completePatientDetectionFlow(userPhoneNumber, config.id)
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
@@ -2938,7 +2998,15 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
         if (detectionResult?.handled) {
           if (detectionResult.message) {
-            await sendDirectResponse(detectionCtx, detectionResult.message, "detection_flow")
+            const _sedesRows = (detectionResult as any).sedesListRows
+            const _searchBtns = (detectionResult as any).searchTypeButtons
+            if (_sedesRows && _sedesRows.length > 0) {
+              await sendExistingPatientResult(detectionCtx, { message: detectionResult.message, sedesListRows: _sedesRows }, "detection_flow")
+            } else if (_searchBtns && _searchBtns.length > 0) {
+              await sendExistingPatientResult(detectionCtx, { message: detectionResult.message, searchTypeButtons: _searchBtns }, "detection_flow")
+            } else {
+              await sendDirectResponse(detectionCtx, detectionResult.message, "detection_flow")
+            }
           }
 
           // Cuando el paciente seleccionó una opción del menú inicial, derivar al flujo correcto
@@ -2982,12 +3050,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   }
                 )
                 if (existingResult?.handled && existingResult.message) {
-                  await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")
+                  await sendExistingPatientResult(detectionCtx, existingResult, "existing_patient_flow")
                 }
                 await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                 return
               }
-              
+
               // Derivar a flujo de paciente existente para reservar turno
               const existingResult = await initializeExistingPatientFlow(
                 userPhoneNumber,
@@ -3002,9 +3070,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 userMessage // Para entity extraction del mensaje que disparó el flujo
               )
               if (existingResult?.handled && existingResult.message) {
-                await sendDirectResponse(detectionCtx, existingResult.message, "existing_patient_flow")
+                await sendExistingPatientResult(detectionCtx, existingResult, "existing_patient_flow")
               }
-              
+
               // Limpiar estado de detección DESPUÉS de inicializar el flujo
               await completePatientDetectionFlow(userPhoneNumber, config.id)
             } else if (detectionResult.action === 'confirm_appointment' || detectionResult.action === 'cancel_appointment' || detectionResult.action === 'cancel_and_book_new_appointment') {
@@ -3568,7 +3636,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 initialMsg
               )
               if (existingResult?.handled && existingResult.message) {
-                await sendDirectResponse(dispatcherCtxDirect, existingResult.message, "ai-dispatcher-existing")
+                await sendExistingPatientResult(dispatcherCtxDirect, existingResult, "ai-dispatcher-existing")
               }
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
@@ -3640,7 +3708,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   }
                 )
                 if (existRes?.handled && existRes.message) {
-                  await sendDirectResponse(dispatcherCtxDirect, existRes.message, "ai-dispatcher-continue-existing")
+                  await sendExistingPatientResult(dispatcherCtxDirect, existRes, "ai-dispatcher-continue-existing")
                 }
                 await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                 return

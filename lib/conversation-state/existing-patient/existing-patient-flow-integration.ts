@@ -22,6 +22,7 @@ import {
 } from '../shared/sede-handler'
 import {
   buildSearchOptionsMessage,
+  buildSearchOptionsButtons,
   handleSearchTypeSelection,
   buildProfessionalNameRequestMessage,
   type SearchOptionsConfig,
@@ -138,6 +139,10 @@ export interface ExistingPatientResult {
   nextPhase?: string
   shouldCallOpenAI?: boolean
   openAIContext?: string
+  /** Rows for WhatsApp List Message — present when the message is a sede selection prompt */
+  sedesListRows?: Array<{ id: string; title: string; description?: string }>
+  /** Buttons for WhatsApp Reply Buttons — present when the message is a search type prompt */
+  searchTypeButtons?: Array<{ id: string; title: string }>
 }
 
 /**
@@ -485,6 +490,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
       handled: true,
       message: `${welcomeMessage}\n\n${buildSearchOptionsMessage(sedeFastPath.nombre, undefined)}`,
       nextPhase: 'awaiting_search_type',
+      searchTypeButtons: buildSearchOptionsButtons(undefined),
     }
   }
 
@@ -516,10 +522,17 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
 
   logger.info('Flow initialized', { sedesCount: sedesResult.sedes.length, profesionalMencionado })
 
+  const sedesListRows = sedesResult.sedes.map(s => ({
+    id: String(s.numero),
+    title: s.nombre.substring(0, 24),
+    description: [s.domicilio, s.localidad].filter(Boolean).join(', ').substring(0, 72),
+  }))
+
   return {
     handled: true,
     message: `${welcomeMessage}\n\n${buildSedesMessage(sedesResult.sedes)}`,
     nextPhase: 'awaiting_sede',
+    sedesListRows,
   }
 }
 
@@ -687,6 +700,7 @@ async function handleBackNavigation(
         handled: true,
         message: withBackOption(buildSearchOptionsMessage(state.sedeNombre || '', searchOptionsConfig), 'awaiting_search_type', 'existing'),
         nextPhase: 'awaiting_search_type',
+        searchTypeButtons: buildSearchOptionsButtons(searchOptionsConfig),
       }
     }
 
@@ -826,6 +840,7 @@ async function handleSedePhase(
       handled: true,
       message: buildSearchOptionsMessage(state.sedeNombre, searchOptionsConfig),
       nextPhase: 'awaiting_search_type',
+      searchTypeButtons: buildSearchOptionsButtons(searchOptionsConfig),
     }
   }
 
