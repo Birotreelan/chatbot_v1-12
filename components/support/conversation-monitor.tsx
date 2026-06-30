@@ -143,6 +143,8 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId }: Conve
 
   const { getAuthHeaders, sessionId } = useSession()
   const convPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Track whether the current contact has already received its initial full load
+  const isInitialLoadRef = useRef(true)
 
   // ── Load contacts ──────────────────────────────────────────────────────────
   const loadContacts = useCallback(async () => {
@@ -170,42 +172,71 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId }: Conve
     }
   }, [getAuthHeaders, sessionId, selectedContact])
 
+  // Contacts poll: reduced from 15s → 30s (2× less reads)
   useEffect(() => {
     loadContacts()
-    const interval = setInterval(loadContacts, 15000)
+    const interval = setInterval(loadContacts, 30000)
     return () => clearInterval(interval)
   }, []) // intentionally omit loadContacts to avoid restart loop
 
   // ── Load conversation ──────────────────────────────────────────────────────
+  // initial=true  → limit=50 (full history, shown once when contact is selected)
+  // initial=false → limit=10 (only last 10 msgs, merged by ID to detect new ones)
+  // This reduces poll bandwidth by ~15× (10 msgs × 500 B vs 150 msgs × 500 B)
   const loadConversation = useCallback(
-    async (contact: MonitorContact) => {
-      setConvLoading(true)
+    async (contact: MonitorContact, initial = false) => {
+      if (initial) setConvLoading(true)
       try {
-        let url = `/api/support/monitor/conversation?configId=${contact.configId}&phoneNumber=${encodeURIComponent(contact.phoneNumber)}`
+        const limit = initial ? 50 : 10
+        let url = `/api/support/monitor/conversation?configId=${contact.configId}&phoneNumber=${encodeURIComponent(contact.phoneNumber)}&limit=${limit}`
         if (sessionId) url += `&_sid=${encodeURIComponent(sessionId)}`
         const res = await fetch(url, { credentials: "include", headers: { ...getAuthHeaders() } })
         if (!res.ok) throw new Error("Error al cargar conversación")
         const data = await res.json()
-        setConversation({
-          messages: data.messages || [],
-          activeSession: data.activeSession || null,
-          configName: data.configName || contact.configName,
-        })
+        const incoming: HumanSupportMessage[] = data.messages || []
+
+        if (initial) {
+          // Full replace on initial load
+          setConversation({
+            messages: incoming,
+            activeSession: data.activeSession || null,
+            configName: data.configName || contact.configName,
+          })
+        } else {
+          // Incremental: merge by message ID — only append truly new messages
+          setConversation((prev) => {
+            if (!prev) return {
+              messages: incoming,
+              activeSession: data.activeSession || null,
+              configName: data.configName || contact.configName,
+            }
+            const existingIds = new Set(prev.messages.map((m) => m.id))
+            const newMsgs = incoming.filter((m) => !existingIds.has(m.id))
+            return {
+              ...prev,
+              activeSession: data.activeSession || prev.activeSession,
+              messages: newMsgs.length > 0 ? [...prev.messages, ...newMsgs] : prev.messages,
+            }
+          })
+        }
       } catch (err) {
         console.error("[Monitor] Error cargando conversación:", err)
       } finally {
-        setConvLoading(false)
+        if (initial) setConvLoading(false)
       }
     },
     [getAuthHeaders, sessionId]
   )
 
   // Poll conversation when one is selected
+  // Interval reduced from 5s → 20s (4× less calls)
   useEffect(() => {
     if (convPollRef.current) clearInterval(convPollRef.current)
     if (!selectedContact) return
-    loadConversation(selectedContact)
-    convPollRef.current = setInterval(() => loadConversation(selectedContact), 5000)
+    isInitialLoadRef.current = true
+    loadConversation(selectedContact, true) // full initial load
+    isInitialLoadRef.current = false
+    convPollRef.current = setInterval(() => loadConversation(selectedContact, false), 20000)
     return () => {
       if (convPollRef.current) clearInterval(convPollRef.current)
     }

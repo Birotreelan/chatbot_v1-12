@@ -83,8 +83,8 @@ export async function GET(request: Request) {
       // Enviar estado inicial inmediatamente
       await sendUpdate()
 
-      // Configurar intervalo para updates (cada 10 segundos)
-      intervalId = setInterval(sendUpdate, 10000)
+      // Configurar intervalo para updates (cada 30 segundos — reducido de 10s para ahorrar bandwidth)
+      intervalId = setInterval(sendUpdate, 30000)
 
       // Manejar señal de abort (cliente desconectado)
       request.signal.addEventListener("abort", () => {

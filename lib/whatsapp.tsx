@@ -2034,7 +2034,29 @@ IMPORTANTE: Busca en el historial de la conversación la información del turno 
               break
 
             default:
-              // Error genérico
+              // Si es botón de confirmación, evitar pasar a OpenAI (genera mensajes de error con datos
+              // de clínica que confunden al paciente). Enviar error directo y retornar.
+              if (!isCancellationButton) {
+                console.error("[PROXY] Fallo de proxy no manejado para botón de confirmación", {
+                  errorType,
+                  proxyResponse,
+                })
+                const errorCtxDefault: DirectResponseContext = {
+                  phoneNumberId: value.metadata.phone_number_id,
+                  accessToken: config.accessToken,
+                  userPhoneNumber,
+                  configId: config.id,
+                  clienteId: config.cliente_id,
+                }
+                await sendDirectResponse(
+                  errorCtxDefault,
+                  "No pudimos procesar tu confirmación en este momento. Por favor, intentá de nuevo en unos minutos.",
+                  "button_confirm_proxy_default_error"
+                )
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
+              }
+              // Error genérico para otros botones — pasar a OpenAI con contexto
               userMessage = `El paciente presionó "${originalMessage}" pero hubo un error en el procesamiento.
 
 [ERROR_PROCESAMIENTO_BOTON]
@@ -2107,7 +2129,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // INTERCEPTAR DNI (Sprint 5: Extracción y Validación de DNI)
     // Si hay un estado awaiting_dni activo, validar directamente sin OpenAI
     // ============================================================================
-    if (message.type === "text") {
+    if (message.type === "text" || message.type === "button" || message.type === "interactive") {
       const dniFlags = await getEffectiveFeatureFlags(config.id)
       if (dniFlags.directDNIExtraction) {
         const dniResult = await handleDNIIfAwaiting(userMessage, userPhoneNumber, config.id)
@@ -2151,7 +2173,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // IMPORTANTE: Ejecutar PRIMERO porque si el usuario solo dice "igualmente"
     // no queremos iniciar ningún flujo
     // ============================================================================
-    if (message.type === "text") {
+    if (message.type === "text" || message.type === "button" || message.type === "interactive") {
       const reciprocalFlags = await getEffectiveFeatureFlags(config.id)
       
       if (reciprocalFlags.reciprocalFarewellSilence) {
@@ -2191,7 +2213,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // "2" → no quiere: limpiamos el estado y enviamos despedida
     // Otro → re-preguntamos
     // ============================================================================
-    if (message.type === "text" && config.cliente_id) {
+    if ((message.type === "text" || message.type === "button" || message.type === "interactive") && config.cliente_id) {
       const hasPendingClinicaOffer = await getClinicaCancellationOffer(userPhoneNumber, config.id)
       if (hasPendingClinicaOffer) {
         const clinicaOfferCtx: DirectResponseContext = {
@@ -2241,7 +2263,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // turno_confirmado_clinica → confirmar que el turno está confirmado
     // En ambos casos respondemos de forma determinista (sin OpenAI) y limpiamos el contexto.
     // ============================================================================
-    if (message.type === "text" && config.cliente_id) {
+    if ((message.type === "text" || message.type === "button" || message.type === "interactive") && config.cliente_id) {
       const clinicaContext = await getAppointmentContext(userPhoneNumber, config.id)
       const clinicaTipoMensaje = (clinicaContext as any)?.tipo_mensaje as string | undefined
 
@@ -2325,9 +2347,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // cuando hay un template reciente (ventana 24h) pero sin flowState pendiente
     // IMPORTANTE: Ejecutar ANTES de despedida porque "La confirmo. Gracias" contiene "Gracias"
     // ============================================================================
-    if (message.type === "text") {
+    if (message.type === "text" || message.type === "button" || message.type === "interactive") {
       const directConfirmFlags = await getEffectiveFeatureFlags(config.id)
-      
+
       if (directConfirmFlags.directConfirmCancelDetection && config.cliente_id) {
   
         

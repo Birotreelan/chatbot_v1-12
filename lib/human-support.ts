@@ -106,72 +106,72 @@ export async function getSupportSession(sessionId: string): Promise<HumanSupport
 }
 
 // Obtener sesiones pendientes (filtradas por tenant si aplica)
+// OPTIMIZACIÓN: usa pipeline para agrupar todos los GETs en una sola request HTTP
+// Antes: 1 zrange + N gets individuales = N+1 requests
+// Ahora: 1 zrange + 1 pipeline con N gets = 2 requests
 export async function getPendingSessions(tenantId: string | null = null): Promise<HumanSupportSession[]> {
   const redis = getRedisClient()
   if (!redis) return []
 
-  console.log("[HUMAN_SUPPORT] getPendingSessions llamado con tenantId:", tenantId)
-
   // Obtener todos los sessionIds pendientes (ordenados por timestamp)
   const sessionIds = await redis.zrange(SUPPORT_PENDING_SET, 0, -1)
 
-  console.log("[HUMAN_SUPPORT] SessionIds pendientes en Redis:", sessionIds)
+  if (!sessionIds || sessionIds.length === 0) return []
 
-  if (!sessionIds || sessionIds.length === 0) {
-    console.log("[HUMAN_SUPPORT] No hay sesiones pendientes en Redis")
-    return []
+  // Pipeline: todos los GETs en una sola request HTTP
+  const pipeline = redis.pipeline()
+  for (const sessionId of sessionIds) {
+    pipeline.get(`${SUPPORT_SESSION_PREFIX}${sessionId}`)
   }
+  const results = await pipeline.exec()
 
   const sessions: HumanSupportSession[] = []
-
-  for (const sessionId of sessionIds) {
-    const session = await getSupportSession(sessionId as string)
-    if (session) {
-      console.log("[HUMAN_SUPPORT] Sesión encontrada:", {
-        id: session.id,
-        tenantId: session.tenantId,
-        configId: session.configId,
-        status: session.status,
-        phoneNumber: session.phoneNumber
-      })
-      // Filtrar por tenant si no es super admin
-      if (tenantId === null || session.tenantId === tenantId) {
-        console.log("[HUMAN_SUPPORT] Sesión INCLUIDA (tenantId coincide o es null)")
+  for (const raw of results) {
+    if (!raw) continue
+    try {
+      const session = (typeof raw === "string" ? JSON.parse(raw) : raw) as HumanSupportSession
+      if (session && (tenantId === null || session.tenantId === tenantId)) {
         sessions.push(session)
-      } else {
-        console.log("[HUMAN_SUPPORT] Sesión EXCLUIDA - tenantId no coincide:", session.tenantId, "vs", tenantId)
       }
+    } catch {
+      // skip malformed session
     }
   }
 
-  console.log("[HUMAN_SUPPORT] Total sesiones filtradas:", sessions.length)
   return sessions
 }
 
 // Obtener sesiones activas de un agente
+// OPTIMIZACIÓN: pipeline para agrupar los GETs de sesión
 export async function getAgentActiveSessions(agentId: string): Promise<HumanSupportSession[]> {
   const redis = getRedisClient()
   if (!redis) return []
 
-  console.log("[HUMAN_SUPPORT] getAgentActiveSessions llamado con agentId:", agentId)
-
   const agentSessionsKey = `${SUPPORT_AGENT_SESSIONS_PREFIX}${agentId}:active`
   const sessionIds = await redis.smembers(agentSessionsKey)
 
-  console.log("[HUMAN_SUPPORT] Session IDs del agente:", sessionIds)
-
   if (!sessionIds || sessionIds.length === 0) return []
 
-  const sessions: HumanSupportSession[] = []
-
+  // Pipeline: todos los GETs en una sola request HTTP
+  const pipeline = redis.pipeline()
   for (const sessionId of sessionIds) {
-    const session = await getSupportSession(sessionId as string)
-    if (session && session.status === "in_progress") {
-      sessions.push(session)
+    pipeline.get(`${SUPPORT_SESSION_PREFIX}${sessionId}`)
+  }
+  const results = await pipeline.exec()
+
+  const sessions: HumanSupportSession[] = []
+  for (const raw of results) {
+    if (!raw) continue
+    try {
+      const session = (typeof raw === "string" ? JSON.parse(raw) : raw) as HumanSupportSession
+      if (session && session.status === "in_progress") {
+        sessions.push(session)
+      }
+    } catch {
+      // skip malformed session
     }
   }
 
-  console.log("[HUMAN_SUPPORT] Sesiones activas encontradas:", sessions.length)
   return sessions
 }
 

@@ -58,12 +58,20 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
 
     console.log(`[CONVERSATIONS] ✅ Cliente Redis obtenido`)
 
+    // OPTIMIZACIÓN Bloque 4: truncar contenido largo antes de almacenar
+    // Template-context blocks y mensajes de sistema pueden ser 3-5 KB cada uno.
+    // Truncar a 1000 chars reduce el tamaño almacenado ~70% en esos casos.
+    const MAX_CONTENT_LENGTH = 1000
+    const rawContent = message.content || ""
+    const truncatedContent = rawContent.length > MAX_CONTENT_LENGTH
+      ? rawContent.substring(0, MAX_CONTENT_LENGTH) + "…[truncado]"
+      : rawContent
+
     const validatedMessage = {
       ...message,
+      content: truncatedContent,
       timestamp: ensureValidTimestamp(message.timestamp),
     }
-
-    console.log(`[CONVERSATIONS] ✅ Mensaje validado:`, JSON.stringify(validatedMessage, null, 2))
 
     // Claves para almacenamiento
     const conversationKey = `${CONVERSATION_PREFIX}${message.configId}:${message.phoneNumber}`
