@@ -1220,8 +1220,8 @@ async function searchAndShowTurnos(
     ),
     nextPhase: 'awaiting_turno_selection',
     turnosButtons: window.hasMore
-      ? [{ id: "ver_mas", title: "Ver más" }, { id: "0", title: "Volver a paso ant." }]
-      : [{ id: "0", title: "Volver a paso ant." }],
+      ? [{ id: "ver_mas", title: "Ver más" }]
+      : [],
   }
 }
 
@@ -1274,8 +1274,8 @@ async function handleTurnoPhase(
       ),
       nextPhase: 'awaiting_turno_selection',
       turnosButtons: nextWindow.hasMore
-        ? [{ id: "ver_mas", title: "Ver más" }, { id: "0", title: "Volver a paso ant." }]
-        : [{ id: "0", title: "Volver a paso ant." }],
+        ? [{ id: "ver_mas", title: "Ver más" }]
+        : [],
     }
   }
 
