@@ -34,12 +34,18 @@ export function buildConfirmationMessage(
     dni?: string
     telefono?: string
     email?: string
+    esFamiliar?: boolean
   }
 ): string {
   const fechaFormateada = formatDateForDisplay(turno.fecha)
   const primerNombre = getFirstName(patientName)
 
-  let message = `${primerNombre}, para confirmar tu reserva necesito verificar los datos:\n\n`
+  let message: string
+  if (patientData?.esFamiliar) {
+    message = `Por último, necesito que verifiques que todos los datos de la solicitud de turno de *${primerNombre}* son correctos.\n\n`
+  } else {
+    message = `${primerNombre}, para confirmar tu reserva necesito verificar los datos:\n\n`
+  }
 
   message += `**DATOS DEL PACIENTE:**\n\n`
   message += `Apellido: ${patientData?.apellido || ''}\n\n`

@@ -301,7 +301,7 @@ async function sendExistingPatientResult(
       // 1. Texto de la lista (plain text)
       await sendWhatsAppMessage(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, msg)
       // 2. Botones con body corto
-      const buttonBody = "¿Cómo deseás continuar? Podés enviarme el número del turno que querés reservar o usar el botón para ver más fechas disponibles."
+      const buttonBody = "¿Cómo deseás continuar? Podés enviarme el *número* del turno que querés reservar o usar el botón para ver más fechas disponibles."
       await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, buttonBody, buttons)
       await _saveHistory(msg)
       return true

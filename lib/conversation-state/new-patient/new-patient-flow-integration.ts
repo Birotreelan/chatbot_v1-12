@@ -608,6 +608,7 @@ async function handleBackNavigation(
             nombre: state.nombre,
             dni: state.dni,
             email: state.email,
+            esFamiliar: state.esFamiliar,
           }
         ),
         'awaiting_confirmation',
@@ -1498,7 +1499,7 @@ async function handleTurnoPhase(
         nombreCompleto,
         state.sedeNombre,
         state.obraSocialNombre,
-        { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: state.telefono }
+        { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: state.telefono, esFamiliar: state.esFamiliar }
       ),
       confirmationButtons: true,
     }
@@ -1538,6 +1539,7 @@ async function handleEmailPhase(
           dni: state.dni,
           telefono: state.telefono,
           email: state.email,
+          esFamiliar: state.esFamiliar,
         }
       ),
       confirmationButtons: true,
@@ -1730,7 +1732,7 @@ async function handleModifyNombreStep2Phase(
       nombreCompleto,
       state.sedeNombre,
       state.obraSocialNombre,
-      { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email }
+      { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email, esFamiliar: state.esFamiliar }
     ),
     confirmationButtons: true,
   }
@@ -1770,7 +1772,7 @@ async function handleModifyDniPhase(
       nombreCompleto,
       state.sedeNombre,
       state.obraSocialNombre,
-      { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email }
+      { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email, esFamiliar: state.esFamiliar }
     ),
     confirmationButtons: true,
   }
@@ -1827,7 +1829,7 @@ async function handleModifyObraSocialPhase(
         nombreCompleto,
         state.sedeNombre,
         state.obraSocialNombre,
-        { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email }
+        { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email, esFamiliar: state.esFamiliar }
       ),
       confirmationButtons: true,
     }
