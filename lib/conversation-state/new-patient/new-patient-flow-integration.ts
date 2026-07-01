@@ -28,6 +28,7 @@ import { generateWelcomeMessage, generateObraSocialRequest } from '../response-g
 import {
   fetchSedes,
   buildSedesMessage,
+  buildSedesListRows,
   handleSedeSelection as handleSedeSelectionShared,
   buildSedesErrorMessage,
   type SedeInterruptionOptions,
@@ -162,6 +163,16 @@ export interface NewPatientResult {
   }
   shouldCallOpenAI?: boolean
   openAIContext?: string
+  /** Rows for WhatsApp List Message — set when showing sede selection */
+  sedesListRows?: Array<{ id: string; title: string; description?: string }>
+  /** Buttons for WhatsApp Reply Buttons — set when showing search type prompt */
+  searchTypeButtons?: Array<{ id: string; title: string }>
+  /** Buttons for turnos pagination */
+  turnosButtons?: Array<{ id: string; title: string }>
+  /** True when message is a confirmation prompt */
+  confirmationButtons?: boolean
+  /** True when message needs a single "Volver a paso ant." button */
+  atrasButton?: boolean
 }
 
 /**
@@ -500,7 +511,11 @@ async function handleBackNavigation(
       }
       await saveFlowState(phone, state)
       const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
-      return reRender(buildSedesMessage(state.sedesOpciones, nombreCompleto || undefined, state.obraSocialNombre), 'awaiting_sede')
+      return {
+        handled: true,
+        message: withBackOption(buildSedesMessage(state.sedesOpciones, nombreCompleto || undefined, state.obraSocialNombre), 'awaiting_sede', 'new'),
+        sedesListRows: buildSedesListRows(state.sedesOpciones),
+      }
     }
 
     case 'awaiting_search_type': {
@@ -968,25 +983,15 @@ async function transitionToSedes(
   state.phase = 'awaiting_sede'
   await saveFlowState(phone, state)
 
-  // Para familiar: el encabezado del mensaje menciona al familiar, no al que escribe
+  // Para familiar: construir intro personalizada + lista de sedes
   let sedesMsg: string
   if (state.esFamiliar) {
     const primerNombre = state.nombre || ''
-    let msg = primerNombre ? `Perfecto. ` : ``
+    let intro = primerNombre ? `Perfecto. ` : ``
     if (state.obraSocialNombre) {
-      msg += `La cobertura de *${primerNombre}* es *${state.obraSocialNombre}*.\n\n`
+      intro += `La cobertura de *${primerNombre}* es *${state.obraSocialNombre}*.\n\n`
     }
-    msg += `Para continuar, selecciona la sede donde se va a atender:\n\n`
-    sedesResult.sedes.forEach((sede) => {
-      let sedeInfo = `${sede.numero}. *${sede.nombre}*`
-      const ubicacionParts = [sede.domicilio, sede.localidad, sede.provincia].filter(Boolean)
-      if (ubicacionParts.length > 0) {
-        sedeInfo += `\n   Ubicacion: ${ubicacionParts.join(', ')}`
-      }
-      msg += `${sedeInfo}\n`
-    })
-    msg += `\nResponde con el *numero* de la sede que prefieras.`
-    sedesMsg = msg
+    sedesMsg = intro + buildSedesMessage(sedesResult.sedes)
   } else {
     sedesMsg = buildSedesMessage(sedesResult.sedes, nombreCompleto, state.obraSocialNombre)
   }
@@ -994,6 +999,7 @@ async function transitionToSedes(
   return {
     handled: true,
     message: sedesMsg,
+    sedesListRows: buildSedesListRows(sedesResult.sedes),
     patientInfo: {
       dni: state.dni,
       name: nombreCompleto,
@@ -1121,6 +1127,7 @@ async function handleSearchTypePhase(
       return {
         handled: true,
         message: buildSedesMessage(state.sedesOpciones),
+        sedesListRows: buildSedesListRows(state.sedesOpciones),
       }
     }
   }

@@ -67,6 +67,20 @@ export async function fetchSedes(clientId: string): Promise<{
 }
 
 /**
+ * Construye las filas para el WhatsApp List Message de sedes.
+ * Reutilizable por cualquier flujo (new patient, existing patient).
+ */
+export function buildSedesListRows(
+  sedes: SedeOption[]
+): Array<{ id: string; title: string; description?: string }> {
+  return sedes.map((s) => ({
+    id: String(s.numero),
+    title: s.nombre.substring(0, 24),
+    description: [s.domicilio, s.localidad].filter(Boolean).join(', ').substring(0, 72),
+  }))
+}
+
+/**
  * Construye el mensaje de seleccion de sedes
  */
 export function buildSedesMessage(

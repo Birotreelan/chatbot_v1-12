@@ -3103,7 +3103,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             // Familiar NO encontrado → iniciar flujo de paciente nuevo con ese DNI (modo familiar)
             const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, true, userMessage)
             if (newPatientResult?.handled && newPatientResult.message) {
-              await sendDirectResponse(detectionCtx, newPatientResult.message, "familiar_new_patient")
+              await sendExistingPatientResult(detectionCtx, newPatientResult, "familiar_new_patient")
               await completePatientDetectionFlow(userPhoneNumber, config.id)
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
@@ -3162,7 +3162,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
           const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, false, userMessage)
           if (newPatientResult?.handled && newPatientResult.message) {
-            await sendDirectResponse(detectionCtx, newPatientResult.message, "new_patient_flow")
+            await sendExistingPatientResult(detectionCtx, newPatientResult, "new_patient_flow")
             await completePatientDetectionFlow(userPhoneNumber, config.id)
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
@@ -3924,7 +3924,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   userPhoneNumber, userMessage, config.cliente_id, config.escalationPhoneNumber
                 )
                 if (newRes?.handled && newRes.message) {
-                  await sendDirectResponse(dispatcherCtxDirect, newRes.message, "ai-dispatcher-continue-new")
+                  await sendExistingPatientResult(dispatcherCtxDirect, newRes, "ai-dispatcher-continue-new")
                 }
                 await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                 return
