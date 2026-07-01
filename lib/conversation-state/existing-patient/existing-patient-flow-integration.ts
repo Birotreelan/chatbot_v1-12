@@ -754,17 +754,22 @@ async function handleBackNavigation(
     case 'awaiting_turno_selection': {
       // Volver a la lista de turnos: limpiar la selección y re-mostrar/re-buscar
       state.turnoSeleccionado = undefined
+      state.turnosMostrados = 0 // Resetear ventana al inicio
       state.phase = 'awaiting_turno_selection'
       if (state.turnosOpciones && state.turnosOpciones.length > 0) {
+        // Usar ventana paginada (no lista completa) para evitar superar el límite de 4096 chars de WhatsApp
+        const window = getNextWindow(state.turnosOpciones, 0)
+        state.turnosMostrados = window.newShownCount
         await saveFlowState(phoneNumber, state)
         return {
           handled: true,
           message: withBackOption(
-            buildTurnosListMessage(state.turnosOpciones, state.patientName, state.sedeNombre, state.profesionalNombre),
+            buildTurnosWindowMessage(window.turnos, state.turnosOpciones.length, window.hasMore, state.patientName, state.sedeNombre, state.profesionalNombre, true),
             'awaiting_turno_selection',
             'existing'
           ),
           nextPhase: 'awaiting_turno_selection',
+          turnosButtons: window.hasMore ? [{ id: 'ver_mas', title: 'Ver más' }] : [],
         }
       }
       await saveFlowState(phoneNumber, state)
