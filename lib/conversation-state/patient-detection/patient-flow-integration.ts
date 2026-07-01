@@ -106,6 +106,11 @@ export async function initializePatientDetection(
       return {
         handled: true,
         message: buildNewPatientGreeting(clinicName),
+        buttons: [
+          { id: "1", title: "Solicitar turno" },
+          { id: "2", title: "Turno para familiar" },
+          { id: "3", title: "Otra consulta" },
+        ],
         patientInfo: {
           isNewPatient: true,
         },
@@ -498,6 +503,11 @@ export async function handleDNIForMultiplePatients(
       return {
         handled: true,
         message: buildNewPatientGreeting(clinicName),
+        buttons: [
+          { id: "1", title: "Solicitar turno" },
+          { id: "2", title: "Turno para familiar" },
+          { id: "3", title: "Otra consulta" },
+        ],
         patientInfo: {
           isNewPatient: true,
         },

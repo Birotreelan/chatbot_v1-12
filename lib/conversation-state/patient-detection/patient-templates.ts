@@ -370,11 +370,12 @@ export function buildNewPatientGreeting(
 ): string {
   return (
     `*¡Bienvenido a ${clinicName}!*\n\n` +
-    `Soy Iris, tu asistente virtual de inteligencia artificial.\n\n` +
-    `Por favor indicame, ¿cuál es el motivo de tu contacto?\n\n` +
-    `1- Solicitar un turno médico\n` +
-    `2- Realizar otra consulta\n\n` +
-    `Respondé con el *número* de opción que prefieras.`
+    `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +
+    `¿En qué te puedo ayudar?\n\n` +
+    `1- Solicitar turno médico\n` +
+    `2- Solicitar turno para un familiar\n` +
+    `3- Realizar otra consulta\n\n` +
+    `Respondé con el número o presioná el botón de tu preferencia.`
   )
 }
 
