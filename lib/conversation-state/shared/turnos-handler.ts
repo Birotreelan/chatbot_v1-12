@@ -210,7 +210,7 @@ export function buildTurnosWindowMessage(
     message += `encontré *${totalFound} turno${totalFound !== 1 ? 's' : ''}* disponible${totalFound !== 1 ? 's' : ''} para los próximos ${SEARCH_DAYS} días`
     if (profesionalNombre) message += ` con *${profesionalNombre}*`
     if (sedeName) message += ` en *${sedeName}*`
-    message += `.\n\n`
+    message += `. Te mostraré los turnos más próximos a la fecha actual:\n\n`
   }
 
   // Agrupar por fecha
@@ -232,12 +232,10 @@ export function buildTurnosWindowMessage(
     message += '\n'
   })
 
-  message += `Respondé con el *número* del turno que preferís.`
-
   if (hasMore) {
-    message += `\n\nPresioná el botón *Ver más* o escribí *"ver más"* para ver los siguientes turnos disponibles.`
+    message += `Respondé con el *número* del turno que preferís o presioná el botón *Ver más* para ver los turnos disponibles en las fechas siguientes.`
   } else {
-    message += `\n\n_Esos son todos los turnos disponibles en los próximos ${SEARCH_DAYS} días._`
+    message += `Respondé con el *número* del turno que preferís.\n\n_Esos son todos los turnos disponibles en los próximos ${SEARCH_DAYS} días._`
   }
 
   return message

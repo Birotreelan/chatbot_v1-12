@@ -270,6 +270,9 @@ async function sendExistingPatientResult(
     await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
   }
 
+  // Límite de WhatsApp para body de mensajes interactivos
+  const WA_INTERACTIVE_BODY_LIMIT = 1024
+
   const _tryInteractive = async (buttons: Array<{ id: string; title: string }>, label: string): Promise<boolean> => {
     try {
       await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, result.message!, buttons)
@@ -277,6 +280,32 @@ async function sendExistingPatientResult(
       return true
     } catch (err) {
       console.error(`[WHATSAPP] Error enviando ${label}, fallback a texto:`, err)
+      return false
+    }
+  }
+
+  /**
+   * Para mensajes largos (lista de turnos): el body excede el límite de 1024 chars
+   * de WhatsApp para mensajes interactivos. Solución: enviar el texto como mensaje
+   * normal primero, luego enviar un segundo mensaje interactivo corto con los botones.
+   */
+  const _tryInteractiveSplit = async (buttons: Array<{ id: string; title: string }>, label: string): Promise<boolean> => {
+    const msg = result.message!
+    if (msg.length <= WA_INTERACTIVE_BODY_LIMIT) {
+      // Mensaje corto: enviar todo junto como siempre
+      return _tryInteractive(buttons, label)
+    }
+    // Mensaje largo: split en dos envíos
+    try {
+      // 1. Texto de la lista (plain text)
+      await sendWhatsAppMessage(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, msg)
+      // 2. Botones con body corto
+      const buttonBody = "¿Qué querés hacer?"
+      await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, buttonBody, buttons)
+      await _saveHistory(msg)
+      return true
+    } catch (err) {
+      console.error(`[WHATSAPP] Error enviando ${label} (split), fallback a texto:`, err)
       return false
     }
   }
@@ -298,8 +327,9 @@ async function sendExistingPatientResult(
   }
 
   // Reply Buttons para paginación de turnos ("Ver más" y/o "Volver a paso ant.")
+  // Usa split porque la lista de turnos suele superar los 1024 chars del límite de WhatsApp
   if (result.turnosButtons && result.turnosButtons.length > 0) {
-    if (await _tryInteractive(result.turnosButtons, "turnos buttons")) return
+    if (await _tryInteractiveSplit(result.turnosButtons, "turnos buttons")) return
   }
 
   // Reply Buttons para confirmación de turno
