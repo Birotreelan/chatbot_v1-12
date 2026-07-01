@@ -259,6 +259,7 @@ async function sendExistingPatientResult(
     turnosButtons?: Array<{ id: string; title: string }>
     confirmationButtons?: boolean
     atrasButton?: boolean
+    modifyMenuRows?: Array<{ id: string; title: string; description?: string }>
   },
   phase = "existing_patient_flow"
 ): Promise<void> {
@@ -318,6 +319,17 @@ async function sendExistingPatientResult(
       return
     } catch (listErr) {
       console.error("[WHATSAPP] Error enviando sede list message, fallback a texto:", listErr)
+    }
+  }
+
+  // List Message para menú de modificación de datos
+  if (result.modifyMenuRows && result.modifyMenuRows.length > 0) {
+    try {
+      await sendWhatsAppList(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, result.message, "Ver opciones", result.modifyMenuRows, "¿Qué dato modificar?")
+      await _saveHistory(result.message)
+      return
+    } catch (listErr) {
+      console.error("[WHATSAPP] Error enviando modify menu list message, fallback a texto:", listErr)
     }
   }
 
@@ -3212,6 +3224,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               turnosButtons: _dr.turnosButtons,
               confirmationButtons: _dr.confirmationButtons,
               atrasButton: _dr.atrasButton,
+              modifyMenuRows: _dr.modifyMenuRows,
             }, "detection_flow")
           }
 

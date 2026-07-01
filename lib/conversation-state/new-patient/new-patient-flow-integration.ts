@@ -174,6 +174,8 @@ export interface NewPatientResult {
   confirmationButtons?: boolean
   /** True when message needs a single "Volver a paso ant." button */
   atrasButton?: boolean
+  /** Rows for WhatsApp List Message — set when showing the modify-data selection menu */
+  modifyMenuRows?: Array<{ id: string; title: string; description?: string }>
 }
 
 /**
@@ -394,6 +396,10 @@ export async function handleNewPatientMessage(
 
     case 'awaiting_modify_nombre':
       result = await handleModifyNombrePhase(phone, userMessage, clientId, state)
+      break
+
+    case 'awaiting_modify_nombre_2':
+      result = await handleModifyNombreStep2Phase(phone, userMessage, clientId, state)
       break
 
     case 'awaiting_modify_dni':
@@ -1624,6 +1630,7 @@ async function handleConfirmationPhase(
     return {
       handled: true,
       message: result.message,
+      modifyMenuRows: buildModifyMenuRows(),
     }
   }
 
@@ -1642,7 +1649,19 @@ async function handleConfirmationPhase(
 }
 
 /**
- * Fase: Modificar Nombre y Apellido (paciente nuevo)
+ * Filas para el WhatsApp List Message del menú de modificación de datos
+ */
+function buildModifyMenuRows(): Array<{ id: string; title: string; description?: string }> {
+  return [
+    { id: 'nombre', title: 'Nombre y Apellido', description: 'Corregir nombre o apellido' },
+    { id: 'dni', title: 'DNI', description: 'Corregir número de documento' },
+    { id: 'obra_social', title: 'Obra Social', description: 'Cambiar cobertura médica' },
+    { id: 'turno', title: 'Modificar turno', description: 'Elegir otro día u horario' },
+  ]
+}
+
+/**
+ * Fase: Modificar Nombre - Paso 1: Apellido
  */
 async function handleModifyNombrePhase(
   phone: string,
@@ -1652,26 +1671,56 @@ async function handleModifyNombrePhase(
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'modify_nombre_phase')
 
+  const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
   const input = userMessage.trim()
-  const parts = input.split(/\s+/)
+  const soloLetras = /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s'-]+$/
 
-  if (parts.length < 2) {
-    const msgNombre = state.esFamiliar
-      ? `Necesito el nombre y apellido completo del familiar. Por ejemplo: *Juan Perez*`
-      : `Necesito tu nombre y apellido completo. Por ejemplo: *Juan Perez*`
-    return {
-      handled: true,
-      message: msgNombre,
-    }
+  if (!soloLetras.test(input) || input.length < 2) {
+    const msg = state.esFamiliar
+      ? `Por favor, escribí solo el *apellido* del familiar.\n\nPor ejemplo: *Pérez*`
+      : `Por favor, escribí solo tu *apellido*.\n\nPor ejemplo: *Pérez*`
+    return { handled: true, message: msg, atrasButton: true }
   }
 
+  state.apellido = input.split(/\s+/).map(capitalize).join(' ')
+  state.phase = 'awaiting_modify_nombre_2'
+  await saveFlowState(phone, state)
+
+  logger.info('Apellido updated in modify flow', { apellido: state.apellido })
+
+  const msg = state.esFamiliar
+    ? `Gracias. Ahora escribí el *nombre* completo del familiar (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+    : `Gracias. Ahora escribí tu *nombre* completo (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+  return { handled: true, message: msg, atrasButton: true }
+}
+
+/**
+ * Fase: Modificar Nombre - Paso 2: Nombre
+ */
+async function handleModifyNombreStep2Phase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'modify_nombre2_phase')
+
   const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
-  state.nombre = capitalize(parts[0])
-  state.apellido = parts.slice(1).map(capitalize).join(' ')
+  const input = userMessage.trim()
+  const soloLetras = /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s'-]+$/
+
+  if (!soloLetras.test(input) || input.length < 2) {
+    const msg = state.esFamiliar
+      ? `Por favor, escribí solo el *nombre* del familiar (sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+      : `Por favor, escribí solo tu *nombre* (sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+    return { handled: true, message: msg, atrasButton: true }
+  }
+
+  state.nombre = input.split(/\s+/).map(capitalize).join(' ')
   state.phase = 'awaiting_confirmation'
   await saveFlowState(phone, state)
 
-  logger.info('Nombre updated', { nombre: state.nombre, apellido: state.apellido })
+  logger.info('Nombre updated in modify flow', { nombre: state.nombre, apellido: state.apellido })
 
   const nombreCompleto = `${state.nombre} ${state.apellido}`
   return {
@@ -1683,6 +1732,7 @@ async function handleModifyNombrePhase(
       state.obraSocialNombre,
       { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email }
     ),
+    confirmationButtons: true,
   }
 }
 
@@ -1722,6 +1772,7 @@ async function handleModifyDniPhase(
       state.obraSocialNombre,
       { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email }
     ),
+    confirmationButtons: true,
   }
 }
 
@@ -1778,12 +1829,13 @@ async function handleModifyObraSocialPhase(
         state.obraSocialNombre,
         { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: phone, email: state.email }
       ),
+      confirmationButtons: true,
     }
   } catch (error) {
     logger.error('Error validating obra social', error as Error)
     return {
       handled: true,
-      message: `Ocurrio un error al validar tu obra social. Por favor, intenta nuevamente.`,
+      message: `Ocurrio un error al validar la obra social. Por favor, intenta nuevamente.`,
     }
   }
 }
@@ -1806,7 +1858,8 @@ async function handleModifySelectionPhase(
   if (!option) {
     return {
       handled: true,
-      message: `No entendi tu respuesta. Por favor, responde con el numero de la opcion:\n\n${buildModifyDataMenu()}`,
+      message: `No entendi tu respuesta. Por favor, seleccioná una opción:\n\n${buildModifyDataMenu()}`,
+      modifyMenuRows: buildModifyMenuRows(),
     }
   }
 
@@ -1815,28 +1868,28 @@ async function handleModifySelectionPhase(
   if (option === 'nombre') {
     state.phase = 'awaiting_modify_nombre'
     await saveFlowState(phone, state)
-    return {
-      handled: true,
-      message: `Por favor, escribi tu *nombre y apellido completo* corregido.`,
-    }
+    const msgNombre = state.esFamiliar
+      ? `Primero, escribí el *apellido* de la persona que agendará el turno.\n\nPor ejemplo: *Pérez*`
+      : `Primero, escribí tu *apellido*.\n\nPor ejemplo: *Pérez*`
+    return { handled: true, message: msgNombre, atrasButton: true }
   }
 
   if (option === 'dni') {
     state.phase = 'awaiting_modify_dni'
     await saveFlowState(phone, state)
-    return {
-      handled: true,
-      message: `Por favor, escribi tu *DNI* corregido (solo numeros, sin puntos ni espacios).`,
-    }
+    const msgDni = state.esFamiliar
+      ? `Por favor, escribi el *DNI* del familiar corregido (solo numeros, sin puntos ni espacios).`
+      : `Por favor, escribi tu *DNI* corregido (solo numeros, sin puntos ni espacios).`
+    return { handled: true, message: msgDni, atrasButton: true }
   }
 
   if (option === 'obra_social') {
     state.phase = 'awaiting_modify_obra_social'
     await saveFlowState(phone, state)
-    return {
-      handled: true,
-      message: `Por favor, escribi el nombre de tu *obra social o prepaga*.\n\nSi no tenes cobertura, escribi *Particular*.`,
-    }
+    const msgOS = state.esFamiliar
+      ? `Por favor, escribi el nombre de la *obra social o prepaga* del familiar.\n\nSi no tiene cobertura, escribi *Particular*.`
+      : `Por favor, escribi el nombre de tu *obra social o prepaga*.\n\nSi no tenes cobertura, escribi *Particular*.`
+    return { handled: true, message: msgOS, atrasButton: true }
   }
 
   if (option === 'turno') {
@@ -1871,6 +1924,7 @@ async function handleModifySelectionPhase(
     return {
       handled: true,
       message: buildSedesMessage(sedesResult.sedes, nombreCompleto, state.obraSocialNombre),
+      sedesListRows: buildSedesListRows(sedesResult.sedes),
     }
   }
 

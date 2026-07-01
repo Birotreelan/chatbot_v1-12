@@ -150,6 +150,8 @@ export interface ExistingPatientResult {
   confirmationButtons?: boolean
   /** True when message is a professional name prompt — triggers "Volver a paso ant." button */
   atrasButton?: boolean
+  /** Rows for WhatsApp List Message — set when showing the modify-data selection menu */
+  modifyMenuRows?: Array<{ id: string; title: string; description?: string }>
 }
 
 /**
@@ -1588,6 +1590,12 @@ async function handleConfirmationPhase(
       handled: true,
       message: result.message,
       nextPhase: 'awaiting_modify_selection',
+      modifyMenuRows: [
+        { id: 'nombre', title: 'Nombre y Apellido', description: 'Corregir nombre o apellido' },
+        { id: 'dni', title: 'DNI', description: 'Corregir número de documento' },
+        { id: 'obra_social', title: 'Obra Social', description: 'Cambiar cobertura médica' },
+        { id: 'turno', title: 'Modificar turno', description: 'Elegir otro día u horario' },
+      ],
     }
   }
 
@@ -1783,8 +1791,14 @@ async function handleModifySelectionPhase(
   if (!option) {
     return {
       handled: true,
-      message: `No entendi tu respuesta. Por favor, responde con el numero de la opcion:\n\n${buildModifyDataMenu()}`,
+      message: `No entendi tu respuesta. Por favor, seleccioná una opción:\n\n${buildModifyDataMenu()}`,
       nextPhase: 'awaiting_modify_selection',
+      modifyMenuRows: [
+        { id: 'nombre', title: 'Nombre y Apellido', description: 'Corregir nombre o apellido' },
+        { id: 'dni', title: 'DNI', description: 'Corregir número de documento' },
+        { id: 'obra_social', title: 'Obra Social', description: 'Cambiar cobertura médica' },
+        { id: 'turno', title: 'Modificar turno', description: 'Elegir otro día u horario' },
+      ],
     }
   }
 

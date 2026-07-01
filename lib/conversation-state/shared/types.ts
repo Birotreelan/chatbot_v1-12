@@ -81,6 +81,7 @@ export type FlowPhase =
   | 'awaiting_confirmation'
   | 'awaiting_modify_selection'
   | 'awaiting_modify_nombre'
+  | 'awaiting_modify_nombre_2'
   | 'awaiting_modify_dni'
   | 'awaiting_modify_obra_social'
   | 'completed'
