@@ -16,6 +16,7 @@ import { getHistory } from '../conversation-history'
 import {
   fetchSedes,
   buildSedesMessage,
+  buildSedesListRows,
   handleSedeSelection as handleSedeSelectionShared,
   buildSedesErrorMessage,
   type SedeInterruptionOptions,
@@ -687,6 +688,7 @@ async function handleBackNavigation(
         handled: true,
         message: withBackOption(buildSedesMessage(state.sedesOpciones), 'awaiting_sede', 'existing'),
         nextPhase: 'awaiting_sede',
+        sedesListRows: buildSedesListRows(state.sedesOpciones),
       }
     }
 
@@ -967,6 +969,7 @@ async function handleSearchTypePhase(
         handled: true,
         message: buildSedesMessage(state.sedesOpciones),
         nextPhase: 'awaiting_sede',
+        sedesListRows: buildSedesListRows(state.sedesOpciones),
       }
     }
   }
@@ -1853,6 +1856,7 @@ async function handleModifySelectionPhase(
       handled: true,
       message: buildSedesMessage(sedesResult.sedes),
       nextPhase: 'awaiting_sede',
+      sedesListRows: buildSedesListRows(sedesResult.sedes),
     }
   }
 

@@ -35,6 +35,7 @@ import {
 } from '../shared/sede-handler'
 import {
   buildSearchOptionsMessage,
+  buildSearchOptionsButtons,
   handleSearchTypeSelection,
   buildProfessionalNameRequestMessage,
   type SearchOptionsConfig,
@@ -440,9 +441,10 @@ async function handleBackNavigation(
   logger.info('[BACK] Retrocediendo de fase', { from: state.phase, to: prev })
   state.attempts = 0
 
-  const reRender = (message: string, phase: string): NewPatientResult => ({
+  const reRender = (message: string, phase: string, extra?: Partial<NewPatientResult>): NewPatientResult => ({
     handled: true,
     message: withBackOption(message, phase, 'new'),
+    ...extra,
   })
 
   switch (prev) {
@@ -530,7 +532,9 @@ async function handleBackNavigation(
       state.turnoSeleccionado = undefined
       state.phase = 'awaiting_search_type'
       await saveFlowState(phone, state)
-      return reRender(buildSearchOptionsMessage(state.sedeNombre || '', searchOptionsConfig), 'awaiting_search_type')
+      return reRender(buildSearchOptionsMessage(state.sedeNombre || '', searchOptionsConfig), 'awaiting_search_type', {
+        searchTypeButtons: buildSearchOptionsButtons(searchOptionsConfig),
+      })
     }
 
     case 'awaiting_professional_name': {
@@ -541,7 +545,9 @@ async function handleBackNavigation(
       state.turnoSeleccionado = undefined
       state.phase = 'awaiting_professional_name'
       await saveFlowState(phone, state)
-      return reRender(buildProfessionalNameRequestMessage(), 'awaiting_professional_name')
+      return reRender(buildProfessionalNameRequestMessage(), 'awaiting_professional_name', {
+        atrasButton: true,
+      })
     }
 
     case 'awaiting_specialty_selection': {
@@ -569,7 +575,8 @@ async function handleBackNavigation(
         const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
         return reRender(
           buildTurnosListMessage(state.turnosOpciones, nombreCompleto || undefined, state.sedeNombre, state.profesionalNombre),
-          'awaiting_turno_selection'
+          'awaiting_turno_selection',
+          { turnosButtons: [] }
         )
       }
       await saveFlowState(phone, state)
@@ -597,7 +604,8 @@ async function handleBackNavigation(
             email: state.email,
           }
         ),
-        'awaiting_confirmation'
+        'awaiting_confirmation',
+        { confirmationButtons: true }
       )
     }
 
@@ -977,6 +985,7 @@ async function transitionToSedes(
       handled: true,
       message: buildSearchOptionsMessage(unicaSede.nombre, undefined),
       patientInfo: { dni: state.dni, name: nombreCompleto, healthInsurance: state.obraSocialNombre },
+      searchTypeButtons: buildSearchOptionsButtons(undefined),
     }
   }
 
@@ -1043,6 +1052,7 @@ async function handleSedePhase(
     return {
       handled: true,
       message: buildSearchOptionsMessage(state.sedeNombre, searchOptionsConfig),
+      searchTypeButtons: buildSearchOptionsButtons(searchOptionsConfig),
     }
   }
 
@@ -1052,6 +1062,7 @@ async function handleSedePhase(
   return {
     handled: true,
     message: result.message,
+    sedesListRows: state.sedesOpciones ? buildSedesListRows(state.sedesOpciones) : undefined,
   }
 }
 
@@ -1078,6 +1089,7 @@ async function handleSearchTypePhase(
       return {
         handled: true,
         message: buildProfessionalNameRequestMessage(),
+        atrasButton: true,
       }
     }
 
@@ -1364,6 +1376,7 @@ async function searchAndShowTurnos(
       state.profesionalNombre,
       true
     ),
+    turnosButtons: window.hasMore ? [{ id: 'ver_mas', title: 'Ver más' }] : [],
   }
 }
 
@@ -1407,6 +1420,7 @@ async function handleTurnoPhase(
       return {
         handled: true,
         message: `_Esos son todos los turnos disponibles en los próximos 60 días. ¿Cuál deseás elegir?_`,
+        turnosButtons: [],
       }
     }
     state.turnosMostrados = window.newShownCount
@@ -1422,6 +1436,7 @@ async function handleTurnoPhase(
         state.profesionalNombre,
         false
       ),
+      turnosButtons: window.hasMore ? [{ id: 'ver_mas', title: 'Ver más' }] : [],
     }
   }
 
@@ -1442,6 +1457,7 @@ async function handleTurnoPhase(
         state.profesionalNombre,
         true
       ),
+      turnosButtons: window.hasMore ? [{ id: 'ver_mas', title: 'Ver más' }] : [],
     }
   }
 
@@ -1478,6 +1494,7 @@ async function handleTurnoPhase(
         state.obraSocialNombre,
         { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: state.telefono }
       ),
+      confirmationButtons: true,
     }
   }
 
@@ -1517,6 +1534,7 @@ async function handleEmailPhase(
           email: state.email,
         }
       ),
+      confirmationButtons: true,
     }
   }
 
