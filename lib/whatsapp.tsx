@@ -3008,14 +3008,14 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         }
 
         if (detectionResult?.action === 'contact_intent_pending') {
-          // Paciente nuevo seleccionó su intención: turno (1) o consulta (2)
+          // Paciente nuevo seleccionó su intención: turno propio (1), familiar (2) o consulta (3)
           // Detectar selección por número O por texto natural
           const { detectMenuOption, NEW_PATIENT_MENU } = await import('./conversation-state/patient-detection/menu-option-detector')
 
           let selection: number | null = null
 
           // Capa 1: número directo
-          const numMatch = userMessage.trim().match(/^[1-2]$/)
+          const numMatch = userMessage.trim().match(/^[1-3]$/)
           if (numMatch) {
             selection = parseInt(numMatch[0], 10)
           } else {
@@ -3029,7 +3029,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           if (!selection) {
             await sendDirectResponse(
               detectionCtx,
-              'Por favor, respondé con 1 o 2 según tu intención.',
+              'Por favor, respondé con 1, 2 o 3 según tu intención.',
               "contact_intent_invalid"
             )
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -3047,7 +3047,16 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           } else if (selection === 2) {
-            // Opción 2: Consulta — derivar teléfono y terminar flujo
+            // Opción 2: Turno para un familiar → pedir DNI del familiar
+            await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_familiar_dni')
+            const familiarDNIMessage = await import('./conversation-state/patient-detection/patient-templates').then(
+              m => m.buildFamiliarDNIRequestMessage()
+            )
+            await sendDirectResponse(detectionCtx, familiarDNIMessage, "contact_intent_familiar")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          } else if (selection === 3) {
+            // Opción 3: Consulta — derivar teléfono y terminar flujo
             const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
               m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
             )

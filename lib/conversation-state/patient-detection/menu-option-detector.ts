@@ -26,11 +26,16 @@ export interface DetectionResult {
 export const NEW_PATIENT_MENU: MenuOption[] = [
   {
     index: 1,
-    label: 'Solicitar un turno médico',
+    label: 'Solicitar turno médico',
     keywords: ['turno', 'cita', 'agendar', 'reserva', 'appointment', 'médico', 'doctor', 'consulta médica'],
   },
   {
     index: 2,
+    label: 'Solicitar turno para un familiar',
+    keywords: ['familiar', 'hijo', 'hija', 'esposa', 'esposo', 'madre', 'padre', 'mama', 'mamá', 'papa', 'papá', 'pareja', 'hermano', 'hermana'],
+  },
+  {
+    index: 3,
     label: 'Realizar otra consulta',
     keywords: ['consulta', 'pregunta', 'información', 'info', 'duda', 'ayuda', 'soporte', 'help', 'otra'],
   },
