@@ -43,7 +43,7 @@ export function ConversationsList({
 
   useEffect(() => {
     loadContacts()
-    const interval = setInterval(loadContacts, 10000)
+    const interval = setInterval(loadContacts, 60000) // optimización: 10s → 60s
     return () => clearInterval(interval)
   }, [configId, appliedDateFrom, appliedDateTo])
 

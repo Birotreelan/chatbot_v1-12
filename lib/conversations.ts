@@ -9,8 +9,11 @@ const CONVERSATION_PAUSED_PREFIX = "conversation_paused:"
 // Duración de almacenamiento: 7 días en segundos (reducido de 15 para optimizar bandwidth)
 const CONVERSATION_TTL = 7 * 24 * 60 * 60 // 7 días
 
-const contactsCache = new Map<string, { contacts: ConversationContact[]; timestamp: number }>()
-const CACHE_TTL = 30000 // 30 segundos de caché
+// OPTIMIZACIÓN: cache de contactos en Redis (TTL 60s) en lugar de Map en memoria.
+// En Vercel serverless cada invocación es una instancia nueva — el Map nunca se reutiliza.
+// Con Redis el cache es compartido entre todas las instancias.
+const CONTACTS_CACHE_TTL_SECONDS = 60
+const CONTACTS_CACHE_KEY_PREFIX = "contacts_cache:"
 
 export interface ConversationMessage {
   id: string
@@ -47,20 +50,14 @@ function ensureValidTimestamp(timestamp: any): string {
 // Guardar un mensaje en la conversación
 export async function saveConversationMessage(message: ConversationMessage): Promise<void> {
   try {
-    console.log(`[CONVERSATIONS] 🔵 ===== INICIO saveConversationMessage =====`)
-    console.log(`[CONVERSATIONS] 🔵 Mensaje recibido:`, JSON.stringify(message, null, 2))
-
     const redisClient = getRedisClient()
     if (!redisClient) {
       console.warn("[CONVERSATIONS] Redis no disponible, no se puede guardar mensaje")
       return
     }
 
-    console.log(`[CONVERSATIONS] ✅ Cliente Redis obtenido`)
-
-    // OPTIMIZACIÓN Bloque 4: truncar contenido largo antes de almacenar
+    // Truncar contenido largo antes de almacenar
     // Template-context blocks y mensajes de sistema pueden ser 3-5 KB cada uno.
-    // Truncar a 1000 chars reduce el tamaño almacenado ~70% en esos casos.
     const MAX_CONTENT_LENGTH = 1000
     const rawContent = message.content || ""
     const truncatedContent = rawContent.length > MAX_CONTENT_LENGTH
@@ -73,25 +70,10 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
       timestamp: ensureValidTimestamp(message.timestamp),
     }
 
-    // Claves para almacenamiento
     const conversationKey = `${CONVERSATION_PREFIX}${message.configId}:${message.phoneNumber}`
     const contactKey = `${CONVERSATION_CONTACT_PREFIX}${message.configId}:${message.phoneNumber}`
     const contactsSetKey = `${CONVERSATION_CONTACTS_SET_PREFIX}${message.configId}`
 
-    console.log(`[CONVERSATIONS] 🔑 Claves generadas:`)
-    console.log(`[CONVERSATIONS]   - conversationKey: ${conversationKey}`)
-    console.log(`[CONVERSATIONS]   - contactKey: ${contactKey}`)
-    console.log(`[CONVERSATIONS]   - contactsSetKey: ${contactsSetKey}`)
-
-    // 1. Guardar el mensaje en la lista de conversación
-    console.log(`[CONVERSATIONS] 📝 Guardando mensaje en lista...`)
-    const messageString = JSON.stringify(validatedMessage)
-    console.log(
-      `[CONVERSATIONS] 📝 Mensaje serializado (${messageString.length} chars):`,
-      messageString.substring(0, 200),
-    )
-
-    // 2. Actualizar información del contacto
     const contactInfo: ConversationContact = {
       phoneNumber: message.phoneNumber,
       lastMessage: message.content.substring(0, 100),
@@ -100,41 +82,20 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
       configId: message.configId,
     }
 
-    console.log(`[CONVERSATIONS] 📇 Objeto contactInfo creado:`, JSON.stringify(contactInfo, null, 2))
-
-    const contactString = JSON.stringify(contactInfo)
-    console.log(`[CONVERSATIONS] 📇 contactInfo serializado (${contactString.length} chars):`, contactString)
-
-    // ===== OPTIMIZACION: Usar pipeline para agrupar todos los comandos en una sola request =====
-    // ANTES: 7 requests separadas (rpush, expire, set, expire, get, sadd, expire)
-    // DESPUES: 1 request con pipeline = 85% menos bandwidth
-    console.log(`[CONVERSATIONS] 💾 Ejecutando pipeline de 6 comandos...`)
+    // Pipeline: 6 comandos en 1 request HTTP (rpush, expire, set, expire, sadd, expire)
+    // + invalidar cache de contactos Redis
     const pipeline = redisClient.pipeline()
-    
-    // Comando 1-2: Guardar mensaje y su TTL
-    pipeline.rpush(conversationKey, messageString)
+    pipeline.rpush(conversationKey, JSON.stringify(validatedMessage))
     pipeline.expire(conversationKey, CONVERSATION_TTL)
-    
-    // Comando 3-4: Guardar contacto y su TTL
-    pipeline.set(contactKey, contactString)
+    pipeline.set(contactKey, JSON.stringify(contactInfo))
     pipeline.expire(contactKey, CONVERSATION_TTL)
-    
-    // Comando 5-6: Agregar al set de contactos y su TTL
     pipeline.sadd(contactsSetKey, message.phoneNumber)
     pipeline.expire(contactsSetKey, CONVERSATION_TTL)
-    
-    // Ejecutar todos los comandos en una sola request
+    // Invalidar cache Redis de contactos para este configId
+    pipeline.del(`${CONTACTS_CACHE_KEY_PREFIX}${message.configId}`)
     await pipeline.exec()
-    console.log(`[CONVERSATIONS] ✅ Pipeline ejecutado exitosamente (6 comandos en 1 request)`)
-
-    contactsCache.delete(message.configId)
-
-    console.log(`[CONVERSATIONS] 🟢 ===== FIN saveConversationMessage (EXITOSO) =====`)
   } catch (error) {
-    console.error("[CONVERSATIONS] 🔴 ===== ERROR en saveConversationMessage =====")
-    console.error("[CONVERSATIONS] ❌ Error guardando mensaje:", error)
-    console.error("[CONVERSATIONS] ❌ Stack:", error.stack)
-    console.error("[CONVERSATIONS] 🔴 ===== FIN ERROR =====")
+    console.error("[CONVERSATIONS] Error guardando mensaje:", error)
   }
 }
 
@@ -213,26 +174,35 @@ export async function getAllConversationMessages(configId: string, phoneNumber: 
 }
 
 // Obtener todos los contactos de un cliente
+// OPTIMIZACIÓN: cache en Redis (TTL 60s) compartido entre instancias serverless.
+// Sin filtros de fecha → sirve del cache. Con filtros → siempre va a Redis.
 export async function getConversationContacts(
   configId: string,
   dateFrom?: string,
   dateTo?: string,
 ): Promise<ConversationContact[]> {
   try {
-    const cached = contactsCache.get(configId)
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL && !dateFrom && !dateTo) {
-      return cached.contacts
-    }
-
     const redisClient = getRedisClient()
     if (!redisClient) {
       console.warn("[CONVERSATIONS] Redis no disponible")
       return []
     }
 
-    const contactsSetKey = `${CONVERSATION_CONTACTS_SET_PREFIX}${configId}`
+    // Cache Redis: solo sin filtros de fecha
+    if (!dateFrom && !dateTo) {
+      const cacheKey = `${CONTACTS_CACHE_KEY_PREFIX}${configId}`
+      try {
+        const cached = await redisClient.get(cacheKey)
+        if (cached) {
+          const parsed = typeof cached === "string" ? JSON.parse(cached) : cached
+          if (Array.isArray(parsed)) return parsed as ConversationContact[]
+        }
+      } catch {
+        // cache miss — continuar con lectura normal
+      }
+    }
 
-    // Obtener todos los números de teléfono del set
+    const contactsSetKey = `${CONVERSATION_CONTACTS_SET_PREFIX}${configId}`
     const phoneNumbers = await redisClient.smembers(contactsSetKey)
 
     if (!phoneNumbers || phoneNumbers.length === 0) {
@@ -240,23 +210,13 @@ export async function getConversationContacts(
     }
 
     const contactKeys = phoneNumbers.map((phone) => `${CONVERSATION_CONTACT_PREFIX}${configId}:${phone}`)
-
     const contactsData = await redisClient.mget(...contactKeys)
 
     const contacts: ConversationContact[] = contactsData
       .map((contactData, index) => {
         if (!contactData) return null
-
         try {
-          let contact: any
-          if (typeof contactData === "string") {
-            contact = JSON.parse(contactData)
-          } else if (typeof contactData === "object") {
-            contact = contactData
-          } else {
-            return null
-          }
-
+          const contact: any = typeof contactData === "string" ? JSON.parse(contactData) : contactData
           return {
             phoneNumber: contact.phoneNumber || phoneNumbers[index],
             lastMessage: contact.lastMessage || "",
@@ -264,8 +224,7 @@ export async function getConversationContacts(
             messageCount: contact.messageCount || 0,
             configId: contact.configId || configId,
           }
-        } catch (error) {
-          console.error(`[CONVERSATIONS] Error procesando contacto:`, error)
+        } catch {
           return null
         }
       })
@@ -278,22 +237,18 @@ export async function getConversationContacts(
         try {
           const contactDate = new Date(contact.lastMessageAt)
           if (isNaN(contactDate.getTime())) return false
-
-          // Establecer la hora al inicio o al final del día para una comparación adecuada
           if (dateFrom) {
             const fromDate = new Date(dateFrom)
             fromDate.setHours(0, 0, 0, 0)
             if (contactDate < fromDate) return false
           }
-
           if (dateTo) {
             const toDate = new Date(dateTo)
             toDate.setHours(23, 59, 59, 999)
             if (contactDate > toDate) return false
           }
-
           return true
-        } catch (error) {
+        } catch {
           return false
         }
       })
@@ -301,22 +256,21 @@ export async function getConversationContacts(
 
     // Ordenar por fecha del último mensaje
     filteredContacts.sort((a, b) => {
-      try {
-        const dateA = new Date(a.lastMessageAt).getTime()
-        const dateB = new Date(b.lastMessageAt).getTime()
-
-        if (isNaN(dateA)) return 1
-        if (isNaN(dateB)) return -1
-
-        return dateB - dateA
-      } catch (error) {
-        return 0
-      }
+      const dateA = new Date(a.lastMessageAt).getTime()
+      const dateB = new Date(b.lastMessageAt).getTime()
+      if (isNaN(dateA)) return 1
+      if (isNaN(dateB)) return -1
+      return dateB - dateA
     })
 
-    // Solo almacenar en caché si no se aplican filtros de fecha
-    if (!dateFrom && !dateTo) {
-      contactsCache.set(configId, { contacts: filteredContacts, timestamp: Date.now() })
+    // Guardar en cache Redis solo sin filtros de fecha
+    if (!dateFrom && !dateTo && redisClient) {
+      try {
+        const cacheKey = `${CONTACTS_CACHE_KEY_PREFIX}${configId}`
+        await redisClient.setex(cacheKey, CONTACTS_CACHE_TTL_SECONDS, JSON.stringify(filteredContacts))
+      } catch {
+        // fallar silenciosamente — el cache es opcional
+      }
     }
 
     return filteredContacts
