@@ -61,6 +61,7 @@ import {
 import { createConversationLogger } from "./conversation-state/logger"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
 import { resolveState } from "./conversation-state/router"
+import { composeReentryMessage } from "./conversation-state/router/compose-reentry"
 import { handleFarewellIfDetected, detectFarewellPreFlow, detectReciprocalFarewellPreFlow } from "./conversation-state/farewell-handler"
 import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
 import { detectDirectConfirmationPreFlow, buildCancelConfirmationPrompt, buildAskExplicitConfirmationMessage } from "./conversation-state/direct-confirmation-handler"
@@ -1450,10 +1451,19 @@ async function runInterjectionInActiveFlow(
     }
     const answer = action.type === 'send_and_return'
       ? action.message.replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '').trimEnd()
-      : 'Perdón, no entendí tu mensaje.'
-    let message = answer
-    if (typeof stepPrompt === 'string' && stepPrompt.trim() && !message.includes(stepPrompt.trim().slice(0, 25))) {
-      message += `\n\n${TRANSITION}\n\n${stepPrompt.trim()}`
+      : ''
+
+    // Componer UN mensaje natural (IA) que responda la consulta y retome el paso con
+    // fluidez, conservando las opciones numeradas. Fallback determinístico si falla.
+    let message: string | null = null
+    if (typeof stepPrompt === 'string' && stepPrompt.trim()) {
+      message = await composeReentryMessage({ answer, stepPrompt })
+    }
+    if (!message) {
+      message = answer || 'Perdón, no entendí tu mensaje.'
+      if (typeof stepPrompt === 'string' && stepPrompt.trim() && !message.includes(stepPrompt.trim().slice(0, 25))) {
+        message += `\n\n${TRANSITION}\n\n${stepPrompt.trim()}`
+      }
     }
 
     const ctxDirect: DirectResponseContext = {
