@@ -3120,9 +3120,18 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // ============================================================================
     if (message.type === "text") {
       const wrongNumberFlags = await getEffectiveFeatureFlags(config.id)
-      
-      if (wrongNumberFlags.directWrongNumberDetection) {
-        
+
+      // No interceptar "número equivocado" si el paciente está en medio de un flujo
+      // activo: evita que respuestas como "no tengo turno" cierren la conversación.
+      const wrongNumberActiveFlow =
+        (await isPatientDetectionFlowActive(userPhoneNumber)) ||
+        (await isExistingPatientFlowActive(userPhoneNumber)) ||
+        (await isNewPatientFlowActive(userPhoneNumber)) ||
+        (await isRescheduleFlowActive(userPhoneNumber, config.id)) ||
+        !!(await getBookingFlowState(userPhoneNumber, config.id))
+
+      if (wrongNumberFlags.directWrongNumberDetection && !wrongNumberActiveFlow) {
+
         // Verificar si hubo recordatorio reciente (ventana de 24h)
         let hasRecentReminder = false
         if (config.cliente_id) {

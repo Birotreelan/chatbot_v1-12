@@ -67,6 +67,7 @@ REGLAS DE CLASIFICACIÓN (en orden de prioridad):
 - TODO LO DEMÁS que no encaja → mostrar_menu_principal (NUNCA inventar información)
 
 RESTRICCIONES CRÍTICAS:
+- Si el paciente NO tiene un turno agendado (turnos = 0), NUNCA uses responder_consulta_informativa (no hay turno del cual informar). En ese caso, una pregunta sobre día/horario/fecha se trata con respuesta_empatica, aclarando que va a poder elegir el día y horario que le convenga al ver los turnos disponibles.
 - NUNCA consultes ni menciones disponibilidad de turnos — no tenés acceso a ese dato.
 - NUNCA inventes horarios, fechas disponibles, ni estados de la clínica.
 - NUNCA respondas consultas médicas o administrativas.
