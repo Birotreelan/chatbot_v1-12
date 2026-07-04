@@ -54,7 +54,7 @@ INSTRUCCIONES DE CLASIFICACIÓN:
 
 REGLAS DE CLASIFICACIÓN (en orden de prioridad):
 - "cambiar turno", "reagendar", "cambiar la fecha", "otro horario", "otro día" → cancelar_y_solicitar_nuevo_turno
-- "quiero/necesito/sacar/pedir un turno" (nuevo, adicional) → iniciar_reserva_turno
+- "quiero/necesito/sacar/pedir un turno" (nuevo, adicional) → iniciar_reserva_turno. Si el turno es para un FAMILIAR u otra persona ("para mi hijo/madre/esposo", "para un familiar", "es para otra persona"), pasá para_familiar=true.
 - Afirmación de asistencia al turno actual ("sí voy", "confirmo", "dale") → confirmar_asistencia_turno
   EXCEPCIÓN: si el turno ya está confirmado (Estado=Confirmado), NO usar confirmar_asistencia_turno → usar respuesta_empatica
 - "cancelar", "no puedo ir", "no voy" → cancelar_turno

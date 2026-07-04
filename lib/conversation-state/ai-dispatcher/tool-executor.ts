@@ -30,6 +30,7 @@ export type ExecutorAction =
   | { type: 'init_patient_detection' }                        // iniciar detección de paciente
   | { type: 'init_existing_patient_flow'; slots?: { profesional?: string; especialidad?: string } }
   | { type: 'init_new_patient_flow'; slots?: { profesional?: string; especialidad?: string } }
+  | { type: 'init_familiar_flow' }                            // reserva para un familiar → pedir DNI del familiar
   | { type: 'trigger_confirm_appointment' }                   // confirmar asistencia directa
   | { type: 'trigger_cancel_menu' }                          // mostrar menú de cancelación
   | { type: 'trigger_cancel_and_rebook' }                    // cancelar + iniciar reserva
@@ -85,6 +86,10 @@ export async function executeDispatcherDecision(
 
     // ── Iniciar reserva de turno ─────────────────────────────────────────────
     case TOOL_NAMES.INICIAR_RESERVA: {
+      // Reserva para un familiar/otra persona → pedir el DNI del familiar (modo familiar).
+      if (decision.args.para_familiar === true) {
+        return { action: { type: 'init_familiar_flow' }, logNote: 'Dispatcher → reserva para familiar' }
+      }
       const slots = {
         profesional: decision.args.profesional_mencionado || undefined,
         especialidad: decision.args.especialidad_mencionada || undefined,

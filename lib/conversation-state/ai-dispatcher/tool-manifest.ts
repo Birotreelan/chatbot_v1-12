@@ -116,6 +116,10 @@ Iniciará el flujo de reserva completo (sede → especialidad/médico → turno 
             type: 'string',
             description: 'Especialidad médica mencionada (ej: "oftalmología", "cardiología"). Dejar vacío si no mencionó ninguna.',
           },
+          para_familiar: {
+            type: 'boolean',
+            description: 'true si el turno es para un FAMILIAR u otra persona (ej: "un turno para mi hijo/madre", "para un familiar"). false si es para sí mismo.',
+          },
         },
         required: [],
       },

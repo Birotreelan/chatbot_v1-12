@@ -1267,6 +1267,24 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
  * NOTA: duplica temporalmente parte del bloque tardío del AI Dispatcher. Se unifica en
  * el Incremento 5 (limpieza), cuando el router cubra todos los estados.
  */
+/**
+ * Reserva para un familiar: cambia la fase de detección a awaiting_familiar_dni y pide
+ * el DNI del familiar. Devuelve true si había detección activa (se pudo activar el modo
+ * familiar); false si no (el caller cae al comportamiento normal).
+ */
+async function requestFamiliarDni(
+  userPhoneNumber: string,
+  config: any,
+  ctxDirect: DirectResponseContext,
+): Promise<boolean> {
+  const ok = await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_familiar_dni')
+  if (!ok) return false
+  const { buildFamiliarDNIRequestMessage } = await import('./conversation-state/patient-detection/patient-templates')
+  await sendDirectResponse(ctxDirect, buildFamiliarDNIRequestMessage(), 'router-familiar-dni')
+  await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+  return true
+}
+
 async function runPrimaryDispatcherNoFlow(
   userPhoneNumber: string,
   userMessage: string,
@@ -1311,7 +1329,12 @@ async function runPrimaryDispatcherNoFlow(
       return true
     }
 
-    if (action.type === 'init_patient_detection' || action.type === 'init_new_patient_flow') {
+    if (action.type === 'init_familiar_flow') {
+      if (await requestFamiliarDni(userPhoneNumber, config, ctxDirect)) return true
+      // Sin detección activa → iniciar detección normal (menú); el paciente puede elegir "2".
+    }
+
+    if (action.type === 'init_patient_detection' || action.type === 'init_new_patient_flow' || action.type === 'init_familiar_flow') {
       const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
       if (detResult?.handled && detResult.message) {
         // Enviar con los botones del menú (1/2/3) si el resultado los trae.
@@ -1425,6 +1448,22 @@ async function runInterjectionInActiveFlow(
     }
     const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
     const action = execResult.action
+
+    // Reserva para un familiar → activar modo familiar (pedir DNI del familiar), sin ceder.
+    if (action.type === 'init_familiar_flow') {
+      const ctxFam: DirectResponseContext = {
+        phoneNumberId: value.metadata.phone_number_id,
+        accessToken: config.accessToken,
+        userPhoneNumber,
+        configId: config.id,
+        clienteId: config.cliente_id,
+      }
+      if (await requestFamiliarDni(userPhoneNumber, config, ctxFam)) {
+        routerLogger.info('[Router intercalada] Reserva para familiar → pidiendo DNI del familiar')
+        return true
+      }
+      return false
+    }
 
     // Respuesta válida al paso, o cambio de intención REAL → ceder al pipeline
     // (el handler del paso o el dispatcher tardío lo procesan).
@@ -4348,6 +4387,18 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               return
             }
 
+            if (action.type === 'init_familiar_flow') {
+              // Reserva para un familiar → pedir DNI del familiar si hay detección activa.
+              if (await requestFamiliarDni(userPhoneNumber, config, dispatcherCtxDirect)) return
+              // Sin detección activa → menú normal (el paciente puede elegir "2").
+              const detFam = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+              if (detFam?.handled && detFam.message) {
+                await sendDirectResponse(dispatcherCtxDirect, detFam.message, "ai-dispatcher-familiar")
+              }
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
             if (action.type === 'init_new_patient_flow') {
               // Para pacientes nuevos sin DNI previo, iniciar flujo de detección.
               // Si el DNI ingresado no existe en el sistema, patient-detection
@@ -4451,6 +4502,60 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             return
           } catch {
             // Si incluso el fallback falla, caer al enqueue como último recurso
+          }
+        }
+      }
+    }
+
+    // ============================================================================
+    // RETIRO CONTROLADO DEL FALLBACK LIBRE (bajo intentRouterFull)
+    // En vez de enviar mensajes de texto no resueltos al asistente libre de OpenAI
+    // (que puede inventar información), damos una respuesta determinística:
+    //  - En medio de un flujo → re-mostramos el paso actual (sin inventar).
+    //  - Sin flujo activo → menú principal.
+    // (Audio y reagendamiento siguen por el camino normal — necesitan OpenAI.)
+    // ============================================================================
+    if (message.type === "text" && config.cliente_id) {
+      const routerFullFallback = (await getEffectiveFeatureFlags(config.id)).intentRouterFull === true
+      if (routerFullFallback) {
+        const [detA, exA, npA, bkA] = await Promise.all([
+          isPatientDetectionFlowActive(userPhoneNumber),
+          isExistingPatientFlowActive(userPhoneNumber),
+          isNewPatientFlowActive(userPhoneNumber),
+          getBookingFlowState(userPhoneNumber, config.id),
+        ])
+        const inRealFlow = detA || exA || npA || !!bkA
+        const reschedActive = await isRescheduleFlowActive(userPhoneNumber, config.id)
+        // Si hay reagendamiento activo, dejamos que siga por el enqueue (camino legacy).
+        if (!reschedActive) {
+          const ctxFallback: DirectResponseContext = {
+            phoneNumberId: value.metadata.phone_number_id,
+            accessToken: config.accessToken,
+            userPhoneNumber,
+            configId: config.id,
+            clienteId: config.cliente_id,
+          }
+          if (inRealFlow) {
+            const hist = await import('./conversation-state/conversation-history')
+              .then((m) => m.getHistory(userPhoneNumber)).catch(() => [] as any[])
+            const TRANSITION = 'Para continuar con tu turno:'
+            let step = [...hist].reverse().find((m: any) => m.role === 'bot')?.text
+            if (typeof step === 'string' && step.includes(TRANSITION)) {
+              step = step.slice(step.lastIndexOf(TRANSITION) + TRANSITION.length).trim()
+            }
+            const btns = await getStepButtons(userPhoneNumber, config.id)
+            const fbMsg = step && step.trim()
+              ? `Perdón, no te entendí. ${TRANSITION}\n\n${step.trim()}`
+              : 'Perdón, no te entendí. ¿Podés repetirlo?'
+            await sendDirectResponse(ctxFallback, fbMsg, "router-fallback-resume", btns || undefined)
+            return
+          } else {
+            const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+            if (det?.handled && det.message) {
+              await sendDirectResponse(ctxFallback, det.message, "router-fallback-menu", (det as any).buttons)
+            }
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
           }
         }
       }
@@ -4597,7 +4702,9 @@ export async function processIndividualMessage(
               }
             }
 
-            // Sin turnos en los próximos 60 días → mostrar menú de búsqueda ampliada
+            // Sin turnos con el mismo profesional/sede en 60 días → recién ACÁ (como fallback,
+            // después de haber buscado mismo profesional y misma sede) se ofrece la búsqueda
+            // ampliada. Ofrecerla es correcto en este punto, no al inicio.
             const { buildNoTurnosConProfesionalMessage, buildNoTurnosSaveSearchTypeState } =
               await import("./conversation-state/reschedule-templates")
             const noTurnosMsg = buildNoTurnosConProfesionalMessage(
