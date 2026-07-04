@@ -493,9 +493,26 @@ ${JSON.stringify(functionArgs, null, 2)}`
     }
   }
 }
+// Acciones irreversibles que el asistente libre NO debe ejecutar por su cuenta.
+// Cuando BLOCK_ASSISTANT_IRREVERSIBLE_ACTIONS=true, se bloquean y se pide confirmación
+// explícita del paciente (que el flujo determinístico/router procesa de forma segura).
+// Evita casos peligrosos como confirmar un turno que el paciente quería cancelar.
+const ASSISTANT_GUARDED_TOOLS = new Set(["confirmar_turno", "cancelar_turno"])
+
 // Implementación directa de todas las funciones
 export async function executeOpenAITool(toolName: string, args: any, clienteId: string) {
 
+  // Guard de seguridad: no permitir que el asistente libre confirme/cancele por su cuenta.
+  if (process.env.BLOCK_ASSISTANT_IRREVERSIBLE_ACTIONS === "true" && ASSISTANT_GUARDED_TOOLS.has(toolName)) {
+    console.warn(`[OPENAI-GUARD] 🛡️ Acción irreversible bloqueada para el asistente libre: '${toolName}'`)
+    return {
+      success: false,
+      accion_no_ejecutada: true,
+      motivo: "Por seguridad, confirmar o cancelar un turno no se ejecuta automáticamente.",
+      instruccion_asistente:
+        "NO confirmes ni canceles el turno vos mismo. Pedile al paciente que responda explícitamente 'Sí' o 'No' para que el sistema procese la acción de forma segura mediante el flujo de confirmación.",
+    }
+  }
 
   try {
     switch (toolName) {

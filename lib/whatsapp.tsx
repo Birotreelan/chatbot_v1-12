@@ -2330,8 +2330,16 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // ============================================================================
     if (message.type === "text" || message.type === "button" || message.type === "interactive") {
       const reciprocalFlags = await getEffectiveFeatureFlags(config.id)
-      
-      if (reciprocalFlags.reciprocalFarewellSilence) {
+
+      // No silenciar si el paciente está en medio de un flujo activo.
+      const reciprocalActiveFlow =
+        (await isPatientDetectionFlowActive(userPhoneNumber)) ||
+        (await isExistingPatientFlowActive(userPhoneNumber)) ||
+        (await isNewPatientFlowActive(userPhoneNumber)) ||
+        (await isRescheduleFlowActive(userPhoneNumber, config.id)) ||
+        !!(await getBookingFlowState(userPhoneNumber, config.id))
+
+      if (reciprocalFlags.reciprocalFarewellSilence && !reciprocalActiveFlow) {
         const reciprocalResult = await detectReciprocalFarewellPreFlow(
           userMessage,
           userPhoneNumber,
@@ -2907,9 +2915,18 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // ============================================================================
     if (message.type === "text") {
       const farewellFlags = await getEffectiveFeatureFlags(config.id)
-      
-      if (farewellFlags.directFarewellDetection) {
-        
+
+      // No interceptar despedidas si el paciente está en medio de un flujo activo:
+      // evita falsos positivos que secuestran respuestas del flujo (ej: un DNI leído como "chau").
+      const farewellActiveFlow =
+        (await isPatientDetectionFlowActive(userPhoneNumber)) ||
+        (await isExistingPatientFlowActive(userPhoneNumber)) ||
+        (await isNewPatientFlowActive(userPhoneNumber)) ||
+        (await isRescheduleFlowActive(userPhoneNumber, config.id)) ||
+        !!(await getBookingFlowState(userPhoneNumber, config.id))
+
+      if (farewellFlags.directFarewellDetection && !farewellActiveFlow) {
+
         const farewellResult = await detectFarewellPreFlow(
           userMessage,
           userPhoneNumber,

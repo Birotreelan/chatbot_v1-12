@@ -108,7 +108,11 @@ const CONFIRMED_PREFIX = "appointment_confirmed"
 
 // TTLs en segundos
 const CONTEXT_TTL = 48 * 60 * 60 // 48 horas - el contexto del turno
-const FLOW_STATE_TTL = 30 * 60   // 30 minutos - el estado del flujo pendiente
+// El estado del flujo pendiente (ej: awaiting_cancel_confirmation) debe sobrevivir
+// tanto como la ventana en que el paciente puede responder al recordatorio: los
+// pacientes contestan el template horas después. Con 30 min se perdía la "memoria"
+// del proceso y un "1" tardío se reinterpretaba (peligroso: cancelar → confirmar).
+const FLOW_STATE_TTL = 24 * 60 * 60 // 24 horas - el estado del flujo pendiente
 const CONFIRMED_TTL = 48 * 60 * 60 // 48 horas - marca de "turno ya confirmado"
 
 function getContextKey(phone: string, configId: string): string {
