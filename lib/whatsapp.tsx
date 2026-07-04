@@ -209,19 +209,39 @@ interface DirectResponseContext {
 /**
  * Envia una respuesta directa al usuario y guarda en el historial
  */
+// Botones para los prompts de decisión de cancelación / reagendamiento.
+const CANCEL_CONFIRM_BUTTONS = [
+  { id: "1", title: "Sí, cancelar" },
+  { id: "2", title: "No, mantener" },
+]
+const RESCHEDULE_OFFER_BUTTONS = [
+  { id: "1", title: "Reagendar" },
+  { id: "2", title: "No reagendar" },
+]
+
 async function sendDirectResponse(
   ctx: DirectResponseContext,
   message: string,
-  phase = "direct"
+  phase = "direct",
+  buttons?: Array<{ id: string; title: string }>
 ): Promise<boolean> {
   const logger = createConversationLogger(ctx.userPhoneNumber, ctx.configId, phase)
   try {
-    await sendWhatsAppMessage(
-      ctx.phoneNumberId,
-      ctx.accessToken,
-      ctx.userPhoneNumber,
-      message
-    )
+    if (buttons && buttons.length > 0) {
+      try {
+        await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, message, buttons)
+      } catch {
+        // Fallback a texto plano si el envío interactivo falla
+        await sendWhatsAppMessage(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, message)
+      }
+    } else {
+      await sendWhatsAppMessage(
+        ctx.phoneNumberId,
+        ctx.accessToken,
+        ctx.userPhoneNumber,
+        message
+      )
+    }
 
     await saveConversationMessage({
       id: nanoid(),
@@ -594,7 +614,7 @@ async function handlePendingFlowResponse(
       ...(wantsBookNew ? { postCancelAction: 'book_new' as const } : {}),
     })
     const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex)
-    await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_flow")
+    await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_flow", CANCEL_CONFIRM_BUTTONS)
     return true
   }
 
@@ -925,7 +945,9 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         }
 
         const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
-        await sendDirectResponse(ctx, successMsg, "awaiting_cancel_confirmation")
+        // Botones de reagendar solo si el turno admite reagendamiento (igual criterio que el builder)
+        const offersReschedule = chatbotData.turnos[flowState.turnoIndex || 0]?.admite_reagendamiento !== false
+        await sendDirectResponse(ctx, successMsg, "awaiting_cancel_confirmation", offersReschedule ? RESCHEDULE_OFFER_BUTTONS : undefined)
 
         // Si no hay flujo de reagendamiento, el turno quedó cancelado → volver al menú sin él
         if (!admiteReagendamiento) {
@@ -1112,7 +1134,7 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         postCancelAction: 'reschedule',
       })
       const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex)
-      await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_and_reschedule")
+      await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_and_reschedule", CANCEL_CONFIRM_BUTTONS)
       return true
 
     } else {
@@ -1245,7 +1267,7 @@ async function runPrimaryDispatcherNoFlow(
       getAppointmentContext(userPhoneNumber, config.id).catch(() => null),
       import('./conversation-state/conversation-history')
         .then((m) => m.getHistory(userPhoneNumber))
-        .then((msgs: any[]) => msgs.map((m: any) => `${m.role === 'user' ? 'Paciente' : 'Bot'}: ${m.content}`).join('\n'))
+        .then((msgs: any[]) => msgs.map((m: any) => `${m.role === 'user' ? 'Paciente' : 'Bot'}: ${m.text}`).join('\n'))
         .catch(() => ''),
     ])
 
@@ -1328,6 +1350,88 @@ async function runPrimaryDispatcherNoFlow(
     return false
   } catch (error) {
     routerLogger.error('[Router primario] Error — cediendo al pipeline normal', error as Error)
+    return false
+  }
+}
+
+/**
+ * Heurística barata: ¿el mensaje parece una pregunta / consulta intercalada?
+ * Se usa SOLO para decidir si vale la pena consultar al router en medio de un flujo
+ * (no para clasificar). Respuestas de paso (números, DNI, nombres, "1"/"2") NO disparan
+ * el router: las maneja el handler del flujo como siempre.
+ */
+function looksLikeInterjectionQuestion(message: string): boolean {
+  const t = message.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  if (t.length < 4) return false
+  if (/^\d+$/.test(t)) return false // número puro (selección, DNI)
+  if (t.includes('?')) return true
+  return /\b(que |qué|como |cuando |donde |cuanto |cuesta|precio|obra social|cobertura|trabajan|atienden|tienen|hay |puedo|se puede|cual|por que|porque|direccion|horario|telefono|cubre|acepta|sirve|necesito saber|queria saber|quiero saber)\b/.test(t)
+}
+
+/**
+ * Router de intención — Incremento 2: pregunta intercalada DENTRO de un flujo activo.
+ *
+ * Cuando el paciente está en medio de un flujo y hace una consulta ("trabajan con PAMI?"),
+ * el router la responde de forma CONTROLADA (derivar/consulta/empática) y vuelve a mostrar
+ * el paso pendiente (memoria del proceso), en vez de que el asistente libre conteste y se
+ * pierda el hilo.
+ *
+ * Devuelve true si respondió la consulta (el caller retorna); false para ceder al pipeline
+ * normal (respuestas de paso al handler del flujo; cambios de intención al dispatcher tardío).
+ */
+async function runInterjectionInActiveFlow(
+  userPhoneNumber: string,
+  userMessage: string,
+  config: any,
+  value: any,
+): Promise<boolean> {
+  const routerLogger = createConversationLogger(userPhoneNumber, config.id, "router-interjection")
+  try {
+    const historyModule = await import('./conversation-state/conversation-history')
+    const historyMsgs = await historyModule.getHistory(userPhoneNumber).catch(() => [] as any[])
+    const dispatcherHistory = historyMsgs.map((m: any) => `${m.role === 'user' ? 'Paciente' : 'Bot'}: ${m.text}`).join('\n')
+    const dispatcherAppCtx = await getAppointmentContext(userPhoneNumber, config.id).catch(() => null)
+
+    const dispatcherCtx = await buildDispatcherContext(userPhoneNumber, config.id, dispatcherAppCtx, dispatcherHistory)
+    const dispatcherResult = await runAIDispatcher(userPhoneNumber, config.id, userMessage, dispatcherCtx)
+    if (!dispatcherResult.handled) return false
+
+    const executorDeps: ExecutorDeps = {
+      phoneNumber: userPhoneNumber,
+      configId: config.id,
+      clienteId: config.cliente_id,
+      escalationPhone: config.escalationPhoneNumber,
+    }
+    const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
+    const action = execResult.action
+
+    // Solo interceptamos si es una respuesta controlada (consulta/derivación/empática).
+    // Para continuar_flujo_activo o cambios de intención, cedemos al pipeline normal.
+    if (action.type !== 'send_and_return') {
+      routerLogger.info('[Router intercalada] No es consulta, cede al flujo', { action: action.type })
+      return false
+    }
+
+    // Respuesta controlada + re-mostrar el paso pendiente (último mensaje del bot).
+    const lastBotMsg = [...historyMsgs].reverse().find((m: any) => m.role === 'bot')?.text
+    let message = action.message
+    if (typeof lastBotMsg === 'string' && lastBotMsg.trim() && !message.includes(lastBotMsg.trim().slice(0, 25))) {
+      message += `\n\n${lastBotMsg.trim()}`
+    }
+
+    const ctxDirect: DirectResponseContext = {
+      phoneNumberId: value.metadata.phone_number_id,
+      accessToken: config.accessToken,
+      userPhoneNumber,
+      configId: config.id,
+      clienteId: config.cliente_id,
+    }
+    await sendDirectResponse(ctxDirect, message, "router-interjection-resume")
+    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+    routerLogger.info('[Router intercalada] Consulta respondida + paso retomado')
+    return true
+  } catch (error) {
+    routerLogger.error('[Router intercalada] Error — cede al pipeline', error as Error)
     return false
   }
 }
@@ -1724,7 +1828,7 @@ export async function handleMessage(value: any) {
           }
           
           const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, 0)
-          const sent = await sendDirectResponse(ctx, doubleConfirmMsg)
+          const sent = await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_flow", CANCEL_CONFIRM_BUTTONS)
           
           if (sent) {
             return // Salir, no pasar a OpenAI
@@ -2437,10 +2541,18 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         ])
         const tipoClinica = (apptCtx as any)?.tipo_mensaje
         const hasClinicaTemplate = tipoClinica === 'turno_cancelado_clinica' || tipoClinica === 'turno_confirmado_clinica'
-        const hasActiveFlow =
-          detActive || exActive || npActive || rsActive || !!pendingFS || !!bookingFS || !!clinicaFU || hasClinicaTemplate
+        // Flujo "real" de conversación (booking/detección/reagendamiento), sin contar clínica.
+        const hasRealFlow = detActive || exActive || npActive || rsActive || !!pendingFS || !!bookingFS
+        const hasClinicaContext = !!clinicaFU || hasClinicaTemplate
+        const hasActiveFlow = hasRealFlow || hasClinicaContext
+
         if (!hasActiveFlow) {
+          // Incremento 1: sin flujo activo → dispatcher primario decide la intención.
           const handled = await runPrimaryDispatcherNoFlow(userPhoneNumber, userMessage, config, value)
+          if (handled) return
+        } else if (hasRealFlow && !hasClinicaContext && looksLikeInterjectionQuestion(userMessage)) {
+          // Incremento 2: consulta intercalada en medio de un flujo → responder + retomar el paso.
+          const handled = await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value)
           if (handled) return
         }
       }
@@ -3680,7 +3792,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
                   // Construir y enviar mensaje de doble confirmación
                   const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, 0)
-                  await sendDirectResponse(detectionCtx, doubleConfirmMsg, "cancel_flow")
+                  await sendDirectResponse(detectionCtx, doubleConfirmMsg, "cancel_flow", CANCEL_CONFIRM_BUTTONS)
                 }
               } else {
                 // Sin turnos - no debería pasar, pero por seguridad derivar a OpenAI
