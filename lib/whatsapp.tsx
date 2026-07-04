@@ -2685,6 +2685,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         const hasClinicaTemplate = tipoClinica === 'turno_cancelado_clinica' || tipoClinica === 'turno_confirmado_clinica'
         // Flujo "real" de conversación (booking/detección/reagendamiento), sin contar clínica.
         const hasRealFlow = detActive || exActive || npActive || rsActive || !!pendingFS || !!bookingFS
+        // El reagendamiento tiene su PROPIA selección de turno (texto libre incluido);
+        // no lo interceptamos con el router de intercalada para no romperla.
+        const hasInterjectionFlow = detActive || exActive || npActive || !!pendingFS || !!bookingFS
         const hasClinicaContext = !!clinicaFU || hasClinicaTemplate
         const hasActiveFlow = hasRealFlow || hasClinicaContext
 
@@ -2692,7 +2695,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // Incremento 1: sin flujo activo → dispatcher primario decide la intención.
           const handled = await runPrimaryDispatcherNoFlow(userPhoneNumber, userMessage, config, value)
           if (handled) return
-        } else if (hasRealFlow && !hasClinicaContext && !isObviousStepInput(userMessage)) {
+        } else if (hasInterjectionFlow && !hasClinicaContext && !isObviousStepInput(userMessage)) {
           // Incremento 2 (universal): cualquier texto que NO sea un input obvio del paso
           // pasa por el router → decide input válido vs consulta intercalada, y nunca deja
           // que el handler del paso rechace una pregunta.

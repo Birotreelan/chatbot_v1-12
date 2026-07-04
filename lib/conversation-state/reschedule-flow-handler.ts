@@ -12,10 +12,10 @@
  */
 
 import { getRedisClient } from "@/lib/redis"
-import { extractSelection, SelectionResult } from "./selection-extractor"
 import { isBackCommand } from "./shared/back-navigation"
 import type { ChatbotData, ChatbotDataTurno } from "../appointment-flow-state"
 import { getNextWindow, buildTurnosWindowMessage } from "./shared/turnos-handler"
+import { handleTurnoSelection } from "./shared/turno-selection-handler"
 import type { TurnoOption } from "./shared/types"
 
 // ============================================================================
@@ -431,28 +431,37 @@ export async function handleRescheduleMessage(
       }
     }
 
-    // Intentar resolver con el extractor de selecciones.
-    // IMPORTANTE: extractSelection espera opciones con forma { index, label }
-    // y devuelve { selected, selectedIndex }. (Antes se leían campos
-    // inexistentes resolved/value, por lo que la selección nunca resolvía y
-    // el flujo caía indebidamente al fallback de OpenAI.)
-    const selection = extractSelection(
-      message,
-      state.turnosDisponibles.map((t, i) => ({
-        index: i,
-        label: `${t.fecha_formateada} - ${t.hora_formateada} hs`,
-      }))
-    )
+    // Resolver la selección con el MISMO resolver robusto que la reserva normal:
+    // números, hora, "día + hora" (ej. "el 13 a las 09 15") y NLU. Los turnos se
+    // mapean a TurnoOption (numero = índice + 1) para resolver contra el índice
+    // global de la lista completa (no solo la ventana visible).
+    const rescheduleOptions = rescheduleTurnosToOptions(state.turnosDisponibles)
+    const sel = await handleTurnoSelection(message, rescheduleOptions, phone, configId)
+    console.log(`[RESCHEDULE-FLOW] handleTurnoSelection →`, {
+      selected: sel.selectedTurno?.numero,
+      showMore: sel.showMore,
+    })
 
-    console.log(`[RESCHEDULE-FLOW] Selection extractor result:`, selection)
+    // El resolver interpretó el mensaje como "Ver más" → avanzar a la siguiente ventana.
+    if (sel.showMore) {
+      const w = buildRescheduleWindow(state, state.turnosMostrados || 0)
+      state.turnosMostrados = w.newShownCount
+      await saveRescheduleState(phone, configId, state)
+      return {
+        type: 'pending',
+        nextPhase: 'awaiting_selection',
+        state,
+        showMore: true,
+        message: w.message,
+        hasMoreTurnos: w.hasMore,
+      }
+    }
 
-    if (selection.selected && selection.selectedIndex !== undefined) {
-      const turnoIndex = selection.selectedIndex
-      const turnoSeleccionado = state.turnosDisponibles[turnoIndex]
-
+    if (sel.selectedTurno) {
+      const turnoSeleccionado = state.turnosDisponibles[sel.selectedTurno.numero - 1]
       if (turnoSeleccionado) {
         console.log(`[RESCHEDULE-FLOW] Turno seleccionado: ${turnoSeleccionado.fecha_formateada} ${turnoSeleccionado.hora_formateada}`)
-        
+
         state.turnoSeleccionado = turnoSeleccionado
         state.phase = 'awaiting_confirmation'
         state.intentosFallidos = 0
