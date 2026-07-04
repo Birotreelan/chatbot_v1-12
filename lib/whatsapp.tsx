@@ -1414,10 +1414,14 @@ async function runInterjectionInActiveFlow(
     }
 
     // Respuesta controlada + re-mostrar el paso pendiente (último mensaje del bot).
+    // Quitamos el cierre "...escribime y te ayudo" de la derivación (estorba al retomar)
+    // y agregamos una transición para que respuesta+paso fluyan.
     const lastBotMsg = [...historyMsgs].reverse().find((m: any) => m.role === 'bot')?.text
     let message = action.message
+      .replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '')
+      .trimEnd()
     if (typeof lastBotMsg === 'string' && lastBotMsg.trim() && !message.includes(lastBotMsg.trim().slice(0, 25))) {
-      message += `\n\n${lastBotMsg.trim()}`
+      message += `\n\nPara continuar con tu turno:\n\n${lastBotMsg.trim()}`
     }
 
     const ctxDirect: DirectResponseContext = {

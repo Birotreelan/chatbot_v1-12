@@ -182,6 +182,7 @@ Usá este tool para:
 - Explicaciones de contexto: "Estuve internada", "Me surgió un viaje".
 - Agradecimientos: "Muchas gracias", "Muy amable".
 - Despedidas: "Hasta luego", "Chau".
+- Preguntas sobre el proceso de reserva/atención: "¿voy a poder elegir el turno?", "¿puedo cancelar después?", "¿es obligatorio darte la obra social?". Respondé breve y veraz (sí va a poder elegir/continuar), sin inventar horarios/precios/datos.
 Responde con empatía y sin iniciar ningún flujo.`,
       parameters: {
         type: 'object',
