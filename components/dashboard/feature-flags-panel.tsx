@@ -139,6 +139,12 @@ const FLAG_META: Record<
     risk: "medio",
     sprint: "Router (piloto)",
   },
+  intentRouterFull: {
+    label: "Router de intención — flujo completo (master)",
+    description: "Master flag: el router de intención pasa a ser el decisor primario de TODO el flujo de turnos (reutiliza el AI Dispatcher + contratos de estado) en lugar de la cascada de regex. Implica el piloto de clínica. Apagar para volver al comportamiento actual.",
+    risk: "alto",
+    sprint: "Router (full)",
+  },
 }
 
 const RISK_BADGE: Record<"bajo" | "medio" | "alto", string> = {
@@ -172,6 +178,7 @@ const FLAG_ORDER: FlagKey[] = [
   "postActionContextHandler",
   "nluFallbackRouter",
   "intentRouterClinicaOffer",
+  "intentRouterFull",
 ]
 
 export function FeatureFlagsPanel() {

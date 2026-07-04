@@ -265,6 +265,12 @@ export interface FeatureFlags {
   // Cuando está ON, el estado de oferta post-cancelación/confirmación se maneja
   // con el router de intención (contrato de estados) en vez del interceptor de regex.
   intentRouterClinicaOffer: boolean
+
+  // Master flag del router de intención para TODO el flujo de turnos.
+  // Cuando está ON, el router de intención es el decisor primario de intención
+  // (reutilizando el AI Dispatcher + los contratos de estado) en vez de la cascada
+  // de interceptores de regex. Implica intentRouterClinicaOffer.
+  intentRouterFull: boolean
 }
 
 /**
@@ -300,6 +306,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   humanSupport: false,
   humanSupportOfferToPatient: false,
   intentRouterClinicaOffer: false,
+  intentRouterFull: false,
 }
 
 /**
