@@ -1367,17 +1367,25 @@ async function runPrimaryDispatcherNoFlow(
 }
 
 /**
- * Heurística barata: ¿el mensaje parece una pregunta / consulta intercalada?
- * Se usa SOLO para decidir si vale la pena consultar al router en medio de un flujo
- * (no para clasificar). Respuestas de paso (números, DNI, nombres, "1"/"2") NO disparan
- * el router: las maneja el handler del flujo como siempre.
+ * Heurística barata: ¿el mensaje es un input OBVIO de un paso (número, DNI, email,
+ * "0", o un token corto tipo nombre/apellido/obra social)?
+ *
+ * Se usa SOLO como optimización de costo: si es un input obvio, lo maneja el handler
+ * del paso sin consultar al router. Para CUALQUIER otro texto (frases, preguntas), el
+ * router decide (input válido vs consulta intercalada) — así el comportamiento es
+ * uniforme en todos los pasos y una pregunta nunca se rechaza como si fuera un dato.
  */
-function looksLikeInterjectionQuestion(message: string): boolean {
-  const t = message.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-  if (t.length < 4) return false
-  if (/^\d+$/.test(t)) return false // número puro (selección, DNI)
-  if (t.includes('?')) return true
-  return /\b(que |qué|como |cuando |donde |cuanto |cuesta|precio|obra social|cobertura|trabajan|atienden|tienen|hay |puedo|se puede|cual|por que|porque|direccion|horario|telefono|cubre|acepta|sirve|necesito saber|queria saber|quiero saber)\b/.test(t)
+function isObviousStepInput(message: string): boolean {
+  const t = message.trim()
+  if (t === '' ) return true
+  if (t === '0') return true                       // volver
+  if (/^\d+$/.test(t)) return true                 // número (selección)
+  if (t.replace(/\D/g, '').length >= 7 && t.replace(/\D/g, '').length <= 9 && !/[a-záéíóúñ?]/i.test(t)) return true // DNI
+  if (/^\S+@\S+\.\S+$/.test(t)) return true         // email
+  // Token corto sin signos de pregunta: probable nombre / apellido / obra social / "particular".
+  const words = t.split(/\s+/)
+  if (words.length <= 2 && t.length <= 25 && !t.includes('?') && /[a-záéíóúñ]/i.test(t)) return true
+  return false
 }
 
 /**
@@ -1417,26 +1425,33 @@ async function runInterjectionInActiveFlow(
     const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
     const action = execResult.action
 
-    // Solo interceptamos si es una respuesta controlada (consulta/derivación/empática).
-    // Para continuar_flujo_activo o cambios de intención, cedemos al pipeline normal.
-    if (action.type !== 'send_and_return') {
-      routerLogger.info('[Router intercalada] No es consulta, cede al flujo', { action: action.type })
+    // Respuesta válida al paso, o cambio de intención REAL → ceder al pipeline
+    // (el handler del paso o el dispatcher tardío lo procesan).
+    if (
+      action.type === 'continue_active_flow' ||
+      action.type === 'init_new_patient_flow' ||
+      action.type === 'init_existing_patient_flow' ||
+      action.type === 'trigger_confirm_appointment' ||
+      action.type === 'trigger_cancel_menu' ||
+      action.type === 'trigger_cancel_and_rebook'
+    ) {
+      routerLogger.info('[Router intercalada] Cede al pipeline', { action: action.type })
       return false
     }
 
-    // Respuesta controlada + re-mostrar el paso pendiente (último mensaje del bot).
-    // Quitamos el cierre "...escribime y te ayudo" de la derivación (estorba al retomar)
-    // y agregamos una transición para que respuesta+paso fluyan.
+    // A partir de acá NO cedemos al handler del paso (rechazaría el texto libre como dato).
+    // - send_and_return → respuesta controlada (consulta/derivación/empática).
+    // - init_patient_detection u otro (el dispatcher no pudo clasificar) → "no entendí".
+    // En ambos casos respondemos y RE-MOSTRAMOS el paso, para no romper el flujo.
     const TRANSITION = 'Para continuar con tu turno:'
     let stepPrompt = [...historyMsgs].reverse().find((m: any) => m.role === 'bot')?.text
-    // Si el último mensaje del bot ya era una respuesta intercalada compuesta,
-    // tomamos SOLO el paso (lo que va tras la última transición) para no anidar/repetir.
     if (typeof stepPrompt === 'string' && stepPrompt.includes(TRANSITION)) {
       stepPrompt = stepPrompt.slice(stepPrompt.lastIndexOf(TRANSITION) + TRANSITION.length).trim()
     }
-    let message = action.message
-      .replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '')
-      .trimEnd()
+    const answer = action.type === 'send_and_return'
+      ? action.message.replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '').trimEnd()
+      : 'Perdón, no entendí tu mensaje.'
+    let message = answer
     if (typeof stepPrompt === 'string' && stepPrompt.trim() && !message.includes(stepPrompt.trim().slice(0, 25))) {
       message += `\n\n${TRANSITION}\n\n${stepPrompt.trim()}`
     }
@@ -2573,8 +2588,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // Incremento 1: sin flujo activo → dispatcher primario decide la intención.
           const handled = await runPrimaryDispatcherNoFlow(userPhoneNumber, userMessage, config, value)
           if (handled) return
-        } else if (hasRealFlow && !hasClinicaContext && looksLikeInterjectionQuestion(userMessage)) {
-          // Incremento 2: consulta intercalada en medio de un flujo → responder + retomar el paso.
+        } else if (hasRealFlow && !hasClinicaContext && !isObviousStepInput(userMessage)) {
+          // Incremento 2 (universal): cualquier texto que NO sea un input obvio del paso
+          // pasa por el router → decide input válido vs consulta intercalada, y nunca deja
+          // que el handler del paso rechace una pregunta.
           const handled = await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value)
           if (handled) return
         }
