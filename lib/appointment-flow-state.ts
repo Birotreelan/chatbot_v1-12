@@ -563,6 +563,51 @@ export async function clearClinicaCancellationOffer(
 }
 
 // ============================================================================
+// BOTONES DEL PASO ACTUAL
+// Guarda los botones del último paso mostrado, para poder re-mostrarlos (con botones)
+// cuando el router responde una consulta intercalada y retoma el paso.
+// ============================================================================
+
+const STEP_BUTTONS_PREFIX = "step_buttons"
+const STEP_BUTTONS_TTL = 60 * 60 // 1 hora
+
+export async function saveStepButtons(
+  phone: string,
+  configId: string,
+  buttons: Array<{ id: string; title: string }>,
+): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  try {
+    const key = `${STEP_BUTTONS_PREFIX}:${configId}:${phone}`
+    if (buttons && buttons.length > 0) {
+      await redis.set(key, JSON.stringify(buttons), { ex: STEP_BUTTONS_TTL })
+    } else {
+      await redis.del(key)
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+export async function getStepButtons(
+  phone: string,
+  configId: string,
+): Promise<Array<{ id: string; title: string }> | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+  try {
+    const val = await redis.get(`${STEP_BUTTONS_PREFIX}:${configId}:${phone}`)
+    if (!val) return null
+    if (Array.isArray(val)) return val as Array<{ id: string; title: string }>
+    if (typeof val === "string") return JSON.parse(val)
+    return null
+  } catch {
+    return null
+  }
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 

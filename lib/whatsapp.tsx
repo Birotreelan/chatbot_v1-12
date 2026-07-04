@@ -38,6 +38,8 @@ import {
   saveClinicaCancellationOffer,
   getClinicaFollowupData,
   clearClinicaCancellationOffer,
+  saveStepButtons,
+  getStepButtons,
   type ChatbotData,
   type ChatbotDataTurno,
   type ChatbotDataTurnoCancelado,
@@ -257,6 +259,12 @@ async function sendDirectResponse(
 
     await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
 
+    // Recordar los botones del paso actual (para re-mostrarlos en una consulta intercalada).
+    // No lo hacemos para la propia respuesta intercalada (no debe pisar el paso real).
+    if (phase !== "router-interjection-resume") {
+      await saveStepButtons(ctx.userPhoneNumber, ctx.configId, buttons || [])
+    }
+
     logger.info("Respuesta directa enviada", { messageLength: message.length })
     return true
   } catch (error) {
@@ -285,6 +293,9 @@ async function sendExistingPatientResult(
   phase = "existing_patient_flow"
 ): Promise<void> {
   if (!result.message) return
+
+  // Recordar los botones de reply del paso (para re-mostrarlos en una consulta intercalada).
+  await saveStepButtons(ctx.userPhoneNumber, ctx.configId, result.searchTypeButtons || result.turnosButtons || [])
 
   const _saveHistory = async (msg: string) => {
     await saveConversationMessage({ id: nanoid(), role: "assistant", content: msg, timestamp: new Date().toISOString(), phoneNumber: ctx.userPhoneNumber, configId: ctx.configId })
@@ -1416,12 +1427,18 @@ async function runInterjectionInActiveFlow(
     // Respuesta controlada + re-mostrar el paso pendiente (último mensaje del bot).
     // Quitamos el cierre "...escribime y te ayudo" de la derivación (estorba al retomar)
     // y agregamos una transición para que respuesta+paso fluyan.
-    const lastBotMsg = [...historyMsgs].reverse().find((m: any) => m.role === 'bot')?.text
+    const TRANSITION = 'Para continuar con tu turno:'
+    let stepPrompt = [...historyMsgs].reverse().find((m: any) => m.role === 'bot')?.text
+    // Si el último mensaje del bot ya era una respuesta intercalada compuesta,
+    // tomamos SOLO el paso (lo que va tras la última transición) para no anidar/repetir.
+    if (typeof stepPrompt === 'string' && stepPrompt.includes(TRANSITION)) {
+      stepPrompt = stepPrompt.slice(stepPrompt.lastIndexOf(TRANSITION) + TRANSITION.length).trim()
+    }
     let message = action.message
       .replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '')
       .trimEnd()
-    if (typeof lastBotMsg === 'string' && lastBotMsg.trim() && !message.includes(lastBotMsg.trim().slice(0, 25))) {
-      message += `\n\nPara continuar con tu turno:\n\n${lastBotMsg.trim()}`
+    if (typeof stepPrompt === 'string' && stepPrompt.trim() && !message.includes(stepPrompt.trim().slice(0, 25))) {
+      message += `\n\n${TRANSITION}\n\n${stepPrompt.trim()}`
     }
 
     const ctxDirect: DirectResponseContext = {
@@ -1431,9 +1448,10 @@ async function runInterjectionInActiveFlow(
       configId: config.id,
       clienteId: config.cliente_id,
     }
-    await sendDirectResponse(ctxDirect, message, "router-interjection-resume")
-    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-    routerLogger.info('[Router intercalada] Consulta respondida + paso retomado')
+    // Re-adjuntar los botones del paso (si los tenía), así el re-prompt no los pierde.
+    const stepButtons = await getStepButtons(userPhoneNumber, config.id)
+    await sendDirectResponse(ctxDirect, message, "router-interjection-resume", stepButtons || undefined)
+    routerLogger.info('[Router intercalada] Consulta respondida + paso retomado', { conBotones: !!(stepButtons && stepButtons.length) })
     return true
   } catch (error) {
     routerLogger.error('[Router intercalada] Error — cede al pipeline', error as Error)
