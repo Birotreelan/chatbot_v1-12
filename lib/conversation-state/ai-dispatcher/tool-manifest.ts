@@ -27,6 +27,7 @@ export const TOOL_NAMES = {
   DERIVAR_CONSULTA:          'derivar_consulta_externa',
   RESPUESTA_EMPATICA:        'respuesta_empatica',
   CONTINUAR_FLUJO:           'continuar_flujo_activo',
+  FINALIZAR:                 'finalizar_conversacion',
 } as const
 
 export type ToolName = typeof TOOL_NAMES[keyof typeof TOOL_NAMES]
@@ -213,6 +214,28 @@ Usá este tool cuando:
 Este tool le pasa el mensaje al handler determinístico del flujo activo.
 NO usar si el paciente claramente cambió de intención (quiere cancelar en lugar de continuar la reserva).`,
       parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+
+  // ── Finalizar / abandonar conversación ─────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: TOOL_NAMES.FINALIZAR,
+      description: `El paciente quiere TERMINAR o ABANDONAR la conversación / el flujo actual sin completar la acción.
+Usá este tool cuando expresa que se va, se arrepiente o no quiere seguir ahora:
+"chau", "bye", "gracias, nada más", "me arrepentí", "dejalo", "en otro momento lo vemos", "no quiero seguir", "mejor lo dejo".
+Cierra el flujo activo y se despide con calidez. NO usar si el paciente todavía quiere gestionar el turno.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          mensaje: {
+            type: 'string',
+            description: 'Despedida breve y cálida en español rioplatense (voseo), 1 oración. Ej: "¡Listo! Cuando quieras retomar, escribime. ¡Que tengas un buen día!".',
+          },
+        },
+        required: [],
+      },
     },
   },
 ]

@@ -35,6 +35,7 @@ export type ExecutorAction =
   | { type: 'trigger_cancel_menu' }                          // mostrar menú de cancelación
   | { type: 'trigger_cancel_and_rebook' }                    // cancelar + iniciar reserva
   | { type: 'continue_active_flow' }                         // reenviar mensaje al flow activo
+  | { type: 'end_conversation'; message: string }            // finalizar/abandonar: cerrar flujo + despedir
   | { type: 'passthrough' }                                  // ceder al enqueue/OpenAI normal
 
 export interface ExecutorResult {
@@ -140,6 +141,16 @@ export async function executeDispatcherDecision(
     // ── Continuar flujo activo ───────────────────────────────────────────────
     case TOOL_NAMES.CONTINUAR_FLUJO:
       return { action: { type: 'continue_active_flow' }, logNote: 'Dispatcher → continuar flujo activo' }
+
+    // ── Finalizar / abandonar conversación ───────────────────────────────────
+    case TOOL_NAMES.FINALIZAR:
+      return {
+        action: {
+          type: 'end_conversation',
+          message: (decision.args.mensaje as string) || '¡Listo! Cuando quieras retomar tu turno, escribime. ¡Que tengas un buen día!',
+        },
+        logNote: 'Dispatcher → finalizar conversación',
+      }
 
     // ── Fallback de seguridad ────────────────────────────────────────────────
     default:

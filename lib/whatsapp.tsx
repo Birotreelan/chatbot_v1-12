@@ -1285,6 +1285,43 @@ async function requestFamiliarDni(
   return true
 }
 
+/**
+ * Inicia la doble confirmación de cancelación correctamente: setea el flowState
+ * `awaiting_cancel_confirmation` (que reconoce handlePendingFlowResponse para procesar
+ * el "1"/"2") y envía el mensaje con el builder correcto + botones.
+ * Devuelve false si no hay contexto de turno (el caller decide el fallback).
+ */
+async function startCancelDoubleConfirm(
+  userPhoneNumber: string,
+  config: any,
+  ctxDirect: DirectResponseContext,
+  postCancelAction?: 'reschedule',
+): Promise<boolean> {
+  const chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+  if (!chatbotData || !chatbotData.turnos || chatbotData.turnos.length === 0) return false
+  const turnoIndex = 0
+  await setFlowState(userPhoneNumber, config.id, {
+    type: 'awaiting_cancel_confirmation',
+    createdAt: new Date().toISOString(),
+    turnoIndex,
+    ...(postCancelAction ? { postCancelAction } : {}),
+  } as any)
+  const msg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex)
+  await sendDirectResponse(ctxDirect, msg, "router-cancel-confirm", CANCEL_CONFIRM_BUTTONS)
+  await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+  return true
+}
+
+/** Limpia todos los flujos activos (para finalizar/abandonar la conversación). */
+async function clearActiveFlows(userPhoneNumber: string, config: any): Promise<void> {
+  await Promise.all([
+    clearNewPatientFlow(userPhoneNumber, config.id).catch(() => {}),
+    clearExistingPatientFlow(userPhoneNumber).catch(() => {}),
+    clearPatientDetectionFlow(userPhoneNumber, config.id).catch(() => {}),
+    clearFlowState(userPhoneNumber, config.id).catch(() => {}),
+  ])
+}
+
 async function runPrimaryDispatcherNoFlow(
   userPhoneNumber: string,
   userMessage: string,
@@ -1325,6 +1362,13 @@ async function runPrimaryDispatcherNoFlow(
 
     if (action.type === 'send_and_return') {
       await sendDirectResponse(ctxDirect, action.message, "router-primary")
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      return true
+    }
+
+    if (action.type === 'end_conversation') {
+      await clearActiveFlows(userPhoneNumber, config)
+      await sendDirectResponse(ctxDirect, action.message, "router-end")
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
       return true
     }
@@ -1371,13 +1415,9 @@ async function runPrimaryDispatcherNoFlow(
     }
 
     if (action.type === 'trigger_cancel_menu' || action.type === 'trigger_cancel_and_rebook') {
-      const { buildCancelConfirmationPrompt } = await import('./conversation-state/direct-confirmation-handler')
-      const turno = dispatcherCtx.turnos[0]
-      const turnoDetails = turno
-        ? `📅 ${turno.fecha} a las ${turno.hora}\n👨‍⚕️ ${turno.profesional}\n📍 ${turno.sede}`
-        : "Tu turno programado"
-      const cancelMsg = buildCancelConfirmationPrompt(turnoDetails)
-      await sendDirectResponse(ctxDirect, cancelMsg, "router-primary-cancel")
+      const postAction = action.type === 'trigger_cancel_and_rebook' ? 'reschedule' : undefined
+      if (await startCancelDoubleConfirm(userPhoneNumber, config, ctxDirect, postAction)) return true
+      await sendDirectResponse(ctxDirect, 'No encontré un turno activo para cancelar. Si necesitás ayuda, escribime.', "router-cancel-no-turno")
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
       return true
     }
@@ -1448,6 +1488,21 @@ async function runInterjectionInActiveFlow(
     }
     const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
     const action = execResult.action
+
+    // Finalizar / abandonar → cerrar el flujo y despedir (no re-preguntar el paso).
+    if (action.type === 'end_conversation') {
+      await clearActiveFlows(userPhoneNumber, config)
+      const ctxEnd: DirectResponseContext = {
+        phoneNumberId: value.metadata.phone_number_id,
+        accessToken: config.accessToken,
+        userPhoneNumber,
+        configId: config.id,
+        clienteId: config.cliente_id,
+      }
+      await sendDirectResponse(ctxEnd, action.message, "router-end")
+      routerLogger.info('[Router intercalada] Finalizar conversación → flujo cerrado')
+      return true
+    }
 
     // Reserva para un familiar → activar modo familiar (pedir DNI del familiar), sin ceder.
     if (action.type === 'init_familiar_flow') {
@@ -4314,6 +4369,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               return
             }
 
+            if (action.type === 'end_conversation') {
+              await clearActiveFlows(userPhoneNumber, config)
+              await sendDirectResponse(dispatcherCtxDirect, action.message, "ai-dispatcher-end")
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
             if (action.type === 'init_patient_detection') {
               const detResult = await initializePatientDetection(
                 userPhoneNumber, config.id, config.cliente_id, config.displayName
@@ -4359,30 +4421,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               return
             }
 
-            if (action.type === 'trigger_cancel_menu') {
-              // Mostrar menú de cancelación — reutilizar template existente
-              const { buildCancelConfirmationPrompt } = await import('./conversation-state/direct-confirmation-handler')
-              const turno = dispatcherCtx.turnos[0]
-              const turnoDetails = turno
-                ? `📅 ${turno.fecha} a las ${turno.hora}\n👨‍⚕️ ${turno.profesional}\n📍 ${turno.sede}`
-                : "Tu turno programado"
-              const cancelMsg = buildCancelConfirmationPrompt(turnoDetails)
-              await sendDirectResponse(dispatcherCtxDirect, cancelMsg, "ai-dispatcher-cancel")
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
-            }
-
-            if (action.type === 'trigger_cancel_and_rebook') {
-              // Mostrar prompt de cancelación — igual que trigger_cancel_menu.
-              // Después de la cancelación, el dispatcher interceptará el próximo mensaje
-              // de reserva y lo enrutará a iniciar_reserva_turno automáticamente.
-              const { buildCancelConfirmationPrompt } = await import('./conversation-state/direct-confirmation-handler')
-              const turno = dispatcherCtx.turnos[0]
-              const turnoDetails = turno
-                ? `📅 ${turno.fecha} a las ${turno.hora}\n👨‍⚕️ ${turno.profesional}\n📍 ${turno.sede}`
-                : "Tu turno programado"
-              const cancelMsg = buildCancelConfirmationPrompt(turnoDetails)
-              await sendDirectResponse(dispatcherCtxDirect, cancelMsg, "ai-dispatcher-cancel-rebook")
+            if (action.type === 'trigger_cancel_menu' || action.type === 'trigger_cancel_and_rebook') {
+              // Doble confirmación de cancelación (setea awaiting_cancel_confirmation para
+              // que el "1"/"2" se procese; antes usaba una firma incorrecta y no seteaba el
+              // estado → mostraba "undefined" y se quedaba en bucle).
+              const postAction = action.type === 'trigger_cancel_and_rebook' ? 'reschedule' : undefined
+              if (await startCancelDoubleConfirm(userPhoneNumber, config, dispatcherCtxDirect, postAction)) return
+              await sendDirectResponse(dispatcherCtxDirect, 'No encontré un turno activo para cancelar. Si necesitás ayuda, escribime.', "ai-dispatcher-cancel-no-turno")
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
             }
