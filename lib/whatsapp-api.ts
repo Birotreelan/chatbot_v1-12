@@ -37,12 +37,55 @@ function normalizePhoneNumber(phone: string): string {
   return cleaned
 }
 
+// Límite duro de WhatsApp para el body de un mensaje de texto.
+const WHATSAPP_TEXT_MAX = 4096
+// Margen de seguridad para no rozar el límite exacto.
+const WHATSAPP_TEXT_SAFE = 4000
+
+/**
+ * Parte un mensaje largo en fragmentos que respetan el límite de WhatsApp.
+ * Intenta cortar en límites naturales (doble salto de línea → salto de línea → espacio)
+ * para no romper líneas de la lista de turnos a la mitad.
+ */
+export function splitMessageForWhatsApp(message: string, maxLen: number = WHATSAPP_TEXT_SAFE): string[] {
+  if (!message || message.length <= maxLen) return [message || ""]
+
+  const chunks: string[] = []
+  let remaining = message
+
+  while (remaining.length > maxLen) {
+    let cut = remaining.lastIndexOf("\n\n", maxLen)
+    if (cut < maxLen * 0.5) cut = remaining.lastIndexOf("\n", maxLen)
+    if (cut < maxLen * 0.5) cut = remaining.lastIndexOf(" ", maxLen)
+    if (cut <= 0) cut = maxLen // sin punto de corte natural: corte duro
+
+    chunks.push(remaining.slice(0, cut).trimEnd())
+    remaining = remaining.slice(cut).trimStart()
+  }
+
+  if (remaining.length > 0) chunks.push(remaining)
+  return chunks
+}
+
 export async function sendWhatsAppMessage(
   phoneNumberId: string,
   accessToken: string,
   to: string,
   message: string,
 ): Promise<any> {
+  // Si el mensaje supera el límite de WhatsApp, enviarlo en fragmentos secuenciales.
+  // Esto evita el error 400 "text.body must be at most 4096 characters" que, sin este
+  // control, dejaba al paciente sin ninguna respuesta.
+  if (message && message.length > WHATSAPP_TEXT_MAX) {
+    const parts = splitMessageForWhatsApp(message)
+    console.log(`[v0] [WHATSAPP_API] ✂️ Mensaje de ${message.length} chars dividido en ${parts.length} fragmentos`)
+    let lastResult: any = null
+    for (const part of parts) {
+      lastResult = await sendWhatsAppMessage(phoneNumberId, accessToken, to, part)
+    }
+    return lastResult
+  }
+
   try {
     console.log("[v0] [WHATSAPP_API] 📤 Preparando envío de mensaje")
     console.log("[v0] [WHATSAPP_API] phoneNumberId:", phoneNumberId)

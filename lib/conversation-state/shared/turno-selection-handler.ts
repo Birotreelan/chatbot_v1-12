@@ -134,13 +134,27 @@ function extraerHoraDeTexto(input: string): string | null {
   m = norm.match(/\b(\d{1,2})\s*h\s*(\d{2})\b/)
   if (m) return `${m[1].padStart(2, '0')}:${m[2]}`
 
-  // "las X" o "la X" seguido de fin / espacio / "hs" → HH:00
-  m = norm.match(/\blas?\s+(\d{1,2})(?:\s|$|\s*(?:hs?|hrs?|horas?))/)
-  if (m) return `${m[1].padStart(2, '0')}:00`
+  // "las X YY" → HH:MM  (las 9 45 → 09:45); si no hay minutos → HH:00
+  m = norm.match(/\blas?\s+(\d{1,2})(?:\s+(\d{2}))?(?:\s|$|\s*(?:hs?|hrs?|horas?))/)
+  if (m) {
+    const mm = m[2] && parseInt(m[2], 10) <= 59 ? m[2] : '00'
+    return `${m[1].padStart(2, '0')}:${mm}`
+  }
 
   // "X hs" "X hrs" "X horas" → HH:00
   m = norm.match(/\b(\d{1,2})\s*(?:hs?|hrs?|horas?)\b/)
   if (m) return `${m[1].padStart(2, '0')}:00`
+
+  // "X YY" con espacio → HH:MM  (9 45 → 09:45). Último recurso: dos numeros
+  // consecutivos donde el primero es una hora valida (0-23) y el segundo minutos (00-59).
+  m = norm.match(/\b(\d{1,2})\s+(\d{2})\b/)
+  if (m) {
+    const hh = parseInt(m[1], 10)
+    const mm = parseInt(m[2], 10)
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      return `${m[1].padStart(2, '0')}:${m[2]}`
+    }
+  }
 
   return null
 }
@@ -296,8 +310,28 @@ export function resolverTextoATurno(input: string, turnosOpciones: TurnoOption[]
  */
 export type TurnoNLUResult =
   | { outcome: 'resolved'; turnoNumero: number; reasoning: string }
-  | { outcome: 'ambiguous'; clarificationMessage: string; reasoning: string }
+  | { outcome: 'ambiguous'; clarificationMessage: string; candidateNumeros: number[]; primaryNumero?: number; reasoning: string }
   | { outcome: 'unrelated'; reasoning: string }
+
+/**
+ * Palabras afirmativas cortas que, tras una pregunta de aclaración con un candidato
+ * principal, deben interpretarse como "sí, ese turno".
+ */
+const AFFIRMATIVE_PATTERNS: RegExp[] = [
+  /^s[ií]p?$/,                       // si, sí, sip
+  /^s[ií]\s+(ese|esa|dale|claro|por favor|correcto)$/,
+  /^(ese|esa)(\s+mismo| mismo| si| sí)?$/,
+  /^(dale|ok|oka|okey|okay|listo|perfecto|correcto|exacto|exactamente|confirmo|obvio|claro|dale si|de una)$/,
+  /^(ese|esa)\s+(turno|horario)$/,
+]
+
+/**
+ * Determina si el texto del paciente es una confirmación afirmativa breve.
+ */
+export function isAffirmative(input: string): boolean {
+  const norm = normalizarTexto(input)
+  return AFFIRMATIVE_PATTERNS.some((re) => re.test(norm))
+}
 
 /**
  * Serializa la lista de turnos en texto compacto para el prompt de OpenAI.
@@ -352,16 +386,21 @@ Se te dara una lista de turnos disponibles (con numero, dia, fecha, hora y profe
 Tu tarea es determinar con cual turno coincide el texto del paciente.
 
 REGLAS CRITICAS:
-1. Si el texto identifica UN UNICO turno con certeza → responde con outcome "resolved" y el numero exacto del turno.
-2. Si el texto es ambiguo (coincide con mas de uno o falta informacion para decidir) → responde con outcome "ambiguous" y genera una pregunta corta y clara en castellano argentino informal que le pida al paciente que aclare entre las opciones en conflicto. Menciona los turnos especificos en conflicto (dia, fecha, hora segun corresponda).
-3. Si el texto no tiene ninguna relacion con seleccionar un turno (ej: "ok", "gracias", saludos) → responde con outcome "unrelated".
+1. Si el texto identifica UN UNICO turno con certeza → responde con outcome "resolved" y el numero exacto del turno. Si el texto apunta claramente a un turno principal aunque haya otros parecidos, PREFERI "resolved" con ese turno antes que preguntar.
+2. Si el texto es genuinamente ambiguo (coincide con mas de uno y no hay uno claramente principal) → responde con outcome "ambiguous". Debes incluir:
+   - "candidateNumeros": el array con los numeros de los turnos en conflicto.
+   - "primaryNumero": el numero del turno MAS probable (el que mejor coincide con lo que pidio el paciente); si realmente no hay uno mas probable, omitilo.
+   - "clarificationMessage": una pregunta corta y clara en castellano argentino informal que pida aclarar entre las opciones en conflicto, mencionando los datos que las distinguen (dia, fecha, hora). Si hay un "primaryNumero", la pregunta debe proponerlo explicitamente para que un "si" del paciente lo confirme (ej: "¿Te referís al lunes 3 de agosto a las 09:45?").
+3. Si el texto no tiene ninguna relacion con seleccionar un turno (ej: "gracias", saludos) → responde con outcome "unrelated".
 4. NUNCA inventes un turno que no este en la lista.
-5. La pregunta de aclaracion debe ser muy concisa (1-2 oraciones), conversacional y mencionar solo los datos relevantes para distinguir las opciones.
+5. La pregunta de aclaracion debe ser muy concisa (1-2 oraciones) y conversacional.
 
 SALIDA JSON (sin markdown):
 {
   "outcome": "resolved" | "ambiguous" | "unrelated",
   "turnoNumero": <numero entero, solo si outcome es "resolved">,
+  "candidateNumeros": [<numeros>, ...],   // solo si outcome es "ambiguous"
+  "primaryNumero": <numero entero>,        // opcional, solo si outcome es "ambiguous"
   "clarificationMessage": "<pregunta en castellano, solo si outcome es 'ambiguous'>",
   "reasoning": "<explicacion breve de la decision>"
 }`
@@ -395,7 +434,18 @@ Retorna JSON.`
     }
 
     if (parsed.outcome === 'ambiguous' && typeof parsed.clarificationMessage === 'string') {
-      return { outcome: 'ambiguous', clarificationMessage: parsed.clarificationMessage, reasoning: parsed.reasoning || '' }
+      const candidateNumeros: number[] = Array.isArray(parsed.candidateNumeros)
+        ? parsed.candidateNumeros.filter((n: any) => typeof n === 'number')
+        : []
+      const primaryNumero: number | undefined =
+        typeof parsed.primaryNumero === 'number' ? parsed.primaryNumero : undefined
+      return {
+        outcome: 'ambiguous',
+        clarificationMessage: parsed.clarificationMessage,
+        candidateNumeros,
+        primaryNumero,
+        reasoning: parsed.reasoning || '',
+      }
     }
 
     if (parsed.outcome === 'unrelated') {
@@ -438,6 +488,11 @@ export interface TurnoInterruptionOptions {
  *
  * IMPORTANTE: turnosOpciones es el array COMPLETO de 60 días con numeración permanente.
  */
+export interface PendingDisambiguation {
+  candidateNumeros: number[]
+  primaryNumero?: number
+}
+
 export async function handleTurnoSelection(
   userInput: string,
   turnosOpciones: TurnoOption[],
@@ -445,7 +500,8 @@ export async function handleTurnoSelection(
   clientId: string,
   searchType?: SearchType,
   interruptionOptions?: TurnoInterruptionOptions,
-  profesionalNombre?: string
+  profesionalNombre?: string,
+  pendingDisambiguation?: PendingDisambiguation
 ): Promise<HandlerResult & {
   selectedTurno?: TurnoOption
   requestedRebusqueda?: boolean
@@ -454,11 +510,32 @@ export async function handleTurnoSelection(
   showAll?: boolean
   filteredTurnos?: TurnoOption[]
   filteredMessage?: string
+  disambiguation?: { candidateNumeros: number[]; primaryNumero?: number }
 }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turno_selection')
 
   // Normalizar input
   const inputNormalizado = userInput.trim().toLowerCase()
+
+  // ── Confirmación de una aclaración previa ────────────────────────────────
+  // Si venimos de una pregunta de aclaración que propuso un turno principal y el
+  // paciente responde afirmativamente ("si", "dale", "ese", "correcto"), confirmamos
+  // ese turno directamente sin volver a interpretar el texto.
+  if (pendingDisambiguation?.primaryNumero != null && isAffirmative(userInput)) {
+    const turnoConfirmado = turnosOpciones.find((t) => t.numero === pendingDisambiguation.primaryNumero)
+    if (turnoConfirmado) {
+      logger.info('Aclaración confirmada con afirmativo', {
+        input: userInput,
+        turnoNumero: turnoConfirmado.numero,
+        agendaId: turnoConfirmado.id,
+      })
+      return {
+        handled: true,
+        nextPhase: 'awaiting_confirmation',
+        selectedTurno: turnoConfirmado,
+      }
+    }
+  }
 
   // Intentar extraer numero — también acepta "opcion 1", "OPCION1", "Opción 2"
   const numeroMatch = inputNormalizado.match(/^\d+$/)
@@ -600,6 +677,10 @@ export async function handleTurnoSelection(
         handled: true,
         message: nluResult.clarificationMessage,
         nextPhase: 'awaiting_turno_selection',
+        disambiguation: {
+          candidateNumeros: nluResult.candidateNumeros,
+          primaryNumero: nluResult.primaryNumero,
+        },
       }
     }
 

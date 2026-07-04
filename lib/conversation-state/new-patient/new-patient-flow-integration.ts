@@ -141,7 +141,10 @@ export interface NewPatientFlowState {
   /** Turnos mostrados al paciente hasta ahora (paginación) */
   turnosMostrados: number
   turnoSeleccionado?: TurnoOption
-  
+  /** Aclaración pendiente: candidatos y candidato principal propuesto por el NLU.
+   *  Permite que un "si" del paciente confirme el turno propuesto. */
+  turnoDisambiguation?: { candidateNumeros: number[]; primaryNumero?: number }
+
   // Email (obligatorio para paciente nuevo)
   email?: string
   
@@ -1418,6 +1421,11 @@ async function handleTurnoPhase(
       }
     : undefined
 
+  // Capturar la aclaración pendiente y limpiarla: solo se re-guarda si el NLU
+  // vuelve a pedir aclaración (result.disambiguation más abajo).
+  const pendingDisambiguation = state.turnoDisambiguation
+  state.turnoDisambiguation = undefined
+
   const result = await handleTurnoSelection(
     userMessage,
     state.turnosOpciones,
@@ -1425,8 +1433,16 @@ async function handleTurnoPhase(
     clientId,
     state.searchType,
     interruptionOptions,
-    state.profesionalNombre
+    state.profesionalNombre,
+    pendingDisambiguation
   )
+
+  // ── Aclaración pendiente: el NLU detectó ambigüedad y propuso un candidato ──
+  if (result.disambiguation) {
+    state.turnoDisambiguation = result.disambiguation
+    await saveFlowState(phone, state)
+    return { handled: true, message: result.message }
+  }
 
   // ── "Ver más": mostrar la siguiente ventana de 15 días ──────────────────
   if (result.showMore) {
@@ -1513,6 +1529,9 @@ async function handleTurnoPhase(
     }
   }
 
+  // Persistir el estado (incluida la limpieza de turnoDisambiguation) antes de
+  // re-mostrar la lista / mensaje de opción inválida.
+  await saveFlowState(phone, state)
   return { handled: true, message: result.message }
 }
 

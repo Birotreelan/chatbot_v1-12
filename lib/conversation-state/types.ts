@@ -260,6 +260,11 @@ export interface FeatureFlags {
   // paciente la opción de ser atendido por un humano.
   // Solo tiene efecto si humanSupport: true.
   humanSupportOfferToPatient: boolean
+
+  // Router de intención (piloto) para la oferta post-template de clínica.
+  // Cuando está ON, el estado de oferta post-cancelación/confirmación se maneja
+  // con el router de intención (contrato de estados) en vez del interceptor de regex.
+  intentRouterClinicaOffer: boolean
 }
 
 /**
@@ -294,6 +299,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   aiDispatcher: true,
   humanSupport: false,
   humanSupportOfferToPatient: false,
+  intentRouterClinicaOffer: false,
 }
 
 /**

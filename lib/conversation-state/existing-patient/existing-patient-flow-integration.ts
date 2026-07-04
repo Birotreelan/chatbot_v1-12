@@ -126,6 +126,9 @@ export interface ExistingPatientFlowState {
   /** Turnos mostrados al paciente hasta ahora (paginación) */
   turnosMostrados: number
   turnoSeleccionado?: TurnoOption
+  /** Aclaración pendiente: candidatos y candidato principal propuesto por el NLU.
+   *  Permite que un "si" del paciente confirme el turno propuesto. */
+  turnoDisambiguation?: { candidateNumeros: number[]; primaryNumero?: number }
 
   // Control
   attempts: number
@@ -1257,7 +1260,19 @@ async function handleTurnoPhase(
       }
     : undefined
 
-  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phoneNumber, clientId, state.searchType, interruptionOptions, state.profesionalNombre)
+  // Capturar la aclaración pendiente y limpiarla: solo se re-guarda si el NLU
+  // vuelve a pedir aclaración (result.disambiguation más abajo).
+  const pendingDisambiguation = state.turnoDisambiguation
+  state.turnoDisambiguation = undefined
+
+  const result = await handleTurnoSelection(userMessage, state.turnosOpciones, phoneNumber, clientId, state.searchType, interruptionOptions, state.profesionalNombre, pendingDisambiguation)
+
+  // Aclaración pendiente: el NLU detectó ambigüedad y propuso un candidato
+  if (result.disambiguation) {
+    state.turnoDisambiguation = result.disambiguation
+    await saveFlowState(phoneNumber, state)
+    return { handled: true, message: result.message, nextPhase: 'awaiting_turno_selection' }
+  }
 
   // Paginación: ver más (siguiente ventana de 15 días)
   if (result.showMore) {
@@ -1366,6 +1381,9 @@ async function handleTurnoPhase(
     }
   }
 
+  // Persistir el estado (incluida la limpieza de turnoDisambiguation) antes de
+  // re-mostrar la lista / mensaje de opción inválida.
+  await saveFlowState(phoneNumber, state)
   return {
     handled: true,
     message: result.message,

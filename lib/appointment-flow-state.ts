@@ -479,14 +479,29 @@ export async function clearFlowState(
 const CLINICA_OFFER_PREFIX = "clinica_cancel_offer"
 const CLINICA_OFFER_TTL = 60 * 60 // 1 hora
 
+/**
+ * Datos que persistimos junto a la oferta/seguimiento post-template de clínica.
+ * - kind: 'cancelled' (con oferta 1/2 de nuevo turno) | 'confirmed' (solo seguimiento).
+ * - telefonoContacto: teléfono de la clínica para derivar consultas que el bot no puede responder.
+ */
+export interface ClinicaFollowupData {
+  kind: 'cancelled' | 'confirmed'
+  telefonoContacto?: string
+}
+
 export async function saveClinicaCancellationOffer(
   phone: string,
-  configId: string
+  configId: string,
+  data?: ClinicaFollowupData
 ): Promise<boolean> {
   const redis = getRedisClient()
   if (!redis) return false
   try {
-    await redis.set(`${CLINICA_OFFER_PREFIX}:${configId}:${phone}`, '1', { ex: CLINICA_OFFER_TTL })
+    const payload = JSON.stringify({
+      kind: data?.kind || 'cancelled',
+      telefonoContacto: data?.telefonoContacto || '',
+    })
+    await redis.set(`${CLINICA_OFFER_PREFIX}:${configId}:${phone}`, payload, { ex: CLINICA_OFFER_TTL })
     return true
   } catch { return false }
 }
@@ -499,8 +514,36 @@ export async function getClinicaCancellationOffer(
   if (!redis) return false
   try {
     const val = await redis.get<string>(`${CLINICA_OFFER_PREFIX}:${configId}:${phone}`)
-    return val !== null
+    return val !== null && val !== undefined
   } catch { return false }
+}
+
+/**
+ * Devuelve los datos de la oferta/seguimiento post-template (o null si no hay).
+ * Tolera el formato viejo ('1') y el objeto ya parseado por Upstash.
+ */
+export async function getClinicaFollowupData(
+  phone: string,
+  configId: string
+): Promise<ClinicaFollowupData | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+  try {
+    const val = await redis.get(`${CLINICA_OFFER_PREFIX}:${configId}:${phone}`)
+    if (val === null || val === undefined) return null
+    if (typeof val === 'object') return val as ClinicaFollowupData // Upstash ya lo parseó
+    if (typeof val === 'string') {
+      if (val === '1') return { kind: 'cancelled' } // formato viejo
+      try {
+        return JSON.parse(val) as ClinicaFollowupData
+      } catch {
+        return { kind: 'cancelled' }
+      }
+    }
+    return { kind: 'cancelled' }
+  } catch {
+    return null
+  }
 }
 
 export async function clearClinicaCancellationOffer(

@@ -36,7 +36,7 @@ import {
   isAppointmentConfirmed,
   getAppointmentRef,
   saveClinicaCancellationOffer,
-  getClinicaCancellationOffer,
+  getClinicaFollowupData,
   clearClinicaCancellationOffer,
   type ChatbotData,
   type ChatbotDataTurno,
@@ -58,6 +58,7 @@ import {
 } from "./direct-response-templates"
 import { createConversationLogger } from "./conversation-state/logger"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
+import { resolveState } from "./conversation-state/router"
 import { handleFarewellIfDetected, detectFarewellPreFlow, detectReciprocalFarewellPreFlow } from "./conversation-state/farewell-handler"
 import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
 import { detectDirectConfirmationPreFlow, buildCancelConfirmationPrompt, buildAskExplicitConfirmationMessage } from "./conversation-state/direct-confirmation-handler"
@@ -2249,15 +2250,62 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     }
 
     // ============================================================================
+    // ROUTER DE INTENCIÓN (PILOTO) — oferta/seguimiento post-template de clínica.
+    // Con el flag intentRouterClinicaOffer ON, el router de intención maneja estos
+    // estados (clasificación LLM + acciones cerradas). Con el flag OFF, se salta y
+    // corre el interceptor de regex de abajo (comportamiento actual, sin cambios).
+    // ============================================================================
+    let clinicaRouterOn = false
+    if ((message.type === "text" || message.type === "button" || message.type === "interactive") && config.cliente_id) {
+      clinicaRouterOn = (await getEffectiveFeatureFlags(config.id)).intentRouterClinicaOffer === true
+      if (clinicaRouterOn) {
+        const decision = await resolveState(userMessage, {
+          phone: userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+          escalationPhone: config.escalationPhoneNumber,
+        })
+        if (decision) {
+          const eff = decision.effect
+          if (eff.type === 'send_and_return') {
+            const routerCtx: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+            if (eff.buttons && eff.buttons.length) {
+              try {
+                await sendWhatsAppInteractive(routerCtx.phoneNumberId, routerCtx.accessToken, userPhoneNumber, eff.message, eff.buttons)
+                await saveConversationMessage({ id: nanoid(), role: "assistant", content: eff.message, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
+                appendToHistory(userPhoneNumber, { role: 'bot', text: eff.message, timestamp: Date.now() }).catch(() => {})
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              } catch {
+                await sendDirectResponse(routerCtx, eff.message, "router_clinica")
+              }
+            } else {
+              await sendDirectResponse(routerCtx, eff.message, "router_clinica")
+            }
+            return
+          }
+          // 'init_booking' / 'clear_state_and_passthrough' / 'noop':
+          // execute() ya limpió el estado → dejamos caer al pipeline normal (Sprint 9, etc.).
+        }
+      }
+    }
+
+    // ============================================================================
     // SPRINT 14b-1: RESPUESTA DEL PACIENTE A OFERTA DE REAGENDAMIENTO POST-CANCELACIÓN
     // Cuando la clínica canceló un turno y ofrecimos reagendar, el paciente responde "1" o "2".
     // "1" → quiere nuevo turno: limpiamos el estado y dejamos caer a Sprint 9 (booking flow)
     // "2" → no quiere: limpiamos el estado y enviamos despedida
     // Otro → re-preguntamos
+    // (Se salta si el router de intención está manejando este estado.)
     // ============================================================================
-    if ((message.type === "text" || message.type === "button" || message.type === "interactive") && config.cliente_id) {
-      const hasPendingClinicaOffer = await getClinicaCancellationOffer(userPhoneNumber, config.id)
-      if (hasPendingClinicaOffer) {
+    if (!clinicaRouterOn && (message.type === "text" || message.type === "button" || message.type === "interactive") && config.cliente_id) {
+      const clinicaFollowup = await getClinicaFollowupData(userPhoneNumber, config.id)
+      if (clinicaFollowup) {
         const clinicaOfferCtx: DirectResponseContext = {
           phoneNumberId: value.metadata.phone_number_id,
           accessToken: config.accessToken,
@@ -2266,35 +2314,84 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           clienteId: config.cliente_id,
         }
         const trimmed = userMessage.trim()
-        const wantsNew = trimmed === '1' || /^\bsi\b/i.test(trimmed) || /\bquiero\b|\bnuevo turno\b/i.test(trimmed)
-        const doesntWant = trimmed === '2' || /^\bno\b/i.test(trimmed)
+        // Normalizamos (minúsculas y sin tildes) para que los patrones no dependan de acentos.
+        const trimmedNorm = trimmed.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+        const isCancelled = clinicaFollowup.kind !== 'confirmed'
+        // Teléfono para derivar: el del template, o el de escalación de la config como fallback.
+        const clinicaPhone = clinicaFollowup.telefonoContacto || config.escalationPhoneNumber || ''
 
-        if (wantsNew) {
-          await clearClinicaCancellationOffer(userPhoneNumber, config.id)
-          // Caer al flujo normal de solicitud de turno (Sprint 9 maneja "1" como Solicitar turno)
-          // No hacemos return — el mensaje "1" será procesado por Sprint 9
-        } else if (doesntWant) {
-          await clearClinicaCancellationOffer(userPhoneNumber, config.id)
-          await sendDirectResponse(clinicaOfferCtx, "Entendido. Si en algún momento querés gestionar un turno, escribime. ¡Hasta pronto!", "clinica_cancellation_declined")
-          return
-        } else {
-          // Respuesta no reconocida — re-preguntar
-          const reaskMsg = "No entendí tu respuesta. Por favor respondé:\n\n1. Sí, quiero un nuevo turno\n2. No, gracias"
-          let reaskSent = false
-          try {
-            await sendWhatsAppInteractive(clinicaOfferCtx.phoneNumberId, clinicaOfferCtx.accessToken, clinicaOfferCtx.userPhoneNumber, reaskMsg, [
-              { id: "1", title: "Sí, quiero turno" },
-              { id: "2", title: "No, gracias" },
-            ])
-            await saveConversationMessage({ id: nanoid(), role: "assistant", content: reaskMsg, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
-            appendToHistory(userPhoneNumber, { role: 'bot', text: reaskMsg, timestamp: Date.now() }).catch(() => {})
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-            reaskSent = true
-          } catch {
-            await sendDirectResponse(clinicaOfferCtx, reaskMsg, "clinica_cancellation_reask")
+        // ¿El paciente está haciendo una pregunta / pidiendo el motivo? (no una elección 1/2)
+        const looksLikeQuestion =
+          /\b(por\s*que|porque|motivo|razon|saber|entender|explic|como fue|que paso|que sucedio)\b/.test(trimmedNorm) ||
+          /\?\s*$/.test(trimmed)
+
+        // Mensaje de derivación: reconoce que no tenemos el motivo y deriva a la clínica.
+        // Reusa el mismo estilo que ya usamos en otros flujos ("comunicate ... al *telefono*").
+        const buildUnknownReasonMessage = (withOffer: boolean): string => {
+          let m = "No tengo el detalle del motivo por parte de la clínica."
+          m += clinicaPhone
+            ? ` Para más información podés comunicarte directamente con la clínica al *${clinicaPhone}*.`
+            : " Para más información podés comunicarte directamente con la clínica."
+          if (withOffer) {
+            m += "\n\nMientras tanto, ¿querés que busquemos un nuevo turno disponible?\n\n1. Sí, quiero un nuevo turno\n2. No, gracias"
           }
-          if (!reaskSent) { /* stats handled by sendDirectResponse fallback */ }
-          return
+          return m
+        }
+
+        // Envía un mensaje directo con (o sin) botones 1/2, con fallback a texto.
+        const sendClinicaMessage = async (msg: string, withButtons: boolean, tag: string) => {
+          if (withButtons) {
+            try {
+              await sendWhatsAppInteractive(clinicaOfferCtx.phoneNumberId, clinicaOfferCtx.accessToken, clinicaOfferCtx.userPhoneNumber, msg, [
+                { id: "1", title: "Sí, quiero turno" },
+                { id: "2", title: "No, gracias" },
+              ])
+              await saveConversationMessage({ id: nanoid(), role: "assistant", content: msg, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
+              appendToHistory(userPhoneNumber, { role: 'bot', text: msg, timestamp: Date.now() }).catch(() => {})
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            } catch {
+              // fallthrough a texto plano
+            }
+          }
+          await sendDirectResponse(clinicaOfferCtx, msg, tag)
+        }
+
+        if (isCancelled) {
+          // Flujo turno_cancelado_clinica: hay oferta 1/2 de nuevo turno.
+          const wantsNew = trimmedNorm === '1' || /^(si|sip|dale|de una|obvio|claro)\b/.test(trimmedNorm) || /\bquiero\b/.test(trimmedNorm) || /\b(nuevo|otro)\s+turno\b/.test(trimmedNorm)
+          const doesntWant = trimmedNorm === '2' || /^no\b/.test(trimmedNorm)
+
+          // PRIORIDAD: una pregunta ("¿por qué?", "quiero saber por qué...") se responde
+          // con desconocimiento + derivación, y se vuelve a ofrecer 1/2 sin perder el estado.
+          if (looksLikeQuestion) {
+            await sendClinicaMessage(buildUnknownReasonMessage(true), true, "clinica_cancellation_unknown_reason")
+            return
+          }
+
+          if (wantsNew) {
+            await clearClinicaCancellationOffer(userPhoneNumber, config.id)
+            // Caer al flujo normal de solicitud de turno (Sprint 9 maneja "1" como Solicitar turno)
+            // No hacemos return — el mensaje será procesado por Sprint 9
+          } else if (doesntWant) {
+            await clearClinicaCancellationOffer(userPhoneNumber, config.id)
+            await sendDirectResponse(clinicaOfferCtx, "Entendido. Si en algún momento querés gestionar un turno, escribime. ¡Hasta pronto!", "clinica_cancellation_declined")
+            return
+          } else {
+            // No es 1/2 ni una pregunta clara: respondemos amablemente derivando + re-ofertando.
+            await sendClinicaMessage(buildUnknownReasonMessage(true), true, "clinica_cancellation_reask")
+            return
+          }
+        } else {
+          // Flujo turno_confirmado_clinica: no hay oferta 1/2, solo seguimiento.
+          if (looksLikeQuestion) {
+            // No tenemos más detalles del turno/estado que los ya enviados → derivar a la clínica.
+            await sendClinicaMessage(buildUnknownReasonMessage(false), false, "clinica_confirmation_unknown_reason")
+            return
+          }
+          // Cualquier otro mensaje (gracias, etc.): limpiamos el seguimiento y dejamos que
+          // el pipeline normal lo maneje (despedida, nueva consulta, etc.).
+          await clearClinicaCancellationOffer(userPhoneNumber, config.id)
         }
       }
     }
@@ -2345,8 +2442,11 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           if (admiteReagendamiento) {
             responseMsg += '\n\nSi querés, podemos ayudarte a buscar un nuevo turno disponible.'
-            // Guardar estado de oferta para manejar la respuesta del paciente
-            await saveClinicaCancellationOffer(userPhoneNumber, config.id)
+            // Guardar estado de oferta (con teléfono de contacto para derivar consultas)
+            await saveClinicaCancellationOffer(userPhoneNumber, config.id, {
+              kind: 'cancelled',
+              telefonoContacto: telefonoContacto || config.escalationPhoneNumber || '',
+            })
             let interactiveSent = false
             try {
               await sendWhatsAppInteractive(clinicaInfoCtx.phoneNumberId, clinicaInfoCtx.accessToken, clinicaInfoCtx.userPhoneNumber, responseMsg, [
@@ -2377,6 +2477,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           if (fecha) responseMsg += ` para el *${fecha}*`
           if (hora) responseMsg += ` a las *${hora}*`
           responseMsg += '! ✅\n\nSi necesitás algo más, no dudes en escribirme.'
+          // Guardar seguimiento para manejar preguntas posteriores (ej: "¿por qué?", detalles)
+          // derivándolas a la clínica en vez de caer al pipeline genérico.
+          await saveClinicaCancellationOffer(userPhoneNumber, config.id, {
+            kind: 'confirmed',
+            telefonoContacto: telefonoContacto || config.escalationPhoneNumber || '',
+          })
           await sendDirectResponse(clinicaInfoCtx, responseMsg, "clinica_confirmation_info")
           return
         }
