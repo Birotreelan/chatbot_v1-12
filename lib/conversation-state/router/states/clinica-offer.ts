@@ -79,7 +79,9 @@ export const clinicaPostCancelOffer: StateContract = {
   fallbackActionId: 'reofrecer_neutral',
 
   async execute(actionId: string, _slots, ctx: StateContext): Promise<RouterEffect> {
-    const telefono = ctx.data.telefonoContacto as string | undefined
+    // Priorizar el Número de Derivación de la config (ctx.escalationPhone); el del
+    // template/estado guardado es solo fallback.
+    const telefono = ctx.escalationPhone || (ctx.data.telefonoContacto as string | undefined)
 
     switch (actionId) {
       case 'aceptar_nuevo_turno':
@@ -151,7 +153,9 @@ export const clinicaPostConfirmFollowup: StateContract = {
   fallbackActionId: 'ceder_pipeline',
 
   async execute(actionId: string, _slots, ctx: StateContext): Promise<RouterEffect> {
-    const telefono = ctx.data.telefonoContacto as string | undefined
+    // Priorizar el Número de Derivación de la config (ctx.escalationPhone); el del
+    // template/estado guardado es solo fallback.
+    const telefono = ctx.escalationPhone || (ctx.data.telefonoContacto as string | undefined)
 
     switch (actionId) {
       case 'consulta_no_respondible':

@@ -1220,6 +1220,118 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
   return false
 }
 
+/**
+ * Router de intención — Incremento 1: dispatcher PRIMARIO cuando NO hay flujo activo.
+ *
+ * Con intentRouterFull ON y sin ningún flujo determinístico activo, el AI Dispatcher
+ * decide primero (antes de la cascada de interceptores de regex). Reproduce el
+ * subconjunto de acciones del dispatcher que aplican sin flujo activo.
+ *
+ * Devuelve true si manejó el mensaje (el caller debe retornar); false para ceder al
+ * pipeline normal (passthrough / continuar_flujo_activo / error).
+ *
+ * NOTA: duplica temporalmente parte del bloque tardío del AI Dispatcher. Se unifica en
+ * el Incremento 5 (limpieza), cuando el router cubra todos los estados.
+ */
+async function runPrimaryDispatcherNoFlow(
+  userPhoneNumber: string,
+  userMessage: string,
+  config: any,
+  value: any,
+): Promise<boolean> {
+  const routerLogger = createConversationLogger(userPhoneNumber, config.id, "router-primary")
+  try {
+    const [dispatcherAppCtx, dispatcherHistory] = await Promise.all([
+      getAppointmentContext(userPhoneNumber, config.id).catch(() => null),
+      import('./conversation-state/conversation-history')
+        .then((m) => m.getHistory(userPhoneNumber))
+        .then((msgs: any[]) => msgs.map((m: any) => `${m.role === 'user' ? 'Paciente' : 'Bot'}: ${m.content}`).join('\n'))
+        .catch(() => ''),
+    ])
+
+    const dispatcherCtx = await buildDispatcherContext(userPhoneNumber, config.id, dispatcherAppCtx, dispatcherHistory)
+    const dispatcherResult = await runAIDispatcher(userPhoneNumber, config.id, userMessage, dispatcherCtx)
+    if (!dispatcherResult.handled) return false
+
+    const executorDeps: ExecutorDeps = {
+      phoneNumber: userPhoneNumber,
+      configId: config.id,
+      clienteId: config.cliente_id,
+      escalationPhone: config.escalationPhoneNumber,
+    }
+    const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
+    routerLogger.info('[Router primario] Acción', { action: execResult.action.type, note: execResult.logNote })
+
+    const ctxDirect: DirectResponseContext = {
+      phoneNumberId: value.metadata.phone_number_id,
+      accessToken: config.accessToken,
+      userPhoneNumber,
+      configId: config.id,
+      clienteId: config.cliente_id,
+    }
+    const action = execResult.action
+
+    if (action.type === 'send_and_return') {
+      await sendDirectResponse(ctxDirect, action.message, "router-primary")
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      return true
+    }
+
+    if (action.type === 'init_patient_detection' || action.type === 'init_new_patient_flow') {
+      const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+      if (detResult?.handled && detResult.message) {
+        await sendDirectResponse(ctxDirect, detResult.message, "router-primary-menu")
+      }
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      return true
+    }
+
+    if (action.type === 'init_existing_patient_flow') {
+      const patient = dispatcherCtx.patient
+      const initialMsg = action.slots?.profesional
+        ? `Necesito turno con ${action.slots.profesional}`
+        : action.slots?.especialidad
+          ? `Necesito turno de ${action.slots.especialidad}`
+          : undefined
+      const existingResult = await initializeExistingPatientFlow(
+        userPhoneNumber, '', patient.name ?? '', patient.dni ?? '', undefined, config.cliente_id, undefined, config.escalationPhoneNumber, initialMsg
+      )
+      if (existingResult?.handled && existingResult.message) {
+        await sendExistingPatientResult(ctxDirect, existingResult, "router-primary-existing")
+      }
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      return true
+    }
+
+    if (action.type === 'trigger_confirm_appointment') {
+      if (dispatcherAppCtx) {
+        const confirmMsg = buildConfirmationMessage(dispatcherAppCtx, 0)
+        await sendDirectResponse(ctxDirect, confirmMsg, "router-primary-confirm")
+      }
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      return true
+    }
+
+    if (action.type === 'trigger_cancel_menu' || action.type === 'trigger_cancel_and_rebook') {
+      const { buildCancelConfirmationPrompt } = await import('./conversation-state/direct-confirmation-handler')
+      const turno = dispatcherCtx.turnos[0]
+      const turnoDetails = turno
+        ? `📅 ${turno.fecha} a las ${turno.hora}\n👨‍⚕️ ${turno.profesional}\n📍 ${turno.sede}`
+        : "Tu turno programado"
+      const cancelMsg = buildCancelConfirmationPrompt(turnoDetails)
+      await sendDirectResponse(ctxDirect, cancelMsg, "router-primary-cancel")
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      return true
+    }
+
+    // continue_active_flow / passthrough / desconocido → ceder al pipeline normal
+    return false
+  } catch (error) {
+    routerLogger.error('[Router primario] Error — cediendo al pipeline normal', error as Error)
+    return false
+  }
+}
+
 // Modificar la función handleMessage para usar la cola por usuario
 export async function handleMessage(value: any) {
 
@@ -2257,7 +2369,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // ============================================================================
     let clinicaRouterOn = false
     if ((message.type === "text" || message.type === "button" || message.type === "interactive") && config.cliente_id) {
-      clinicaRouterOn = (await getEffectiveFeatureFlags(config.id)).intentRouterClinicaOffer === true
+      const _clinicaFlags = await getEffectiveFeatureFlags(config.id)
+      // El master flag intentRouterFull implica el router de la oferta de clínica.
+      clinicaRouterOn = _clinicaFlags.intentRouterClinicaOffer === true || _clinicaFlags.intentRouterFull === true
       if (clinicaRouterOn) {
         const decision = await resolveState(userMessage, {
           phone: userPhoneNumber,
@@ -2296,6 +2410,35 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     }
 
     // ============================================================================
+    // ROUTER PRIMARIO (Incremento 1) — con intentRouterFull ON y SIN flujo activo
+    // ni contexto de clínica, el AI Dispatcher decide primero (router primario),
+    // antes de la cascada de interceptores de regex de abajo.
+    // ============================================================================
+    if (message.type === "text" && config.cliente_id) {
+      const fullRouterOn = (await getEffectiveFeatureFlags(config.id)).intentRouterFull === true
+      if (fullRouterOn) {
+        const [detActive, exActive, npActive, rsActive, pendingFS, bookingFS, clinicaFU, apptCtx] = await Promise.all([
+          isPatientDetectionFlowActive(userPhoneNumber),
+          isExistingPatientFlowActive(userPhoneNumber),
+          isNewPatientFlowActive(userPhoneNumber),
+          isRescheduleFlowActive(userPhoneNumber, config.id),
+          getFlowState(userPhoneNumber, config.id),
+          getBookingFlowState(userPhoneNumber, config.id),
+          getClinicaFollowupData(userPhoneNumber, config.id),
+          getAppointmentContext(userPhoneNumber, config.id).catch(() => null),
+        ])
+        const tipoClinica = (apptCtx as any)?.tipo_mensaje
+        const hasClinicaTemplate = tipoClinica === 'turno_cancelado_clinica' || tipoClinica === 'turno_confirmado_clinica'
+        const hasActiveFlow =
+          detActive || exActive || npActive || rsActive || !!pendingFS || !!bookingFS || !!clinicaFU || hasClinicaTemplate
+        if (!hasActiveFlow) {
+          const handled = await runPrimaryDispatcherNoFlow(userPhoneNumber, userMessage, config, value)
+          if (handled) return
+        }
+      }
+    }
+
+    // ============================================================================
     // SPRINT 14b-1: RESPUESTA DEL PACIENTE A OFERTA DE REAGENDAMIENTO POST-CANCELACIÓN
     // Cuando la clínica canceló un turno y ofrecimos reagendar, el paciente responde "1" o "2".
     // "1" → quiere nuevo turno: limpiamos el estado y dejamos caer a Sprint 9 (booking flow)
@@ -2317,8 +2460,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // Normalizamos (minúsculas y sin tildes) para que los patrones no dependan de acentos.
         const trimmedNorm = trimmed.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
         const isCancelled = clinicaFollowup.kind !== 'confirmed'
-        // Teléfono para derivar: el del template, o el de escalación de la config como fallback.
-        const clinicaPhone = clinicaFollowup.telefonoContacto || config.escalationPhoneNumber || ''
+        // Teléfono para derivar: el Número de Derivación de la config; el del template es fallback.
+        const clinicaPhone = config.escalationPhoneNumber || clinicaFollowup.telefonoContacto || ''
 
         // ¿El paciente está haciendo una pregunta / pidiendo el motivo? (no una elección 1/2)
         const looksLikeQuestion =
@@ -2442,10 +2585,11 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           if (admiteReagendamiento) {
             responseMsg += '\n\nSi querés, podemos ayudarte a buscar un nuevo turno disponible.'
-            // Guardar estado de oferta (con teléfono de contacto para derivar consultas)
+            // Guardar estado de oferta con el Número de Derivación de la config
+            // (config.escalationPhoneNumber). El teléfono del template es solo fallback.
             await saveClinicaCancellationOffer(userPhoneNumber, config.id, {
               kind: 'cancelled',
-              telefonoContacto: telefonoContacto || config.escalationPhoneNumber || '',
+              telefonoContacto: config.escalationPhoneNumber || telefonoContacto || '',
             })
             let interactiveSent = false
             try {
@@ -2463,7 +2607,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             }
             if (!interactiveSent) { /* stats handled by sendDirectResponse fallback */ }
           } else {
-            if (telefonoContacto) responseMsg += `\n\nPara consultas, podés comunicarte con la clínica al ${telefonoContacto}.`
+            // Derivación con el Número de Derivación de la config; el del template es fallback.
+            const derivPhone = config.escalationPhoneNumber || telefonoContacto
+            if (derivPhone) responseMsg += `\n\nPara consultas, podés comunicarte con la clínica al ${derivPhone}.`
             // sendDirectResponse handles saveConversationMessage, appendToHistory, updateWhatsAppStats internally
             await sendDirectResponse(clinicaInfoCtx, responseMsg, "clinica_cancellation_info")
           }
@@ -2479,9 +2625,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           responseMsg += '! ✅\n\nSi necesitás algo más, no dudes en escribirme.'
           // Guardar seguimiento para manejar preguntas posteriores (ej: "¿por qué?", detalles)
           // derivándolas a la clínica en vez de caer al pipeline genérico.
+          // Usamos el Número de Derivación de la config; el del template es solo fallback.
           await saveClinicaCancellationOffer(userPhoneNumber, config.id, {
             kind: 'confirmed',
-            telefonoContacto: telefonoContacto || config.escalationPhoneNumber || '',
+            telefonoContacto: config.escalationPhoneNumber || telefonoContacto || '',
           })
           await sendDirectResponse(clinicaInfoCtx, responseMsg, "clinica_confirmation_info")
           return
