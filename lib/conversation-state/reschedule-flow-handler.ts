@@ -15,6 +15,8 @@ import { getRedisClient } from "@/lib/redis"
 import { extractSelection, SelectionResult } from "./selection-extractor"
 import { isBackCommand } from "./shared/back-navigation"
 import type { ChatbotData, ChatbotDataTurno } from "../appointment-flow-state"
+import { getNextWindow, buildTurnosWindowMessage } from "./shared/turnos-handler"
+import type { TurnoOption } from "./shared/types"
 
 // ============================================================================
 // TYPES
@@ -61,6 +63,7 @@ export interface RescheduleFlowState {
     profesional: string
   }
   turnosDisponibles: TurnoDisponible[]
+  turnosMostrados?: number // paginación: cuántos turnos ya se mostraron (ventana "Ver más")
   turnoSeleccionado: TurnoDisponible | null
   turnoReservado: TurnoDisponible | null
   createdAt: string
@@ -74,6 +77,8 @@ export interface RescheduleFlowResult {
   nextPhase?: ReschedulePhase
   turnoSeleccionado?: TurnoDisponible
   state?: RescheduleFlowState
+  showMore?: boolean       // el usuario pidió "Ver más" turnos (siguiente ventana)
+  hasMoreTurnos?: boolean  // si quedan más turnos tras la ventana mostrada (para el botón)
   fallbackContext?: {
     intent: string
     extractedData?: Record<string, any>
@@ -312,6 +317,50 @@ export async function initRescheduleFlow(
   }
 }
 
+/** Convierte los turnos del reagendamiento al formato TurnoOption (numero = índice+1). */
+function rescheduleTurnosToOptions(turnos: TurnoDisponible[]): TurnoOption[] {
+  return turnos.map((t, i) => ({
+    numero: i + 1,
+    id: t.id || t.agenda_id || '',
+    fecha: t.fecha,
+    hora: t.hora_formateada || t.hora,
+    profesionalId: t.profesional_id || '',
+    profesionalNombre: t.profesional || '',
+    sedeNombre: t.sede || '',
+  }))
+}
+
+/**
+ * Construye la ventana de turnos del reagendamiento con la MISMA UX que la reserva
+ * (encabezado con total, ventana de 15 días, "Ver más"). El número mostrado es el índice
+ * global +1, así la selección sigue resolviendo turnosDisponibles[numero-1].
+ */
+export function buildRescheduleWindow(
+  state: RescheduleFlowState,
+  turnosMostrados: number,
+): { message: string; newShownCount: number; hasMore: boolean } {
+  const options = rescheduleTurnosToOptions(state.turnosDisponibles)
+  const w = getNextWindow(options, turnosMostrados)
+  const isFirst = turnosMostrados === 0
+  let message = buildTurnosWindowMessage(
+    w.turnos,
+    options.length,
+    w.hasMore,
+    isFirst ? state.paciente.nombres : undefined,
+    undefined,
+    state.turnosCancelado.profesional,
+    isFirst,
+  )
+  message += `\n\n0. *Volver al paso anterior*`
+  return { message, newShownCount: w.newShownCount, hasMore: w.hasMore }
+}
+
+/** Detecta el pedido de "Ver más" turnos. */
+function isVerMasRequest(message: string): boolean {
+  const t = message.trim().toLowerCase()
+  return t === 'ver_mas' || t === 'ver más' || t === 'ver mas' || t === 'mas' || t === 'más' || t === 'ver mas turnos' || t === 'ver más turnos'
+}
+
 /**
  * Procesa un mensaje del usuario durante el flujo
  */
@@ -353,6 +402,32 @@ export async function handleRescheduleMessage(
       return {
         type: 'error',
         message: "Listo, cancelé el reagendamiento. Si querés agendar o reagendar un turno, escribime cuando quieras.",
+      }
+    }
+
+    // "Ver más": mostrar la siguiente ventana de turnos (misma UX que la reserva).
+    if (isVerMasRequest(message)) {
+      const shown = state.turnosMostrados || 0
+      const w = buildRescheduleWindow(state, shown)
+      if (w.newShownCount <= shown) {
+        return {
+          type: 'pending',
+          nextPhase: 'awaiting_selection',
+          state,
+          showMore: true,
+          message: 'Esos son todos los turnos disponibles en los próximos 60 días. Respondé con el *número* del que preferís.\n\n0. *Volver al paso anterior*',
+          hasMoreTurnos: false,
+        }
+      }
+      state.turnosMostrados = w.newShownCount
+      await saveRescheduleState(phone, configId, state)
+      return {
+        type: 'pending',
+        nextPhase: 'awaiting_selection',
+        state,
+        showMore: true,
+        message: w.message,
+        hasMoreTurnos: w.hasMore,
       }
     }
 

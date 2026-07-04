@@ -5,7 +5,7 @@
  * Proporciona funciones para interceptar y procesar mensajes en el flujo de reagendamiento.
  */
 
-import { sendWhatsAppMessage } from "../whatsapp-api"
+import { sendWhatsAppMessage, sendWhatsAppInteractive } from "../whatsapp-api"
 import { saveConversationMessage } from "../conversations"
 import { nanoid } from "nanoid"
 import { updateWhatsAppStats } from "../db"
@@ -16,6 +16,7 @@ import {
   clearRescheduleState,
   handleRescheduleMessage,
   initRescheduleFlow,
+  buildRescheduleWindow,
   isConfirmation,
   isAbandon,
   type RescheduleFlowState,
@@ -62,15 +63,24 @@ interface RescheduleResponseContext {
  */
 async function sendRescheduleResponse(
   ctx: RescheduleResponseContext,
-  message: string
+  message: string,
+  buttons?: Array<{ id: string; title: string }>
 ): Promise<boolean> {
   try {
-    await sendWhatsAppMessage(
-      ctx.phoneNumberId,
-      ctx.accessToken,
-      ctx.userPhoneNumber,
-      message
-    )
+    if (buttons && buttons.length > 0) {
+      try {
+        await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, message, buttons)
+      } catch {
+        await sendWhatsAppMessage(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, message)
+      }
+    } else {
+      await sendWhatsAppMessage(
+        ctx.phoneNumberId,
+        ctx.accessToken,
+        ctx.userPhoneNumber,
+        message
+      )
+    }
 
     await saveConversationMessage({
       id: nanoid(),
@@ -257,9 +267,11 @@ export async function startRescheduleFlow(
     }
   }
 
-  // Construir y enviar mensaje con lista de turnos
-  const turnosMsg = buildRescheduleStartMessage(initResult.state, turnosDisponibles)
-  await sendRescheduleResponse(ctx, turnosMsg)
+  // Mostrar la PRIMERA ventana de turnos (misma UX que la reserva: ventana de 15 días + "Ver más").
+  const w = buildRescheduleWindow(initResult.state, 0)
+  initResult.state.turnosMostrados = w.newShownCount
+  await saveRescheduleState(userPhoneNumber, configId, initResult.state)
+  await sendRescheduleResponse(ctx, w.message, w.hasMore ? [{ id: 'ver_mas', title: 'Ver más' }] : undefined)
 
   // Trackear inicio
   if (clienteId) {
@@ -316,6 +328,14 @@ export async function processRescheduleMessage(
   console.log(`[RESCHEDULE-INTEGRATION] Resultado del handler:`, result.type)
 
   // ========================================
+  // CASO "Ver más": mostrar la siguiente ventana de turnos con su botón
+  // ========================================
+  if (result.showMore && result.message) {
+    await sendRescheduleResponse(ctx, result.message, result.hasMoreTurnos ? [{ id: 'ver_mas', title: 'Ver más' }] : undefined)
+    return { handled: true, fallbackToOpenAI: false }
+  }
+
+  // ========================================
   // CASO 1: Turno seleccionado - mostrar confirmación
   // ========================================
   if (result.type === 'pending' && result.nextPhase === 'awaiting_confirmation' && result.turnoSeleccionado) {
@@ -333,11 +353,12 @@ export async function processRescheduleMessage(
   // ========================================
   if (result.type === 'pending' && result.nextPhase === 'awaiting_selection' && result.state) {
     const rejectMsg = buildRescheduleRejectionMessage(result.state)
-    const turnosMsg = buildRescheduleStartMessage(result.state, result.state.turnosDisponibles)
-    
+    // Re-mostrar la lista desde la primera ventana (con "Ver más").
+    const w = buildRescheduleWindow(result.state, 0)
+    result.state.turnosMostrados = w.newShownCount
+    await saveRescheduleState(userPhoneNumber, configId, result.state)
     await sendRescheduleResponse(ctx, rejectMsg)
-    await sendRescheduleResponse(ctx, turnosMsg)
-
+    await sendRescheduleResponse(ctx, w.message, w.hasMore ? [{ id: 'ver_mas', title: 'Ver más' }] : undefined)
     return {
       handled: true,
       fallbackToOpenAI: false,

@@ -4724,9 +4724,11 @@ export async function processIndividualMessage(
               })
             }
 
-            // Búsqueda progresiva: 14 días → 30 días → 60 días
-            for (const dias of [14, 30, 60]) {
-              const turnos = await buscarConRango(dias)
+            // Buscar en los próximos 60 días (mismo profesional y sede), igual que la reserva
+            // normal. Antes usaba búsqueda progresiva (14→30→60) y se detenía en el primer rango
+            // con turnos, por eso la lista salía más corta.
+            {
+              const turnos = await buscarConRango(60)
               if (Array.isArray(turnos) && turnos.length > 0) {
                 // Pasar chatbotData completo (con turno_cancelado) para que startRescheduleFlow
                 // tenga el contexto correcto al construir el estado del flujo
