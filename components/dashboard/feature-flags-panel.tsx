@@ -133,6 +133,12 @@ const FLAG_META: Record<
     risk: "bajo",
     sprint: "Sprint 18",
   },
+  intentRouterClinicaOffer: {
+    label: "Router de intención — oferta post-template (piloto)",
+    description: "Maneja la oferta/seguimiento tras templates de la clínica (turno cancelado/confirmado) con el router de intención (clasificación LLM + acciones cerradas) en lugar del interceptor de regex. Reversible: apagar para volver al comportamiento actual.",
+    risk: "medio",
+    sprint: "Router (piloto)",
+  },
 }
 
 const RISK_BADGE: Record<"bajo" | "medio" | "alto", string> = {
@@ -165,6 +171,7 @@ const FLAG_ORDER: FlagKey[] = [
   "directInformationalQuery",
   "postActionContextHandler",
   "nluFallbackRouter",
+  "intentRouterClinicaOffer",
 ]
 
 export function FeatureFlagsPanel() {
