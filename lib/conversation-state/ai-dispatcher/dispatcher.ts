@@ -58,10 +58,11 @@ REGLAS DE CLASIFICACIÓN (en orden de prioridad):
 - Afirmación de asistencia al turno actual ("sí voy", "confirmo", "dale") → confirmar_asistencia_turno
   EXCEPCIÓN: si el turno ya está confirmado (Estado=Confirmado), NO usar confirmar_asistencia_turno → usar respuesta_empatica
 - "cancelar", "no puedo ir", "no voy" → cancelar_turno
-- "¿a qué hora?", "¿con quién?", "¿dónde?" sobre el turno → responder_consulta_informativa
+- "¿a qué hora?", "¿con quién?", "¿dónde es mi turno?" SOLO cuando pregunta por un turno YA existente → responder_consulta_informativa
 - Saludo, primer mensaje, mensaje ambiguo sin intención clara → mostrar_menu_principal
 - Despedida, agradecimiento ("gracias", "chau") → respuesta_empatica con respuesta cálida y breve
-- Consulta médica, síntomas, costos, coberturas → derivar_consulta_externa
+- Consulta médica, síntomas, costos, coberturas, obras sociales → derivar_consulta_externa
+- Datos de la CLÍNICA que NO tenemos en el sistema (dirección, ubicación, cómo llegar, horarios de atención, estacionamiento, teléfono de contacto) → derivar_consulta_externa (NUNCA inventes una dirección, horario ni teléfono)
 - TODO LO DEMÁS que no encaja → mostrar_menu_principal (NUNCA inventar información)
 
 RESTRICCIONES CRÍTICAS:

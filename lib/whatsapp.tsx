@@ -1302,7 +1302,8 @@ async function runPrimaryDispatcherNoFlow(
     if (action.type === 'init_patient_detection' || action.type === 'init_new_patient_flow') {
       const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
       if (detResult?.handled && detResult.message) {
-        await sendDirectResponse(ctxDirect, detResult.message, "router-primary-menu")
+        // Enviar con los botones del menú (1/2/3) si el resultado los trae.
+        await sendDirectResponse(ctxDirect, detResult.message, "router-primary-menu", (detResult as any).buttons)
       }
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
       return true

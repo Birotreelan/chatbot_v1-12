@@ -152,10 +152,11 @@ Solo responde información que ya tenemos del turno. No inventes datos.`,
       name: TOOL_NAMES.DERIVAR_CONSULTA,
       description: `El paciente pregunta algo que este bot no puede responder.
 Usá este tool para:
-- Consultas administrativas: costos, coberturas, documentación, pagos.
+- Consultas administrativas: costos, coberturas, obras sociales, documentación, pagos.
 - Consultas médicas: síntomas, medicamentos, diagnósticos, tratamientos.
+- Datos de la clínica que no tenemos en el sistema: dirección, ubicación, cómo llegar, horarios de atención, estacionamiento, teléfono.
 - Cualquier consulta fuera del scope de gestión de turnos.
-Redirigirá al teléfono de la clínica.`,
+Redirigirá al teléfono de la clínica. NUNCA inventes estos datos.`,
       parameters: {
         type: 'object',
         properties: {
