@@ -511,6 +511,9 @@ export async function handleTurnoSelection(
   filteredTurnos?: TurnoOption[]
   filteredMessage?: string
   disambiguation?: { candidateNumeros: number[]; primaryNumero?: number }
+  /** true si el turno se resolvió por texto/hora/NLU (no por número directo):
+   *  el caller debe pedir confirmación explícita del turno antes de continuar. */
+  needsConfirmation?: boolean
 }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turno_selection')
 
@@ -620,6 +623,7 @@ export async function handleTurnoSelection(
         handled: true,
         nextPhase: 'awaiting_confirmation',
         selectedTurno: turnoByHora,
+        needsConfirmation: true,
       }
     }
   }
@@ -641,6 +645,7 @@ export async function handleTurnoSelection(
         handled: true,
         nextPhase: 'awaiting_confirmation',
         selectedTurno: turnoResuelto,
+        needsConfirmation: true,
       }
     }
 
@@ -663,6 +668,7 @@ export async function handleTurnoSelection(
           handled: true,
           nextPhase: 'awaiting_confirmation',
           selectedTurno: turnoNLU,
+          needsConfirmation: true,
         }
       }
     }

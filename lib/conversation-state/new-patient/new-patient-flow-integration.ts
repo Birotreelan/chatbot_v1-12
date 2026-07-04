@@ -65,6 +65,7 @@ import {
   handleTurnoSelection,
   buildTurnoSelectedMessage,
   buildInvalidSelectionMessage,
+  isAffirmative,
   type TurnoInterruptionOptions,
 } from '../shared/turno-selection-handler'
 import {
@@ -144,6 +145,8 @@ export interface NewPatientFlowState {
   /** Aclaración pendiente: candidatos y candidato principal propuesto por el NLU.
    *  Permite que un "si" del paciente confirme el turno propuesto. */
   turnoDisambiguation?: { candidateNumeros: number[]; primaryNumero?: number }
+  /** Turno resuelto por texto libre, pendiente de confirmación explícita del paciente. */
+  turnoPendingConfirm?: TurnoOption
 
   // Email (obligatorio para paciente nuevo)
   email?: string
@@ -1414,6 +1417,43 @@ async function handleTurnoPhase(
     return { handled: false, shouldCallOpenAI: true }
   }
 
+  // ── Confirmación de un turno elegido por TEXTO LIBRE ──────────────────────
+  // Si hay un turno pendiente de confirmar (resuelto por texto/hora/NLU), interpretamos
+  // la respuesta: Sí → proceder; No → re-mostrar lista; número → nueva selección.
+  if (state.turnoPendingConfirm) {
+    const pend = state.turnoPendingConfirm
+    const norm = userMessage.trim().toLowerCase()
+    if (isAffirmative(userMessage) || /^s[ií]\b/.test(norm) || norm === 'confirmo') {
+      state.turnoPendingConfirm = undefined
+      userMessage = String(pend.numero) // re-emitir como número exacto → procede sin re-confirmar
+    } else if (/^no\b/.test(norm) || norm === 'ver otros' || norm === 'otro') {
+      state.turnoPendingConfirm = undefined
+      state.turnosMostrados = 0
+      const w = getNextWindow(state.turnosOpciones, 0)
+      state.turnosMostrados = w.newShownCount
+      await saveFlowState(phone, state)
+      const nombre = `${state.nombre || ''} ${state.apellido || ''}`.trim()
+      return {
+        handled: true,
+        message: withBackOption(
+          buildTurnosWindowMessage(w.turnos, state.turnosOpciones.length, w.hasMore, nombre || undefined, state.sedeNombre, state.profesionalNombre, true),
+          'awaiting_turno_selection',
+          'new',
+        ),
+        turnosButtons: w.hasMore ? [{ id: 'ver_mas', title: 'Ver más' }] : [],
+      }
+    } else if (/^\d+$/.test(norm)) {
+      state.turnoPendingConfirm = undefined // nueva selección por número → procesar abajo
+    } else {
+      await saveFlowState(phone, state)
+      return {
+        handled: true,
+        message: `${buildTurnoSelectedMessage(pend)}\n\n¿Es este el turno que querés? Respondé *Sí* o *No*.`,
+        turnosButtons: [{ id: 'si', title: 'Sí, es ese' }, { id: 'no', title: 'Ver otros' }],
+      }
+    }
+  }
+
   const interruptionOptions: TurnoInterruptionOptions | undefined = flowInterruptionEnabled
     ? {
         originalTurnosMessage: buildInvalidSelectionMessage(state.turnosOpciones, state.searchType),
@@ -1500,6 +1540,18 @@ async function handleTurnoPhase(
 
   // ── Turno seleccionado ───────────────────────────────────────────────────
   if (result.selectedTurno) {
+    // Si se resolvió por texto libre/hora/NLU, pedir confirmación explícita del turno
+    // (evita agendar un turno mal interpretado, ej: "el lunes próximo" → lunes equivocado).
+    if (result.needsConfirmation) {
+      state.turnoPendingConfirm = result.selectedTurno
+      await saveFlowState(phone, state)
+      return {
+        handled: true,
+        message: `${buildTurnoSelectedMessage(result.selectedTurno)}\n\n¿Es este el turno que querés? Respondé *Sí* o *No*.`,
+        turnosButtons: [{ id: 'si', title: 'Sí, es ese' }, { id: 'no', title: 'Ver otros' }],
+      }
+    }
+
     state.turnoSeleccionado = result.selectedTurno
     state.attempts = 0
 
