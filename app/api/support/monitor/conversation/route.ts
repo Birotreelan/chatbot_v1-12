@@ -50,7 +50,14 @@ export async function GET(request: Request) {
       ...convMessages.map((m) => ({
         id: m.id || nanoid(),
         sessionId: activeSession?.id || "",
-        role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+        // messageType "agent" identifica mensajes enviados por la persona de la clínica,
+        // que guardamos también en el historial para que sobrevivan al cierre de la sesión.
+        role:
+          m.role === "user"
+            ? ("user" as const)
+            : (m as any).messageType === "agent"
+              ? ("agent" as const)
+              : ("assistant" as const),
         content: m.content,
         timestamp: m.timestamp,
       })),

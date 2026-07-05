@@ -10,7 +10,7 @@ import {
   createSupportSession,
   getActiveSessionByPhone,
 } from "@/lib/human-support"
-import { getConversationMessages, getAllConversationMessages } from "@/lib/conversations"
+import { getConversationMessages, getAllConversationMessages, saveConversationMessage } from "@/lib/conversations"
 import { getWhatsAppConfigById, getThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { openai } from "@/lib/openai"
@@ -56,7 +56,12 @@ export async function GET(request: Request) {
       ...conversationHistory.map((msg: any) => ({
         id: msg.id,
         sessionId,
-        role: msg.role === "user" ? ("user" as const) : ("assistant" as const),
+        role:
+          msg.role === "user"
+            ? ("user" as const)
+            : msg.messageType === "agent"
+              ? ("agent" as const)
+              : ("assistant" as const),
         content: msg.content,
         timestamp: msg.timestamp,
       })),
@@ -461,6 +466,19 @@ async function handleMessage(sessionId: string, session: SessionData, message: s
 
     console.log("[v0] [MESSAGE] Guardando mensaje en Redis...")
     await saveSupportMessage(supportMessage)
+    // También lo guardamos en el historial de conversación (mismo id para deduplicar).
+    // Así queda visible en el monitor y el dashboard incluso después de cerrar la sesión,
+    // cuando ya no hay sesión activa para recuperar los mensajes de soporte.
+    // messageType "agent" permite distinguirlo del asistente de IA al renderizar.
+    await saveConversationMessage({
+      id: supportMessage.id,
+      role: "assistant",
+      content: supportMessage.content,
+      timestamp: supportMessage.timestamp,
+      phoneNumber: supportSession.phoneNumber,
+      configId: supportSession.configId,
+      messageType: "agent",
+    })
     console.log("[v0] [MESSAGE] ✅ Mensaje guardado en Redis")
 
     console.log("[v0] [MESSAGE] ✅ Proceso completo exitoso")
