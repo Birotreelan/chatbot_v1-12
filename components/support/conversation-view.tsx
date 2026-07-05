@@ -23,6 +23,7 @@ interface ConversationViewProps {
 export function ConversationView({ sessionId }: ConversationViewProps) {
   const router = useRouter()
   const [session, setSession] = useState<ExtendedSession | null>(null)
+  const [agentName, setAgentName] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCloseDialog, setShowCloseDialog] = useState(false)
@@ -57,6 +58,7 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
         ...data.session,
         messages: data.session.messages || [],
       })
+      if (data.userInfo?.displayName) setAgentName(data.userInfo.displayName)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido")
@@ -217,7 +219,7 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
           
           {/* Lista de mensajes */}
           <div className="flex-1 min-h-0">
-            <MessageList messages={session.messages} />
+            <MessageList messages={session.messages} agentLabel={agentName} />
           </div>
 
           {/* Input para responder */}

@@ -73,8 +73,8 @@ export function SupportDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h1 className="text-lg font-semibold text-foreground">Panel de Atención al Paciente</h1>
-          <p className="text-xs text-muted-foreground">Gestioná las conversaciones con los pacientes</p>
+          <h1 className="text-lg font-semibold text-foreground">Panel de atención por whatsapp</h1>
+          <p className="text-xs text-muted-foreground">Gestión de conversaciones automatizadas y atención humana.</p>
         </div>
         <div className="flex items-center gap-2">
           {userInfo && (
@@ -107,7 +107,7 @@ export function SupportDashboard() {
         <TabsList className="grid w-full grid-cols-2 mb-3">
           <TabsTrigger value="sessions" className="gap-1.5 text-xs">
             <MessageSquare className="h-3.5 w-3.5" />
-            Sesiones
+            Atención humana
             {pendingSessions.length + activeSessions.length > 0 && (
               <span className="ml-1 bg-orange-100 text-orange-700 text-[10px] font-medium px-1.5 py-0.5 rounded">
                 {pendingSessions.length + activeSessions.length}
@@ -116,7 +116,7 @@ export function SupportDashboard() {
           </TabsTrigger>
           <TabsTrigger value="monitor" className="gap-1.5 text-xs">
             <MonitorPlay className="h-3.5 w-3.5" />
-            Monitor
+            Conversaciones generadas por IA
           </TabsTrigger>
         </TabsList>
 
@@ -131,7 +131,7 @@ export function SupportDashboard() {
                   {pendingSessions.length}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground mb-2">Visibles para todos los agentes</p>
+              <p className="text-xs text-muted-foreground mb-2">Visibles para todos los usuarios de atención. Una vez que tomes una conversación solo tú podrás responder.</p>
               <div className="flex-1 overflow-y-auto min-h-0">
                 <SessionsList
                   sessions={pendingSessions}
@@ -165,6 +165,7 @@ export function SupportDashboard() {
         <TabsContent value="monitor" className="flex-1 min-h-0 mt-0">
           <ConversationMonitor
             currentUserId={userInfo?.userId}
+            currentUserName={userInfo?.displayName}
             onSessionInitiated={() => {
               loadSessions()
               setActiveTab("sessions")

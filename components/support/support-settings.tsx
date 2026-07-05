@@ -164,7 +164,7 @@ export function SupportSettings() {
                 <Label className="text-sm font-medium cursor-pointer">Soporte Humano</Label>
               </div>
               <p className="text-xs text-muted-foreground">
-                Los agentes pueden intervenir y chatear directamente con el paciente.
+                El personal de la clinica puede intervenir y chatear directamente con el paciente.
               </p>
             </div>
             <Switch
@@ -186,7 +186,7 @@ export function SupportSettings() {
                 <Label className="text-sm font-medium cursor-pointer">Ofrecer al Paciente</Label>
               </div>
               <p className="text-xs text-muted-foreground">
-                Cuando el asistente no puede responder, le ofrece al paciente hablar con una persona.
+                Cuando el asistente de IA no tiene las facultades para responder, le ofrece al paciente hablar con un humano.
               </p>
             </div>
             <Switch
@@ -207,9 +207,8 @@ export function SupportSettings() {
               <p className="text-sm font-medium">Horario de Atención Humana</p>
             </div>
             <p className="text-xs text-muted-foreground">
-              Fuera de este horario el paciente igualmente puede ser derivado, pero se le indicará
-              que recibirá respuesta dentro del horario configurado. Si no configurás ningún día,
-              se considera disponible siempre.
+              Configuración del horario en que el personal de la clínica está disponible para atender
+              las solicitudes de los pacientes.
             </p>
 
             <ScheduleConfigurator

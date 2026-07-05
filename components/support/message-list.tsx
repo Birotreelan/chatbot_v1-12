@@ -9,9 +9,11 @@ import { Bot, User, UserCheck } from "lucide-react"
 
 interface MessageListProps {
   messages: HumanSupportMessage[]
+  /** Nombre a mostrar en los mensajes del lado de la clínica (por defecto "Agente"). */
+  agentLabel?: string
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, agentLabel }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -102,7 +104,7 @@ export function MessageList({ messages }: MessageListProps) {
                   <>
                     <UserCheck className="w-3 h-3" />
                     <Badge variant="outline" className="text-xs px-1 py-0 h-4 bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30">
-                      Agente
+                      {agentLabel || "Agente"}
                     </Badge>
                   </>
                 )}

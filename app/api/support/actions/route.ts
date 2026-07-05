@@ -82,6 +82,10 @@ export async function GET(request: Request) {
         ...supportSession,
         messages: uniqueMessages,
       },
+      userInfo: {
+        userId: session.userId,
+        displayName: session.displayName,
+      },
     })
   } catch (error: any) {
     console.error("[API SUPPORT ACTIONS GET] Error:", error)

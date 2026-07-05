@@ -31,7 +31,7 @@ export function SupportNav() {
         <div className="flex items-center gap-2">
           <Headphones className="h-4 w-4" />
           <Link href={supportUrl} className="font-semibold text-sm">
-            Atencion al Paciente
+            Atención por whatsapp
           </Link>
         </div>
         {/* Solo mostrar botón de cerrar sesión si NO es login por SSO */}

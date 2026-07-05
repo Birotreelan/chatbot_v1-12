@@ -47,6 +47,8 @@ interface ConversationMonitorProps {
   onSessionInitiated?: (sessionId: string) => void
   /** userId of the logged-in agent (to check if session is assigned to them) */
   currentUserId?: string
+  /** Nombre del usuario logueado (para etiquetar sus mensajes en la conversación) */
+  currentUserName?: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -129,7 +131,7 @@ function ContactRow({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function ConversationMonitor({ onSessionInitiated, currentUserId }: ConversationMonitorProps) {
+export function ConversationMonitor({ onSessionInitiated, currentUserId, currentUserName }: ConversationMonitorProps) {
   const [contacts, setContacts] = useState<MonitorContact[]>([])
   const [contactsLoading, setContactsLoading] = useState(true)
   const [contactsError, setContactsError] = useState<string | null>(null)
@@ -414,7 +416,7 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId }: Conve
                   Cargando conversación...
                 </div>
               ) : (
-                <MessageList messages={conversation?.messages || []} />
+                <MessageList messages={conversation?.messages || []} agentLabel={currentUserName} />
               )}
             </div>
 
