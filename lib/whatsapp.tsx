@@ -36,6 +36,7 @@ import {
   clearAppointmentTurnos,
   isConfirmCancelResponse,
   isKeepAppointmentResponse,
+  isAttendanceAffirmation,
   isRescheduleChoice,
   isCancelAndRescheduleChoice,
   markAppointmentConfirmed,
@@ -70,7 +71,7 @@ import { resolveState } from "./conversation-state/router"
 import { composeReentryMessage } from "./conversation-state/router/compose-reentry"
 import { handleFarewellIfDetected, detectFarewellPreFlow, detectReciprocalFarewellPreFlow } from "./conversation-state/farewell-handler"
 import { detectWrongNumberPreFlow, setWrongPersonState } from "./conversation-state/wrong-number-handler"
-import { detectDirectConfirmationPreFlow, buildCancelConfirmationPrompt, buildAskExplicitConfirmationMessage } from "./conversation-state/direct-confirmation-handler"
+import { detectDirectConfirmationPreFlow, buildCancelConfirmationPrompt, buildAskExplicitConfirmationMessage, buildTimeClarificationResponse } from "./conversation-state/direct-confirmation-handler"
 import { detectInformationalQueryPreFlow } from "./conversation-state/informational-query-handler"
 import { detectPostActionContextPreFlow, savePostActionContext } from "./conversation-state/post-action-context"
 import { detectNLUFallbackPreFlow } from "./conversation-state/nlu-fallback-handler"
@@ -987,8 +988,13 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         await clearFlowState(userPhoneNumber, config.id)
         return false
       }
-    } else if (isKeepAppointmentResponse(userMessage)) {
-      logger.info("Usuario decide mantener turno")
+    } else if (isKeepAppointmentResponse(userMessage) || isAttendanceAffirmation(userMessage)) {
+      // isAttendanceAffirmation: "si si voy!!", "confirmo asisencia", "Confirmar" (botón del
+      // template) expresan asistencia → mantener el turno, NUNCA interpretar como cancelación
+      // (incidentes 2026-07-05: cancelaciones accidentales que borraron turnos de la base).
+      logger.info("Usuario decide mantener turno", {
+        via: isKeepAppointmentResponse(userMessage) ? "keep_response" : "attendance_affirmation",
+      })
       await clearFlowState(userPhoneNumber, config.id)
 
       // El paciente eligió mantener el turno → se considera confirmada la asistencia
@@ -3325,6 +3331,29 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             })
             
             await sendDirectResponse(cancelCtx, cancelPrompt, "direct_cancel_prompt")
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+
+          if (directActionResult.action === "clarify_time") {
+
+            // El paciente tenía otro horario en mente (ej: "me habían dicho que era 15:30").
+            // NO es cancelación: se informa el horario correcto — el sistema es la fuente de verdad.
+            const turnoDetailsClarify = appointmentCtx.turno
+              ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n📍 ${appointmentCtx.turno.sede}`
+              : null
+
+            const clarifyMessage = buildTimeClarificationResponse(patientName, turnoDetailsClarify)
+
+            const clarifyCtx: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+
+            await sendDirectResponse(clarifyCtx, clarifyMessage, "time_clarification")
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }

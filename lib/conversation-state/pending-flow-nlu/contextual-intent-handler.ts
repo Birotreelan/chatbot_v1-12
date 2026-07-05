@@ -100,8 +100,10 @@ const RE_BOOK =
   /\b(turno nuevo|nuevo turno|pedir (un )?turno|sacar (un )?turno|reservar|quiero (un )?turno|necesito (un )?turno|agendar)\b/
 
 // Confirmar asistencia (diferente de confirmar_accion)
+// Tolerante a typos: \basis\w* cubre "asistencia", "asisencia", "asistensia", "asisto", "asistire".
+// \bvoy\b cubre "voy", "si si voy!!" (las negaciones se filtran con RE_NO/RE_CANCEL antes de usar este patrón).
 const RE_CONFIRM_ATTEND =
-  /\b(confirmar( (asistencia|turno))?|confirmo (asistencia|turno)|voy a ir|ahi estare|ahi voy|asistiré|asistire|estare ahi|alla estare)\b/
+  /\b(confirmar( (asistencia|turno))?|confirmo( (mi|la|el))? ?asis\w*|confirmo (el )?turno|voy a ir|ahi estare|ahi voy|voy|asis\w*|estare( ahi)?|alla estare|ire)\b/
 
 // Consulta informativa sobre el turno
 const RE_INFO =
@@ -131,16 +133,28 @@ function extractIntentWithRules(
   }
 
   // --- Flujo de confirmación de cancelación ---
+  // POLÍTICA ESTRICTA (incidentes 2026-07-05): cancelar borra el turno de la base.
+  // Solo la mención EXPLÍCITA de cancelar confirma la cancelación. Cualquier señal
+  // de asistencia mantiene el turno. Afirmaciones genéricas ("si", "ok", "confirmo")
+  // NO cancelan: se re-pregunta.
   if (context.flowType === "awaiting_cancel_confirmation") {
-    // "cancelar" es afirmación en este flujo
-    if (RE_CANCEL.test(msg)) {
+    // 1) Señal de ASISTENCIA sin negación ni mención de cancelar → mantener turno
+    //    Ej: "si si voy!! GraciS", "confirmo asisencia", "Confirmar"
+    if (RE_CONFIRM_ATTEND.test(msg) && !RE_CANCEL.test(msg) && !RE_NO.test(msg)) {
+      return { intent: "confirmar_turno", confidence: 0.9, reasoning: "Señal de asistencia en flujo de cancelación → mantener turno" }
+    }
+    // 2) Cancelación explícita (sin negación tipo "no quiero cancelar")
+    if (RE_CANCEL.test(msg) && !/\bno\b(?:\s+\w+){0,2}\s+cancel/.test(msg)) {
       return { intent: "confirmar_accion", confidence: 0.85, reasoning: "Intención de cancelar en flujo de cancelación → confirmar acción" }
     }
-    if (RE_YES.test(msg) && !RE_NO.test(msg)) {
-      return { intent: "confirmar_accion", confidence: 0.85, reasoning: "Afirmación en flujo de cancelación" }
-    }
+    // 3) Negación → mantener turno
     if (RE_NO.test(msg)) {
       return { intent: "rechazar_accion", confidence: 0.85, reasoning: "Negación en flujo de cancelación" }
+    }
+    // 4) Afirmación genérica SIN palabra de cancelar → AMBIGUA, nunca cancelar.
+    //    Devuelve baja confianza → re-prompt de la doble confirmación.
+    if (RE_YES.test(msg)) {
+      return { intent: "otro", confidence: 0.4, reasoning: "Afirmación ambigua en flujo de cancelación — se requiere '1' o 'cancelar' explícito" }
     }
   }
 
@@ -241,7 +255,7 @@ export async function handleContextualIntent(
       confidence: intentResult.confidence,
     })
 
-    const result = determineAction(intentResult, context, chatbotData)
+    const result = determineAction(intentResult, context, chatbotData, normalizeText(userMessage))
 
     logger.info("Acción determinada", {
       action: result.action,
@@ -265,14 +279,49 @@ export async function handleContextualIntent(
 // HELPERS
 // ============================================================================
 
+/**
+ * GATE de seguridad: en el flujo de cancelación, process_as_confirmation
+ * (= ejecutar la cancelación) SOLO se permite con evidencia explícita:
+ * "1", la palabra "cancelar/cancelo/cancelación" sin negación, o una
+ * no-asistencia inequívoca ("no puedo ir", "no voy").
+ */
+function hasExplicitCancelEvidence(normalizedMsg: string): boolean {
+  if (/^1\.?$/.test(normalizedMsg)) return true
+  if (/\bno\b(?:\s+\w+){0,2}\s+cancel/.test(normalizedMsg)) return false // "no quiero cancelar"
+  if (/cancel/.test(normalizedMsg)) return true
+  if (/\bno\s+(puedo|voy|ire|asistire|asisto)\b/.test(normalizedMsg)) return true
+  return false
+}
+
 function determineAction(
   intentResult: { intent: DetectedIntent; confidence: number; reasoning: string },
   context: FlowContext,
-  chatbotData: ChatbotData
+  chatbotData: ChatbotData,
+  normalizedMsg: string
 ): ContextualIntentResult {
   const { intent, confidence, reasoning } = intentResult
 
+  // Señal de asistencia en flujo de cancelación → mantener el turno (opción 2).
+  // Mantener es reversible (puede volver a pedir cancelar); cancelar no.
+  if (intent === "confirmar_turno" && context.flowType === "awaiting_cancel_confirmation") {
+    return {
+      detectedIntent: intent,
+      confidence,
+      reasoning: "Asistencia expresada durante doble confirmación de cancelación → mantener turno y confirmar asistencia",
+      action: "process_as_rejection",
+    }
+  }
+
   if (intent === "confirmar_accion" && confidence >= 0.7) {
+    // GATE: en flujo de cancelación, jamás cancelar sin evidencia explícita
+    if (context.flowType === "awaiting_cancel_confirmation" && !hasExplicitCancelEvidence(normalizedMsg)) {
+      return {
+        detectedIntent: intent,
+        confidence: 0.4,
+        reasoning: "Afirmación sin evidencia explícita de cancelar — re-preguntar en lugar de cancelar",
+        action: "abandon_flow", // el caller re-muestra la doble confirmación, nunca abandona
+      }
+    }
     return { detectedIntent: intent, confidence, reasoning, action: "process_as_confirmation" }
   }
 

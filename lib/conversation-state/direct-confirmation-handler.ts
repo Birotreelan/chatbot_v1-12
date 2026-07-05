@@ -174,6 +174,39 @@ const CANCELLATION_KEYWORDS = [
 ]
 
 // ============================================================================
+// PATRONES DE DISCREPANCIA DE HORARIO
+// ============================================================================
+
+/**
+ * Referencia a un horario dentro del mensaje: "15:30", "15.30", "15 y 30",
+ * "3 y media", "15 hs", "a las 15", etc.
+ */
+const TIME_REFERENCE_PATTERN =
+  /\d{1,2}\s*(?:[:.]\s*\d{2}|\s+y\s+(?:media|cuarto|\d{1,2})|\s*hs?\b|\s*horas?\b)|a\s+las?\s+\d{1,2}\b/i
+
+/**
+ * Expresiones de creencia previa sobre el horario: el paciente tenía otro
+ * horario en mente ("me habían dicho", "pensé que era", "tenía anotado", etc.)
+ */
+const PRIOR_BELIEF_PATTERN =
+  /me\s+hab[ií]an?\s+(?:dicho|avisado|llamado|anotado|agendado|confirmado)|me\s+(?:dijeron|avisaron|llamaron)|pens[eé]\s+que|cre[ií]a?\s+que|ten[ií]a\s+(?:anotado|agendado|entendido)|hab[ií]a\s+(?:anotado|agendado|entendido)|(?:que|si)\s+era\s+(?:a\s+las?\s+)?\d|no\s+era\s+a\s+las?|entend[ií]\s+que/i
+
+/**
+ * Detecta comentarios de discrepancia de horario: el paciente creía que el
+ * turno era a otra hora y está corrigiendo su propia agenda, NO cancelando.
+ * Ej: "Me habia llamado que era 15 y 30 entonces 18 y 30"
+ * En estos casos el sistema es la fuente de verdad: se responde con el
+ * horario correcto del turno.
+ */
+export function isTimeDiscrepancyRemark(message: string): boolean {
+  const m = message.trim()
+  // Si es una cancelación explícita, no es discrepancia de horario
+  if (isDirectCancellationPattern(m)) return false
+  if (mightBeCancellation(m)) return false
+  return PRIOR_BELIEF_PATTERN.test(m) && TIME_REFERENCE_PATTERN.test(m)
+}
+
+// ============================================================================
 // FUNCIONES DE DETECCIÓN POR PATRONES
 // ============================================================================
 
@@ -249,10 +282,11 @@ export function mightBeCancellation(message: string): boolean {
 // NLU PARA CASOS AMBIGUOS
 // ============================================================================
 
-export type DirectActionIntent = 
-  | "confirmar_asistencia" 
-  | "cancelar_turno" 
-  | "consulta_con_cortesia" 
+export type DirectActionIntent =
+  | "confirmar_asistencia"
+  | "cancelar_turno"
+  | "aclaracion_horario"
+  | "consulta_con_cortesia"
   | "otro"
 
 interface NLUResult {
@@ -293,12 +327,14 @@ export async function classifyDirectActionWithNLU(
 El paciente recibió un recordatorio de turno. Clasificá su respuesta en:
 - "confirmar_asistencia": confirma que va a ir al turno (ej: "si estaré", "ahi voy", "voy a ir", "la confirmo", "confirmo", incluso con typos)
 - "cancelar_turno": quiere cancelar (ej: "no puedo ir", "cancelo", "no voy a poder", "quiero cancelar")
+- "aclaracion_horario": comenta que tenía otro horario en mente o muestra confusión sobre la hora/fecha, SIN pedir cancelar ni cambiar nada (ej: "me habían dicho que era a las 15", "pensé que era más temprano", "yo tenía anotado 15:30", "me había llamado que era 15 y 30 entonces 18 y 30")
 - "consulta_con_cortesia": pregunta o solicita algo distinto a confirmar/cancelar (ej: "¿puedo cambiar el horario?", "¿cuánto cuesta?")
 - "otro": no encaja en ninguna categoría
 
 IMPORTANTE: Aunque haya typos o lenguaje informal, si la intención es clara, clasificar correctamente.
+IMPORTANTE: "cancelar_turno" SOLO si el paciente expresa que NO va a asistir o pide cancelar. Mencionar un horario distinto al del turno o darse cuenta de que lo tenía mal agendado NO es cancelación: es "aclaracion_horario".
 
-Respondé SOLO con JSON: {"intent": "confirmar_asistencia"|"cancelar_turno"|"consulta_con_cortesia"|"otro", "confidence": 0.0-1.0, "reasoning": "..."}`,
+Respondé SOLO con JSON: {"intent": "confirmar_asistencia"|"cancelar_turno"|"aclaracion_horario"|"consulta_con_cortesia"|"otro", "confidence": 0.0-1.0, "reasoning": "..."}`,
         },
         { role: "user", content: `"${message}"` },
       ],
@@ -348,6 +384,16 @@ function classifyByRules(message: string): NLUResult {
     }
   }
   
+  // Discrepancia de horario: el paciente tenía otro horario en mente
+  // (NO es cancelación — el sistema es la fuente de verdad)
+  if (isTimeDiscrepancyRemark(message)) {
+    return {
+      intent: "aclaracion_horario",
+      confidence: 0.90,
+      reasoning: "Menciona un horario con expresión de creencia previa (lo tenía mal agendado)",
+    }
+  }
+
   // Si contiene signos de interrogación, probablemente es consulta
   if (message.includes("?")) {
     return {
@@ -388,8 +434,8 @@ function classifyByRules(message: string): NLUResult {
 
 export interface DirectActionResult {
   detected: boolean
-  /** confirm: confirmar turno | cancel: cancelar turno | ask_explicit: pedir confirmación con opciones numeradas */
-  action?: "confirm" | "cancel" | "ask_explicit"
+  /** confirm: confirmar turno | cancel: cancelar turno | ask_explicit: pedir confirmación con opciones numeradas | clarify_time: informar el horario correcto del turno (el paciente lo tenía mal agendado) */
+  action?: "confirm" | "cancel" | "ask_explicit" | "clarify_time"
   appointmentContext?: Record<string, unknown>
   response?: string
 }
@@ -472,6 +518,15 @@ export async function detectDirectConfirmationPreFlow(
     return { detected: true, action: "cancel", appointmentContext }
   }
 
+  // Paso 3b: Discrepancia de horario (0ms latencia)
+  // El paciente tenía otro horario en mente y lo está corrigiendo — NO es cancelación.
+  // Ej: "Me habia llamado que era 15 y 30 entonces 18 y 30"
+  // Respuesta: informar el horario correcto del turno (el sistema es la fuente de verdad).
+  if (isTimeDiscrepancyRemark(message)) {
+    logger.info("Discrepancia de horario detectada por patrón — informando horario correcto", { message })
+    return { detected: true, action: "clarify_time", appointmentContext }
+  }
+
   // Si el turno ya está confirmado, los pasos de confirmación implícita y ambigua
   // no aplican — pero sí hay que detectar intención de CANCELACIÓN expresada de forma
   // conversacional (ej: "no podré asistir hoy", "tuve un problema de salud").
@@ -485,6 +540,13 @@ export async function detectDirectConfirmationPreFlow(
           confidence: cancelCheck.confidence,
         })
         return { detected: true, action: "cancel", appointmentContext }
+      }
+      if (cancelCheck.intent === "aclaracion_horario" && cancelCheck.confidence >= 0.70) {
+        logger.info("Aclaración de horario detectada por NLU (turno ya confirmado)", {
+          message: message.substring(0, 60),
+          confidence: cancelCheck.confidence,
+        })
+        return { detected: true, action: "clarify_time", appointmentContext }
       }
     }
     logger.info("Turno confirmado — no interceptar mensajes ambiguos, cediendo al flujo normal")
@@ -532,6 +594,10 @@ export async function detectDirectConfirmationPreFlow(
 
     if (classification.intent === "cancelar_turno" && classification.confidence >= 0.70) {
       return { detected: true, action: "cancel", appointmentContext }
+    }
+
+    if (classification.intent === "aclaracion_horario" && classification.confidence >= 0.70) {
+      return { detected: true, action: "clarify_time", appointmentContext }
     }
 
     // GPT clasifica como consulta u otro → continuar flujo normal
@@ -602,6 +668,20 @@ export function buildConfirmationSuccessResponse(patientName: string): string {
  */
 export function buildAskExplicitConfirmationMessage(appointmentDetails: string): string {
   return `Gracias por tu mensaje. Para confirmar, ¿asistirás al siguiente turno?\n\n${appointmentDetails}\n\n1- Sí, confirmo\n2- No, quiero cancelar`
+}
+
+/**
+ * Construye la respuesta cuando el paciente tenía otro horario en mente.
+ * El sistema es la fuente de verdad: se informa el horario correcto del turno.
+ */
+export function buildTimeClarificationResponse(
+  patientName: string,
+  appointmentDetails: string | null
+): string {
+  if (!appointmentDetails) {
+    return `${patientName}, el horario válido de tu turno es el que te enviamos por este medio. Ante cualquier duda, tomá ese como referencia. ¡Te esperamos!`
+  }
+  return `${patientName}, te aclaro el horario correcto de tu turno según nuestro sistema:\n\n${appointmentDetails}\n\nEse es el horario válido. ¡Te esperamos!`
 }
 
 /**

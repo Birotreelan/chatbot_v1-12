@@ -612,10 +612,52 @@ export async function getStepButtons(
 // ============================================================================
 
 /**
- * Detecta si una respuesta del usuario es una confirmacion de cancelacion ("1", "si", etc).
+ * Detecta si el mensaje expresa intenci\u00f3n de ASISTIR al turno
+ * (aunque venga mezclado con afirmaciones: "si si voy!!", "confirmo asistencia").
  *
- * Maneja respuestas compuestas (ej: "si gracias", "si, de acuerdo") que contienen
- * la afirmaci\u00f3n como primer token significativo.
+ * Se usa como GUARDA en la doble confirmaci\u00f3n de cancelaci\u00f3n: cualquier se\u00f1al
+ * de asistencia anula la interpretaci\u00f3n como "s\u00ed, cancelar". Cancelar un turno
+ * es irreversible (lo borra de la base), mantenerlo no \u2014 ante ambig\u00fcedad, se mantiene.
+ *
+ * Tolerante a typos frecuentes: "asisencia", "asistensia" (v\u00eda \basis\w*).
+ */
+export function isAttendanceAffirmation(message: string): boolean {
+  const normalized = message
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+
+  // Negaciones o menciones de cancelar anulan la se\u00f1al de asistencia
+  // ("no voy", "no puedo asistir", "si, cancelar")
+  if (/\bno\b/.test(normalized)) return false
+  if (/cancel/.test(normalized)) return false
+
+  const attendancePatterns = [
+    /\bvoy\b/,                          // "voy", "si si voy!!", "ahi voy"
+    /\bire\b/,                          // "ire" (ir\u00e9 sin acento)
+    /\basis\w*/,                        // "asisto", "asistire", "asistencia", "asisencia" (typo)
+    /\bestare\b/,                       // "estare", "ahi estare"
+    /^confirmar\.?!*$/,                 // bot\u00f3n "Confirmar" del template de recordatorio
+    /confirmo\s+(mi\s+|la\s+)?asis\w*/, // "confirmo asistencia" (y typos)
+    /confirmo\s+(el\s+)?turno/,         // "confirmo el turno"
+    /mantener/,                         // "mantener el turno"
+  ]
+  return attendancePatterns.some(pattern => pattern.test(normalized))
+}
+
+/**
+ * Detecta si una respuesta del usuario confirma la CANCELACI\u00d3N del turno.
+ *
+ * POL\u00cdTICA ESTRICTA (incidentes 2026-07-05): la cancelaci\u00f3n borra el turno de la
+ * base de datos y es irreversible. Solo se acepta como confirmaci\u00f3n:
+ *   - "1" (la opci\u00f3n expl\u00edcita)
+ *   - un "si"/"s\u00ed" EXACTO y solo (respuesta directa a "1- S\u00ed, cancelar el turno")
+ *   - un mensaje que contenga la palabra "cancelar"/"cancelo"/"cancelaci\u00f3n" sin negaci\u00f3n
+ *
+ * Todo lo dem\u00e1s ("si gracias", "ok", "dale", "confirmo", "si si voy") NO cancela:
+ * cae al NLU contextual o al re-prompt. Adem\u00e1s, cualquier se\u00f1al de asistencia
+ * (isAttendanceAffirmation) anula la cancelaci\u00f3n aunque contenga afirmaciones.
  */
 export function isConfirmCancelResponse(message: string): boolean {
   const normalized = message
@@ -624,15 +666,17 @@ export function isConfirmCancelResponse(message: string): boolean {
     .replace(/[\u0300-\u036f]/g, "") // quita acentos
     .trim()
 
+  // GUARDA 1: se\u00f1al de asistencia \u2192 jam\u00e1s interpretar como cancelaci\u00f3n
+  if (isAttendanceAffirmation(message)) return false
+
+  // GUARDA 2: negaci\u00f3n de cancelar ("no quiero cancelar", "no cancelen", "no lo cancelo")
+  if (/\bno\b[\s\S]{0,30}cancel/.test(normalized)) return false
+
   const confirmPatterns = [
-    /^1\.?$/,              // "1" o "1."
-    /^si\b/,               // empieza con "si" (cubre "si gracias", "si de acuerdo", etc.)
-    /^s$/,                 // "s"
-    /^ok\b/,               // "ok", "ok gracias"
-    /^dale\b/,             // "dale", "dale gracias"
-    /^de acuerdo\b/,       // "de acuerdo"
-    /^claro\b/,            // "claro", "claro que si"
-    /cancelar/,            // contiene "cancelar"
+    /^1\.?$/,       // "1" o "1."
+    /^si\.?!*$/,    // "si" EXACTO (nada m\u00e1s) \u2014 respuesta directa a "1- S\u00ed, cancelar"
+    /cancel/,       // contiene "cancelar", "cancelo", "cancelen", "cancelacion", "si, cancelar"
+    /^no\s+(puedo|voy|ire|asistire|asisto)\b/, // no-asistencia inequ\u00edvoca: "no puedo ir", "no voy a poder"
   ]
 
   return confirmPatterns.some(pattern => pattern.test(normalized))
@@ -650,6 +694,12 @@ export function isKeepAppointmentResponse(message: string): boolean {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
+
+  // "no puedo ir" / "no voy" / "no asistire" NO es mantener: es no-asistencia
+  // (la maneja isConfirmCancelResponse). Sin esta guarda, un "no puedo ir" en la
+  // doble confirmación mantendría el turno Y confirmaría asistencia — lo contrario
+  // de lo que el paciente dijo.
+  if (/^no\s+(puedo|voy|ire|asistire|asisto)\b/.test(normalized)) return false
 
   const keepPatterns = [
     /^2\.?$/,              // "2" o "2."
