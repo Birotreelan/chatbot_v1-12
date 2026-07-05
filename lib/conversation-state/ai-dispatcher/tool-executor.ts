@@ -37,6 +37,7 @@ export type ExecutorAction =
   | { type: 'continue_active_flow' }                         // reenviar mensaje al flow activo
   | { type: 'end_conversation'; message: string }            // finalizar/abandonar: cerrar flujo + despedir
   | { type: 'derive_to_human'; motivo?: string }             // el paciente pidió hablar con una persona
+  | { type: 'derive_external'; message: string }             // consulta fuera de scope: ofrecer humano u tel.
   | { type: 'passthrough' }                                  // ceder al enqueue/OpenAI normal
 
 export interface ExecutorResult {
@@ -126,10 +127,12 @@ export async function executeDispatcherDecision(
     }
 
     // ── Derivar consulta ─────────────────────────────────────────────────────
+    // Devuelve derive_external (no send_and_return): whatsapp.tsx decide si primero
+    // ofrece atención humana (si la clínica la tiene activa y en horario) o manda el teléfono.
     case TOOL_NAMES.DERIVAR_CONSULTA: {
       const tipo = decision.args.tipo ?? 'otro'
       const message = buildDerivacionMessage(tipo, deps.escalationPhone)
-      return { action: { type: 'send_and_return', message }, logNote: `Dispatcher → derivación (${tipo})` }
+      return { action: { type: 'derive_external', message }, logNote: `Dispatcher → derivación (${tipo})` }
     }
 
     // ── Respuesta empática ───────────────────────────────────────────────────

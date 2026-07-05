@@ -349,6 +349,10 @@ export interface HumanSupportOfferParams {
   // - "offer"  (o undefined): esperando que el paciente confirme 1/2.
   // - "reason": confirmó atención humana, ahora esperamos que elija el motivo.
   stage?: "offer" | "reason"
+  // Mensaje a enviar si el paciente RECHAZA la oferta (opción 2). Cuando la oferta
+  // se dispara desde una derivación al teléfono, acá va el texto con el teléfono de
+  // la clínica. Si no se define, se usa el mensaje por defecto ("seguís con el asistente").
+  declineMessage?: string
 }
 
 export async function setPendingHumanSupportOffer(

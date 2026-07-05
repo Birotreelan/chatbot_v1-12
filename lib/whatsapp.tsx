@@ -1364,14 +1364,76 @@ function buildHumanUnavailableMessage(escalationPhone?: string, hoursStr?: strin
 }
 
 /**
- * Deriva la conversación a atención humana (acción derive_to_human del dispatcher).
+ * ¿Corresponde ofrecer atención humana en este momento?
+ * true solo si la clínica tiene humanSupport activo Y estamos dentro del horario de atención.
+ */
+async function shouldOfferHuman(config: any): Promise<boolean> {
+  const flags = await getEffectiveFeatureFlags(config.id)
+  if (!flags.humanSupport) return false
+  const schedule = await getHumanSupportSchedule(config.id)
+  const timezone = config.timezone || "America/Argentina/Buenos_Aires"
+  return isWithinHumanSupportHours(schedule, timezone)
+}
+
+/**
+ * Envía la oferta de atención humana (etapa 1: "1/2") y guarda el estado pendiente.
+ * La respuesta "1"/"2" la intercepta el guard getPendingHumanSupportOffer en handleMessage
+ * (antes del dispatcher): "1" → menú de motivos → sesión; "2" → declineMessage (o el default).
+ */
+async function sendHumanOffer(
+  ctx: DirectResponseContext,
+  config: any,
+  offerMessage: string,
+  declineMessage?: string,
+): Promise<void> {
+  const { threadId } = await getThreadForUser(ctx.userPhoneNumber, config.id).catch(() => ({ threadId: "" }))
+  await setPendingHumanSupportOffer(config.id, ctx.userPhoneNumber, {
+    configId: config.id,
+    tenantId: config.cliente_id || "unknown",
+    threadId: threadId || "",
+    assistantId: config.whatsappAssistantId || "",
+    displayName: config.displayName,
+    reason: "El paciente solicitó hablar con una persona",
+    priority: "medium",
+    summary: "El paciente pidió atención humana desde el chat.",
+    phoneNumberId: ctx.phoneNumberId,
+    accessToken: ctx.accessToken,
+    stage: "offer",
+    declineMessage,
+  })
+  await sendDirectResponse(ctx, offerMessage, "human-offer")
+}
+
+/**
+ * Gate para las derivaciones al teléfono: si la clínica ofrece atención humana y estamos
+ * en horario, ofrece primero hablar con una persona (y deja el teléfono como opción "2").
+ * Si no, envía directamente el mensaje con el teléfono, como veníamos haciendo.
+ */
+async function offerHumanOrSendPhone(
+  ctx: DirectResponseContext,
+  config: any,
+  phoneMessage: string,
+  phase = "derive-phone",
+): Promise<void> {
+  if (await shouldOfferHuman(config)) {
+    const clinicName = config.displayName || "la clínica"
+    const offerMessage =
+      `Puedo conectarte con una persona del equipo de ${clinicName}. ¿Querés?\n\n` +
+      `1. Sí, quiero atención humana\n` +
+      `2. No, pasame el teléfono de contacto`
+    await sendHumanOffer(ctx, config, offerMessage, phoneMessage)
+    return
+  }
+  await sendDirectResponse(ctx, phoneMessage, phase)
+}
+
+/**
+ * Deriva la conversación a atención humana (acción derive_to_human del dispatcher:
+ * el paciente pidió EXPLÍCITAMENTE hablar con una persona).
  *
  * Comportamiento (definido por producto):
- * - Si humanSupport está deshabilitado para la config → derivar al teléfono de la clínica.
- * - Si estamos FUERA del horario de atención → derivar al teléfono (con el horario).
- * - Si hay soporte disponible y en horario → OFRECER al paciente (1/2). La respuesta "1"/"2"
- *   la intercepta el guard getPendingHumanSupportOffer en handleMessage (antes del dispatcher),
- *   que crea la sesión de soporte y pausa la IA.
+ * - Si humanSupport está deshabilitado o estamos fuera de horario → derivar al teléfono.
+ * - Si hay soporte disponible y en horario → OFRECER al paciente (1/2); "2" acá vuelve al asistente.
  *
  * Devuelve true: siempre responde (la derivación es una acción terminal del turno).
  */
@@ -1412,28 +1474,14 @@ async function handleDeriveToHuman(
       return true
     }
 
-    // Soporte disponible y en horario → ofrecer al paciente (modo C). No creamos la sesión
-    // todavía: esperamos su confirmación "1"/"2".
-    const { threadId } = await getThreadForUser(userPhoneNumber, config.id).catch(() => ({ threadId: "" }))
-    await setPendingHumanSupportOffer(config.id, userPhoneNumber, {
-      configId: config.id,
-      tenantId: config.cliente_id || "unknown",
-      threadId: threadId || "",
-      assistantId: config.whatsappAssistantId || "",
-      displayName: config.displayName,
-      reason: motivo || "El paciente solicitó hablar con una persona",
-      priority: "medium",
-      summary: motivo || "El paciente pidió atención humana desde el chat.",
-      phoneNumberId: value.metadata.phone_number_id,
-      accessToken: config.accessToken,
-    })
-
+    // Soporte disponible y en horario → ofrecer al paciente. Acá el "2" vuelve al asistente
+    // (declineMessage undefined → mensaje por defecto).
     const clinicName = config.displayName || "la clínica"
     const offerMessage =
       `Entiendo, querés hablar con una persona del equipo de ${clinicName}. ¿Te conecto?\n\n` +
       `1. Sí, quiero atención humana\n` +
       `2. No, sigo con el asistente`
-    await sendDirectResponse(ctxDirect, offerMessage, "derive-human-offer")
+    await sendHumanOffer(ctxDirect, config, offerMessage)
     logger.info("Oferta de atención humana enviada al paciente")
     return true
   } catch (error) {
@@ -1500,6 +1548,12 @@ async function runPrimaryDispatcherNoFlow(
 
     if (action.type === 'derive_to_human') {
       return await handleDeriveToHuman(userPhoneNumber, userMessage, config, value, action.motivo)
+    }
+
+    if (action.type === 'derive_external') {
+      await offerHumanOrSendPhone(ctxDirect, config, action.message, "router-primary-derive")
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      return true
     }
 
     if (action.type === 'init_familiar_flow') {
@@ -1679,7 +1733,9 @@ async function runInterjectionInActiveFlow(
     if (typeof stepPrompt === 'string' && stepPrompt.includes(TRANSITION)) {
       stepPrompt = stepPrompt.slice(stepPrompt.lastIndexOf(TRANSITION) + TRANSITION.length).trim()
     }
-    const answer = action.type === 'send_and_return'
+    // derive_external se trata como send_and_return acá: en medio de un flujo activo NO
+    // ofrecemos atención humana (sería disruptivo); respondemos la consulta y retomamos el paso.
+    const answer = (action.type === 'send_and_return' || action.type === 'derive_external')
       ? action.message.replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '').trimEnd()
       : ''
 
@@ -2006,10 +2062,13 @@ export async function handleMessage(value: any) {
           await updateWhatsAppStats(config.id, { messagesReceived: 1 })
           return
         } else if (normalized === "2") {
-          // Declinó → seguir con la IA.
+          // Declinó → si la oferta vino de una derivación, mandamos el teléfono
+          // (declineMessage); si no, seguimos con la IA.
           await clearPendingHumanSupportOffer(config.id, userPhoneNumber)
           await savePatientMsg()
-          const declineMsg = "Entendido. Seguís con el asistente virtual. Si necesitás algo más, avisame."
+          const declineMsg =
+            pendingOffer.declineMessage ||
+            "Entendido. Seguís con el asistente virtual. Si necesitás algo más, avisame."
           await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, declineMsg)
           await updateWhatsAppStats(config.id, { messagesReceived: 1 })
           return
@@ -3756,7 +3815,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
               m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
             )
-            await sendDirectResponse(detectionCtx, otherInquiryMessage, "contact_intent_consulta")
+            await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "contact_intent_consulta")
             await completePatientDetectionFlow(userPhoneNumber, config.id)
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
@@ -3944,7 +4003,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
                 m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
               )
-              await sendDirectResponse(detectionCtx, otherInquiryMessage, "other_inquiry_existing_patient")
+              await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "other_inquiry_existing_patient")
               await completePatientDetectionFlow(userPhoneNumber, config.id)
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
@@ -4539,6 +4598,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
             if (action.type === 'derive_to_human') {
               await handleDeriveToHuman(userPhoneNumber, userMessage, config, value, action.motivo)
+              return
+            }
+
+            if (action.type === 'derive_external') {
+              await offerHumanOrSendPhone(dispatcherCtxDirect, config, action.message, "ai-dispatcher-derive")
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
             }
 
