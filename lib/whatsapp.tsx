@@ -1385,6 +1385,7 @@ async function sendHumanOffer(
   config: any,
   offerMessage: string,
   declineMessage?: string,
+  buttons?: Array<{ id: string; title: string }>,
 ): Promise<void> {
   const { threadId } = await getThreadForUser(ctx.userPhoneNumber, config.id).catch(() => ({ threadId: "" }))
   await setPendingHumanSupportOffer(config.id, ctx.userPhoneNumber, {
@@ -1401,8 +1402,14 @@ async function sendHumanOffer(
     stage: "offer",
     declineMessage,
   })
-  await sendDirectResponse(ctx, offerMessage, "human-offer")
+  await sendDirectResponse(ctx, offerMessage, "human-offer", buttons)
 }
+
+/** Botones de respuesta rápida para la oferta de atención humana (2 opciones). */
+const HUMAN_OFFER_BUTTONS: Array<{ id: string; title: string }> = [
+  { id: "1", title: "Sí, atención humana" },
+  { id: "2", title: "No, me comunico" },
+]
 
 /**
  * Gate para las derivaciones al teléfono: si la clínica ofrece atención humana y estamos
@@ -1417,11 +1424,16 @@ async function offerHumanOrSendPhone(
 ): Promise<void> {
   if (await shouldOfferHuman(config)) {
     const clinicName = config.displayName || "la clínica"
+    const escalationPhone = config.escalationPhoneNumber
+    const phoneRef = escalationPhone ? `*${escalationPhone}*` : "la clínica"
     const offerMessage =
-      `Puedo conectarte con una persona del equipo de ${clinicName}. ¿Querés?\n\n` +
-      `1. Sí, quiero atención humana\n` +
-      `2. No, pasame el teléfono de contacto`
-    await sendHumanOffer(ctx, config, offerMessage, phoneMessage)
+      `Actualmente estás conectado a Iris, un asistente virtual de inteligencia artificial que solo está ` +
+      `preparado para la gestión de turnos. Para otro tipo de consultas, por favor contactanos al ${phoneRef}. ` +
+      `O si querés, puedo derivarte a la atención humana de ${clinicName} y te atenderán en breve por este mismo canal. ` +
+      `Por favor seleccioná la opción deseada:\n\n` +
+      `1. Sí, requiero atención humana.\n` +
+      `2. No, me comunicaré al ${escalationPhone ? escalationPhone : "teléfono de la clínica"}`
+    await sendHumanOffer(ctx, config, offerMessage, phoneMessage, HUMAN_OFFER_BUTTONS)
     return
   }
   await sendDirectResponse(ctx, phoneMessage, phase)
@@ -1481,7 +1493,11 @@ async function handleDeriveToHuman(
       `Entiendo, querés hablar con una persona del equipo de ${clinicName}. ¿Te conecto?\n\n` +
       `1. Sí, quiero atención humana\n` +
       `2. No, sigo con el asistente`
-    await sendHumanOffer(ctxDirect, config, offerMessage)
+    const directButtons = [
+      { id: "1", title: "Sí, atención humana" },
+      { id: "2", title: "No, sigo con Iris" },
+    ]
+    await sendHumanOffer(ctxDirect, config, offerMessage, undefined, directButtons)
     logger.info("Oferta de atención humana enviada al paciente")
     return true
   } catch (error) {
