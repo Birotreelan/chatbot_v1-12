@@ -73,7 +73,7 @@ export function SupportDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h1 className="text-lg font-semibold text-foreground">Panel de atención por whatsapp</h1>
+          <h1 className="text-lg font-semibold text-foreground">Panel de Atención Treelan Iris</h1>
           <p className="text-xs text-muted-foreground">Gestión de conversaciones automatizadas y atención humana.</p>
         </div>
         <div className="flex items-center gap-2">
