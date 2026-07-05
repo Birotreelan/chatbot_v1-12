@@ -1333,16 +1333,19 @@ async function clearActiveFlows(userPhoneNumber: string, config: any): Promise<v
  * La clave es el número que el paciente responde; el valor es el texto que se
  * guarda como `reason` de la sesión y se muestra en el panel de atención.
  */
-const HUMAN_SUPPORT_REASONS: Record<string, { label: string; priority: "low" | "medium" | "high" }> = {
-  "1": { label: "Consulta sobre cobertura de obra social, pagos o facturación", priority: "medium" },
-  "2": { label: "Solicitud o consulta sobre recetas", priority: "medium" },
-  "3": { label: "Solicitud o consulta sobre estudios", priority: "medium" },
-  "4": { label: "Consulta sobre cirugías", priority: "medium" },
-  "5": { label: "Consulta urgente (guardia oftalmológica)", priority: "high" },
-  "6": { label: "Otro motivo", priority: "medium" },
+const HUMAN_SUPPORT_REASONS: Record<
+  string,
+  { label: string; short: string; priority: "low" | "medium" | "high" }
+> = {
+  "1": { label: "Consulta sobre cobertura de obra social, pagos o facturación", short: "Obra social / pagos", priority: "medium" },
+  "2": { label: "Solicitud o consulta sobre recetas", short: "Recetas", priority: "medium" },
+  "3": { label: "Solicitud o consulta sobre estudios", short: "Estudios", priority: "medium" },
+  "4": { label: "Consulta sobre cirugías", short: "Cirugías", priority: "medium" },
+  "5": { label: "Consulta urgente (guardia oftalmológica)", short: "Urgencia / guardia", priority: "high" },
+  "6": { label: "Otro motivo", short: "Otro motivo", priority: "medium" },
 }
 
-/** Menú de motivos que se envía al paciente tras confirmar que quiere atención humana. */
+/** Cuerpo de texto del menú de motivos (también sirve de fallback si falla la lista). */
 function buildHumanSupportReasonMenu(): string {
   const opciones = Object.entries(HUMAN_SUPPORT_REASONS)
     .map(([num, { label }]) => `${num}. ${label}`)
@@ -1350,8 +1353,34 @@ function buildHumanSupportReasonMenu(): string {
   return (
     `Para derivarte con la persona indicada, contame el motivo de tu consulta:\n\n` +
     `${opciones}\n\n` +
-    `Respondé con el número de la opción.`
+    `Respondé con el número de la opción o seleccionala desde la lista "ver opciones".`
   )
+}
+
+/** Filas del menú de motivos para el mensaje de lista de WhatsApp (title ≤24, description ≤72). */
+function buildHumanSupportReasonRows(): Array<{ id: string; title: string; description?: string }> {
+  return Object.entries(HUMAN_SUPPORT_REASONS).map(([id, { short, label }]) => ({
+    id,
+    title: `${id}. ${short}`,
+    description: label,
+  }))
+}
+
+/**
+ * Envía el menú de motivos como mensaje de lista de WhatsApp (botón "ver opciones").
+ * Si la lista falla, cae a texto plano con el mismo cuerpo.
+ */
+async function sendHumanSupportReasonMenu(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+): Promise<void> {
+  const body = buildHumanSupportReasonMenu()
+  try {
+    await sendWhatsAppList(phoneNumberId, accessToken, to, body, "ver opciones", buildHumanSupportReasonRows(), "Motivos")
+  } catch {
+    await sendWhatsAppMessage(phoneNumberId, accessToken, to, body)
+  }
 }
 
 /** Mensaje de fallback cuando no podemos derivar a un agente en este momento. */
@@ -2066,15 +2095,10 @@ export async function handleMessage(value: any) {
       // ── Etapa 1: confirmación 1/2 ─────────────────────────────────────────────
       if (stage === "offer") {
         if (normalized === "1") {
-          // Aceptó → todavía NO creamos la sesión: le preguntamos el motivo.
+          // Aceptó → todavía NO creamos la sesión: le preguntamos el motivo (lista).
           await savePatientMsg()
           await setPendingHumanSupportOffer(config.id, userPhoneNumber, { ...pendingOffer, stage: "reason" })
-          await sendWhatsAppMessage(
-            pendingOffer.phoneNumberId,
-            pendingOffer.accessToken,
-            userPhoneNumber,
-            buildHumanSupportReasonMenu(),
-          )
+          await sendHumanSupportReasonMenu(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber)
           await updateWhatsAppStats(config.id, { messagesReceived: 1 })
           return
         } else if (normalized === "2") {
@@ -2104,14 +2128,9 @@ export async function handleMessage(value: any) {
       // ── Etapa 2: selección del motivo ─────────────────────────────────────────
       const selected = HUMAN_SUPPORT_REASONS[normalized]
       if (!selected) {
-        // Selección inválida → volver a mostrar el menú de motivos.
+        // Selección inválida → volver a mostrar el menú de motivos (lista).
         await savePatientMsg()
-        await sendWhatsAppMessage(
-          pendingOffer.phoneNumberId,
-          pendingOffer.accessToken,
-          userPhoneNumber,
-          buildHumanSupportReasonMenu(),
-        )
+        await sendHumanSupportReasonMenu(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber)
         await updateWhatsAppStats(config.id, { messagesReceived: 1 })
         return
       }
