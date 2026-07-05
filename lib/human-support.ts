@@ -345,6 +345,10 @@ export interface HumanSupportOfferParams {
   summary: string
   phoneNumberId: string
   accessToken: string
+  // Etapa del flujo de oferta:
+  // - "offer"  (o undefined): esperando que el paciente confirme 1/2.
+  // - "reason": confirmó atención humana, ahora esperamos que elija el motivo.
+  stage?: "offer" | "reason"
 }
 
 export async function setPendingHumanSupportOffer(

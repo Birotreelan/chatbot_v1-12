@@ -1328,6 +1328,32 @@ async function clearActiveFlows(userPhoneNumber: string, config: any): Promise<v
   ])
 }
 
+/**
+ * Motivos de derivación a atención humana que se le ofrecen al paciente.
+ * La clave es el número que el paciente responde; el valor es el texto que se
+ * guarda como `reason` de la sesión y se muestra en el panel de atención.
+ */
+const HUMAN_SUPPORT_REASONS: Record<string, { label: string; priority: "low" | "medium" | "high" }> = {
+  "1": { label: "Consulta sobre cobertura de obra social, pagos o facturación", priority: "medium" },
+  "2": { label: "Solicitud o consulta sobre recetas", priority: "medium" },
+  "3": { label: "Solicitud o consulta sobre estudios", priority: "medium" },
+  "4": { label: "Consulta sobre cirugías", priority: "medium" },
+  "5": { label: "Consulta urgente (guardia oftalmológica)", priority: "high" },
+  "6": { label: "Otro motivo", priority: "medium" },
+}
+
+/** Menú de motivos que se envía al paciente tras confirmar que quiere atención humana. */
+function buildHumanSupportReasonMenu(): string {
+  const opciones = Object.entries(HUMAN_SUPPORT_REASONS)
+    .map(([num, { label }]) => `${num}. ${label}`)
+    .join("\n")
+  return (
+    `Para derivarte con la persona indicada, contame el motivo de tu consulta:\n\n` +
+    `${opciones}\n\n` +
+    `Respondé con el número de la opción.`
+  )
+}
+
 /** Mensaje de fallback cuando no podemos derivar a un agente en este momento. */
 function buildHumanUnavailableMessage(escalationPhone?: string, hoursStr?: string): string {
   const phoneLine = escalationPhone
@@ -1952,10 +1978,11 @@ export async function handleMessage(value: any) {
     const pendingOffer = await getPendingHumanSupportOffer(config.id, userPhoneNumber)
     if (pendingOffer) {
       const normalized = userMessage.trim()
-      if (normalized === "1") {
-        // Patient accepted — create session and notify
-        await clearPendingHumanSupportOffer(config.id, userPhoneNumber)
-        await saveConversationMessage({
+      const stage = pendingOffer.stage ?? "offer"
+
+      // Guardar el mensaje del paciente en el historial (aplica a todas las ramas).
+      const savePatientMsg = () =>
+        saveConversationMessage({
           id: nanoid(),
           role: "user",
           content: userMessage,
@@ -1963,58 +1990,79 @@ export async function handleMessage(value: any) {
           phoneNumber: userPhoneNumber,
           configId: config.id,
         })
-        try {
-          await createSupportSession({
-            phoneNumber: userPhoneNumber,
-            configId: pendingOffer.configId,
-            tenantId: pendingOffer.tenantId,
-            threadId: pendingOffer.threadId,
-            assistantId: pendingOffer.assistantId,
-            displayName: pendingOffer.displayName,
-            reason: pendingOffer.reason,
-            priority: pendingOffer.priority,
-            summary: pendingOffer.summary,
-          })
-          const confirmMsg = `Hemos derivado la conversación a atención humana de ${pendingOffer.displayName || "la clínica"}. En unos instantes serás atendido.`
-          await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, confirmMsg)
-        } catch (err) {
-          console.error("[WHATSAPP] Error creando sesión desde oferta:", err)
+
+      // ── Etapa 1: confirmación 1/2 ─────────────────────────────────────────────
+      if (stage === "offer") {
+        if (normalized === "1") {
+          // Aceptó → todavía NO creamos la sesión: le preguntamos el motivo.
+          await savePatientMsg()
+          await setPendingHumanSupportOffer(config.id, userPhoneNumber, { ...pendingOffer, stage: "reason" })
+          await sendWhatsAppMessage(
+            pendingOffer.phoneNumberId,
+            pendingOffer.accessToken,
+            userPhoneNumber,
+            buildHumanSupportReasonMenu(),
+          )
+          await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+          return
+        } else if (normalized === "2") {
+          // Declinó → seguir con la IA.
+          await clearPendingHumanSupportOffer(config.id, userPhoneNumber)
+          await savePatientMsg()
+          const declineMsg = "Entendido. Seguís con el asistente virtual. Si necesitás algo más, avisame."
+          await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, declineMsg)
+          await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+          return
+        } else {
+          // Respuesta no reconocida → re-ofrecer.
+          await savePatientMsg()
+          const reOfferMsg =
+            `Por favor elegí una opción:\n\n` +
+            `1. Sí, quiero atención humana\n` +
+            `2. No, sigo con el asistente`
+          await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, reOfferMsg)
+          await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+          return
         }
-        await updateWhatsAppStats(config.id, { messagesReceived: 1 })
-        return
-      } else if (normalized === "2") {
-        // Patient declined — clear offer and let them continue with AI
-        await clearPendingHumanSupportOffer(config.id, userPhoneNumber)
-        await saveConversationMessage({
-          id: nanoid(),
-          role: "user",
-          content: userMessage,
-          timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
-          configId: config.id,
-        })
-        const declineMsg = "Entendido. Seguís con el asistente virtual. Si necesitás algo más, avisame."
-        await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, declineMsg)
-        await updateWhatsAppStats(config.id, { messagesReceived: 1 })
-        return
-      } else {
-        // Unrecognized response — re-send the offer
-        await saveConversationMessage({
-          id: nanoid(),
-          role: "user",
-          content: userMessage,
-          timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
-          configId: config.id,
-        })
-        const reOfferMsg =
-          `Por favor elegí una opción:\n\n` +
-          `1. Sí, quiero atención humana\n` +
-          `2. No, gracias`
-        await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, reOfferMsg)
+      }
+
+      // ── Etapa 2: selección del motivo ─────────────────────────────────────────
+      const selected = HUMAN_SUPPORT_REASONS[normalized]
+      if (!selected) {
+        // Selección inválida → volver a mostrar el menú de motivos.
+        await savePatientMsg()
+        await sendWhatsAppMessage(
+          pendingOffer.phoneNumberId,
+          pendingOffer.accessToken,
+          userPhoneNumber,
+          buildHumanSupportReasonMenu(),
+        )
         await updateWhatsAppStats(config.id, { messagesReceived: 1 })
         return
       }
+
+      // Motivo válido → crear la sesión con el motivo elegido (se refleja en el panel).
+      await clearPendingHumanSupportOffer(config.id, userPhoneNumber)
+      await savePatientMsg()
+      try {
+        await createSupportSession({
+          phoneNumber: userPhoneNumber,
+          configId: pendingOffer.configId,
+          tenantId: pendingOffer.tenantId,
+          threadId: pendingOffer.threadId,
+          assistantId: pendingOffer.assistantId,
+          displayName: pendingOffer.displayName,
+          reason: selected.label,
+          priority: selected.priority,
+          summary: `Motivo indicado por el paciente: ${selected.label}.`,
+        })
+        const confirmMsg = `Perfecto, te derivo a atención humana de ${pendingOffer.displayName || "la clínica"} por: ${selected.label}. En unos instantes te van a atender.`
+        await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, confirmMsg)
+      } catch (err) {
+        console.error("[WHATSAPP] Error creando sesión desde oferta:", err)
+      }
+      await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+      return
     }
 
     const conversationPaused = await isConversationPaused(config.id, userPhoneNumber)
