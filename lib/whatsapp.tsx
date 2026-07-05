@@ -1436,8 +1436,8 @@ async function sendHumanOffer(
 
 /** Botones de respuesta rápida para la oferta de atención humana (2 opciones). */
 const HUMAN_OFFER_BUTTONS: Array<{ id: string; title: string }> = [
-  { id: "1", title: "Sí, atención humana" },
-  { id: "2", title: "No, me comunico" },
+  { id: "1", title: "Atención humana" },
+  { id: "2", title: "Me comunico" },
 ]
 
 /**
@@ -1457,11 +1457,11 @@ async function offerHumanOrSendPhone(
     const phoneRef = escalationPhone ? `*${escalationPhone}*` : "la clínica"
     const offerMessage =
       `Actualmente estás conectado a Iris, un asistente virtual de inteligencia artificial que solo está ` +
-      `preparado para la gestión de turnos. Para otro tipo de consultas, por favor contactanos al ${phoneRef}. ` +
-      `O si querés, puedo derivarte a la atención humana de ${clinicName} y te atenderán en breve por este mismo canal. ` +
+      `preparado para la gestión de turnos. Para otro tipo de consultas puedo derivarte a la atención humana ` +
+      `de ${clinicName} y te atenderán en breve por este mismo canal o puedes contactarnos al ${phoneRef}. ` +
       `Por favor seleccioná la opción deseada:\n\n` +
-      `1. Sí, requiero atención humana.\n` +
-      `2. No, me comunicaré al ${escalationPhone ? escalationPhone : "teléfono de la clínica"}`
+      `1. Requiero atención humana.\n` +
+      `2. Me comunicaré al ${escalationPhone ? escalationPhone : "teléfono de la clínica"}`
     await sendHumanOffer(ctx, config, offerMessage, phoneMessage, HUMAN_OFFER_BUTTONS)
     return
   }
