@@ -53,6 +53,7 @@ INSTRUCCIONES DE CLASIFICACIÓN:
 4. Si el paciente cambió de intención → usá el tool de la nueva intención.
 
 REGLAS DE CLASIFICACIÓN (en orden de prioridad):
+- El paciente pide EXPLÍCITAMENTE hablar con una PERSONA/HUMANO/AGENTE real ("quiero hablar con una persona", "con un humano", "atención humana", "con un agente", "una persona real", "un asesor", "un operador", "que me atienda alguien", "no quiero hablar con un bot") → solicitar_atencion_humana. Esta regla tiene PRIORIDAD sobre finalizar_conversacion y derivar_consulta_externa: pedir una persona NO es despedirse ni una consulta médica/administrativa.
 - "cambiar turno", "reagendar", "cambiar la fecha", "otro horario", "otro día" → cancelar_y_solicitar_nuevo_turno
 - "quiero/necesito/sacar/pedir un turno" (nuevo, adicional) → iniciar_reserva_turno. Si el turno es para un FAMILIAR u otra persona ("para mi hijo/madre/esposo", "para un familiar", "es para otra persona"), pasá para_familiar=true.
 - Afirmación de asistencia al turno actual ("sí voy", "confirmo", "dale") → confirmar_asistencia_turno

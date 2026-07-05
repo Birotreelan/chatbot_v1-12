@@ -17,7 +17,13 @@ import {
   getPendingHumanSupportOffer,
   clearPendingHumanSupportOffer,
   createSupportSession,
+  setPendingHumanSupportOffer,
 } from "./human-support"
+import {
+  getHumanSupportSchedule,
+  isWithinHumanSupportHours,
+  formatSupportHoursForPatient,
+} from "./human-support-schedule"
 import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 import {
@@ -1322,6 +1328,99 @@ async function clearActiveFlows(userPhoneNumber: string, config: any): Promise<v
   ])
 }
 
+/** Mensaje de fallback cuando no podemos derivar a un agente en este momento. */
+function buildHumanUnavailableMessage(escalationPhone?: string, hoursStr?: string): string {
+  const phoneLine = escalationPhone
+    ? `Para hablar con alguien del equipo, comunicate directamente con la clínica al *${escalationPhone}*.`
+    : `Para hablar con alguien del equipo, comunicate directamente con la clínica.`
+  const hoursLine = hoursStr ? `\n\nEl horario de atención es ${hoursStr}.` : ""
+  return `Por ahora no puedo conectarte con una persona desde acá.\n\n${phoneLine}${hoursLine}\n\nSi necesitás gestionar un turno, escribime y te ayudo.`
+}
+
+/**
+ * Deriva la conversación a atención humana (acción derive_to_human del dispatcher).
+ *
+ * Comportamiento (definido por producto):
+ * - Si humanSupport está deshabilitado para la config → derivar al teléfono de la clínica.
+ * - Si estamos FUERA del horario de atención → derivar al teléfono (con el horario).
+ * - Si hay soporte disponible y en horario → OFRECER al paciente (1/2). La respuesta "1"/"2"
+ *   la intercepta el guard getPendingHumanSupportOffer en handleMessage (antes del dispatcher),
+ *   que crea la sesión de soporte y pausa la IA.
+ *
+ * Devuelve true: siempre responde (la derivación es una acción terminal del turno).
+ */
+async function handleDeriveToHuman(
+  userPhoneNumber: string,
+  userMessage: string,
+  config: any,
+  value: any,
+  motivo?: string,
+): Promise<boolean> {
+  const logger = createConversationLogger(userPhoneNumber, config.id, "derive-to-human")
+  const ctxDirect: DirectResponseContext = {
+    phoneNumberId: value.metadata.phone_number_id,
+    accessToken: config.accessToken,
+    userPhoneNumber,
+    configId: config.id,
+    clienteId: config.cliente_id,
+  }
+
+  try {
+    const flags = await getEffectiveFeatureFlags(config.id)
+    const escalationPhone = config.escalationPhoneNumber
+
+    // Fallback 1: soporte humano deshabilitado para esta clínica → derivar al teléfono.
+    if (!flags.humanSupport) {
+      logger.info("humanSupport deshabilitado → fallback a teléfono")
+      await sendDirectResponse(ctxDirect, buildHumanUnavailableMessage(escalationPhone), "derive-human-disabled")
+      return true
+    }
+
+    // Fallback 2: fuera del horario de atención → derivar al teléfono (con el horario).
+    const schedule = await getHumanSupportSchedule(config.id)
+    const timezone = config.timezone || "America/Argentina/Buenos_Aires"
+    if (!isWithinHumanSupportHours(schedule, timezone)) {
+      const hoursStr = formatSupportHoursForPatient(schedule)
+      logger.info("Fuera de horario de atención → fallback a teléfono", { hoursStr })
+      await sendDirectResponse(ctxDirect, buildHumanUnavailableMessage(escalationPhone, hoursStr), "derive-human-offhours")
+      return true
+    }
+
+    // Soporte disponible y en horario → ofrecer al paciente (modo C). No creamos la sesión
+    // todavía: esperamos su confirmación "1"/"2".
+    const { threadId } = await getThreadForUser(userPhoneNumber, config.id).catch(() => ({ threadId: "" }))
+    await setPendingHumanSupportOffer(config.id, userPhoneNumber, {
+      configId: config.id,
+      tenantId: config.cliente_id || "unknown",
+      threadId: threadId || "",
+      assistantId: config.whatsappAssistantId || "",
+      displayName: config.displayName,
+      reason: motivo || "El paciente solicitó hablar con una persona",
+      priority: "medium",
+      summary: motivo || "El paciente pidió atención humana desde el chat.",
+      phoneNumberId: value.metadata.phone_number_id,
+      accessToken: config.accessToken,
+    })
+
+    const clinicName = config.displayName || "la clínica"
+    const offerMessage =
+      `Entiendo, querés hablar con una persona del equipo de ${clinicName}. ¿Te conecto?\n\n` +
+      `1. Sí, quiero atención humana\n` +
+      `2. No, sigo con el asistente`
+    await sendDirectResponse(ctxDirect, offerMessage, "derive-human-offer")
+    logger.info("Oferta de atención humana enviada al paciente")
+    return true
+  } catch (error) {
+    logger.error("Error derivando a atención humana — fallback a teléfono", error as Error)
+    await sendDirectResponse(
+      ctxDirect,
+      buildHumanUnavailableMessage(config.escalationPhoneNumber),
+      "derive-human-error",
+    ).catch(() => {})
+    return true
+  }
+}
+
 async function runPrimaryDispatcherNoFlow(
   userPhoneNumber: string,
   userMessage: string,
@@ -1371,6 +1470,10 @@ async function runPrimaryDispatcherNoFlow(
       await sendDirectResponse(ctxDirect, action.message, "router-end")
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
       return true
+    }
+
+    if (action.type === 'derive_to_human') {
+      return await handleDeriveToHuman(userPhoneNumber, userMessage, config, value, action.motivo)
     }
 
     if (action.type === 'init_familiar_flow') {
@@ -1502,6 +1605,13 @@ async function runInterjectionInActiveFlow(
       await sendDirectResponse(ctxEnd, action.message, "router-end")
       routerLogger.info('[Router intercalada] Finalizar conversación → flujo cerrado')
       return true
+    }
+
+    // Pedido explícito de atención humana → cortar el flujo activo y derivar.
+    if (action.type === 'derive_to_human') {
+      await clearActiveFlows(userPhoneNumber, config)
+      routerLogger.info('[Router intercalada] Derivar a atención humana → flujo cerrado')
+      return await handleDeriveToHuman(userPhoneNumber, userMessage, config, value, action.motivo)
     }
 
     // Reserva para un familiar → activar modo familiar (pedir DNI del familiar), sin ceder.
@@ -4376,6 +4486,11 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               await clearActiveFlows(userPhoneNumber, config)
               await sendDirectResponse(dispatcherCtxDirect, action.message, "ai-dispatcher-end")
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            if (action.type === 'derive_to_human') {
+              await handleDeriveToHuman(userPhoneNumber, userMessage, config, value, action.motivo)
               return
             }
 

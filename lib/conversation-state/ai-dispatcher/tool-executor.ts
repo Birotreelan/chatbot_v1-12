@@ -36,6 +36,7 @@ export type ExecutorAction =
   | { type: 'trigger_cancel_and_rebook' }                    // cancelar + iniciar reserva
   | { type: 'continue_active_flow' }                         // reenviar mensaje al flow activo
   | { type: 'end_conversation'; message: string }            // finalizar/abandonar: cerrar flujo + despedir
+  | { type: 'derive_to_human'; motivo?: string }             // el paciente pidió hablar con una persona
   | { type: 'passthrough' }                                  // ceder al enqueue/OpenAI normal
 
 export interface ExecutorResult {
@@ -137,6 +138,13 @@ export async function executeDispatcherDecision(
       const message = respuesta || '¡Gracias por escribirnos! Si necesitás algo más, estoy acá para ayudarte.'
       return { action: { type: 'send_and_return', message }, logNote: 'Dispatcher → respuesta empática' }
     }
+
+    // ── Solicitar atención humana ────────────────────────────────────────────
+    case TOOL_NAMES.SOLICITAR_HUMANO:
+      return {
+        action: { type: 'derive_to_human', motivo: (decision.args.motivo as string) || undefined },
+        logNote: 'Dispatcher → derivar a atención humana',
+      }
 
     // ── Continuar flujo activo ───────────────────────────────────────────────
     case TOOL_NAMES.CONTINUAR_FLUJO:

@@ -26,6 +26,7 @@ export const TOOL_NAMES = {
   CONSULTA_INFORMATIVA:      'responder_consulta_informativa',
   DERIVAR_CONSULTA:          'derivar_consulta_externa',
   RESPUESTA_EMPATICA:        'respuesta_empatica',
+  SOLICITAR_HUMANO:          'solicitar_atencion_humana',
   CONTINUAR_FLUJO:           'continuar_flujo_activo',
   FINALIZAR:                 'finalizar_conversacion',
 } as const
@@ -198,6 +199,32 @@ Responde con empatía y sin iniciar ningún flujo.`,
           },
         },
         required: ['respuesta'],
+      },
+    },
+  },
+
+  // ── Solicitar atención humana ──────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: TOOL_NAMES.SOLICITAR_HUMANO,
+      description: `El paciente pide EXPLÍCITAMENTE hablar con una persona / humano / agente real.
+Usá este tool cuando el mensaje expresa querer dejar de hablar con el bot y ser atendido por alguien:
+"quiero hablar con una persona", "necesito hablar con un humano", "atención humana",
+"con un agente", "con alguien de verdad", "una persona real", "un asesor", "un operador",
+"que me atienda alguien", "pasame con un humano", "no quiero hablar con un bot".
+Esta acción deriva la conversación a un agente de la clínica (con pausa del asistente).
+NO usar para consultas médicas/administrativas (eso es derivar_consulta_externa),
+ni cuando el paciente solo quiere terminar la charla (eso es finalizar_conversacion).`,
+      parameters: {
+        type: 'object',
+        properties: {
+          motivo: {
+            type: 'string',
+            description: 'Motivo breve por el que el paciente quiere hablar con una persona, si lo menciona. Dejar vacío si no da un motivo.',
+          },
+        },
+        required: [],
       },
     },
   },
