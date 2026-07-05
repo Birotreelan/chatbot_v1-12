@@ -22,7 +22,7 @@ import {
 import {
   getHumanSupportSchedule,
   isWithinHumanSupportHours,
-  formatSupportHoursForPatient,
+  formatSupportHoursLines,
 } from "./human-support-schedule"
 import type { HumanSupportMessage } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
@@ -1383,6 +1383,21 @@ async function sendHumanSupportReasonMenu(
   }
 }
 
+/** Mensaje cuando el paciente pide atención humana FUERA del horario de atención. */
+function buildHumanOffHoursMessage(escalationPhone: string | undefined, hoursLines: string[]): string {
+  const phoneLine = escalationPhone
+    ? `Para hablar con alguien del equipo, comunicate directamente con la clínica al *${escalationPhone}*.`
+    : `Para hablar con alguien del equipo, comunicate directamente con la clínica.`
+  const hoursBlock = hoursLines.length
+    ? `\n\nEstos son nuestros horarios de atención:\n\n${hoursLines.map((l) => `- ${l}.`).join("\n")}`
+    : ""
+  return (
+    `Entiendo que deseás hablar con una persona de nuestro equipo, pero actualmente estamos fuera del horario de atención y no hay ninguna persona que pueda asistirte.\n\n` +
+    `${phoneLine}${hoursBlock}\n\n` +
+    `Podés contactarnos en esos horarios y te atenderemos. Si necesitás gestionar un turno mediante el asistente de inteligencia artificial, escribí la palabra "turno".`
+  )
+}
+
 /** Mensaje de fallback cuando no podemos derivar a un agente en este momento. */
 function buildHumanUnavailableMessage(escalationPhone?: string, hoursStr?: string): string {
   const phoneLine = escalationPhone
@@ -1509,9 +1524,9 @@ async function handleDeriveToHuman(
     const schedule = await getHumanSupportSchedule(config.id)
     const timezone = config.timezone || "America/Argentina/Buenos_Aires"
     if (!isWithinHumanSupportHours(schedule, timezone)) {
-      const hoursStr = formatSupportHoursForPatient(schedule)
-      logger.info("Fuera de horario de atención → fallback a teléfono", { hoursStr })
-      await sendDirectResponse(ctxDirect, buildHumanUnavailableMessage(escalationPhone, hoursStr), "derive-human-offhours")
+      const hoursLines = formatSupportHoursLines(schedule)
+      logger.info("Fuera de horario de atención → fallback a teléfono", { hoursLines })
+      await sendDirectResponse(ctxDirect, buildHumanOffHoursMessage(escalationPhone, hoursLines), "derive-human-offhours")
       return true
     }
 

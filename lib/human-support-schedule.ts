@@ -120,6 +120,23 @@ export function formatSupportHoursForPatient(schedule: DaySchedule[]): string {
     .join(", ")
 }
 
+/**
+ * Devuelve una línea por cada día habilitado, ej: ["lun de 9h a 18h", "sáb de 9h a 0h"].
+ * Útil para listar los horarios en formato de viñetas.
+ */
+export function formatSupportHoursLines(schedule: DaySchedule[]): string[] {
+  const order = [1, 2, 3, 4, 5, 6, 0]
+  return schedule
+    .filter((d) => d.enabled && d.periods?.length > 0)
+    .sort((a, b) => order.indexOf(a.dayOfWeek) - order.indexOf(b.dayOfWeek))
+    .map((d) => {
+      const times = d.periods
+        .map((p) => `de ${formatTime(p.startTime)} a ${formatTime(p.endTime)}`)
+        .join(" y ")
+      return `${DAYS_SHORT[d.dayOfWeek]} ${times}`
+    })
+}
+
 function formatTime(time: string): string {
   const [h, m] = time.split(":")
   const hour = parseInt(h, 10)
