@@ -104,7 +104,7 @@ export function SupportDashboard() {
 
       {/* Settings panel (inline, collapsible) */}
       {showSettings && (
-        <div className="mb-3 rounded-lg border bg-muted/20 p-4">
+        <div className="mb-3 rounded-lg border bg-muted/20 p-4 shrink-0 max-h-[50vh] overflow-y-auto">
           <p className="text-xs font-semibold mb-3 text-foreground">Configuración de Atención Humana</p>
           <SupportSettings />
         </div>
