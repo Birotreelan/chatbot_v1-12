@@ -333,6 +333,7 @@ El paciente recibió un recordatorio de turno. Clasificá su respuesta en:
 
 IMPORTANTE: Aunque haya typos o lenguaje informal, si la intención es clara, clasificar correctamente.
 IMPORTANTE: "cancelar_turno" SOLO si el paciente expresa que NO va a asistir o pide cancelar. Mencionar un horario distinto al del turno o darse cuenta de que lo tenía mal agendado NO es cancelación: es "aclaracion_horario".
+IMPORTANTE: Un número suelto o token corto sin contexto (ej: "15", "2", "1", "ver_mas") NUNCA es "aclaracion_horario" ni "cancelar_turno" ni "confirmar_asistencia": puede ser la selección de una opción de otro menú. Clasificá como "otro".
 
 Respondé SOLO con JSON: {"intent": "confirmar_asistencia"|"cancelar_turno"|"aclaracion_horario"|"consulta_con_cortesia"|"otro", "confidence": 0.0-1.0, "reasoning": "..."}`,
         },
@@ -484,6 +485,20 @@ export async function detectDirectConfirmationPreFlow(
   const tipoMensaje = appointmentContext.tipo_mensaje as string | undefined
   if (tipoMensaje && INFORMATIONAL_TIPO_MENSAJES.includes(tipoMensaje)) {
     logger.info("Template informacional — no aplica detección de confirmación directa", { tipoMensaje })
+    return { detected: false }
+  }
+
+  // Paso 1c (incidente 2026-07-06): si el contexto NO tiene turnos activos (ej: el
+  // turno ya fue cancelado y turnos[] quedó vacío), no hay nada que confirmar,
+  // cancelar ni aclarar — no interceptar. Sin este check, mensajes de un flujo
+  // posterior (ej: "15" seleccionando turno en reagendamiento) llegaban al NLU
+  // y podían desviarse (clasificado como aclaración de horario).
+  const ctxTurnos = appointmentContext.turnos as unknown[] | undefined
+  const hasActiveTurnos =
+    (Array.isArray(ctxTurnos) && ctxTurnos.length > 0) ||
+    !!(appointmentContext as Record<string, unknown>).turno // formato con turno único
+  if (!hasActiveTurnos) {
+    logger.info("Contexto sin turnos activos — no aplica detección directa", { tipoMensaje })
     return { detected: false }
   }
 

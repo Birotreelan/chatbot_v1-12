@@ -3297,6 +3297,27 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     }
 
     // ============================================================================
+    // GUARDA GLOBAL DE PRE-FLOWS (incidente 2026-07-06): si hay un flujo POR PASOS
+    // activo (reagendamiento, reserva de paciente existente/nuevo, booking), los
+    // interceptores Sprint 14/16/17 NO deben correr: los inputs del paso ("15", "1",
+    // "ver_mas") no son confirmaciones ni consultas — son datos del flujo. Sin esta
+    // guarda, "15" (selección de turno) fue clasificado por el NLU como aclaración
+    // de horario y desvió el flujo; además cada mensaje pagaba 1-2 llamadas a GPT.
+    // ============================================================================
+    const stepFlowActiveForPreflows =
+      (message.type === "text" || message.type === "button" || message.type === "interactive")
+        ? (
+            (await isRescheduleFlowActive(userPhoneNumber, config.id)) ||
+            (await isExistingPatientFlowActive(userPhoneNumber)) ||
+            (await isNewPatientFlowActive(userPhoneNumber)) ||
+            !!(await getBookingFlowState(userPhoneNumber, config.id))
+          )
+        : false
+    if (stepFlowActiveForPreflows) {
+      console.info("[PREFLOW-GUARD] Flujo por pasos activo — interceptores Sprint 14/16/17 omitidos")
+    }
+
+    // ============================================================================
     // SPRINT 14: INTERCEPTAR CONFIRMACION/CANCELACION DIRECTA (PRIORIDAD ALTA)
     // Detecta "Confirmo", "Cancelo", "Voy", "No puedo", etc. por texto libre
     // cuando hay un template reciente (ventana 24h) pero sin flowState pendiente
@@ -3305,7 +3326,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     if (message.type === "text" || message.type === "button" || message.type === "interactive") {
       const directConfirmFlags = await getEffectiveFeatureFlags(config.id)
 
-      if (directConfirmFlags.directConfirmCancelDetection && config.cliente_id) {
+      if (directConfirmFlags.directConfirmCancelDetection && config.cliente_id && !stepFlowActiveForPreflows) {
   
         
         const directActionResult = await detectDirectConfirmationPreFlow(
@@ -3459,23 +3480,32 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
             // El paciente tenía otro horario en mente (ej: "me habían dicho que era 15:30").
             // NO es cancelación: se informa el horario correcto — el sistema es la fuente de verdad.
-            const turnoDetailsClarify = appointmentCtx.turno
-              ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n📍 ${appointmentCtx.turno.sede}`
-              : null
+            // Soporta ambos formatos de contexto: turno único o turnos[].
+            const turnoClarify: any = appointmentCtx.turno
+              || (Array.isArray(appointmentCtx.turnos) && appointmentCtx.turnos[0])
+              || null
 
-            const clarifyMessage = buildTimeClarificationResponse(patientName, turnoDetailsClarify)
+            // Solo interceptar si tenemos los datos REALES del turno. Sin fecha/hora,
+            // el mensaje genérico ("el horario válido es el que te enviamos") confunde
+            // más de lo que aclara — mejor dejar que el pipeline normal procese el mensaje.
+            if (turnoClarify && (turnoClarify.fecha || turnoClarify.fecha_formateada) && (turnoClarify.hora || turnoClarify.hora_formateada)) {
+              const turnoDetailsClarify = `📅 ${turnoClarify.fecha_formateada || turnoClarify.fecha} a las ${turnoClarify.hora_formateada || turnoClarify.hora}\n👨‍⚕️ ${turnoClarify.profesional || ""}\n📍 ${turnoClarify.sede || ""}`
 
-            const clarifyCtx: DirectResponseContext = {
-              phoneNumberId: value.metadata.phone_number_id,
-              accessToken: config.accessToken,
-              userPhoneNumber,
-              configId: config.id,
-              clienteId: config.cliente_id,
+              const clarifyMessage = buildTimeClarificationResponse(patientName, turnoDetailsClarify)
+
+              const clarifyCtx: DirectResponseContext = {
+                phoneNumberId: value.metadata.phone_number_id,
+                accessToken: config.accessToken,
+                userPhoneNumber,
+                configId: config.id,
+                clienteId: config.cliente_id,
+              }
+
+              await sendDirectResponse(clarifyCtx, clarifyMessage, "time_clarification")
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
             }
-
-            await sendDirectResponse(clarifyCtx, clarifyMessage, "time_clarification")
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-            return
+            console.info("[CLARIFY-TIME] Sin datos de turno en contexto — no se intercepta, sigue pipeline normal")
           }
 
           if (directActionResult.action === "ask_explicit") {
@@ -3511,8 +3541,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // ============================================================================
     if (message.type === "text") {
       const infoQueryFlags = await getEffectiveFeatureFlags(config.id)
-      
-      if (infoQueryFlags.directInformationalQuery) {
+
+      if (infoQueryFlags.directInformationalQuery && !stepFlowActiveForPreflows) {
         
         // Obtener el appointmentContext si existe
         const appointmentData = await getAppointmentContext(userPhoneNumber, config.id)
@@ -3549,8 +3579,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // ============================================================================
     if (message.type === "text") {
       const postActionFlags = await getEffectiveFeatureFlags(config.id)
-      
-      if (postActionFlags.postActionContextHandler) {
+
+      if (postActionFlags.postActionContextHandler && !stepFlowActiveForPreflows) {
         
         const postActionResult = await detectPostActionContextPreFlow(
           userMessage,

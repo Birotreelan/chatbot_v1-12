@@ -336,6 +336,16 @@ export async function processRescheduleMessage(
   }
 
   // ========================================
+  // CASO 0: Aclaración determinística — input no entendido, re-preguntar SIN salir
+  // del flujo ni delegar a OpenAI (incidente 2026-07-06: el asistente desviaba la
+  // conversación en medio de la selección de turno)
+  // ========================================
+  if (result.type === 'pending' && result.clarification && result.message) {
+    await sendRescheduleResponse(ctx, result.message)
+    return { handled: true, fallbackToOpenAI: false }
+  }
+
+  // ========================================
   // CASO 1: Turno seleccionado - mostrar confirmación
   // ========================================
   if (result.type === 'pending' && result.nextPhase === 'awaiting_confirmation' && result.turnoSeleccionado) {

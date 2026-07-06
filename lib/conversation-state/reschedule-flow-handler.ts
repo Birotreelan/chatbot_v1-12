@@ -79,6 +79,7 @@ export interface RescheduleFlowResult {
   state?: RescheduleFlowState
   showMore?: boolean       // el usuario pidió "Ver más" turnos (siguiente ventana)
   hasMoreTurnos?: boolean  // si quedan más turnos tras la ventana mostrada (para el botón)
+  clarification?: boolean  // input no entendido → re-preguntar con `message` SIN salir del flujo (no OpenAI)
   fallbackContext?: {
     intent: string
     extractedData?: Record<string, any>
@@ -476,18 +477,22 @@ export async function handleRescheduleMessage(
       }
     }
 
-    // No se pudo resolver → fallback a OpenAI
+    // No se pudo resolver → pedir aclaración determinística SIN salir del flujo.
+    // (Incidente 2026-07-06: el fallback a OpenAI para "7.11y10" desvió la conversación —
+    // el asistente llamó a get_paciente, falló, y respondió "no tenés turnos agendados"
+    // en medio de la selección. El resolver interno ya usa NLU; si no resolvió, lo
+    // correcto es re-preguntar con instrucciones claras, no delegar al asistente.)
     state.intentosFallidos++
     await saveRescheduleState(phone, configId, state)
 
     if (state.intentosFallidos <= 2) {
-      console.log(`[RESCHEDULE-FLOW] Selection no resuelta, intento ${state.intentosFallidos}, fallback a OpenAI`)
+      console.log(`[RESCHEDULE-FLOW] Selection no resuelta, intento ${state.intentosFallidos}, pidiendo aclaración`)
       return {
-        type: 'fallback_to_openai',
-        fallbackContext: {
-          intent: 'interpret_turn_selection',
-          originalMessage: message,
-        },
+        type: 'pending',
+        nextPhase: 'awaiting_selection',
+        state,
+        clarification: true,
+        message: "No pude identificar el turno que elegiste. Por favor respondé con *un solo número* de la lista (por ejemplo: 7).\n\nSi querés ver más opciones, presioná el botón *Ver más*.\n\n0. *Volver al paso anterior*",
       }
     } else {
       // Demasiados intentos fallidos
@@ -532,14 +537,15 @@ export async function handleRescheduleMessage(
         message: "Entendido. Si cambias de idea, puedo ayudarte a reagendar en cualquier momento.",
       }
     } else {
-      // Ambiguo → OpenAI
-      console.log(`[RESCHEDULE-FLOW] Confirmacion ambigua, fallback a OpenAI`)
+      // Ambiguo → re-preguntar determinísticamente SIN salir del flujo (no OpenAI,
+      // mismo criterio que la selección: el asistente puede desviar la conversación)
+      console.log(`[RESCHEDULE-FLOW] Confirmacion ambigua, pidiendo aclaración`)
       return {
-        type: 'fallback_to_openai',
-        fallbackContext: {
-          intent: 'clarify_confirmation',
-          originalMessage: message,
-        },
+        type: 'pending',
+        nextPhase: 'awaiting_confirmation',
+        state,
+        clarification: true,
+        message: "No entendí tu respuesta. Por favor respondé:\n\n1. *Sí, confirmar* la reserva del turno\n2. *No, modificar* (elegir otro turno)",
       }
     }
   }
