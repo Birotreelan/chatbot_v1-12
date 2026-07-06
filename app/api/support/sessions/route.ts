@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { getSessionForApi, getSessionFromRequest } from "@/lib/auth"
 import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
+import { getWhatsAppConfigsByTenant } from "@/lib/db"
+import { getClientFeatureFlags } from "@/lib/conversation-state/feature-flags"
 
 export async function GET(request: Request) {
   try {
@@ -40,11 +42,23 @@ export async function GET(request: Request) {
     const allSessions = [...pendingSessions, ...activeSessions]
     console.log("[API Sessions] Total de sesiones:", allSessions.length)
 
+    // "Ofrecer al paciente" habilitado: true si ALGUNA config del tenant lo tiene activo.
+    // Se usa para bloquear la vista de atención humana si la clínica no lo activó.
+    let offerEnabled = false
+    try {
+      const configs = await getWhatsAppConfigsByTenant(session.tenantId)
+      const flagsList = await Promise.all(configs.map((c) => getClientFeatureFlags(c.id)))
+      offerEnabled = flagsList.some((f) => f.humanSupportOfferToPatient === true)
+    } catch (e) {
+      console.error("[API Sessions] Error calculando offerEnabled:", e)
+    }
+
     return NextResponse.json({
       success: true,
       sessions: allSessions,
       pending: pendingSessions,
       active: activeSessions,
+      offerEnabled,
       userInfo: {
         userId: session.userId,
         displayName: session.displayName,

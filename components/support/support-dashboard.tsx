@@ -6,7 +6,7 @@ import { ConversationMonitor } from "./conversation-monitor"
 import { SupportSettings } from "./support-settings"
 import { useSession } from "./session-provider"
 import type { HumanSupportSession } from "@/lib/types"
-import { Clock, MessageSquare, User, MonitorPlay, Settings, X } from "lucide-react"
+import { Clock, MessageSquare, User, MonitorPlay, Settings, X, Lock } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 
@@ -21,13 +21,19 @@ export function SupportDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null)
+  // Default true para no bloquear la vista durante la carga inicial.
+  const [offerEnabled, setOfferEnabled] = useState(true)
   const [activeTab, setActiveTab] = useState("sessions")
   const [showSettings, setShowSettings] = useState(false)
   const { getAuthHeaders, sessionId } = useSession()
 
   useEffect(() => {
     loadSessions()
-    const interval = setInterval(loadSessions, 10000)
+    // Optimización bandwidth: 10s → 30s + pausa cuando la pestaña no está visible
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return
+      loadSessions()
+    }, 30000)
     return () => clearInterval(interval)
   }, [])
 
@@ -40,6 +46,7 @@ export function SupportDashboard() {
       const data = await response.json()
       setSessions(Array.isArray(data.sessions) ? data.sessions : [])
       if (data.userInfo) setUserInfo(data.userInfo)
+      if (typeof data.offerEnabled === "boolean") setOfferEnabled(data.offerEnabled)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error desconocido")
@@ -122,6 +129,22 @@ export function SupportDashboard() {
 
         {/* Tab: Sesiones */}
         <TabsContent value="sessions" className="flex-1 min-h-0 mt-0">
+          {!offerEnabled ? (
+            <div className="flex flex-col items-center justify-center h-full text-center gap-3 px-6">
+              <div className="rounded-full bg-muted p-3">
+                <Lock className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <h2 className="text-sm font-semibold text-foreground">Atención humana no disponible</h2>
+              <p className="text-xs text-muted-foreground max-w-md">
+                Activá <span className="font-medium">"Ofrecer al Paciente"</span> en la configuración para que
+                los pacientes puedan derivarse y chatear con la clínica a través de esta interfaz.
+              </p>
+              <Button size="sm" className="mt-1 gap-1.5" onClick={() => setShowSettings(true)}>
+                <Settings className="h-3.5 w-3.5" />
+                Abrir configuración
+              </Button>
+            </div>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
             <div className="flex flex-col min-h-0">
               <div className="flex items-center gap-1.5 mb-1.5">
@@ -159,6 +182,7 @@ export function SupportDashboard() {
               </div>
             </div>
           </div>
+          )}
         </TabsContent>
 
         {/* Tab: Monitor */}
