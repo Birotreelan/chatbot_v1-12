@@ -12,7 +12,9 @@
  *     panelUrl: 'whatsapp.php',
  *     position: 'manual',
  *     containerId: 'notification-widget-container',
- *     theme: 'light'
+ *     theme: 'light',
+ *     iconColor: '#ffffff',      // opcional: color del ícono (pisa el del tema)
+ *     iconHoverColor: '#ffffff'  // opcional: color del ícono en hover
  *   };
  * </script>
  * <script src="https://tu-dominio.vercel.app/notification-widget-loader.js"></script>
@@ -21,7 +23,7 @@
   "use strict";
   
   console.log("[NOTIFICATION-WIDGET] ========================================");
-  console.log("[NOTIFICATION-WIDGET] SCRIPT CARGADO - v2.2");
+  console.log("[NOTIFICATION-WIDGET] SCRIPT CARGADO - v2.3 (iconColor configurable)");
   console.log("[NOTIFICATION-WIDGET] Timestamp: " + new Date().toISOString());
   console.log("[NOTIFICATION-WIDGET] ========================================");
 
@@ -114,6 +116,26 @@
   };
 
   var colors = themes[config.theme] || themes.light;
+
+  // Overrides opcionales de color del ícono (para que combine con la barra del
+  // sistema anfitrión sin depender de los temas predefinidos)
+  colors = Object.assign({}, colors);
+
+  // En modo manual/inline el widget vive dentro de la barra del sistema anfitrión
+  // (fondo oscuro): por defecto usar el gris claro de los íconos vecinos (#d5d5d5).
+  // Se puede pisar con config.iconColor.
+  if (config.position === "manual" && !config.iconColor) {
+    config.iconColor = "#d5d5d5";
+  }
+
+  if (config.iconColor) {
+    colors.iconColor = config.iconColor;
+    // Si no se especifica hover, usar el mismo color para no "saltar" a un gris del tema
+    colors.iconHover = config.iconHoverColor || config.iconColor;
+  }
+  if (config.iconHoverColor) {
+    colors.iconHover = config.iconHoverColor;
+  }
 
   // Crear estilos
   function injectStyles() {
