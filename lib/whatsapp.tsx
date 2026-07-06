@@ -95,7 +95,7 @@ import {
   mapApiTurnosToOptions,
   buildNewDateSearchTurnoListMessage,
 } from "./conversation-state/booking-turno-filter"
-import { obtenerTurnos } from "./api-tools/api-functions"
+import { obtenerTurnos, buscarPaciente } from "./api-tools/api-functions"
 import {
   fetchSedes,
   buildSedesMessage,
@@ -1298,10 +1298,104 @@ async function requestFamiliarDni(
 }
 
 /**
+ * FALLBACK (incidente 2026-07-06): reconstruye el contexto de turno consultando el
+ * backend por teléfono cuando el contexto de Redis expiró (TTL 48h, pero los pacientes
+ * escriben días después del template de recordatorio).
+ *
+ * Sin esto, un paciente con turno vigente que escribe "quiero cancelar" días después
+ * recibía "No encontré un turno activo para cancelar" en loop, quedaba convencido de
+ * haber cancelado, y el turno seguía activo en la base.
+ *
+ * Consulta get_paciente por teléfono → turnos_proximos (los turnos REALES del sistema),
+ * arma el ChatbotData y lo persiste en Redis para el resto del flujo.
+ *
+ * Devuelve null si: no hay cliente_id, el paciente no existe, hay MÚLTIPLES pacientes
+ * con el mismo teléfono (no se puede adivinar cuál es — requiere DNI), o no tiene
+ * turnos activos. En esos casos el mensaje "no encontré turno" sí es correcto.
+ */
+async function rebuildAppointmentContextFromBackend(
+  userPhoneNumber: string,
+  config: any,
+): Promise<ChatbotData | null> {
+  if (!config.cliente_id) return null
+  try {
+    const resp = await buscarPaciente(config.cliente_id, { telefono: userPhoneNumber })
+    if (!resp.exito || !resp.datos) {
+      console.log(`[CANCEL-FALLBACK] Paciente no encontrado por teléfono en backend (${userPhoneNumber})`)
+      return null
+    }
+
+    const datos: any = resp.datos
+    // Múltiples pacientes con el mismo teléfono → no adivinar sobre qué turno operar
+    if (datos.warning === 'pacientes_multiples' || Array.isArray(datos.pacientes)) {
+      console.log(`[CANCEL-FALLBACK] Múltiples pacientes con el mismo teléfono — no se reconstruye contexto`)
+      return null
+    }
+
+    const paciente: any = Array.isArray(datos) ? datos[0] : datos
+    if (!paciente) return null
+
+    const turnosRaw: any[] = (resp as any).turnosProximos || []
+    const turnosActivos = turnosRaw.filter((t: any) => {
+      const estado = String(t.Estado ?? t.estado ?? '').trim().toLowerCase()
+      return estado !== 'cancelado'
+    })
+    if (turnosActivos.length === 0) {
+      console.log(`[CANCEL-FALLBACK] Paciente sin turnos activos en backend`)
+      return null
+    }
+
+    const primerTurno = turnosActivos[0]
+    const chatbotData: ChatbotData = {
+      paciente: {
+        nombres: (paciente.Nombres || paciente.nombres || paciente.nombre || 'Paciente').trim(),
+        apellido: (paciente.Apellido || paciente.apellido || '').trim(),
+        dni: (paciente.Nrodoc || paciente.dni || '').toString(),
+        telefono: userPhoneNumber,
+        obra_social_id: (paciente.Deudor_Id || paciente.deudor_id || '').toString() || undefined,
+        obra_social_nombre: (paciente.Deudor_Nombre || paciente.deudor_nombre || '').toString() || undefined,
+      },
+      turnos: turnosActivos.map((t: any): ChatbotDataTurno => ({
+        fecha: t.Fecha || t.fecha,
+        fecha_formateada: t.Fecha || t.fecha,
+        hora: t.Hora || t.hora,
+        hora_formateada: (t.Hora || t.hora || '').substring(0, 5),
+        profesional: t.Profesional_Nombre || t.profesional || '',
+        profesional_id: t.Profesional_Id || t.profesional_id || '',
+        sede: t.Centro_Nombre || t.sede || '',
+        sede_id: t.Sede_Id || t.sede_id || '',
+        direccion: t.Direccion || t.direccion || '',
+        agenda_id: t.Agenda_Id || t.agenda_id || '',
+        admite_reagendamiento: t.admite_reagendamiento || false,
+        tipo: t.Motivo_Nombre || t.tipo || 'consulta',
+        estado: t.Estado || t.estado || '',
+      })),
+      cantidad_turnos: turnosActivos.length,
+      sede_id: primerTurno.Sede_Id || primerTurno.sede_id || '',
+      clinica: config.displayName || 'Clínica',
+      tipo_mensaje: 'user_initiated',
+    }
+
+    // Persistir para que el resto del flujo (doble confirmación, proxy, reagendamiento)
+    // encuentre el contexto como si viniera del template
+    await saveAppointmentContext(userPhoneNumber, config.id, chatbotData)
+    console.log(`[CANCEL-FALLBACK] Contexto reconstruido desde backend: ${turnosActivos.length} turno(s) activo(s)`)
+    return chatbotData
+  } catch (error) {
+    console.error(`[CANCEL-FALLBACK] Error reconstruyendo contexto desde backend:`, error)
+    return null
+  }
+}
+
+/**
  * Inicia la doble confirmación de cancelación correctamente: setea el flowState
  * `awaiting_cancel_confirmation` (que reconoce handlePendingFlowResponse para procesar
  * el "1"/"2") y envía el mensaje con el builder correcto + botones.
- * Devuelve false si no hay contexto de turno (el caller decide el fallback).
+ *
+ * Si el contexto de Redis expiró, hace fallback al backend (get_paciente por teléfono)
+ * para reconstruirlo con los turnos reales del sistema.
+ *
+ * Devuelve false si no hay turno activo NI en Redis NI en backend (el caller decide el fallback).
  */
 async function startCancelDoubleConfirm(
   userPhoneNumber: string,
@@ -1309,8 +1403,34 @@ async function startCancelDoubleConfirm(
   ctxDirect: DirectResponseContext,
   postCancelAction?: 'reschedule',
 ): Promise<boolean> {
-  const chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+  let chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+
+  // Fallback: contexto de Redis expirado → consultar el backend (fuente de verdad)
+  if (!chatbotData || !chatbotData.turnos || chatbotData.turnos.length === 0) {
+    chatbotData = await rebuildAppointmentContextFromBackend(userPhoneNumber, config)
+  }
   if (!chatbotData || !chatbotData.turnos || chatbotData.turnos.length === 0) return false
+
+  // Varios turnos en fechas distintas → el paciente debe elegir sobre cuál operar
+  // (mismo criterio que el flujo de detección: turnos de la misma fecha se cancelan juntos)
+  const allSameDate = chatbotData.turnos.every(
+    (t: any) => (t.fecha || (t as any).Fecha) === (chatbotData!.turnos[0].fecha || (chatbotData!.turnos[0] as any).Fecha)
+  )
+  if (chatbotData.turnos.length > 1 && !allSameDate) {
+    const pendingAction = postCancelAction === 'reschedule'
+      ? ('cancel_and_book_new_appointment' as const)
+      : ('cancel_appointment' as const)
+    await setFlowState(userPhoneNumber, config.id, {
+      type: 'awaiting_turno_selection',
+      createdAt: new Date().toISOString(),
+      pendingAction,
+    })
+    const selectionMsg = buildTurnoSelectionMessage(chatbotData, pendingAction)
+    await sendDirectResponse(ctxDirect, selectionMsg, "router-cancel-turno-selection")
+    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+    return true
+  }
+
   const turnoIndex = 0
   await setFlowState(userPhoneNumber, config.id, {
     type: 'awaiting_cancel_confirmation',
