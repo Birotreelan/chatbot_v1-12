@@ -13,6 +13,8 @@ import {
   Phone,
   Bot,
   Inbox,
+  Search,
+  X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -29,6 +31,32 @@ export interface MonitorContact {
   configName: string
   isPaused: boolean
   supportSessionId?: string
+  // Datos de paciente identificado vía get_paciente (si existen) — usados para filtrar
+  hc?: string
+  nrodoc?: string
+  celular?: string
+  apellido?: string
+  nombre?: string
+}
+
+function fullPatientName(contact: MonitorContact): string | null {
+  const name = `${contact.nombre || ""} ${contact.apellido || ""}`.trim()
+  return name || null
+}
+
+/** Filtra contactos por HC, Nrodoc, Celular, Apellido, Nombre o teléfono */
+function matchesQuery(contact: MonitorContact, rawQuery: string): boolean {
+  const query = rawQuery.trim().toLowerCase()
+  if (!query) return true
+  const haystacks = [
+    contact.hc,
+    contact.nrodoc,
+    contact.celular,
+    contact.apellido,
+    contact.nombre,
+    contact.phoneNumber,
+  ]
+  return haystacks.some((value) => (value || "").toString().toLowerCase().includes(query))
 }
 
 interface ActiveSessionInfo {
@@ -106,13 +134,20 @@ function ContactRow({
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-1">
-          <span className="font-mono text-xs font-semibold truncate">
-            {maskPhone(contact.phoneNumber)}
+          <span className="text-xs font-semibold truncate">
+            {fullPatientName(contact) || maskPhone(contact.phoneNumber)}
           </span>
           <span className="text-[10px] text-muted-foreground shrink-0">
             {timeAgo(contact.lastMessageAt)}
           </span>
         </div>
+        {fullPatientName(contact) && (
+          <p className="font-mono text-[10px] text-muted-foreground/80 truncate">
+            {maskPhone(contact.phoneNumber)}
+            {contact.hc && ` · HC ${contact.hc}`}
+            {contact.nrodoc && ` · DNI ${contact.nrodoc}`}
+          </p>
+        )}
         <div className="flex items-center gap-1 mt-0.5">
           <span className="text-[10px] text-muted-foreground truncate flex-1">
             {contact.lastMessage || "—"}
@@ -135,6 +170,7 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
   const [contacts, setContacts] = useState<MonitorContact[]>([])
   const [contactsLoading, setContactsLoading] = useState(true)
   const [contactsError, setContactsError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
 
   const [selectedContact, setSelectedContact] = useState<MonitorContact | null>(null)
   const [conversation, setConversation] = useState<ConversationData | null>(null)
@@ -174,10 +210,13 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
     }
   }, [getAuthHeaders, sessionId, selectedContact])
 
-  // Contacts poll: reduced from 15s → 30s (2× less reads)
+  // Contacts poll: reduced from 15s → 30s (2× less reads) + pausa con pestaña oculta
   useEffect(() => {
     loadContacts()
-    const interval = setInterval(loadContacts, 30000)
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return
+      loadContacts()
+    }, 30000)
     return () => clearInterval(interval)
   }, []) // intentionally omit loadContacts to avoid restart loop
 
@@ -238,7 +277,10 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
     isInitialLoadRef.current = true
     loadConversation(selectedContact, true) // full initial load
     isInitialLoadRef.current = false
-    convPollRef.current = setInterval(() => loadConversation(selectedContact, false), 20000)
+    convPollRef.current = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return
+      loadConversation(selectedContact, false)
+    }, 20000)
     return () => {
       if (convPollRef.current) clearInterval(convPollRef.current)
     }
@@ -303,6 +345,7 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
   }
 
   // ── Computed ───────────────────────────────────────────────────────────────
+  const filteredContacts = contacts.filter((c) => matchesQuery(c, searchQuery))
   const isMySession =
     conversation?.activeSession?.assignedTo === currentUserId ||
     conversation?.activeSession?.status === "in_progress"
@@ -321,7 +364,7 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
             <span className="text-xs font-semibold">Conversaciones</span>
             {contacts.length > 0 && (
               <span className="bg-muted text-muted-foreground text-[10px] font-medium px-1.5 py-0.5 rounded">
-                {contacts.length}
+                {searchQuery ? `${filteredContacts.length}/${contacts.length}` : contacts.length}
               </span>
             )}
           </div>
@@ -332,6 +375,29 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
           >
             <RefreshCw className="h-3 w-3" />
           </button>
+        </div>
+
+        {/* Search / filter */}
+        <div className="px-2 pt-2 shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar por HC, DNI, celular, apellido o nombre..."
+              className="w-full h-7 pl-7 pr-6 rounded-md border bg-background text-[11px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                title="Limpiar búsqueda"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* List */}
@@ -351,7 +417,13 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
               <p className="text-xs text-muted-foreground text-center">No hay conversaciones aún</p>
             </div>
           )}
-          {contacts.map((c) => (
+          {!contactsLoading && !contactsError && contacts.length > 0 && filteredContacts.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-8 gap-2">
+              <Search className="h-8 w-8 text-muted-foreground/30" />
+              <p className="text-xs text-muted-foreground text-center">Sin resultados para "{searchQuery}"</p>
+            </div>
+          )}
+          {filteredContacts.map((c) => (
             <ContactRow
               key={`${c.configId}:${c.phoneNumber}`}
               contact={c}

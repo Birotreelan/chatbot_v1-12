@@ -33,6 +33,91 @@ export interface ConversationContact {
   configId: string
 }
 
+// ─── Patient snapshot (para filtros en el panel de soporte) ──────────────────
+// Cada vez que get_paciente resuelve un paciente para un teléfono, guardamos
+// una copia liviana de sus datos identificatorios (HC, DNI, celular, nombre,
+// apellido). Así el panel "Conversaciones generadas por IA" puede filtrar por
+// esos campos sin tener que volver a consultar la API de la clínica.
+const PATIENT_SNAPSHOT_PREFIX = "patient_snapshot:"
+// Mismo TTL que la conversación: si la conversación expira, el snapshot también.
+const PATIENT_SNAPSHOT_TTL = CONVERSATION_TTL
+
+export interface PatientSnapshot {
+  hc?: string
+  nrodoc?: string
+  celular?: string
+  apellido?: string
+  nombre?: string
+  updatedAt: string
+}
+
+function patientSnapshotKey(configId: string, phoneNumber: string): string {
+  return `${PATIENT_SNAPSHOT_PREFIX}${configId}:${phoneNumber}`
+}
+
+/**
+ * Guarda/actualiza el snapshot de un paciente identificado para un contacto.
+ * Se llama cada vez que get_paciente (bot) o get_paciente_interfaz (agente
+ * humano) devuelven datos de un paciente para ese teléfono.
+ */
+export async function savePatientSnapshot(
+  configId: string,
+  phoneNumber: string,
+  data: Omit<PatientSnapshot, "updatedAt">,
+): Promise<void> {
+  try {
+    // No pisar el snapshot con datos vacíos (p.ej. una consulta que no trajo nada nuevo)
+    const hasAnyValue = Object.values(data).some((v) => v !== undefined && v !== null && v !== "")
+    if (!hasAnyValue) return
+
+    const redisClient = getRedisClient()
+    if (!redisClient) return
+
+    const key = patientSnapshotKey(configId, phoneNumber)
+    const snapshot: PatientSnapshot = {
+      ...data,
+      updatedAt: new Date().toISOString(),
+    }
+    await redisClient.set(key, JSON.stringify(snapshot))
+    await redisClient.expire(key, PATIENT_SNAPSHOT_TTL)
+  } catch (error) {
+    console.error("[CONVERSATIONS] Error guardando patient snapshot:", error)
+  }
+}
+
+/**
+ * Trae los snapshots de paciente para un conjunto de teléfonos de un config,
+ * en un solo round-trip (mget), para mergear con la lista de contactos.
+ */
+export async function getPatientSnapshots(
+  configId: string,
+  phoneNumbers: string[],
+): Promise<Map<string, PatientSnapshot>> {
+  const result = new Map<string, PatientSnapshot>()
+  if (!phoneNumbers.length) return result
+
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) return result
+
+    const keys = phoneNumbers.map((phone) => patientSnapshotKey(configId, phone))
+    const values = await redisClient.mget<(string | null)[]>(...keys)
+    values.forEach((value, index) => {
+      if (!value) return
+      try {
+        const parsed: PatientSnapshot = typeof value === "string" ? JSON.parse(value) : (value as any)
+        result.set(phoneNumbers[index], parsed)
+      } catch {
+        // ignorar snapshot corrupto
+      }
+    })
+  } catch (error) {
+    console.error("[CONVERSATIONS] Error obteniendo patient snapshots:", error)
+  }
+
+  return result
+}
+
 function ensureValidTimestamp(timestamp: any): string {
   if (!timestamp) {
     return new Date().toISOString()
@@ -83,7 +168,11 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     }
 
     // Pipeline: 6 comandos en 1 request HTTP (rpush, expire, set, expire, sadd, expire)
-    // + invalidar cache de contactos Redis
+    // OPTIMIZACIÓN BANDWIDTH (2026-07-06): ya NO se invalida contacts_cache en cada
+    // mensaje. Con tráfico activo el cache (TTL 60s) nunca llegaba a servir un hit y
+    // cada poll del dashboard hacía SMEMBERS + MGET de TODOS los contactos + re-escritura
+    // del cache completo. Ahora manda el TTL: la lista de contactos puede estar hasta
+    // 60 segundos desactualizada, aceptable para una vista de monitoreo.
     const pipeline = redisClient.pipeline()
     pipeline.rpush(conversationKey, JSON.stringify(validatedMessage))
     pipeline.expire(conversationKey, CONVERSATION_TTL)
@@ -91,11 +180,32 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     pipeline.expire(contactKey, CONVERSATION_TTL)
     pipeline.sadd(contactsSetKey, message.phoneNumber)
     pipeline.expire(contactsSetKey, CONVERSATION_TTL)
-    // Invalidar cache Redis de contactos para este configId
-    pipeline.del(`${CONTACTS_CACHE_KEY_PREFIX}${message.configId}`)
     await pipeline.exec()
   } catch (error) {
     console.error("[CONVERSATIONS] Error guardando mensaje:", error)
+  }
+}
+
+/**
+ * Marcador de actividad barato para polling (2026-07-06): devuelve el timestamp del
+ * último mensaje de la conversación leyendo SOLO el registro de contacto (~200 bytes),
+ * sin traer los mensajes. Los endpoints de polling lo usan para responder "unchanged"
+ * cuando no hay novedades, evitando transferir 50-150 KB por poll.
+ */
+export async function getConversationLastActivity(
+  configId: string,
+  phoneNumber: string,
+): Promise<string | null> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) return null
+    const contactKey = `${CONVERSATION_CONTACT_PREFIX}${configId}:${phoneNumber}`
+    const contactData = await redisClient.get(contactKey)
+    if (!contactData) return null
+    const contact: any = typeof contactData === "string" ? JSON.parse(contactData) : contactData
+    return contact?.lastMessageAt || null
+  } catch {
+    return null
   }
 }
 

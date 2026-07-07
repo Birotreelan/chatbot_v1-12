@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireSupportAgentFromRequest } from "@/lib/auth"
 import { getSupportSession } from "@/lib/human-support"
+import { savePatientSnapshot } from "@/lib/conversations"
 
 const PROXY_URL = "https://proxy.santiagovulliez.com/proxy_service/"
 
@@ -127,10 +128,20 @@ export async function GET(request: Request) {
       obra_social: pacienteRaw.Deudor_Nombre || pacienteRaw.obra_social,
       plan: pacienteRaw.Plan_Nombre || pacienteRaw.plan,
       nro_afiliado: pacienteRaw.Nro_Afiliado_Ppal || pacienteRaw.nro_afiliado,
+      hc: pacienteRaw.HC || pacienteRaw.hc || null,
       url_paciente: pacienteRaw.url_paciente || null,
     }
 
     console.log(`[SUPPORT_PATIENT] Paciente encontrado:`, paciente)
+
+    // Guardar snapshot liviano para poder filtrar contactos en el panel de soporte
+    void savePatientSnapshot(supportSession.configId, phoneNumber, {
+      hc: paciente.hc ? String(paciente.hc).trim() : undefined,
+      nrodoc: paciente.dni ? String(paciente.dni).trim() : undefined,
+      celular: paciente.telefono ? String(paciente.telefono).trim() : undefined,
+      apellido: paciente.apellido ? String(paciente.apellido).trim() : undefined,
+      nombre: paciente.nombre ? String(paciente.nombre).trim() : undefined,
+    })
 
     // Normalizar turnos proximos
     const turnosNormalizados = turnosProximos.map((turno: any) => ({

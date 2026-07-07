@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSessionFromRequest } from "@/lib/auth"
 import { getWhatsAppConfigsByTenant } from "@/lib/db"
-import { getConversationContacts } from "@/lib/conversations"
+import { getConversationContacts, getPatientSnapshots } from "@/lib/conversations"
 import { getRedisClient } from "@/lib/redis"
 
 export const dynamic = "force-dynamic"
@@ -20,6 +20,12 @@ export interface MonitorContact {
   configName: string
   isPaused: boolean
   supportSessionId?: string
+  // Datos de paciente (si se identificó vía get_paciente en algún momento) — usados para filtrar
+  hc?: string
+  nrodoc?: string
+  celular?: string
+  apellido?: string
+  nombre?: string
 }
 
 // GET: All chatbot conversations for this agent's tenant
@@ -95,16 +101,35 @@ export async function GET(request: Request) {
           }
         }
 
-        return contacts.map((contact): MonitorContact => ({
-          phoneNumber: contact.phoneNumber,
-          lastMessage: contact.lastMessage,
-          lastMessageAt: contact.lastMessageAt,
-          messageCount: contact.messageCount,
-          configId: config.id,
-          configName: config.displayName || config.alias || config.id,
-          isPaused: pausedMap.get(contact.phoneNumber) ?? false,
-          supportSessionId: sessionIdMap.get(contact.phoneNumber),
-        }))
+        // Traer snapshots de paciente (HC, Nrodoc, Celular, Apellido, Nombre) en 1 solo mget
+        let patientMap: Map<string, { hc?: string; nrodoc?: string; celular?: string; apellido?: string; nombre?: string }> = new Map()
+        try {
+          patientMap = await getPatientSnapshots(
+            config.id,
+            contacts.map((c) => c.phoneNumber)
+          )
+        } catch {
+          // ignorar — patientMap queda vacío
+        }
+
+        return contacts.map((contact): MonitorContact => {
+          const patient = patientMap.get(contact.phoneNumber)
+          return {
+            phoneNumber: contact.phoneNumber,
+            lastMessage: contact.lastMessage,
+            lastMessageAt: contact.lastMessageAt,
+            messageCount: contact.messageCount,
+            configId: config.id,
+            configName: config.displayName || config.alias || config.id,
+            isPaused: pausedMap.get(contact.phoneNumber) ?? false,
+            supportSessionId: sessionIdMap.get(contact.phoneNumber),
+            hc: patient?.hc,
+            nrodoc: patient?.nrodoc,
+            celular: patient?.celular,
+            apellido: patient?.apellido,
+            nombre: patient?.nombre,
+          }
+        })
       })
     )
 

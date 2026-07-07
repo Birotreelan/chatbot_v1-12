@@ -1,6 +1,7 @@
 import { getRedisClient } from '@/lib/redis'
 import { createConversationLogger } from '../logger'
 import { ClinicAPI } from '../../clinic-api'
+import { savePatientSnapshot } from '../../conversations'
 import {
   detectMenuOption,
   NEW_PATIENT_MENU,
@@ -267,6 +268,15 @@ export async function startPatientDetectionFlow(
       patientName: patientName,
     })
 
+    // Guardar snapshot liviano del paciente para poder filtrar contactos en el panel de soporte
+    void savePatientSnapshot(configId, phoneNumber, {
+      hc: (patient.HC || patient.hc || '').toString().trim() || undefined,
+      nrodoc: patientDNI || undefined,
+      celular: patientCelular || undefined,
+      apellido: patientLastName || undefined,
+      nombre: patientFirstName || undefined,
+    })
+
     // Los turnos vienen directamente en turnos_proximos del get_paciente response.
     // get_turnos_paciente no existe en el proxy, y get_turnos devuelve slots disponibles
     // (no turnos reservados del paciente), por lo que no se usa como fallback.
@@ -487,6 +497,15 @@ export async function processDNIForDisambiguation(
       patientEmail: validatedPatientEmail,
       patientCelular: validatedPatientCelular,
       turnosInResponse: turnosFromResponse.length,
+    })
+
+    // Guardar snapshot liviano del paciente para poder filtrar contactos en el panel de soporte
+    void savePatientSnapshot(configId, phoneNumber, {
+      hc: (validatedPatient.HC || validatedPatient.hc || '').toString().trim() || undefined,
+      nrodoc: validatedPatientDNI || undefined,
+      celular: validatedPatientCelular || undefined,
+      apellido: foundPatientLastName || undefined,
+      nombre: foundPatientFirstName || undefined,
     })
 
     // Usar turnos de la respuesta de get_paciente si existen
