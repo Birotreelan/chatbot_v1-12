@@ -286,10 +286,14 @@ export async function handlePatientDetectionMessage(
     const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
 
     if (dniOnly.length < 7 || dniOnly.length > 9) {
+      // Si el mensaje no tiene dígitos en absoluto (texto libre, ej. "Se podría cambiar el turno"),
+      // re-preguntar sin decir "no es válido" — el paciente simplemente no envió el DNI todavía.
+      const message = dniOnly.length === 0
+        ? 'Para continuar, necesito que me indiques tu DNI (7 u 8 dígitos, sin puntos ni espacios).'
+        : 'El DNI ingresado no parece válido. Por favor indicame tu DNI (7 u 8 dígitos) sin puntos ni espacios.'
       return {
         handled: true,
-        message:
-          'El DNI ingresado no parece válido. Por favor indicame tu DNI (7 u 8 dígitos) sin puntos ni espacios.',
+        message,
       }
     }
 
@@ -475,11 +479,12 @@ export async function handleDNIForMultiplePatients(
 
   if (dniMatch.length < 7 || dniMatch.length > 9) {
     logger.warn('Invalid DNI format', { length: dniMatch.length })
+    const invalidMsg = dniMatch.length === 0
+      ? 'Para continuar, necesito que me indiques tu DNI (7 u 8 dígitos, sin puntos ni espacios).'
+      : 'El DNI ingresado no parece válido. Por favor indicame tu DNI (7 u 8 dígitos) sin puntos ni espacios.'
     return {
       handled: true,
-      message:
-        `El DNI no parece válido. ` +
-        `Por favor, ingresa tu DNI sin puntos ni espacios (7 u 8 dígitos).`,
+      message: invalidMsg,
       patientInfo: {
         isNewPatient: false,
       },
@@ -518,8 +523,7 @@ export async function handleDNIForMultiplePatients(
       handled: true,
       message:
         `El DNI ${dniMatch} no está registrado con este número de teléfono. ` +
-        `Por favor, intenta de nuevo o contacta al centro.\n\n` +
-        `${result.error || ''}`,
+        `Por favor, intenta de nuevo o contactá al centro.`,
       patientInfo: {
         isNewPatient: false,
       },

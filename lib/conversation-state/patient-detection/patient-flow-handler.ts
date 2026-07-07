@@ -391,9 +391,9 @@ export async function processDNIForDisambiguation(
         JSON.stringify(state)
       )
 
-      return { 
-        found: false, 
-        error: `DNI no encontrado. Intento ${state.attempts} de 3.` 
+      return {
+        found: false,
+        error: 'DNI no encontrado.'
       }
     }
 
