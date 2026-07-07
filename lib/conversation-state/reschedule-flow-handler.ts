@@ -584,11 +584,13 @@ export async function handleRescheduleMessage(
       }
     }
 
-    // Respuesta no reconocida
+    // Respuesta no reconocida → re-preguntar determinísticamente SIN salir del flujo
     return {
       type: 'pending',
       nextPhase: 'awaiting_search_type',
       state,
+      clarification: true,
+      message: "No entendí tu elección. Por favor respondé con el número de la opción:\n\n1. *Médico en particular* - Si ya sabés con qué profesional querés atenderte\n2. *Por especialidad* - Para elegir una especialidad y ver los profesionales disponibles\n3. *Cualquier médico disponible* - Para ver los turnos más próximos sin importar el profesional",
     }
   }
 
