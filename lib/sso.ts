@@ -207,34 +207,19 @@ export async function validateSSOToken(
   }
   console.log('[SSO] OK: Token no expirado');
 
-  // Validar fingerprint
-  console.log('[SSO] Verificando fingerprint:');
-  console.log('[SSO]   - Fingerprint recibido:', payload.fingerprint);
-  console.log('[SSO]   - IP para cálculo:', clientIp);
-  console.log('[SSO]   - User-Agent para cálculo:', userAgent);
-  
-  const fingerprintResult = verifyFingerprint(payload.fingerprint, clientIp, userAgent);
-  console.log('[SSO]   - Fingerprint calculado:', fingerprintResult.computed);
-  console.log('[SSO]   - Coinciden:', fingerprintResult.valid);
-  
-  if (!fingerprintResult.valid) {
-    console.log('[SSO] FALLO FINGERPRINT:');
-    console.log('[SSO]   - Recibido:', payload.fingerprint);
-    console.log('[SSO]   - Calculado:', fingerprintResult.computed);
-    console.log('[SSO]   - Input usado: IP="' + clientIp + '" + UA="' + userAgent + '"');
-    return { 
-      valid: false, 
-      error: 'Fingerprint no válido', 
-      errorCode: 'FINGERPRINT_MISMATCH',
-      details: {
-        fingerprintReceived: payload.fingerprint,
-        fingerprintCalculated: fingerprintResult.computed,
-        clientIp: clientIp,
-        userAgent: userAgent
-      }
-    };
+  // Fingerprint: verificar pero no bloquear — las clínicas tienen IPs dinámicas y el
+  // token puede generarse desde una red distinta a la que abre el SSE stream.
+  // La firma HMAC ya garantiza autenticidad; el fingerprint es una capa extra opcional.
+  {
+    const fingerprintResult = verifyFingerprint(payload.fingerprint, clientIp, userAgent);
+    if (!fingerprintResult.valid) {
+      console.log('[SSO] ADVERTENCIA fingerprint (no bloquea): IP cambió o proxy intermedio.');
+      console.log('[SSO]   - Recibido:', payload.fingerprint);
+      console.log('[SSO]   - Calculado:', fingerprintResult.computed);
+    } else {
+      console.log('[SSO] OK: Fingerprint válido');
+    }
   }
-  console.log('[SSO] OK: Fingerprint válido');
 
   // Validar firma
   const secret = process.env.TREELAN_BOT_SECRET;

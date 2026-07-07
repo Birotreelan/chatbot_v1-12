@@ -1,5 +1,12 @@
 import { validateSSOToken } from "@/lib/sso"
 import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
+import { getRedisClient } from "@/lib/redis"
+
+// Cache TTL para los conteos SSE (segundos).
+// Las reconexiones SSE son frecuentes (cada cierre/apertura de pestaña); con este cache
+// no se re-lee Redis si los conteos ya se calcularon en los últimos 20 segundos.
+const SSE_COUNTS_CACHE_TTL = 20
+const SSE_COUNTS_CACHE_PREFIX = "sse_counts:"
 
 /**
  * API de Server-Sent Events para notificaciones en tiempo real
@@ -58,14 +65,35 @@ export async function GET(request: Request) {
         }
 
         try {
-          // Obtener conteos actuales
-          const pendingSessions = await getPendingSessions(tenantId)
-          const activeSessions = await getAgentActiveSessions(userId)
+          const redis = getRedisClient()
+          const cacheKey = `${SSE_COUNTS_CACHE_PREFIX}${tenantId}`
+
+          let pending_count: number
+          let active_count: number
+
+          // Intentar servir desde cache Redis (evita re-leer sesiones en reconexiones frecuentes)
+          const cached = redis ? await redis.get(cacheKey).catch(() => null) : null
+          if (cached) {
+            const counts = typeof cached === "string" ? JSON.parse(cached) : cached
+            pending_count = counts.pending_count ?? 0
+            active_count = counts.active_count ?? 0
+          } else {
+            // Cache miss → leer sesiones y guardar resultado
+            const [pendingSessions, activeSessions] = await Promise.all([
+              getPendingSessions(tenantId),
+              getAgentActiveSessions(userId),
+            ])
+            pending_count = pendingSessions.length
+            active_count = activeSessions.length
+            if (redis) {
+              redis.setex(cacheKey, SSE_COUNTS_CACHE_TTL, JSON.stringify({ pending_count, active_count })).catch(() => {})
+            }
+          }
 
           const data = {
-            pending_count: pendingSessions.length,
-            active_count: activeSessions.length,
-            total: pendingSessions.length + activeSessions.length,
+            pending_count,
+            active_count,
+            total: pending_count + active_count,
             timestamp: Date.now()
           }
 
