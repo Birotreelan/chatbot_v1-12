@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
@@ -25,6 +25,7 @@ interface PatientData {
   nombre_completo?: string
   dni?: string
   documento?: string
+  hc?: string
   telefono?: string
   celular?: string
   email?: string
@@ -61,6 +62,53 @@ export function MonitorPatientPanel({ configId, phoneNumber }: MonitorPatientPan
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [phoneResult, setPhoneResult] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  // true mientras lo que se muestra viene solo del snapshot cacheado (HC/DNI/celular/nombre),
+  // sin turnos, email ni obra social — datos "en vivo" requieren fetchPatientData().
+  const [isSnapshotOnly, setIsSnapshotOnly] = useState(false)
+
+  // Autocompletar con el snapshot cacheado (guardado por get_paciente / get_paciente_interfaz
+  // en consultas previas) apenas se selecciona el contacto, sin llamar a la API de la clínica.
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadSnapshot() {
+      try {
+        const response = await fetch(
+          `/api/dashboard/patient-snapshot?configId=${encodeURIComponent(configId)}&phoneNumber=${encodeURIComponent(phoneNumber)}`,
+        )
+        if (!response.ok) return
+        const data = await response.json()
+        if (cancelled) return
+        if (data.success && data.snapshot) {
+          const snap = data.snapshot
+          setPatient({
+            nombre: snap.nombre,
+            apellido: snap.apellido,
+            dni: snap.nrodoc,
+            hc: snap.hc,
+            celular: snap.celular,
+          })
+          setIsSnapshotOnly(true)
+          setState("loaded")
+        }
+      } catch {
+        // silencioso — el snapshot es solo un "mejor esfuerzo", el botón sigue disponible
+      }
+    }
+
+    // Reset al cambiar de contacto
+    setState("idle")
+    setPatient(null)
+    setAppointments([])
+    setPhoneResult(null)
+    setErrorMsg(null)
+    setIsSnapshotOnly(false)
+    loadSnapshot()
+
+    return () => {
+      cancelled = true
+    }
+  }, [configId, phoneNumber])
 
   async function fetchPatientData() {
     setState("loading")
@@ -79,6 +127,7 @@ export function MonitorPatientPanel({ configId, phoneNumber }: MonitorPatientPan
 
       if (data.success) {
         setPhoneResult(data.phoneNumber)
+        setIsSnapshotOnly(false)
         if (data.isNewPatient || !data.patient) {
           setPatient(null)
           setAppointments([])
@@ -209,7 +258,7 @@ export function MonitorPatientPanel({ configId, phoneNumber }: MonitorPatientPan
           {patient?.url_paciente && (
             <Button variant="ghost" size="sm" asChild className="h-6 text-xs px-2">
               <a href={patient.url_paciente} target="_blank" rel="noopener noreferrer">
-                HC <ExternalLink className="h-3 w-3 ml-1" />
+                Ficha <ExternalLink className="h-3 w-3 ml-1" />
               </a>
             </Button>
           )}
@@ -219,11 +268,23 @@ export function MonitorPatientPanel({ configId, phoneNumber }: MonitorPatientPan
         </div>
       </div>
 
+      {isSnapshotOnly && (
+        <Badge variant="secondary" className="text-[10px] w-fit mb-2">
+          Datos en caché · sin turnos ni obra social
+        </Badge>
+      )}
+
       {/* Nombre */}
       {getFullName() && <h3 className="font-semibold text-sm mb-2 leading-tight">{getFullName()}</h3>}
 
       {/* Info básica */}
       <div className="space-y-1.5 text-xs">
+        {patient?.hc && (
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <CreditCard className="h-3 w-3" />
+            <span>HC: {patient.hc}</span>
+          </div>
+        )}
         {getDocumento() && (
           <div className="flex items-center gap-1.5 text-muted-foreground">
             <CreditCard className="h-3 w-3" />
@@ -249,6 +310,13 @@ export function MonitorPatientPanel({ configId, phoneNumber }: MonitorPatientPan
           </Badge>
         )}
       </div>
+
+      {isSnapshotOnly && (
+        <Button size="sm" variant="outline" className="text-xs h-7 mt-3 w-full" onClick={fetchPatientData}>
+          <RefreshCw className="h-3 w-3 mr-1.5" />
+          Actualizar con datos en vivo (turnos, obra social)
+        </Button>
+      )}
 
       {/* Turnos próximos */}
       {appointments.length > 0 && (
@@ -293,7 +361,7 @@ export function MonitorPatientPanel({ configId, phoneNumber }: MonitorPatientPan
       )}
 
       {/* Sin turnos */}
-      {appointments.length === 0 && state === "loaded" && (
+      {appointments.length === 0 && state === "loaded" && !isSnapshotOnly && (
         <div className="mt-3 pt-2 border-t">
           <p className="text-xs text-muted-foreground flex items-center gap-1">
             <Calendar className="h-3 w-3" />

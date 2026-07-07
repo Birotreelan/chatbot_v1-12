@@ -86,6 +86,26 @@ export async function savePatientSnapshot(
 }
 
 /**
+ * Trae el snapshot de paciente de un único contacto (sin round-trip de mget).
+ * Útil para autocompletar el panel de paciente sin llamar a la API de la clínica.
+ */
+export async function getPatientSnapshot(
+  configId: string,
+  phoneNumber: string,
+): Promise<PatientSnapshot | null> {
+  try {
+    const redisClient = getRedisClient()
+    if (!redisClient) return null
+    const value = await redisClient.get(patientSnapshotKey(configId, phoneNumber))
+    if (!value) return null
+    return typeof value === "string" ? JSON.parse(value) : (value as any)
+  } catch (error) {
+    console.error("[CONVERSATIONS] Error obteniendo patient snapshot:", error)
+    return null
+  }
+}
+
+/**
  * Trae los snapshots de paciente para un conjunto de teléfonos de un config,
  * en un solo round-trip (mget), para mergear con la lista de contactos.
  */

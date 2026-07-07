@@ -15,6 +15,11 @@ interface Contact {
   lastMessage: string
   lastMessageAt: string
   messageCount: number
+  hc?: string
+  nrodoc?: string
+  celular?: string
+  apellido?: string
+  nombre?: string
 }
 
 export function ConversationsView() {

@@ -15,6 +15,17 @@ interface Contact {
   lastMessage: string
   lastMessageAt: string
   messageCount: number
+  // Datos de paciente identificado vía get_paciente (si existen) — usados para mostrar/filtrar
+  hc?: string
+  nrodoc?: string
+  celular?: string
+  apellido?: string
+  nombre?: string
+}
+
+function fullPatientName(contact: Contact): string | null {
+  const name = `${contact.nombre || ""} ${contact.apellido || ""}`.trim()
+  return name || null
 }
 
 interface ConversationsListProps {
@@ -43,7 +54,10 @@ export function ConversationsList({
 
   useEffect(() => {
     loadContacts()
-    const interval = setInterval(loadContacts, 60000) // optimización: 10s → 60s
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return // pausa con pestaña oculta
+      loadContacts()
+    }, 60000) // optimización: 10s → 60s
     return () => clearInterval(interval)
   }, [configId, appliedDateFrom, appliedDateTo])
 
@@ -67,12 +81,14 @@ export function ConversationsList({
     setLoading(true)
   }
 
-  const filteredContacts = useMemo(() => 
-    contacts.filter((contact) =>
-      contact.phoneNumber.toLowerCase().includes(phoneFilter.toLowerCase()),
-    ),
-    [contacts, phoneFilter]
-  )
+  const filteredContacts = useMemo(() => {
+    const query = phoneFilter.trim().toLowerCase()
+    if (!query) return contacts
+    return contacts.filter((contact) =>
+      [contact.phoneNumber, contact.hc, contact.nrodoc, contact.celular, contact.apellido, contact.nombre]
+        .some((value) => (value || "").toString().toLowerCase().includes(query)),
+    )
+  }, [contacts, phoneFilter])
 
   useEffect(() => {
     if (onFilteredContactsChangeRef.current) {
@@ -95,7 +111,7 @@ export function ConversationsList({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             type="text"
-            placeholder="Buscar por número de teléfono..."
+            placeholder="Buscar por HC, DNI, celular, apellido, nombre o teléfono..."
             value={phoneFilter}
             onChange={(e) => setPhoneFilter(e.target.value)}
             className="pl-9"
@@ -149,7 +165,7 @@ export function ConversationsList({
 
         <p className="text-xs text-muted-foreground">
           {filteredContacts.length} de {contacts.length} contactos
-          {phoneFilter && " (filtrado por número)"}
+          {phoneFilter && " (filtrado)"}
         </p>
       </div>
 
@@ -157,7 +173,7 @@ export function ConversationsList({
         <div className="p-4">
           <p className="text-sm text-muted-foreground">
             {phoneFilter
-              ? "No se encontraron contactos con ese número"
+              ? "No se encontraron contactos con ese criterio de búsqueda"
               : "No hay conversaciones en el rango de fechas seleccionado"}
           </p>
         </div>
@@ -179,7 +195,9 @@ export function ConversationsList({
               </Avatar>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-1">
-                  <p className="font-semibold text-sm truncate">{contact.phoneNumber || "Desconocido"}</p>
+                  <p className="font-semibold text-sm truncate">
+                    {fullPatientName(contact) || contact.phoneNumber || "Desconocido"}
+                  </p>
                   <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
                     {(() => {
                       try {
@@ -198,6 +216,13 @@ export function ConversationsList({
                     })()}
                   </span>
                 </div>
+                {fullPatientName(contact) && (
+                  <p className="text-xs text-muted-foreground/80 truncate">
+                    {contact.phoneNumber}
+                    {contact.hc && ` · HC ${contact.hc}`}
+                    {contact.nrodoc && ` · DNI ${contact.nrodoc}`}
+                  </p>
+                )}
                 <p className="text-sm text-muted-foreground truncate">{contact.lastMessage}</p>
               </div>
             </button>
