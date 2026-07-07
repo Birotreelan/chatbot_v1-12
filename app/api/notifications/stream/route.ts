@@ -54,6 +54,11 @@ export async function GET(request: Request) {
   const encoder = new TextEncoder()
   let isConnectionClosed = false
   let intervalId: NodeJS.Timeout | null = null
+  let lifetimeTimeoutId: NodeJS.Timeout | null = null
+
+  // Vercel mata funciones serverless a los 300 s. Cerramos voluntariamente a los 240 s
+  // para que el cliente EventSource reciba un cierre limpio y reconecte sin "error".
+  const MAX_LIFETIME_MS = 240_000
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -108,17 +113,31 @@ export async function GET(request: Request) {
         }
       }
 
+      // Enviar retry hint: el cliente reconectará en 3 s si el servidor cierra la conexión
+      controller.enqueue(encoder.encode(`retry: 3000\n\n`))
+
       // Enviar estado inicial inmediatamente
       await sendUpdate()
 
       // Configurar intervalo para updates (cada 30 segundos — reducido de 10s para ahorrar bandwidth)
       intervalId = setInterval(sendUpdate, 30000)
 
+      // Cierre voluntario antes del timeout de Vercel (300 s)
+      lifetimeTimeoutId = setTimeout(() => {
+        if (!isConnectionClosed) {
+          console.log("[Notifications Stream] Cerrando conexión por límite de vida (240 s) — el cliente reconectará")
+          isConnectionClosed = true
+          if (intervalId) clearInterval(intervalId)
+          controller.close()
+        }
+      }, MAX_LIFETIME_MS)
+
       // Manejar señal de abort (cliente desconectado)
       request.signal.addEventListener("abort", () => {
         console.log("[Notifications Stream] Cliente desconectado")
         isConnectionClosed = true
         if (intervalId) clearInterval(intervalId)
+        if (lifetimeTimeoutId) clearTimeout(lifetimeTimeoutId)
         controller.close()
       })
     },
@@ -127,6 +146,7 @@ export async function GET(request: Request) {
       console.log("[Notifications Stream] Stream cancelado")
       isConnectionClosed = true
       if (intervalId) clearInterval(intervalId)
+      if (lifetimeTimeoutId) clearTimeout(lifetimeTimeoutId)
     }
   })
 
