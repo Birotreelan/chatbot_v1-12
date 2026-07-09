@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateSSOToken } from '@/lib/sso';
+import { validateSSOToken, buildSsoUserId } from '@/lib/sso';
 import { createSessionWithoutCookie } from '@/lib/auth';
-import { nanoid } from 'nanoid';
 import type { SessionData } from '@/lib/types';
 
 export async function GET(request: NextRequest) {
@@ -68,10 +67,12 @@ export async function GET(request: NextRequest) {
     // Crear sesión con los datos del token SSO
     // IMPORTANTE: usamos cliente_id como tenantId para ser consistente con el login tradicional
     // Para SSO multiusuario: usamos usuario_id si viene en el token para identificar al usuario único
-    const ssoUsuarioId = usuario_id || `sso_${cliente_id}_${nanoid(8)}`;
-    
+    // Fallback ESTABLE ("default", no aleatorio) cuando no viene usuario_id — así la clave de
+    // sesiones activas es la misma en cada login/reconexión (ver buildSsoUserId en lib/sso.ts).
+    const ssoUsuarioId = usuario_id || 'default';
+
     const sessionData: SessionData = {
-      userId: `sso_${cliente_id}_${ssoUsuarioId}`,  // Combina cliente + usuario para un ID único global
+      userId: buildSsoUserId(cliente_id, usuario_id),  // Único global — mismo criterio que /api/notifications/*
       username: email || `usuario_${ssoUsuarioId}`,
       role: 'support_agent',
       tenantId: cliente_id,  // Usar cliente_id para consistencia con login tradicional

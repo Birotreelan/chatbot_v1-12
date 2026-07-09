@@ -1,4 +1,4 @@
-import { validateSSOToken } from "@/lib/sso"
+import { validateSSOToken, buildSsoUserId } from "@/lib/sso"
 import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
 import { getRedisClient } from "@/lib/redis"
 
@@ -42,11 +42,12 @@ export async function GET(request: Request) {
     return new Response(validation.error || "Token SSO inválido", { status: 401 })
   }
 
-  const { payload, clientConfig } = validation
-  const tenantId = clientConfig.id
-  const userId = payload.usuario_id 
-    ? `sso_${payload.cliente_id}_${payload.usuario_id}`
-    : `sso_${payload.cliente_id}`
+  const { payload } = validation
+  // IMPORTANTE: el tenantId de las sesiones de soporte es cliente_id, no clientConfig.id/configId
+  // (createSupportSession() y el login de /support usan cliente_id). Ver misma nota en
+  // /api/notifications/status/route.ts — este era el bug real de conteo del widget.
+  const tenantId = payload.cliente_id
+  const userId = buildSsoUserId(payload.cliente_id, payload.usuario_id)
 
   console.log("[Notifications Stream] Conexión autenticada - tenantId:", tenantId, "userId:", userId)
 
@@ -71,7 +72,10 @@ export async function GET(request: Request) {
 
         try {
           const redis = getRedisClient()
-          const cacheKey = `${SSE_COUNTS_CACHE_PREFIX}${tenantId}`
+          // Cache por tenant + usuario: active_count es por-agente, así que compartir la
+          // clave solo por tenantId serviría el active_count del PRIMER usuario que conecte
+          // a los demás usuarios del mismo tenant durante la ventana de cache (20s).
+          const cacheKey = `${SSE_COUNTS_CACHE_PREFIX}${tenantId}:${userId}`
 
           let pending_count: number
           let active_count: number

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { validateSSOToken } from "@/lib/sso"
+import { validateSSOToken, buildSsoUserId } from "@/lib/sso"
 import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
 
 /**
@@ -55,13 +55,15 @@ export async function GET(request: Request) {
       )
     }
 
-    const { payload, clientConfig } = validation
-    const tenantId = clientConfig.id // configId usado como tenantId
-    
-    // Construir userId único global (mismo formato que /api/auth/sso)
-    const userId = payload.usuario_id 
-      ? `sso_${payload.cliente_id}_${payload.usuario_id}`
-      : `sso_${payload.cliente_id}`
+    const { payload } = validation
+    // IMPORTANTE: el tenantId de las sesiones de soporte es cliente_id (no clientConfig.id/configId).
+    // createSupportSession() y el login de /support (app/api/auth/sso) usan cliente_id — si acá se
+    // usa configId, getPendingSessions() nunca encuentra las sesiones recién creadas (bug real
+    // reportado: el widget no contabiliza conversaciones derivadas).
+    const tenantId = payload.cliente_id
+
+    // Construir userId único global (mismo criterio que /api/auth/sso — ver buildSsoUserId)
+    const userId = buildSsoUserId(payload.cliente_id, payload.usuario_id)
 
     console.log("[Notifications Status API] Token válido - tenantId:", tenantId, "userId:", userId)
 

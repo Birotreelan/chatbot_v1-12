@@ -29,10 +29,25 @@ export interface SSOValidationResult {
   payload?: SSOTokenPayload;
   // Configuración del cliente encontrada - contiene el configId (id interno) y displayName
   clientConfig?: {
-    id: string;  // Este es el configId (nanoid) que se usa como tenantId en las sesiones
+    id: string;  // configId (nanoid) de ESTA config de WhatsApp — NO es el tenantId de las
+                 // sesiones de soporte (esas se guardan/consultan con cliente_id, que puede
+                 // ser compartido por varias configs del mismo cliente). Para tenantId usar
+                 // siempre payload.cliente_id, nunca clientConfig.id.
     displayName: string;
     cliente_id: string;
   };
+}
+
+/**
+ * Construye el userId único global para un usuario SSO.
+ * MISMO criterio en /api/auth/sso (login del panel) y en /api/notifications/* (widget
+ * embebible) — si difieren, el widget busca las sesiones activas bajo una clave que
+ * el login nunca usó, y "Mis activas" queda en 0 aunque el agente sí tenga asignadas.
+ * Si el token no trae usuario_id (clínica de un solo agente), usamos un fallback ESTABLE
+ * ("default", no aleatorio) para que la clave sea la misma en cada login/reconexión.
+ */
+export function buildSsoUserId(clienteId: string, usuarioId?: string): string {
+  return `sso_${clienteId}_${usuarioId || 'default'}`;
 }
 
 /**
