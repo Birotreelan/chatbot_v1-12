@@ -212,6 +212,63 @@ user-select: none;
     return button
   }
 
+  // Hoja de estilos del contenedor del chat. Se separa del inline style para
+  // poder usar una media query de mobile con !important que gane por sobre
+  // el inline (que sólo define la posición horizontal, dependiente de
+  // data-position). Diseño (9/7/2026): en desktop el chat queda anclado al
+  // mismo costado de siempre pero ocupa casi todo el alto de la pantalla; en
+  // mobile ocupa la pantalla completa (con el botón de cerrar del propio
+  // header, agregado en components/widget-chat.tsx, siempre a mano).
+  function injectWidgetStyles() {
+    if (document.getElementById("chat-widget-styles")) return
+
+    const style = document.createElement("style")
+    style.id = "chat-widget-styles"
+    style.textContent = `
+      #chat-widget-container {
+        position: fixed;
+        z-index: 9999;
+        top: 20px;
+        bottom: 90px;
+        width: 350px;
+        max-width: calc(100vw - 40px);
+        border: none;
+        border-radius: 16px;
+        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
+        display: none;
+        background: white;
+        overflow: hidden;
+      }
+
+      #chat-widget-container iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        border-radius: 16px;
+      }
+
+      @media (max-width: 767px) {
+        #chat-widget-container {
+          top: 0 !important;
+          bottom: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
+          width: 100% !important;
+          max-width: 100% !important;
+          height: 100vh !important;
+          height: 100dvh !important;
+          border-radius: 0 !important;
+          box-shadow: none !important;
+        }
+
+        #chat-widget-container iframe {
+          border-radius: 0 !important;
+        }
+      }
+    `
+    document.head.appendChild(style)
+  }
+
   function createWidget() {
     // Verificar si ya existe
     if (document.getElementById("chat-widget-container")) {
@@ -219,30 +276,17 @@ user-select: none;
       return document.getElementById("chat-widget-container")
     }
 
+    injectWidgetStyles()
+
     const container = document.createElement("div")
     container.id = "chat-widget-container"
     container.style.cssText = `
-      position: fixed;
-      z-index: 9999;
-      width: 350px;
-      height: 500px;
-      border: none;
-      border-radius: 12px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
       ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
-      bottom: 90px;
-      display: none;
-      background: white;
-      overflow: hidden;
     `
 
+    // El tamaño/radio del iframe se define en el <style> inyectado (#chat-widget-container iframe)
+    // para poder ganarle a la media query de mobile con !important.
     const iframe = document.createElement("iframe")
-    iframe.style.cssText = `
-      width: 100%;
-      height: 100%;
-      border: none;
-      border-radius: 12px;
-    `
 
     // URL del widget con parámetros correctos y cache busting
     const timestamp = Date.now()
@@ -307,6 +351,24 @@ user-select: none;
       console.log("[WIDGET-LOADER] Widget mostrado")
     }
   }
+
+  function hideWidget() {
+    if (widgetContainer && isWidgetVisible) {
+      widgetContainer.style.display = "none"
+      isWidgetVisible = false
+      console.log("[WIDGET-LOADER] Widget ocultado (cerrado desde el botón del header)")
+    }
+  }
+
+  // El chat corre en un iframe de otro origen (nuestro dominio, dentro del
+  // sitio de la clínica) — el botón de cerrar del header (components/widget-chat.tsx)
+  // no puede tocar el DOM del padre directamente, así que avisa por postMessage.
+  window.addEventListener("message", (event) => {
+    const data = event.data
+    if (data && data.source === "iris-widget" && data.type === "close") {
+      hideWidget()
+    }
+  })
 
   async function initWidget() {
     try {

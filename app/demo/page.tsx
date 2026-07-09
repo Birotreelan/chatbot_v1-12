@@ -125,6 +125,21 @@ export default function DemoPage() {
     setPreviewKey((k) => k + 1)
   }, [])
 
+  // La vista previa embebida siempre está visible (no es un widget flotante
+  // que se abre/cierra), así que acá no tiene sentido "ocultarla" cuando el
+  // visitante toca la X del header — en su lugar, tratamos ese cierre como
+  // un reinicio de la conversación (mismo efecto que "Reiniciar chat").
+  useEffect(() => {
+    function handleWidgetMessage(event: MessageEvent) {
+      const data = event.data
+      if (data && data.source === "iris-widget" && data.type === "close") {
+        setPreviewKey((k) => k + 1)
+      }
+    }
+    window.addEventListener("message", handleWidgetMessage)
+    return () => window.removeEventListener("message", handleWidgetMessage)
+  }, [])
+
   const selectedClinic = clinics?.find((c) => c.cliente_id === clienteId)
   const previewUrl = clienteId
     ? `/widget?clienteId=${encodeURIComponent(clienteId)}&embedded=true&_t=${previewKey}`

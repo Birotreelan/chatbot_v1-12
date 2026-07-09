@@ -5,7 +5,7 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Send, MessageCircle } from "lucide-react"
+import { Send, MessageCircle, X } from "lucide-react"
 
 interface Message {
   id: string
@@ -26,6 +26,11 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string>("")
   const [widgetConfig, setWidgetConfig] = useState<any>(null)
+  // Sólo mostramos el botón de cerrar cuando el widget corre dentro de un
+  // iframe (embebido en el sitio de la clínica o en la vista previa del
+  // dashboard) — si alguien navega directo a /widget no tiene sentido, no
+  // hay nadie escuchando el postMessage de cierre.
+  const [isEmbedded, setIsEmbedded] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -88,6 +93,10 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     setSessionId(newSessionId)
     console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
+
+    if (typeof window !== "undefined") {
+      setIsEmbedded(window.self !== window.top)
+    }
 
     // OPTIMIZACIÓN BANDWIDTH (2026-07-06): la config se carga UNA sola vez al montar.
     // Antes había un setInterval de 5s con cache-busting que generaba ~12 requests/min
@@ -213,6 +222,17 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     }
   }
 
+  // Avisa al sitio que embebe el widget (widget-loader.js) que debe ocultar
+  // el iframe. No podemos llamar funciones del padre directamente porque el
+  // sitio de la clínica es un origen distinto — postMessage es la única vía.
+  const handleClose = () => {
+    try {
+      window.parent.postMessage({ source: "iris-widget", type: "close" }, "*")
+    } catch (error) {
+      console.error("[WIDGET-CHAT] Error al enviar mensaje de cierre:", error)
+    }
+  }
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
@@ -234,12 +254,27 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     <div className="flex flex-col h-screen bg-white">
       {/* Header */}
       {!hideHeader && (
-        <div className="bg-sky-600 text-white p-4 flex items-center space-x-3 flex-shrink-0">
-          <MessageCircle className="h-6 w-6" />
-          <div>
-            <h3 className="font-semibold text-lg">{defaultConfig.widgetTitle}</h3>
-            <p className="text-sm opacity-90">{defaultConfig.widgetSubtitle}</p>
+        <div
+          className="bg-sky-600 text-white p-4 flex items-center justify-between gap-3 flex-shrink-0"
+          style={{ paddingTop: "max(env(safe-area-inset-top), 16px)" }}
+        >
+          <div className="flex items-center space-x-3 min-w-0">
+            <MessageCircle className="h-6 w-6 shrink-0" />
+            <div className="min-w-0">
+              <h3 className="font-semibold text-lg truncate">{defaultConfig.widgetTitle}</h3>
+              <p className="text-sm opacity-90 truncate">{defaultConfig.widgetSubtitle}</p>
+            </div>
           </div>
+          {isEmbedded && (
+            <button
+              type="button"
+              onClick={handleClose}
+              aria-label="Cerrar chat"
+              className="shrink-0 rounded-full p-2 -mr-1 hover:bg-white/20 active:bg-white/30 transition-colors"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          )}
         </div>
       )}
 
