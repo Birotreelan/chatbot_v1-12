@@ -38,18 +38,12 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     try {
       console.log("[WIDGET-CHAT] 🔄 Obteniendo configuración actualizada...")
 
-      // Agregar timestamp para evitar caché
-      const timestamp = Date.now()
-      const url = `/api/widget?cliente_id=${encodeURIComponent(clienteId)}&_t=${timestamp}`
+      // Sin cache-busting: la config visual del widget cambia rara vez y el
+      // endpoint responde con Cache-Control (CDN de Vercel). El no-cache con
+      // timestamp forzaba una lectura completa de Redis por cada request.
+      const url = `/api/widget?cliente_id=${encodeURIComponent(clienteId)}`
 
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          Pragma: "no-cache",
-          Expires: "0",
-        },
-      })
+      const response = await fetch(url, { method: "GET" })
 
       if (response.ok) {
         const fetchedConfig = await response.json()
@@ -95,17 +89,11 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     setSessionId(newSessionId)
     console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
 
-    // Configurar actualización periódica de la configuración
-    const configInterval = setInterval(() => {
-      console.log("[WIDGET-CHAT] 🔄 Actualizando configuración periódicamente...")
-      fetchWidgetConfig()
-    }, 5000) // Actualizar cada 5 segundos
-
+    // OPTIMIZACIÓN BANDWIDTH (2026-07-06): la config se carga UNA sola vez al montar.
+    // Antes había un setInterval de 5s con cache-busting que generaba ~12 requests/min
+    // POR CADA visitante con la página abierta — cada request leía TODAS las configs
+    // de Redis. Los cambios de estética del widget se ven al recargar la página.
     console.log("[WIDGET-CHAT] ✅ Inicialización completada")
-
-    return () => {
-      clearInterval(configInterval)
-    }
   }, [clienteId])
 
   // Agregar mensaje de bienvenida cuando la configuración esté lista

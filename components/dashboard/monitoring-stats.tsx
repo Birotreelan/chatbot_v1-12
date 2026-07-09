@@ -37,7 +37,10 @@ export function MonitoringStats() {
     fetchMonitoringData()
 
     // Actualizar cada 30 segundos
-    const interval = setInterval(fetchMonitoringData, 30000)
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return // pausa con pestaña oculta
+      fetchMonitoringData()
+    }, 60000)
     return () => clearInterval(interval)
   }, [])
 

@@ -145,6 +145,20 @@ export function getAppointmentRef(chatbotData: ChatbotData | null | undefined): 
 }
 
 // ============================================================================
+// MEMO EN MEMORIA DEL CONTEXTO (optimización bandwidth 2026-07-06)
+// getAppointmentContext se llama 3-4 veces por mensaje desde los distintos
+// interceptores (Sprint 14/16/17, router, pending-flow). Dentro de una misma
+// invocación serverless este memo ahorra las lecturas repetidas del contexto
+// (~2-10 KB cada una). TTL corto (3s) y toda escritura lo invalida.
+// ============================================================================
+const contextMemo = new Map<string, { data: ChatbotData | null; expiresAt: number }>()
+const CONTEXT_MEMO_TTL_MS = 3000
+
+function invalidateContextMemo(phone: string, configId: string): void {
+  contextMemo.delete(getContextKey(phone, configId))
+}
+
+// ============================================================================
 // CONTEXT FUNCTIONS (Chatbot_Data)
 // ============================================================================
 
@@ -165,6 +179,7 @@ export async function saveAppointmentContext(
   try {
     const key = getContextKey(phone, configId)
     await redis.set(key, JSON.stringify(chatbotData), { ex: CONTEXT_TTL })
+    invalidateContextMemo(phone, configId)
     console.log(`[APPOINTMENT-FLOW] Contexto guardado para ${phone} (config: ${configId})`)
     return true
   } catch (error) {
@@ -188,19 +203,29 @@ export async function getAppointmentContext(
 
   try {
     const key = getContextKey(phone, configId)
+
+    // Memo: evitar lecturas repetidas dentro del procesamiento del mismo mensaje.
+    // structuredClone para que las mutaciones del caller no contaminen el memo.
+    const memoized = contextMemo.get(key)
+    if (memoized && memoized.expiresAt > Date.now()) {
+      return memoized.data ? structuredClone(memoized.data) : null
+    }
+
     const data = await redis.get<string>(key)
-    
+
     if (!data) {
       console.log(`[APPOINTMENT-FLOW] No hay contexto para ${phone} (config: ${configId})`)
+      contextMemo.set(key, { data: null, expiresAt: Date.now() + CONTEXT_MEMO_TTL_MS })
       return null
     }
 
     // Redis puede devolver el objeto ya parseado o un string
-    if (typeof data === 'object') {
-      return data as unknown as ChatbotData
-    }
-    
-    return JSON.parse(data) as ChatbotData
+    const parsed = typeof data === 'object'
+      ? (data as unknown as ChatbotData)
+      : (JSON.parse(data) as ChatbotData)
+
+    contextMemo.set(key, { data: structuredClone(parsed), expiresAt: Date.now() + CONTEXT_MEMO_TTL_MS })
+    return parsed
   } catch (error) {
     console.error("[APPOINTMENT-FLOW] Error obteniendo contexto:", error)
     return null
@@ -220,6 +245,7 @@ export async function clearAppointmentContext(
   try {
     const key = getContextKey(phone, configId)
     await redis.del(key)
+    invalidateContextMemo(phone, configId)
     console.log(`[APPOINTMENT-FLOW] Contexto eliminado para ${phone}`)
     return true
   } catch (error) {
@@ -280,6 +306,7 @@ export async function clearAppointmentTurnos(
     chatbotData.tipo_mensaje = 'turno_cancelado'
 
     await redis.set(key, JSON.stringify(chatbotData), { ex: CONTEXT_TTL })
+    invalidateContextMemo(phone, configId)
 
     // El turno fue cancelado: la marca de "confirmado" ya no aplica
     try {

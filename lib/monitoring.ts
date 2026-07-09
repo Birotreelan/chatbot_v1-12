@@ -91,6 +91,10 @@ export async function logError(category: string, error: Error | string): Promise
     // Limitar la lista a 100 errores
     await redis.ltrim(key, 0, 99)
 
+    // Mantener set índice de categorías (evita usar KEYS en getErrorCategories,
+    // que escanea todo el keyspace — optimización bandwidth 2026-07-06)
+    await redis.sadd(ERROR_CATEGORIES_SET, category)
+
     // Incrementar contador de errores
     await incrementMetric(`error:${category}`)
 
@@ -166,14 +170,28 @@ export async function getRecentErrors(category: string, limit = 10): Promise<any
   }
 }
 
+// Set índice de categorías de errores (evita KEYS sobre todo el keyspace)
+const ERROR_CATEGORIES_SET = "error_categories_set"
+
 // Obtener todas las categorías de errores
 export async function getErrorCategories(): Promise<string[]> {
   const redis = getRedisClient()
   if (!redis) return []
 
   try {
+    // SMEMBERS del set índice: 1 lectura chica en vez de KEYS (scan completo del keyspace).
+    const categories = await redis.smembers(ERROR_CATEGORIES_SET)
+    if (categories && categories.length > 0) {
+      return categories as string[]
+    }
+
+    // Fallback una sola vez (migración): si el set aún no existe, poblarlo desde KEYS
     const keys = await redis.keys(`${ERROR_PREFIX}*`)
-    return keys.map((key) => key.replace(ERROR_PREFIX, ""))
+    const fromKeys = keys.map((key) => key.replace(ERROR_PREFIX, ""))
+    if (fromKeys.length > 0) {
+      await redis.sadd(ERROR_CATEGORIES_SET, ...(fromKeys as [string, ...string[]]))
+    }
+    return fromKeys
   } catch (error) {
     console.error("Error al obtener categorías de errores:", error)
     return []

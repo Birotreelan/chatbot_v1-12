@@ -9,8 +9,9 @@ import {
   saveSupportMessage,
   createSupportSession,
   getActiveSessionByPhone,
+  getSupportSessionActivity,
 } from "@/lib/human-support"
-import { getConversationMessages, getAllConversationMessages, saveConversationMessage } from "@/lib/conversations"
+import { getConversationMessages, getAllConversationMessages, saveConversationMessage, getConversationLastActivity } from "@/lib/conversations"
 import { getWhatsAppConfigById, getThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { openai } from "@/lib/openai"
@@ -45,6 +46,19 @@ export async function GET(request: Request) {
     // Verificar permisos
     if (session.role === "support_agent" && supportSession.tenantId !== session.tenantId) {
       return NextResponse.json({ success: false, error: "No autorizado" }, { status: 403 })
+    }
+
+    // OPTIMIZACIÓN BANDWIDTH (2026-07-06): short-circuit "unchanged" para polling.
+    // Si el frontend manda ?since= y no hubo actividad nueva, respondemos ~100 bytes
+    // en vez de la sesión + 100 mensajes en cada poll.
+    const sinceParam = searchParams.get("since")
+    const sessionActivity = await getSupportSessionActivity(sessionId)
+    const convActivityIso = await getConversationLastActivity(supportSession.configId, supportSession.phoneNumber)
+    const convActivity = convActivityIso ? new Date(convActivityIso).getTime() : 0
+    const lastActivity = Math.max(sessionActivity || 0, convActivity)
+
+    if (sinceParam && lastActivity > 0 && lastActivity <= Number(sinceParam)) {
+      return NextResponse.json({ success: true, unchanged: true, lastActivity })
     }
 
     // Obtener historial con paginacion (ultimos 100 mensajes para soporte)
@@ -83,6 +97,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
+      lastActivity: lastActivity || Date.now(),
       session: {
         ...supportSession,
         messages: uniqueMessages,

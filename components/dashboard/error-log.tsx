@@ -44,7 +44,10 @@ export function ErrorLog() {
     fetchErrorLog()
 
     // Actualizar cada minuto
-    const interval = setInterval(fetchErrorLog, 60000)
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return // pausa con pestaña oculta
+      fetchErrorLog()
+    }, 60000)
     return () => clearInterval(interval)
   }, [selectedCategory])
 

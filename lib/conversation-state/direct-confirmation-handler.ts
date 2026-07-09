@@ -68,7 +68,11 @@ const PURE_CONFIRMATION_PATTERNS = [
   /^\.?de\s*acuerdo\.?$/i,
   /^\.?si\.?$/i,
   /^\.?sí\.?$/i,
-  
+
+  // "Si" alargado ("Siii", "Siiii", "Síii"), con o sin agradecimiento
+  // (caso real: "Siiii gracias" no matcheaba ningún patrón — ver PLAN-DE-TRABAJO.md)
+  /^\.?s[ií]{2,}[.,!]?\s*(?:muchas?\s+)?(?:gracias|gracia|grasias?)?\.?$/i,
+
   // Combinaciones comunes
   /^\.?si,?\s*(?:dale|listo|ok|bueno|perfecto)\.?$/i,
   /^\.?ok,?\s*(?:dale|listo|perfecto)\.?$/i,

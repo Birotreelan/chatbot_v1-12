@@ -39,7 +39,10 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
   useEffect(() => {
     loadMessages()
     loadPauseState()
-    const interval = setInterval(loadMessages, 30000) // optimización: 5s → 30s
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return // pausa con pestaña oculta
+      loadMessages()
+    }, 30000) // optimización: 5s → 30s
     return () => clearInterval(interval)
   }, [configId, phoneNumber])
 

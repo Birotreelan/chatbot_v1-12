@@ -7,8 +7,9 @@ import {
   assignSessionToAgent,
   closeSession,
   saveSupportMessage,
+  getSupportSessionActivity,
 } from "@/lib/human-support"
-import { getConversationMessages, getAllConversationMessages } from "@/lib/conversations"
+import { getConversationMessages, getAllConversationMessages, getConversationLastActivity } from "@/lib/conversations"
 import { getWhatsAppConfigById } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { nanoid } from "nanoid"
@@ -36,6 +37,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ success: false, error: "No autorizado" }, { status: 403 })
     }
 
+    // OPTIMIZACIÓN BANDWIDTH (2026-07-06): short-circuit "unchanged" para polling.
+    // El frontend manda ?since=<lastActivity recibido>. Si no hubo actividad nueva
+    // (ni mensajes de soporte/cambios de sesión ni mensajes de WhatsApp), respondemos
+    // ~100 bytes en vez de sesión + 100 mensajes (~50-150 KB). La verificación lee
+    // solo 2 claves diminutas de Redis.
+    const url = new URL(request.url)
+    const sinceParam = url.searchParams.get("since")
+    const sessionActivity = await getSupportSessionActivity(sessionId)
+    const convActivityIso = await getConversationLastActivity(supportSession.configId, supportSession.phoneNumber)
+    const convActivity = convActivityIso ? new Date(convActivityIso).getTime() : 0
+    const lastActivity = Math.max(sessionActivity || 0, convActivity)
+
+    if (sinceParam && lastActivity > 0 && lastActivity <= Number(sinceParam)) {
+      return NextResponse.json({ success: true, unchanged: true, lastActivity })
+    }
+
     // Obtener historial con paginacion (ultimos 100 mensajes para soporte)
     const { messages: conversationHistory } = await getConversationMessages(supportSession.configId, supportSession.phoneNumber, 100, 0)
     const supportMessages = await getSupportMessages(sessionId)
@@ -45,6 +62,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       session: supportSession,
       conversationHistory,
       supportMessages,
+      lastActivity: lastActivity || Date.now(),
     })
   } catch (error: any) {
     console.error("[API SESSION GET] Error:", error)

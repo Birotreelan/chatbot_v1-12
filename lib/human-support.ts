@@ -216,6 +216,7 @@ export async function assignSessionToAgent(sessionId: string, agentId: string): 
 
     const sessionKey = `${SUPPORT_SESSION_PREFIX}${sessionId}`
     await redis.set(sessionKey, JSON.stringify(session))
+    await touchSupportSessionActivity(sessionId)
 
     // Remover de pendientes
     await redis.zrem(SUPPORT_PENDING_SET, sessionId)
@@ -250,6 +251,7 @@ export async function closeSession(sessionId: string, note?: string): Promise<bo
   const sessionKey = `${SUPPORT_SESSION_PREFIX}${sessionId}`
   await redis.set(sessionKey, JSON.stringify(session))
   await redis.expire(sessionKey, RESOLVED_SESSION_TTL)
+  await touchSupportSessionActivity(sessionId)
 
   // Remover de sesiones activas del agente
   if (session.assignedTo) {
@@ -269,6 +271,38 @@ export async function closeSession(sessionId: string, note?: string): Promise<bo
   return true
 }
 
+// ============================================================================
+// MARCADOR DE ACTIVIDAD DE SESIÓN (optimización bandwidth 2026-07-06)
+// Clave diminuta (~15 bytes) que se actualiza en cada cambio de la sesión.
+// El polling del panel de soporte la lee para responder "unchanged" sin
+// transferir la sesión + 100 mensajes de conversación en cada poll.
+// ============================================================================
+const SUPPORT_SESSION_ACTIVITY_PREFIX = "support_session_activity:"
+const SESSION_ACTIVITY_TTL = 7 * 24 * 60 * 60 // 7 días
+
+export async function touchSupportSessionActivity(sessionId: string): Promise<void> {
+  try {
+    const redis = getRedisClient()
+    if (!redis) return
+    await redis.setex(`${SUPPORT_SESSION_ACTIVITY_PREFIX}${sessionId}`, SESSION_ACTIVITY_TTL, Date.now().toString())
+  } catch {
+    // best-effort
+  }
+}
+
+export async function getSupportSessionActivity(sessionId: string): Promise<number | null> {
+  try {
+    const redis = getRedisClient()
+    if (!redis) return null
+    const val = await redis.get(`${SUPPORT_SESSION_ACTIVITY_PREFIX}${sessionId}`)
+    if (!val) return null
+    const num = Number(val)
+    return Number.isFinite(num) ? num : null
+  } catch {
+    return null
+  }
+}
+
 // Agregar mensaje pendiente a la sesión (cuando el usuario escribe mientras espera)
 export async function addPendingMessageToSession(sessionId: string, message: ConversationMessage): Promise<boolean> {
   const redis = getRedisClient()
@@ -282,6 +316,7 @@ export async function addPendingMessageToSession(sessionId: string, message: Con
 
   const sessionKey = `${SUPPORT_SESSION_PREFIX}${sessionId}`
   await redis.set(sessionKey, JSON.stringify(session))
+  await touchSupportSessionActivity(sessionId)
 
   console.log(`[HUMAN_SUPPORT] 📨 Mensaje pendiente agregado a sesión ${sessionId}`)
 
@@ -296,6 +331,7 @@ export async function saveSupportMessage(message: HumanSupportMessage): Promise<
   const messagesKey = `${SUPPORT_SESSION_MESSAGES_PREFIX}${message.sessionId}`
   await redis.rpush(messagesKey, JSON.stringify(message))
   await redis.expire(messagesKey, RESOLVED_SESSION_TTL)
+  await touchSupportSessionActivity(message.sessionId)
 
   console.log(`[HUMAN_SUPPORT] 💬 Mensaje guardado en sesión ${message.sessionId}`)
 }

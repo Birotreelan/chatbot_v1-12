@@ -499,6 +499,7 @@ export async function trackTemplateSent(
     // Guardar key determinística — permite GET directo en getTemplateSentTime (sin KEYS/SCAN)
     const latestKey = `${TEMPLATE_TRACKING_LATEST_PREFIX}${clienteId}_${phoneNumber}`
     await redis.set(latestKey, serialized, { ex: ttl })
+    templateSentMemo.delete(latestKey)
 
     console.log(`[APPOINTMENT_STATS] ✅ Template tracking guardado: ${trackingId}`)
 
@@ -516,6 +517,12 @@ export async function trackTemplateSent(
   }
 }
 
+// Memo en memoria (optimización bandwidth 2026-07-06): getTemplateSentTime se
+// llama 2+ veces por mensaje (verificación de ventana 24h en varios interceptores).
+// TTL corto; la escritura del tracking lo invalida en esta instancia.
+const templateSentMemo = new Map<string, { value: string | null; expiresAt: number }>()
+const TEMPLATE_SENT_MEMO_TTL_MS = 5000
+
 // Obtener timestamp de envío de template
 export async function getTemplateSentTime(clienteId: string, phoneNumber: string): Promise<string | null> {
   const redis = getRedisClient()
@@ -527,16 +534,25 @@ export async function getTemplateSentTime(clienteId: string, phoneNumber: string
   try {
     // GET directo a la key determinística — O(1), sin KEYS ni SCAN
     const latestKey = `${TEMPLATE_TRACKING_LATEST_PREFIX}${clienteId}_${phoneNumber}`
+
+    const memoized = templateSentMemo.get(latestKey)
+    if (memoized && memoized.expiresAt > Date.now()) {
+      return memoized.value
+    }
+
     const trackingData = await redis.get(latestKey)
 
     if (!trackingData) {
       console.log(`[APPOINTMENT_STATS] ⚠️ No hay template previo para ${phoneNumber} (${clienteId})`)
+      templateSentMemo.set(latestKey, { value: null, expiresAt: Date.now() + TEMPLATE_SENT_MEMO_TTL_MS })
       return null
     }
 
     const parsed = typeof trackingData === "string" ? JSON.parse(trackingData) : trackingData
     console.log(`[APPOINTMENT_STATS] ✅ Template sent time encontrado: ${parsed.sentAt}`)
-    return parsed.sentAt || null
+    const sentAt = parsed.sentAt || null
+    templateSentMemo.set(latestKey, { value: sentAt, expiresAt: Date.now() + TEMPLATE_SENT_MEMO_TTL_MS })
+    return sentAt
   } catch (error) {
     console.error("[APPOINTMENT_STATS] ❌ Error al obtener template sent time:", error)
     return null

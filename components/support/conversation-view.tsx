@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { MessageList } from "./message-list"
@@ -29,10 +29,19 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
   const [showCloseDialog, setShowCloseDialog] = useState(false)
   const { getAuthHeaders, sessionId: ssoSessionId } = useSession()
 
+  // OPTIMIZACIÓN BANDWIDTH (2026-07-06):
+  // - Poll de 5s → 15s.
+  // - Se pausa cuando la pestaña no está visible (una pestaña olvidada consumía GB/día).
+  // - Manda ?since=<lastActivity>: si no hay novedades el server responde ~100 bytes
+  //   en vez de la sesión + 100 mensajes.
+  const lastActivityRef = useRef(0)
+
   useEffect(() => {
     loadSession()
-    // Recargar cada 5 segundos para ver nuevos mensajes
-    const interval = setInterval(loadSession, 5000)
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return
+      loadSession()
+    }, 15000)
     return () => clearInterval(interval)
   }, [sessionId])
 
@@ -43,7 +52,10 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
       if (ssoSessionId) {
         url += `&_sid=${encodeURIComponent(ssoSessionId)}`
       }
-      
+      if (lastActivityRef.current > 0) {
+        url += `&since=${lastActivityRef.current}`
+      }
+
       const response = await fetch(url, {
         method: "GET",
         credentials: "include",
@@ -53,6 +65,17 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
       })
       if (!response.ok) throw new Error("Error al cargar sesión")
       const data = await response.json()
+
+      if (typeof data.lastActivity === "number") {
+        lastActivityRef.current = data.lastActivity
+      }
+
+      // Sin novedades desde el último poll → mantener el estado actual
+      if (data.unchanged) {
+        setError(null)
+        setLoading(false)
+        return
+      }
 
       setSession({
         ...data.session,

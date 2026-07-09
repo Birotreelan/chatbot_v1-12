@@ -31,21 +31,30 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Widget configuration not found" }, { status: 404 })
     }
 
-    // Devolver toda la configuración necesaria
-    return NextResponse.json({
-      id: config.id,
-      displayName: config.displayName,
-      widgetEnabled: config.widgetEnabled,
-      widgetTitle: config.widgetTitle,
-      widgetSubtitle: config.widgetSubtitle,
-      widgetWelcomeMessage: config.widgetWelcomeMessage,
-      widgetPlaceholder: config.widgetPlaceholder,
-      widgetFloatingButtonText: config.widgetFloatingButtonText,
-      widgetPrimaryColor: config.widgetPrimaryColor,
-      widgetSecondaryColor: config.widgetSecondaryColor,
-      // Incluir todos los campos necesarios
-      ...config,
-    })
+    // SEGURIDAD (2026-07-06): devolver SOLO los campos que el widget necesita.
+    // Antes se hacía `...config`, exponiendo accessToken de WhatsApp, proxy y
+    // teléfono de escalación a cualquier visitante del sitio público.
+    // Cache CDN de Vercel: s-maxage=300 → los hits repetidos se sirven desde el
+    // CDN sin invocar la función ni tocar Redis.
+    return NextResponse.json(
+      {
+        id: config.id,
+        displayName: config.displayName,
+        widgetEnabled: config.widgetEnabled,
+        widgetTitle: config.widgetTitle,
+        widgetSubtitle: config.widgetSubtitle,
+        widgetWelcomeMessage: config.widgetWelcomeMessage,
+        widgetPlaceholder: config.widgetPlaceholder,
+        widgetFloatingButtonText: config.widgetFloatingButtonText,
+        widgetPrimaryColor: config.widgetPrimaryColor,
+        widgetSecondaryColor: config.widgetSecondaryColor,
+      },
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
+        },
+      },
+    )
   } catch (error) {
     console.error("Error fetching widget configuration:", error)
     return NextResponse.json({ error: "Failed to fetch widget configuration" }, { status: 500 })

@@ -32,6 +32,42 @@ function getCacheKey(action: string, params: Record<string, any>): string {
   return `${CACHE_PREFIX}${action}:${JSON.stringify(params)}`
 }
 
+// ============================================================================
+// COMPRESIÓN TRANSPARENTE DEL CACHÉ (optimización bandwidth 2026-07-06)
+// Las respuestas de get_turnos pesan ~28 KB; cada escritura Y cada lectura del
+// caché transfiere ese tamaño completo por la red de Upstash (el bandwidth se
+// cobra por bytes, no por comandos). Gzip+base64 las reduce a ~3-5 KB (~85%).
+// Retrocompatible: las entradas viejas sin marcador se leen como JSON plano.
+// ============================================================================
+import { gzipSync, gunzipSync } from "zlib"
+
+const GZIP_MARKER = "gz64:"
+const COMPRESS_MIN_LENGTH = 2048 // payloads chicos no ganan con compresión
+
+function compressForCache(value: unknown): string {
+  const json = JSON.stringify(value)
+  if (json.length < COMPRESS_MIN_LENGTH) return json
+  return GZIP_MARKER + gzipSync(Buffer.from(json, "utf8")).toString("base64")
+}
+
+function decompressFromCache<T>(raw: unknown): T | null {
+  try {
+    if (typeof raw === "string") {
+      if (raw.startsWith(GZIP_MARKER)) {
+        const json = gunzipSync(Buffer.from(raw.slice(GZIP_MARKER.length), "base64")).toString("utf8")
+        return JSON.parse(json) as T
+      }
+      return JSON.parse(raw) as T
+    }
+    if (raw && typeof raw === "object") {
+      return raw as T // entrada vieja auto-deserializada por el cliente de Upstash
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 // Función principal para hacer peticiones al proxy
 async function fetchProxyApi<T>(
   clienteId: string,
@@ -50,13 +86,9 @@ async function fetchProxyApi<T>(
     const cachedData = await redis.get(cacheKey)
     if (cachedData) {
       console.log(`[CACHE] ✅ Hit para ${action}`)
-      // Verificar si cachedData ya es un objeto o es una cadena JSON
-      if (typeof cachedData === "string") {
-        return JSON.parse(cachedData)
-      } else {
-        // Si ya es un objeto, devolverlo directamente
-        return cachedData as ApiResponse<T>
-      }
+      const parsed = decompressFromCache<ApiResponse<T>>(cachedData)
+      if (parsed) return parsed
+      // Entrada corrupta → continuar con fetch normal
     }
   } else if (NO_CACHE_ACTIONS.includes(action)) {
     console.log(`[CACHE] 🚫 Sin caché para ${action} (datos dinámicos)`)
@@ -157,8 +189,8 @@ async function fetchProxyApi<T>(
 
       if (shouldUseCache && redis) {
         const result = { exito: true, datos: data.data }
-        await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
-        console.log(`[CACHE] 💾 Guardado ${action}`)
+        await redis.setex(cacheKey, CACHE_TTL, compressForCache(result))
+        console.log(`[CACHE] 💾 Guardado ${action} (comprimido)`)
       }
 
       return {
@@ -171,8 +203,8 @@ async function fetchProxyApi<T>(
     const result = { exito: true, datos: data }
 
     if (shouldUseCache && redis) {
-      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result))
-      console.log(`[CACHE] 💾 Guardado ${action}`)
+      await redis.setex(cacheKey, CACHE_TTL, compressForCache(result))
+      console.log(`[CACHE] 💾 Guardado ${action} (comprimido)`)
     }
 
     return result
@@ -470,7 +502,8 @@ export async function obtenerDatosSede(clienteId: string, sedeId: string): Promi
     try {
       const cached = await redis.get(cacheKey)
       if (cached) {
-        return (typeof cached === 'string' ? JSON.parse(cached) : cached) as SedeResponse
+        const parsed = decompressFromCache<SedeResponse>(cached)
+        if (parsed) return parsed
       }
     } catch { /* cache miss — continuar con fetch */ }
   }
@@ -506,7 +539,7 @@ export async function obtenerDatosSede(clienteId: string, sedeId: string): Promi
     if (data.success && data.sede) {
       // Guardar en caché
       if (redis) {
-        try { await redis.setex(cacheKey, CACHE_TTL_SEDES, JSON.stringify(data)) } catch { /* ignorar */ }
+        try { await redis.setex(cacheKey, CACHE_TTL_SEDES, compressForCache(data)) } catch { /* ignorar */ }
       }
       return data
     }
@@ -543,7 +576,8 @@ export async function obtenerTodasLasSedes(clienteId: string): Promise<SedesList
     try {
       const cached = await redis.get(cacheKey)
       if (cached) {
-        return (typeof cached === 'string' ? JSON.parse(cached) : cached) as SedesListResult
+        const parsed = decompressFromCache<SedesListResult>(cached)
+        if (parsed) return parsed
       }
     } catch { /* cache miss — continuar con fetch */ }
   }
@@ -583,7 +617,7 @@ export async function obtenerTodasLasSedes(clienteId: string): Promise<SedesList
       }
       // Guardar en caché
       if (redis) {
-        try { await redis.setex(cacheKey, CACHE_TTL_SEDES, JSON.stringify(result)) } catch { /* ignorar */ }
+        try { await redis.setex(cacheKey, CACHE_TTL_SEDES, compressForCache(result)) } catch { /* ignorar */ }
       }
       return result
     }

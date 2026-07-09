@@ -184,6 +184,34 @@ export async function resetGlobalFeatureFlags(): Promise<void> {
 }
 
 /**
+ * Overrides de flags fijados por código, para activar funcionalidades ya validadas
+ * mientras no se dispone de acceso directo a Redis de producción para setearlas
+ * vía `setClientFeatureFlags`/`setGlobalFeatureFlags` (el camino normal: script
+ * `scripts/activate-sprint9.ts` como referencia, o `/dashboard/feature-flags`).
+ *
+ * GLOBAL_CODE_FEATURE_FLAG_OVERRIDES se aplica a TODOS los clientes, SIEMPRE, por
+ * encima de cualquier valor guardado en Redis (client-specific o global) — es el
+ * mecanismo de mayor prioridad. Pedido explícito de Nicolás (9/7/2026): que las
+ * mejoras que vayamos validando se activen para todos los clientes, no solo el que
+ * originó el caso.
+ *
+ * Para revertir un flag alcanza con sacar la entrada de acá (no hace falta Redis).
+ * Cuando en algún momento se recupere acceso a Redis de producción, lo prolijo es
+ * migrar estas entradas a `setGlobalFeatureFlags` y vaciar este objeto.
+ */
+const GLOBAL_CODE_FEATURE_FLAG_OVERRIDES: Partial<FeatureFlags> = {
+  // Activado el 9/7/2026 tras confirmar que "Siiii gracias" y respuestas similares
+  // por texto libre no confirmaban el turno dentro de la ventana de recordatorio
+  // (caso Susana / caso "Siiii gracias", tel. 1123517624). Válido para todos los
+  // clientes, no solo Vision Salud / Salud Ocular.
+  directConfirmCancelDetection: true,
+}
+
+function applyCodeOverrides(_configId: string, flags: FeatureFlags): FeatureFlags {
+  return { ...flags, ...GLOBAL_CODE_FEATURE_FLAG_OVERRIDES }
+}
+
+/**
  * Obtener flags para un cliente: primero busca flags específicos,
  * si no tiene, usa los flags globales (que pueden diferir de los defaults)
  */
@@ -197,7 +225,7 @@ export async function getEffectiveFeatureFlags(configId: string): Promise<Featur
 
   try {
     const redis = getRedisClient()
-    if (!redis) return DEFAULT_FEATURE_FLAGS
+    if (!redis) return applyCodeOverrides(configId, DEFAULT_FEATURE_FLAGS)
 
     const clientKey = `${FEATURE_FLAGS_PREFIX}${configId}`
     const clientData = await redis.get(clientKey)
@@ -211,11 +239,13 @@ export async function getEffectiveFeatureFlags(configId: string): Promise<Featur
       flags = await getGlobalFeatureFlags()
     }
 
+    flags = applyCodeOverrides(configId, flags)
+
     flagsCache.set(configId, { flags, expiresAt: now + FLAGS_CACHE_TTL_MS })
     return flags
   } catch (err) {
     console.error(`[FEATURE-FLAGS] Error obteniendo flags efectivos para ${configId}:`, err)
-    return DEFAULT_FEATURE_FLAGS
+    return applyCodeOverrides(configId, DEFAULT_FEATURE_FLAGS)
   }
 }
 

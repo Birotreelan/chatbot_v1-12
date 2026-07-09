@@ -28,7 +28,10 @@ export function PerformanceMetrics() {
     fetchMetrics()
 
     // Actualizar cada minuto
-    const interval = setInterval(fetchMetrics, 60000)
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return // pausa con pestaña oculta
+      fetchMetrics()
+    }, 60000)
     return () => clearInterval(interval)
   }, [period])
 
