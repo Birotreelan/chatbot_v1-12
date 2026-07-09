@@ -1,160 +1,305 @@
-import { getConfigByClienteId } from "@/lib/db"
+"use client"
 
-export default async function DemoPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ cliente_id?: string }>
-}) {
-  const params = await searchParams
+import { useEffect, useState, useCallback } from "react"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
-  // Usar un cliente_id por defecto para la demo o el proporcionado
-  const clienteId = params.cliente_id || "demo-client"
+interface ClinicOption {
+  cliente_id: string
+  displayName: string
+  widgetEnabled: boolean
+  active: boolean
+}
 
-  // Verificar si existe la configuración (opcional para demo)
-  let config = null
-  try {
-    config = await getConfigByClienteId(clienteId)
-  } catch (error) {
-    // Si no existe, usaremos valores por defecto para la demo
-    console.log("Usando configuración por defecto para la demo")
-  }
+interface WidgetPublicConfig {
+  id?: string
+  displayName?: string
+  widgetEnabled?: boolean
+  widgetTitle?: string
+  widgetSubtitle?: string
+  widgetWelcomeMessage?: string
+  widgetPlaceholder?: string
+  widgetFloatingButtonText?: string
+  widgetPrimaryColor?: string
+  widgetSecondaryColor?: string
+  error?: string
+}
+
+const WIDGET_SCRIPT_ID = "demo-widget-loader-script"
+
+function removeFloatingWidget() {
+  document.getElementById("chat-widget-button")?.remove()
+  document.getElementById("chat-widget-container")?.remove()
+  document.getElementById(WIDGET_SCRIPT_ID)?.remove()
+}
+
+export default function DemoPage() {
+  const [clinics, setClinics] = useState<ClinicOption[] | null>(null)
+  const [loadingClinics, setLoadingClinics] = useState(true)
+  const [clienteId, setClienteId] = useState<string>("")
+  const [config, setConfig] = useState<WidgetPublicConfig | null>(null)
+  const [loadingConfig, setLoadingConfig] = useState(false)
+  const [baseUrl, setBaseUrl] = useState("")
+  const [previewKey, setPreviewKey] = useState(0)
+
+  // Cargar la lista de clínicas y preseleccionar según la URL (?cliente_id=)
+  useEffect(() => {
+    setBaseUrl(window.location.origin)
+
+    async function loadClinics() {
+      try {
+        const res = await fetch("/api/widget/clinics")
+        const data: ClinicOption[] = res.ok ? await res.json() : []
+        setClinics(data)
+
+        const fromUrl = new URLSearchParams(window.location.search).get("cliente_id")
+        if (fromUrl) {
+          setClienteId(fromUrl)
+        } else if (data.length > 0) {
+          setClienteId(data[0].cliente_id)
+        } else {
+          setClienteId("demo-client")
+        }
+      } catch (error) {
+        console.error("Error al cargar la lista de clínicas:", error)
+        setClinics([])
+        setClienteId("demo-client")
+      } finally {
+        setLoadingClinics(false)
+      }
+    }
+
+    loadClinics()
+  }, [])
+
+  // Cada vez que cambia la clínica seleccionada: actualizar la URL, traer su
+  // configuración pública, y reiniciar tanto el widget flotante (script real,
+  // igual que en el sitio de la clínica) como la vista previa embebida.
+  useEffect(() => {
+    if (!clienteId) return
+
+    const url = new URL(window.location.href)
+    url.searchParams.set("cliente_id", clienteId)
+    window.history.replaceState({}, "", url.toString())
+
+    let cancelled = false
+    setLoadingConfig(true)
+    fetch(`/api/widget?cliente_id=${encodeURIComponent(clienteId)}&_t=${Date.now()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setConfig(data)
+      })
+      .catch((error) => {
+        console.error("Error al cargar la configuración del widget:", error)
+        if (!cancelled) setConfig({ error: "No se pudo cargar la configuración" })
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingConfig(false)
+      })
+
+    removeFloatingWidget()
+    const script = document.createElement("script")
+    script.id = WIDGET_SCRIPT_ID
+    script.src = "/widget-loader.js"
+    script.async = true
+    script.setAttribute("data-client-id", clienteId)
+    document.body.appendChild(script)
+
+    setPreviewKey((k) => k + 1)
+
+    return () => {
+      cancelled = true
+      removeFloatingWidget()
+    }
+  }, [clienteId])
+
+  const reloadPreview = useCallback(() => {
+    setPreviewKey((k) => k + 1)
+  }, [])
+
+  const selectedClinic = clinics?.find((c) => c.cliente_id === clienteId)
+  const previewUrl = clienteId
+    ? `/widget?clienteId=${encodeURIComponent(clienteId)}&embedded=true&_t=${previewKey}`
+    : ""
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Demostración del Widget de Chat</h1>
-              <p className="text-gray-600 mt-1">Prueba nuestro widget de chat inteligente en acción</p>
-            </div>
-            <div className="text-sm text-gray-500">
-              Cliente ID: <code className="bg-gray-100 px-2 py-1 rounded">{clienteId}</code>
-            </div>
-          </div>
+          <h1 className="text-2xl font-bold text-gray-900">Demo Widget</h1>
+          <p className="text-gray-600 mt-1">
+            Probá el widget de agendamiento de cualquiera de las clínicas configuradas, tal como lo verían sus
+            pacientes.
+          </p>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Información del Widget */}
           <div className="space-y-6">
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold mb-4">¿Cómo funciona?</h2>
-              <div className="space-y-4 text-gray-600">
-                <p>
-                  Este widget de chat utiliza inteligencia artificial para responder automáticamente a las consultas de
-                  tus usuarios.
-                </p>
-                <ul className="list-disc list-inside space-y-2">
-                  <li>Respuestas automáticas 24/7</li>
-                  <li>Integración fácil en cualquier sitio web</li>
-                  <li>Personalización completa de colores y textos</li>
-                  <li>Gestión de conversaciones desde el panel de control</li>
-                </ul>
-              </div>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Elegir clínica</CardTitle>
+                <CardDescription>Seleccioná qué clínica querés probar.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loadingClinics ? (
+                  <div className="h-10 bg-gray-200 rounded animate-pulse" />
+                ) : clinics && clinics.length > 0 ? (
+                  <Select value={clienteId} onValueChange={setClienteId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccioná una clínica" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clinics.map((clinic) => (
+                        <SelectItem key={clinic.cliente_id} value={clinic.cliente_id}>
+                          {clinic.displayName}
+                          {!clinic.widgetEnabled ? " (widget deshabilitado)" : ""}
+                          {!clinic.active ? " (inactiva)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="text-sm text-gray-500">
+                    No hay clínicas configuradas todavía. Se está usando <code>demo-client</code> como valor de
+                    prueba.
+                  </p>
+                )}
 
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold mb-4">Configuración Actual</h2>
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Estado del Widget:</span>
-                  <span className={`font-medium ${config?.widgetEnabled ? "text-green-600" : "text-orange-600"}`}>
-                    {config?.widgetEnabled ? "Habilitado" : "Demo (sin configuración)"}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Título:</span>
-                  <span className="font-medium">{config?.widgetTitle || "Chat en vivo"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Color Primario:</span>
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-4 h-4 rounded border"
-                      style={{ backgroundColor: config?.widgetPrimaryColor || "#0ea5e9" }}
-                    ></div>
-                    <span className="font-mono text-xs">{config?.widgetPrimaryColor || "#0ea5e9"}</span>
+                {selectedClinic && (
+                  <div className="flex gap-2 flex-wrap">
+                    <Badge variant={selectedClinic.widgetEnabled ? "default" : "secondary"}>
+                      {selectedClinic.widgetEnabled ? "Widget habilitado" : "Widget deshabilitado"}
+                    </Badge>
+                    <Badge variant={selectedClinic.active ? "default" : "secondary"}>
+                      {selectedClinic.active ? "Cliente activo" : "Cliente inactivo"}
+                    </Badge>
                   </div>
-                </div>
-              </div>
-            </div>
+                )}
+              </CardContent>
+            </Card>
 
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold mb-4">Integración</h2>
-              <p className="text-gray-600 mb-4">
-                Para integrar este widget en tu sitio web, simplemente añade este código antes del cierre del tag
-                &lt;/body&gt;:
-              </p>
-              <div className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                <code className="text-sm">
-                  {`<script 
-  src="${typeof window !== "undefined" ? window.location.origin : "https://tu-dominio.com"}/widget-loader.js" 
-  data-client-id="${clienteId}"
-></script>`}
-                </code>
-              </div>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Configuración actual</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {loadingConfig ? (
+                  <div className="h-20 bg-gray-200 rounded animate-pulse" />
+                ) : config?.error ? (
+                  <p className="text-orange-600">{config.error}</p>
+                ) : (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Cliente ID:</span>
+                      <code className="bg-gray-100 px-2 py-1 rounded">{clienteId}</code>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Estado del widget:</span>
+                      <span className={config?.widgetEnabled ? "text-green-600 font-medium" : "text-orange-600 font-medium"}>
+                        {config?.widgetEnabled ? "Habilitado" : "Deshabilitado"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Título:</span>
+                      <span className="font-medium">{config?.widgetTitle || "Chat en vivo"}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600">Color primario:</span>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-4 h-4 rounded border"
+                          style={{ backgroundColor: config?.widgetPrimaryColor || "#0ea5e9" }}
+                        />
+                        <span className="font-mono text-xs">{config?.widgetPrimaryColor || "#0ea5e9"}</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Integración</CardTitle>
+                <CardDescription>
+                  Código para embeber este widget en el sitio de la clínica seleccionada.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                  <code className="text-sm whitespace-pre">
+                    {`<script\n  src="${baseUrl || "https://tu-dominio.com"}/widget-loader.js"\n  data-client-id="${clienteId}"\n></script>`}
+                  </code>
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
-          {/* Vista Previa */}
           <div className="space-y-6">
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold mb-4">Vista Previa</h2>
-              <p className="text-gray-600 mb-4">
-                El widget aparecerá en la esquina inferior derecha de tu sitio web. Haz clic en el botón azul para
-                probarlo.
-              </p>
-
-              {/* Simulación de una página web */}
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 min-h-[400px] relative bg-gradient-to-br from-blue-50 to-indigo-100">
-                <div className="text-center text-gray-500">
-                  <div className="mb-4">
-                    <div className="w-16 h-16 bg-gray-200 rounded-lg mx-auto mb-4"></div>
-                    <h3 className="text-lg font-medium text-gray-700">Tu Sitio Web</h3>
-                    <p className="text-sm text-gray-500">El widget se mostrará aquí</p>
-                  </div>
-
-                  <div className="mt-8 space-y-2 text-xs text-gray-400">
-                    <p>• El widget no interfiere con tu contenido</p>
-                    <p>• Se adapta automáticamente a dispositivos móviles</p>
-                    <p>• Carga de forma asíncrona sin afectar la velocidad</p>
-                  </div>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <div>
+                  <CardTitle>Vista previa en vivo</CardTitle>
+                  <CardDescription>Conversación real contra el motor de agendamiento.</CardDescription>
                 </div>
-              </div>
-            </div>
+                <Button variant="outline" size="sm" onClick={reloadPreview}>
+                  Reiniciar chat
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <div className="border rounded-lg overflow-hidden" style={{ height: 520 }}>
+                  {clienteId ? (
+                    <iframe
+                      key={previewKey}
+                      src={previewUrl}
+                      className="w-full h-full border-0"
+                      title="Vista previa del widget"
+                    />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+                      Elegí una clínica para ver el chat
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 mt-3">
+                  Además de esta vista embebida, el botón flotante real (mismo script que se integra en el sitio de la
+                  clínica) aparece en la esquina inferior derecha de esta página — así se prueba también el
+                  widget-loader.js tal como lo ve un visitante.
+                </p>
+              </CardContent>
+            </Card>
 
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-start">
-                <div className="flex-shrink-0">
-                  <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path
-                      fillRule="evenodd"
-                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
-                <div className="ml-3">
-                  <h3 className="text-sm font-medium text-blue-800">Nota sobre la Demo</h3>
-                  <div className="mt-2 text-sm text-blue-700">
-                    <p>
-                      Esta es una demostración del widget. Para una experiencia completa, configura tu propio cliente
-                      desde el panel de administración.
-                    </p>
-                  </div>
+                <svg className="h-5 w-5 text-blue-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <div className="ml-3 text-sm text-blue-700">
+                  <p className="font-medium text-blue-800 mb-1">Recordatorio</p>
+                  <p>
+                    Esta página solo cambia a qué clínica apunta el widget de prueba — la conversación agenda turnos
+                    reales contra esa clínica. Usá un DNI de prueba, no el de un paciente real.
+                  </p>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </main>
-
-      {/* Widget Script */}
-      <script src="/widget-loader.js" data-client-id={clienteId} async />
     </div>
   )
 }
