@@ -553,6 +553,113 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
 }
 
 /**
+ * Retoma el flujo de paciente existente cuando YA sabemos su identidad, sede y tipo
+ * de búsqueda (ej: viene del flujo de reagendamiento post-cancelación, que ya le
+ * preguntó "1. Médico en particular / 2. Por especialidad / 3. Cualquier médico" y
+ * ya tiene DNI/obra social/sede del turno cancelado). Salta identificación y
+ * selección de sede — va directo al paso siguiente según el tipo de búsqueda.
+ *
+ * Antes de este fix, el fallback de reagendamiento descartaba estos datos y el
+ * mensaje cursaba por el pipeline genérico (OpenAI) sin ningún contexto de
+ * paciente, tratando a alguien YA IDENTIFICADO como paciente nuevo (le volvía a
+ * pedir DNI/apellido/nombre/obra social desde cero). Caso Margarita, tel.
+ * 1140281277, 9/7/2026: ver PLAN-DE-TRABAJO.md.
+ */
+export async function resumeExistingPatientBroadSearch(
+  phoneNumber: string,
+  clientId: string,
+  params: {
+    patientDNI: string
+    patientFirstName?: string
+    patientLastName?: string
+    obraSocialId?: string
+    sedeId?: string
+    /** Tipo de búsqueda ya elegido por el paciente en el flujo de reagendamiento. */
+    searchType: 'por_profesional' | 'por_especialidad' | 'cualquier_medico'
+  },
+  escalationPhoneNumber?: string
+): Promise<ExistingPatientResult> {
+  const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_resume_broad_search')
+  logger.info('Resuming existing patient flow for broad search (from reschedule)', {
+    dni: params.patientDNI,
+    sedeId: params.sedeId,
+    searchType: params.searchType,
+  })
+
+  const flags = await getEffectiveFeatureFlags(clientId)
+  if (!flags.directPacienteExistente) {
+    return { handled: false, shouldCallOpenAI: true, openAIContext: 'Use route_to_pacienteExistente' }
+  }
+
+  const patientName = `${params.patientFirstName || ''} ${params.patientLastName || ''}`.trim() || 'Paciente'
+
+  const sedesResult = await fetchSedes(clientId)
+  if (!sedesResult.success || !sedesResult.sedes) {
+    logger.error('Error fetching sedes', new Error(sedesResult.error || 'Unknown error'))
+    return { handled: true, message: buildSedesErrorMessage(), nextPhase: 'error' }
+  }
+
+  const sedeMatch = sedesResult.sedes.find((s) => s.id === params.sedeId) || sedesResult.sedes[0]
+
+  const state: ExistingPatientFlowState = {
+    phase: 'awaiting_search_type',
+    patientId: '',
+    patientName,
+    patientFirstName: params.patientFirstName,
+    patientLastName: params.patientLastName,
+    patientDNI: params.patientDNI,
+    patientPhone: phoneNumber,
+    obraSocialId: params.obraSocialId,
+    sedesOpciones: sedesResult.sedes,
+    sedeId: sedeMatch.id,
+    sedeNombre: sedeMatch.nombre,
+    turnosMostrados: 0,
+    attempts: 0,
+    createdAt: Date.now(),
+    lastUpdated: Date.now(),
+  }
+
+  // Mapear la clave de searchType del flujo de reagendamiento a la del flujo de
+  // paciente existente (nombres distintos para el mismo concepto).
+  const searchTypeMap: Record<string, ExistingPatientFlowState['searchType']> = {
+    por_profesional: 'medico_particular',
+    por_especialidad: 'especialidad',
+    cualquier_medico: 'cualquier_medico',
+  }
+  state.searchType = searchTypeMap[params.searchType] || 'cualquier_medico'
+
+  if (state.searchType === 'medico_particular') {
+    state.phase = 'awaiting_professional_name'
+    await saveFlowState(phoneNumber, state)
+    return {
+      handled: true,
+      message: buildProfessionalNameRequestMessage(),
+      nextPhase: 'awaiting_professional_name',
+      atrasButton: true,
+    }
+  }
+
+  if (state.searchType === 'especialidad') {
+    const espResult = await fetchSpecialties(clientId)
+    if (!espResult.success || !espResult.especialidades) {
+      return { handled: true, message: buildSpecialtiesErrorMessage(), nextPhase: 'error' }
+    }
+    state.especialidadesOpciones = espResult.especialidades
+    state.phase = 'awaiting_specialty_selection'
+    await saveFlowState(phoneNumber, state)
+    return {
+      handled: true,
+      message: buildSpecialtiesMessage(espResult.especialidades),
+      nextPhase: 'awaiting_specialty_selection',
+    }
+  }
+
+  // cualquier_medico → buscar turnos directamente, sin filtro de profesional/especialidad
+  await saveFlowState(phoneNumber, state)
+  return await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
+}
+
+/**
  * Procesa mensaje del usuario durante el flujo
  */
 export async function handleExistingPatientMessage(

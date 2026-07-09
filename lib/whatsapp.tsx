@@ -126,6 +126,7 @@ import {
   isExistingPatientFlowActive,
   clearExistingPatientFlow,
   getExistingPatientFlowPhase,
+  resumeExistingPatientBroadSearch,
 } from "./conversation-state/existing-patient/existing-patient-flow-integration"
 import {
   initializeNewPatientFlow,
@@ -3510,10 +3511,18 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
           
           if (directActionResult.action === "cancel") {
-            
-            // Construir detalles del turno para el mensaje
-            const turnoDetails = appointmentCtx.turno 
-              ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n�� ${appointmentCtx.turno.sede}`
+
+            // Construir detalles del turno para el mensaje. ChatbotData no tiene un
+            // campo singular "turno" (tiene "turnos[]"), por eso `appointmentCtx.turno`
+            // era siempre undefined y este mensaje mostraba el placeholder genérico
+            // "Tu turno programado" en vez de la fecha/hora/profesional/sede reales
+            // (mismo bug que en "ask_explicit" — caso Ricardo, tel. 1157346398,
+            // 9/7/2026: ver PLAN-DE-TRABAJO.md).
+            const turnoParaCancel: any = appointmentCtx.turno
+              || (Array.isArray(appointmentCtx.turnos) && appointmentCtx.turnos[0])
+              || null
+            const turnoDetails = turnoParaCancel && (turnoParaCancel.fecha || turnoParaCancel.fecha_formateada)
+              ? `📅 ${turnoParaCancel.fecha_formateada || turnoParaCancel.fecha} a las ${turnoParaCancel.hora_formateada || turnoParaCancel.hora}\n👨‍⚕️ ${turnoParaCancel.profesional || ""}\n📍 ${turnoParaCancel.sede || ""}`
               : "Tu turno programado"
             
             const cancelPrompt = buildCancelConfirmationPrompt(patientName, turnoDetails)
@@ -3573,8 +3582,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           if (directActionResult.action === "ask_explicit") {
 
-            const turnoDetailsExplicit = appointmentCtx.turno
-              ? `📅 ${appointmentCtx.turno.fecha} a las ${appointmentCtx.turno.hora}\n👨‍⚕️ ${appointmentCtx.turno.profesional}\n📍 ${appointmentCtx.turno.sede}`
+            // Igual que en "clarify_time": ChatbotData no tiene un campo singular
+            // "turno", tiene "turnos[]" — `appointmentCtx.turno` es siempre undefined,
+            // por eso este mensaje mostraba el placeholder genérico "Tu turno programado"
+            // en vez de la fecha/hora/profesional/sede reales. Caso Ricardo, tel.
+            // 1157346398, 9/7/2026: ver PLAN-DE-TRABAJO.md.
+            const turnoExplicit: any = appointmentCtx.turno
+              || (Array.isArray(appointmentCtx.turnos) && appointmentCtx.turnos[0])
+              || null
+
+            const turnoDetailsExplicit = turnoExplicit && (turnoExplicit.fecha || turnoExplicit.fecha_formateada)
+              ? `📅 ${turnoExplicit.fecha_formateada || turnoExplicit.fecha} a las ${turnoExplicit.hora_formateada || turnoExplicit.hora}\n👨‍⚕️ ${turnoExplicit.profesional || ""}\n📍 ${turnoExplicit.sede || ""}`
               : "Tu turno programado"
 
             const askExplicitMessage = buildAskExplicitConfirmationMessage(turnoDetailsExplicit)
@@ -5451,7 +5469,45 @@ ${JSON.stringify(functionArgs, null, 2)}`
       
       // Si necesita fallback a OpenAI para NLU, continuar con flujo normal
       if (rescheduleResult.fallbackToOpenAI && rescheduleResult.fallbackContext) {
-        // El flujo normal (asst_router) se encarga del procesamiento libre
+        const fc: any = rescheduleResult.fallbackContext
+        // Búsqueda ampliada post-60-días (el paciente ya eligió 1/2/3: médico
+        // particular / especialidad / cualquier médico) y YA estaba identificado
+        // (DNI, obra social y sede vienen del turno recién cancelado). Antes acá
+        // se descartaba ese contexto y el mensaje caía al pipeline genérico de
+        // OpenAI sin ningún dato del paciente, tratándolo como paciente nuevo
+        // (volvía a pedir DNI/apellido/nombre/obra social desde cero). Caso
+        // Margarita, tel. 1140281277, 9/7/2026: ver PLAN-DE-TRABAJO.md.
+        if (fc.type === 'reschedule_broad_search' && fc.paciente) {
+          const resumeResult = await resumeExistingPatientBroadSearch(
+            userPhoneNumber,
+            config.cliente_id,
+            {
+              patientDNI: fc.pacienteDni || fc.paciente.dni || '',
+              patientFirstName: fc.paciente.nombres,
+              patientLastName: fc.paciente.apellido,
+              obraSocialId: fc.obraSocialId,
+              sedeId: fc.sedeId,
+              searchType: fc.searchType,
+            },
+            config.escalationPhoneNumber
+          )
+          if (!resumeResult.shouldCallOpenAI) {
+            const ctxResume: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+            if (resumeResult?.handled && resumeResult.message) {
+              await sendExistingPatientResult(ctxResume, resumeResult, "reschedule-broad-search-existing")
+            }
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+          // shouldCallOpenAI (ej: feature flag directPacienteExistente apagado) → cede al pipeline normal
+        }
+        // Otros tipos de fallback (NLU ambigua dentro del flujo) → el flujo normal (asst_router) se encarga
       }
     }
 
