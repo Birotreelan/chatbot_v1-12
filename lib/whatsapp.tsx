@@ -1957,8 +1957,20 @@ async function runInterjectionInActiveFlow(
       const answerDet = (action.type === 'send_and_return' || action.type === 'derive_external')
         ? action.message.replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '').trimEnd()
         : ''
-      const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
-      const menuMsg = det?.handled && det.message ? det.message : ''
+      // Retomar con el menú corto "¿En qué más puedo ayudarte?" (returnPatientToMenu),
+      // NO con el saludo completo de initializePatientDetection ("bienvenido de
+      // nuevo... soy Iris..."): ese saludo es para el primer contacto — repetirlo
+      // cada vez que se responde una pregunta intercalada duplicaba el mensaje de
+      // bienvenida y el listado de turnos al final de la respuesta. Fallback a
+      // initializePatientDetection solo si el estado ya expiró. Caso Juan, tel.
+      // 1167225248, 9/7/2026: ver PLAN-DE-TRABAJO.md.
+      let menuMsg = await returnPatientToMenu(userPhoneNumber)
+      let menuButtons: Array<{ id: string; title: string }> | undefined
+      if (!menuMsg) {
+        const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+        menuMsg = det?.handled && det.message ? det.message : null
+        menuButtons = (det as any)?.buttons
+      }
       const combined = answerDet && menuMsg
         ? `${answerDet}\n\n${menuMsg}`
         : (answerDet || menuMsg || 'Perdón, no te entendí. ¿Podés repetirlo?')
@@ -1969,7 +1981,7 @@ async function runInterjectionInActiveFlow(
         configId: config.id,
         clienteId: config.cliente_id,
       }
-      await sendDirectResponse(ctxDet, combined, "router-interjection-patient-detection-resume", (det as any)?.buttons)
+      await sendDirectResponse(ctxDet, combined, "router-interjection-patient-detection-resume", menuButtons)
       routerLogger.info('[Router intercalada] Consulta respondida + menú de detección retomado')
       return true
     }
@@ -5134,12 +5146,22 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             clienteId: config.cliente_id,
           }
           if (detA) {
-            // Flujo de detección de paciente activo: resumir con el menú
-            // determinístico real (respeta ventana de recordatorio), nunca
-            // con historial de OpenAI.
-            const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
-            if (det?.handled && det.message) {
-              await sendDirectResponse(ctxFallback, det.message, "router-fallback-patient-detection-resume", (det as any).buttons)
+            // Flujo de detección de paciente activo: resumir con el menú corto
+            // "¿En qué más puedo ayudarte?" (returnPatientToMenu), NO con el saludo
+            // completo de initializePatientDetection ("bienvenido de nuevo... soy
+            // Iris...") — ese saludo es para el primer contacto, repetirlo acá
+            // duplicaba la bienvenida y el listado de turnos al final de cada
+            // respuesta. Fallback a initializePatientDetection solo si el estado
+            // ya expiró. Caso Juan, tel. 1167225248, 9/7/2026: ver PLAN-DE-TRABAJO.md.
+            let menuMsg: string | null = await returnPatientToMenu(userPhoneNumber)
+            let menuButtons: Array<{ id: string; title: string }> | undefined
+            if (!menuMsg) {
+              const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+              menuMsg = det?.handled && det.message ? det.message : null
+              menuButtons = (det as any)?.buttons
+            }
+            if (menuMsg) {
+              await sendDirectResponse(ctxFallback, menuMsg, "router-fallback-patient-detection-resume", menuButtons)
             }
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
