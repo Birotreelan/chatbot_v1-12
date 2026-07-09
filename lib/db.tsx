@@ -368,9 +368,36 @@ export async function deleteWhatsAppConfig(id: string): Promise<boolean> {
   return true
 }
 
+// Índice cliente_id → config_id (mismo patrón que phone_to_config).
+// Evita SCAN + GET de TODAS las configs en cada lectura por cliente_id
+// (el endpoint /api/widget consultaba todas las configs completas por request).
+const CLIENTE_TO_CONFIG_PREFIX = "cliente_to_config:"
+
 // Función para obtener configuración por clienteId - NUEVA FUNCIÓN AGREGADA
 export async function getConfigByClienteId(clienteId: string): Promise<WhatsAppConfig | null> {
   try {
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      // 1) Intentar el índice directo: 2 GETs chicos en vez de SCAN + N GETs
+      const indexKey = `${CLIENTE_TO_CONFIG_PREFIX}${clienteId}`
+      const indexedConfigId = await redisClient.get(indexKey)
+      if (indexedConfigId) {
+        const config = await getWhatsAppConfig(indexedConfigId as string)
+        // Validar que el índice no esté obsoleto (config borrada o cliente_id cambiado)
+        if (config && config.cliente_id === clienteId) return config
+        await redisClient.del(indexKey)
+      }
+
+      // 2) Miss o índice obsoleto → búsqueda completa y auto-reparación del índice
+      const configs = await getAllWhatsAppConfigs()
+      const match = configs.find((config) => config.cliente_id === clienteId) || null
+      if (match) {
+        await redisClient.set(indexKey, match.id)
+      }
+      return match
+    }
+
     const configs = await getAllWhatsAppConfigs()
     return configs.find((config) => config.cliente_id === clienteId) || null
   } catch (error) {
@@ -524,7 +551,11 @@ export async function getThreadForUser(
       return { threadId: thread.id, isNewThread: true }
     },
     30, // Lock timeout de 30 segundos
-    15, // Máximo 15 reintentos (1.5 segundos total de espera)
+    40, // Máximo 40 reintentos (~4 segundos total de espera, retryDelay=100ms por defecto).
+    // Antes eran 15 (1.5s): muy poco margen frente a resetThreadForUser, que puede tener
+    // el mismo lock tomado hasta 60s (dos llamadas a OpenAI: delete + create). Con 15
+    // reintentos, un reset en curso o una simple creación de thread lenta hacía fallar
+    // getThreadForUser con "No se pudo adquirir lock" (visto en producción, /api/proxylistener).
   )
 }
 

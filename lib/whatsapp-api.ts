@@ -159,6 +159,16 @@ export async function sendWhatsAppInteractive(
   try {
     const normalizedPhone = normalizePhoneNumber(to)
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
+    // WhatsApp rechaza el mensaje interactivo si el body supera 1024 caracteres
+    // (error #131009). Truncamos en vez de dejar que falle y se pierdan los botones.
+    const MAX_INTERACTIVE_BODY = 1024
+    let safeBody = body
+    if (body.length > MAX_INTERACTIVE_BODY) {
+      console.warn(
+        `[v0] [WHATSAPP_API] ⚠️ Body de mensaje interactivo excede ${MAX_INTERACTIVE_BODY} caracteres (${body.length}), truncando`,
+      )
+      safeBody = body.slice(0, MAX_INTERACTIVE_BODY - 1) + "…"
+    }
     const payload = {
       messaging_product: "whatsapp",
       recipient_type: "individual",
@@ -166,7 +176,7 @@ export async function sendWhatsAppInteractive(
       type: "interactive",
       interactive: {
         type: "button",
-        body: { text: body },
+        body: { text: safeBody },
         action: {
           buttons: buttons.slice(0, 3).map(b => ({
             type: "reply",
@@ -215,6 +225,14 @@ export async function sendWhatsAppList(
   try {
     const normalizedPhone = normalizePhoneNumber(to)
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
+    const MAX_INTERACTIVE_BODY = 1024
+    let safeBody = body
+    if (body.length > MAX_INTERACTIVE_BODY) {
+      console.warn(
+        `[v0] [WHATSAPP_API] ⚠️ Body de mensaje de lista excede ${MAX_INTERACTIVE_BODY} caracteres (${body.length}), truncando`,
+      )
+      safeBody = body.slice(0, MAX_INTERACTIVE_BODY - 1) + "…"
+    }
     const payload = {
       messaging_product: "whatsapp",
       recipient_type: "individual",
@@ -222,7 +240,7 @@ export async function sendWhatsAppList(
       type: "interactive",
       interactive: {
         type: "list",
-        body: { text: body },
+        body: { text: safeBody },
         action: {
           button: buttonLabel.substring(0, 20),
           sections: [{
