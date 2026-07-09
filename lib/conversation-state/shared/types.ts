@@ -77,6 +77,7 @@ export type FlowPhase =
   | 'awaiting_professional_selection'
   | 'awaiting_specialty_selection'
   | 'awaiting_turno_selection'
+  | 'awaiting_telefono'
   | 'awaiting_email'
   | 'awaiting_confirmation'
   | 'awaiting_modify_selection'

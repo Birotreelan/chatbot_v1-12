@@ -1,17 +1,19 @@
 /**
  * Integracion del flujo de paciente nuevo
  * Usa modulos compartidos para reutilizacion de codigo con paciente existente
- * 
- * FLUJO PACIENTE NUEVO segun documentacion:
+ *
+ * FLUJO PACIENTE NUEVO (reordenado 9/7/2026 — aplica a WhatsApp y widget):
  * 1. DNI (validado externamente antes de iniciar)
- * 2. Nombre y Apellido
- * 3. Obra Social (validacion via API)
- * 4. Sede (igual que paciente existente)
- * 5. Tipo de busqueda (igual que paciente existente)
- * 6. Busqueda profesional/especialidad (igual que paciente existente)
- * 7. Seleccion de turno (igual que paciente existente)
- * 8. Email (obligatorio para paciente nuevo)
- * 9. Confirmacion y reserva (igual que paciente existente)
+ * 2. Obra Social (validacion via API)
+ * 3. Sede (igual que paciente existente)
+ * 4. Tipo de busqueda (igual que paciente existente)
+ * 5. Busqueda profesional/especialidad (igual que paciente existente)
+ * 6. Seleccion de turno (igual que paciente existente)
+ * 7. Apellido y Nombre — recien AHORA, ya elegido el turno
+ * 8. Telefono de WhatsApp — SOLO en flujo de widget (`channel === 'widget'`);
+ *    en WhatsApp el canal ya ES el telefono real, no hace falta pedirlo
+ * 9. Email (obligatorio para paciente nuevo)
+ * 10. Confirmacion y reserva (igual que paciente existente)
  */
 
 import { getRedisClient } from '@/lib/redis'
@@ -104,10 +106,20 @@ export interface NewPatientFlowState {
   phase: FlowPhase | 'awaiting_obra_social' | 'awaiting_obra_social_selection'
   dni: string
   phone: string
-  
+
+  /**
+   * Canal de origen del flujo. Determina si se pide 'awaiting_telefono' (widget,
+   * donde el visitante es anónimo y no tenemos su WhatsApp) o no (WhatsApp, donde
+   * el canal YA es el teléfono real del paciente). Por defecto 'whatsapp' para no
+   * afectar las llamadas existentes.
+   */
+  channel?: 'whatsapp' | 'widget'
+
   // Datos personales (especificos de paciente nuevo)
   nombre?: string
   apellido?: string
+  /** Número de WhatsApp para recordatorios — sólo se pide en flujos de widget (ver `channel`). */
+  telefonoContacto?: string
 
   // Si el flujo fue iniciado para registrar a un familiar (no al usuario que escribe)
   esFamiliar?: boolean
@@ -212,16 +224,22 @@ async function saveFlowState(phone: string, state: NewPatientFlowState): Promise
 
 /**
  * Inicializa el flujo de paciente nuevo
+ *
+ * Orden del flujo (reordenado 9/7/2026, aplica a WhatsApp y widget por igual):
+ * DNI -> obra social -> sede -> tipo de búsqueda -> (profesional/especialidad)
+ * -> turno -> apellido -> nombre -> [teléfono, sólo widget] -> email -> confirmación.
+ * Los datos personales se piden recién DESPUÉS de elegir el turno.
  */
 export async function initializeNewPatientFlow(
   dni: string,
   phone: string,
   clientId: string,
   esFamiliar?: boolean,
-  initialMessage?: string
+  initialMessage?: string,
+  channel?: 'whatsapp' | 'widget'
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'new_patient_init')
-  logger.info('Initializing new patient flow', { dni, esFamiliar })
+  logger.info('Initializing new patient flow', { dni, esFamiliar, channel })
 
   const flags = await getEffectiveFeatureFlags(clientId)
   if (!flags.directPacienteNuevo) {
@@ -233,9 +251,10 @@ export async function initializeNewPatientFlow(
   }
 
   const state: NewPatientFlowState = {
-    phase: 'awaiting_apellido',
+    phase: 'awaiting_obra_social',
     dni,
     phone,
+    channel: channel || 'whatsapp',
     obraSocialValidada: false,
     esFamiliar: esFamiliar === true,
     attempts: 0,
@@ -245,6 +264,9 @@ export async function initializeNewPatientFlow(
   }
 
   // --- Slot filling: extraer entidades del mensaje inicial si está disponible ---
+  // Nota: sólo se usan para saltear las fases de apellido/nombre MÁS ADELANTE
+  // (después de elegir turno) — ya no determinan la fase inicial, que ahora
+  // siempre es 'awaiting_obra_social'.
   if (initialMessage && flags.entityExtraction) {
     try {
       const history = flags.conversationHistory ? await getHistory(phone) : []
@@ -267,47 +289,15 @@ export async function initializeNewPatientFlow(
     }
   }
 
-  // Determinar el primer paso según datos ya disponibles
-  if (state.nombre && state.apellido) {
-    // Ya tenemos ambos datos → saltar al pedido de obra social
-    state.phase = 'awaiting_obra_social'
-    await saveFlowState(phone, state)
-    logger.info('Skipping name phases (both extracted)', { nombre: state.nombre, apellido: state.apellido })
-
-    const history = flags.conversationHistory ? await getHistory(phone) : []
-    const mensaje = flags.humanizedResponses
-      ? await generateObraSocialRequest(state.nombre, state.esFamiliar, history)
-      : state.esFamiliar
-        ? `Gracias. Ahora necesito saber la obra social o prepaga de *${state.nombre}*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tiene cobertura.`
-        : `Gracias ${state.nombre}. Ahora necesito saber tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenés cobertura.`
-
-    return {
-      handled: true,
-      message: mensaje,
-      patientInfo: { dni, name: `${state.nombre} ${state.apellido}` },
-    }
-  }
-
-  if (state.apellido && !state.nombre) {
-    // Ya tenemos apellido → saltar directo a solicitar el nombre
-    state.phase = 'awaiting_nombre'
-    await saveFlowState(phone, state)
-    logger.info('Skipping apellido phase (already extracted)', { apellido: state.apellido })
-    const msgNombre = state.esFamiliar
-      ? `Gracias. Ahora escribí el *nombre completo* del familiar (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
-      : `Gracias. Ahora escribí tu *nombre completo* (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
-    return { handled: true, message: msgNombre, patientInfo: { dni } }
-  }
-
   await saveFlowState(phone, state)
-  logger.info('Flow initialized, requesting apellido', {})
+  logger.info('Flow initialized, requesting obra social', {})
 
   const history = flags.conversationHistory ? await getHistory(phone) : []
   const mensaje = flags.humanizedResponses
-    ? await generateWelcomeMessage(state.esFamiliar, history)
+    ? await generateObraSocialRequest(undefined, state.esFamiliar, history)
     : state.esFamiliar
-      ? `Veo que es la primera vez con nosotros. Para registrarlo y agendar un turno, necesito algunos datos.\n\nPrimero, escribí el *apellido* de la persona que agendará el turno.\n\nPor ejemplo: *Pérez*`
-      : `Veo que es tu primera vez con nosotros. Para registrarte y agendar un turno, necesito algunos datos.\n\nPrimero, escribí tu *apellido*.\n\nPor ejemplo: *Pérez*`
+      ? `Veo que es la primera vez con nosotros. Para agendar el turno del familiar, necesito algunos datos.\n\nPrimero, decime la *obra social o prepaga* del familiar.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tiene cobertura.`
+      : `Veo que es tu primera vez con nosotros. Para agendar tu turno, necesito algunos datos.\n\nPrimero, decime tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenés cobertura.`
 
   return {
     handled: true,
@@ -388,6 +378,10 @@ export async function handleNewPatientMessage(
       result = await handleTurnoPhase(phone, userMessage, clientId, state, escalationPhoneNumber, flowInterruptionEnabled)
       break
 
+    case 'awaiting_telefono':
+      result = await handleTelefonoPhase(phone, userMessage, clientId, state)
+      break
+
     case 'awaiting_email':
       result = await handleEmailPhase(phone, userMessage, clientId, state)
       break
@@ -442,7 +436,7 @@ async function handleBackNavigation(
   searchOptionsConfig?: SearchOptionsConfig
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'back_navigation_new')
-  const prev = getPreviousPhase(state.phase as string, { flow: 'new', searchType: state.searchType })
+  const prev = getPreviousPhase(state.phase as string, { flow: 'new', searchType: state.searchType, channel: state.channel })
 
   if (prev === MAIN_MENU) {
     logger.info('[BACK] Sin paso previo, volviendo al menú principal', { phase: state.phase })
@@ -461,12 +455,10 @@ async function handleBackNavigation(
 
   switch (prev) {
     case 'awaiting_apellido': {
+      // Se llega acá DESPUÉS de elegir turno — no se toca obra social/sede/turno,
+      // sólo se re-piden los datos personales.
       state.nombre = undefined
       state.apellido = undefined
-      state.obraSocialId = undefined
-      state.obraSocialNombre = undefined
-      state.obraSocialValidada = false
-      state.obraSocialOpciones = undefined
       state.phase = 'awaiting_apellido'
       state.attempts = 0
       await saveFlowState(phone, state)
@@ -485,6 +477,18 @@ async function handleBackNavigation(
         ? `Por favor, escribí el *nombre completo* del familiar (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
         : `Por favor, escribí tu *nombre completo* (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
       return reRender(msg, 'awaiting_nombre')
+    }
+
+    case 'awaiting_telefono': {
+      // Sólo se alcanza en flujo de widget (ver getPreviousPhase).
+      state.telefonoContacto = undefined
+      state.phase = 'awaiting_telefono'
+      state.attempts = 0
+      await saveFlowState(phone, state)
+      const msg = state.esFamiliar
+        ? `Por favor, escribí el *número de WhatsApp* del familiar, con característica, sin el 0 ni el 15.\n\nPor ejemplo: *11 2345 6789*`
+        : `Por favor, escribí tu *número de WhatsApp*, con característica, sin el 0 ni el 15.\n\nPor ejemplo: *11 2345 6789*`
+      return reRender(msg, 'awaiting_telefono')
     }
 
     case 'awaiting_obra_social': {
@@ -723,20 +727,82 @@ async function handleNombrePhase(
   }
 
   state.nombre = parts.map(capitalize).join(' ')
-  state.phase = 'awaiting_obra_social'
   state.attempts = 0
-  await saveFlowState(phone, state)
-  logger.info('Nombre captured', { nombre: state.nombre, apellido: state.apellido })
 
-  const obraSocialMsg = state.esFamiliar
-    ? `Gracias. Ahora necesito saber la obra social o prepaga de *${state.nombre}*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tiene cobertura.`
-    : `Gracias ${state.nombre}. Ahora necesito saber tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenés cobertura.`
+  // Widget: no tenemos el WhatsApp del visitante — pedirlo antes del email.
+  // WhatsApp: el canal YA es el teléfono real, se salta directo a email.
+  if (state.channel === 'widget' && !state.telefonoContacto) {
+    state.phase = 'awaiting_telefono'
+    await saveFlowState(phone, state)
+    logger.info('Nombre captured, requesting telefono (widget)', { nombre: state.nombre, apellido: state.apellido })
+
+    const telefonoMsg = state.esFamiliar
+      ? `Gracias. Ahora necesito el *número de WhatsApp* del familiar, para enviarle recordatorios del turno.\n\nEscribilo con característica, sin el 0 ni el 15 (por ejemplo: *11 2345 6789*).`
+      : `Gracias, ${state.nombre}. Ahora necesito tu *número de WhatsApp*, para enviarte recordatorios del turno.\n\nEscribilo con característica, sin el 0 ni el 15 (por ejemplo: *11 2345 6789*).`
+
+    return {
+      handled: true,
+      message: telefonoMsg,
+      patientInfo: { dni: state.dni, name: `${state.nombre} ${state.apellido || ''}`.trim() },
+    }
+  }
+
+  state.phase = 'awaiting_email'
+  await saveFlowState(phone, state)
+  logger.info('Nombre captured, requesting email', { nombre: state.nombre, apellido: state.apellido })
+
+  const emailMsg = state.esFamiliar
+    ? `Para confirmar el turno, necesito el *correo electrónico* de ${state.nombre}.\n\nPor favor, escribí su email para enviarle la confirmación del turno.`
+    : buildEmailRequestMessage()
 
   return {
     handled: true,
-    message: obraSocialMsg,
+    message: emailMsg,
     patientInfo: { dni: state.dni, name: `${state.nombre} ${state.apellido || ''}`.trim() },
   }
+}
+
+/**
+ * Fase: Teléfono de WhatsApp (sólo flujo de widget — el visitante web es anónimo
+ * y no tenemos su número; en WhatsApp el canal ya ES el teléfono real).
+ * El número se usa para reservarTurno y, más adelante, para poder enviarle
+ * recordatorios por WhatsApp aunque haya agendado desde el sitio web.
+ */
+async function handleTelefonoPhase(
+  phone: string,
+  userMessage: string,
+  clientId: string,
+  state: NewPatientFlowState
+): Promise<NewPatientResult> {
+  const logger = createConversationLogger(phone, clientId, 'telefono_phase')
+
+  const soloDigitos = userMessage.replace(/\D/g, '')
+
+  // Validación de formato básica: entre 8 y 13 dígitos (cubre números argentinos
+  // con/sin característica y con/sin código de país).
+  if (soloDigitos.length < 8 || soloDigitos.length > 13) {
+    state.attempts += 1
+    await saveFlowState(phone, state)
+    if (state.attempts >= 3) {
+      return { handled: false, shouldCallOpenAI: true, openAIContext: 'Patient cannot provide valid telefono' }
+    }
+    return {
+      handled: true,
+      message: `No pude reconocer ese número. Por favor, escribilo con característica, sin el 0 ni el 15.\n\nPor ejemplo: *11 2345 6789*`,
+    }
+  }
+
+  state.telefonoContacto = soloDigitos
+  state.phase = 'awaiting_email'
+  state.attempts = 0
+  await saveFlowState(phone, state)
+  logger.info('Telefono captured', { telefonoLength: soloDigitos.length })
+
+  const emailMsg = state.esFamiliar
+    ? `Gracias. Para confirmar el turno, necesito el *correo electrónico* de ${state.nombre || 'el familiar'}.\n\nPor favor, escribí su email para enviarle la confirmación del turno.`
+    : buildEmailRequestMessage()
+
+  return { handled: true, message: emailMsg }
 }
 
 /**
@@ -994,7 +1060,9 @@ async function transitionToSedes(
 
   logger.info('Transitioned to sedes', { count: sedesResult.sedes.length })
 
-  const nombreCompleto = `${state.nombre} ${state.apellido}`
+  // Nombre/apellido aún no se piden en este punto del flujo (se piden después
+  // de elegir turno) — usar fallback vacío en vez de "undefined undefined".
+  const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
 
   // Si solo hay una sede, seleccionarla automáticamente y saltar al siguiente paso
   if (sedesResult.sedes.length === 1) {
@@ -1557,6 +1625,36 @@ async function handleTurnoPhase(
     state.turnoSeleccionado = result.selectedTurno
     state.attempts = 0
 
+    // Turno elegido → ahora sí se piden los datos personales (apellido, nombre,
+    // teléfono si es widget, email), en ese orden. Si ya los tenemos (ej: extraídos
+    // del mensaje inicial), se saltan automáticamente.
+    if (!state.apellido) {
+      state.phase = 'awaiting_apellido'
+      await saveFlowState(phone, state)
+      const apellidoMsg = state.esFamiliar
+        ? `¡Turno seleccionado! Ahora necesito algunos datos para completar la reserva.\n\nPrimero, escribí el *apellido* del familiar.\n\nPor ejemplo: *Pérez*`
+        : `¡Turno seleccionado! Ahora necesito algunos datos para completar la reserva.\n\nPrimero, escribí tu *apellido*.\n\nPor ejemplo: *Pérez*`
+      return { handled: true, message: apellidoMsg }
+    }
+
+    if (!state.nombre) {
+      state.phase = 'awaiting_nombre'
+      await saveFlowState(phone, state)
+      const nombreMsg = state.esFamiliar
+        ? `Gracias. Ahora escribí el *nombre completo* del familiar (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+        : `Gracias. Ahora escribí tu *nombre completo* (solo el nombre, sin apellido).\n\nPor ejemplo: *Juan Pablo*`
+      return { handled: true, message: nombreMsg }
+    }
+
+    if (state.channel === 'widget' && !state.telefonoContacto) {
+      state.phase = 'awaiting_telefono'
+      await saveFlowState(phone, state)
+      const telefonoMsg = state.esFamiliar
+        ? `Gracias. Ahora necesito el *número de WhatsApp* del familiar, para enviarle recordatorios del turno.\n\nEscribilo con característica, sin el 0 ni el 15 (por ejemplo: *11 2345 6789*).`
+        : `Gracias. Ahora necesito tu *número de WhatsApp*, para enviarte recordatorios del turno.\n\nEscribilo con característica, sin el 0 ni el 15 (por ejemplo: *11 2345 6789*).`
+      return { handled: true, message: telefonoMsg }
+    }
+
     if (!state.email) {
       state.phase = 'awaiting_email'
       await saveFlowState(phone, state)
@@ -1577,7 +1675,7 @@ async function handleTurnoPhase(
         nombreCompleto,
         state.sedeNombre,
         state.obraSocialNombre,
-        { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: state.telefono, esFamiliar: state.esFamiliar }
+        { apellido: state.apellido, nombre: state.nombre, dni: state.dni, telefono: state.telefonoContacto || phone, esFamiliar: state.esFamiliar }
       ),
       confirmationButtons: true,
     }
@@ -1606,7 +1704,7 @@ async function handleEmailPhase(
     state.attempts = 0
     await saveFlowState(phone, state)
 
-    const nombreCompleto = `${state.nombre} ${state.apellido}`
+    const nombreCompleto = `${state.nombre || ''} ${state.apellido || ''}`.trim()
     return {
       handled: true,
       message: buildConfirmationMessage(
@@ -1618,7 +1716,7 @@ async function handleEmailPhase(
           apellido: state.apellido,
           nombre: state.nombre,
           dni: state.dni,
-          telefono: state.telefono,
+          telefono: state.telefonoContacto || phone,
           email: state.email,
           esFamiliar: state.esFamiliar,
         }
@@ -1667,6 +1765,9 @@ async function handleConfirmationPhase(
   const result = await handleConfirmationResponse(userMessage, phone, clientId)
 
   if (result.confirmed === true) {
+    // IMPORTANTE: en flujo de widget, `phone` es un sessionId anónimo (web_...),
+    // no un teléfono real — usar el número que se pidió en awaiting_telefono.
+    // En WhatsApp, `phone` ya ES el teléfono real del paciente (comportamiento sin cambios).
     const reservaResult = await executeReservation(
       clientId,
       state.turnoSeleccionado!,
@@ -1674,7 +1775,7 @@ async function handleConfirmationPhase(
         nombre: state.nombre,
         apellido: state.apellido,
         dni: state.dni,
-        telefono: phone,
+        telefono: state.telefonoContacto || phone,
         email: state.email!,
         obraSocialId: state.obraSocialId,
         obraSocialNombre: state.obraSocialNombre,

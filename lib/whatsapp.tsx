@@ -4247,7 +4247,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           if (!patientResponse.exito || !patientResponse.datos) {
             // Familiar NO encontrado → iniciar flujo de paciente nuevo con ese DNI (modo familiar)
-            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, true, userMessage)
+            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, true, userMessage, 'whatsapp')
             if (newPatientResult?.handled && newPatientResult.message) {
               await sendExistingPatientResult(detectionCtx, newPatientResult, "familiar_new_patient")
               await completePatientDetectionFlow(userPhoneNumber, config.id)
@@ -4306,7 +4306,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         if (detectionResult?.action === 'new_patient_dni_pending') {
           // Paciente nuevo ingresó DNI — derivar al flujo de paciente nuevo
           const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
-          const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, false, userMessage)
+          const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, false, userMessage, 'whatsapp')
           if (newPatientResult?.handled && newPatientResult.message) {
             await sendExistingPatientResult(detectionCtx, newPatientResult, "new_patient_flow")
             await completePatientDetectionFlow(userPhoneNumber, config.id)

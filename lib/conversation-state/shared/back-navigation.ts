@@ -73,10 +73,15 @@ export function buildBackOption(isFirstStep: boolean): string {
 /** Fases terminales que nunca muestran opción de volver. */
 const TERMINAL_PHASES = new Set(['completed', 'abandoned', 'error'])
 
-/** Primer paso (sin paso previo) de cada flujo. */
+/**
+ * Primer paso (sin paso previo) de cada flujo.
+ * En el flujo nuevo, desde el reordenamiento (9/7/2026), los datos personales
+ * (apellido/nombre/telefono) se piden DESPUÉS de elegir el turno — el primer
+ * paso pasó a ser la obra social.
+ */
 const FIRST_STEP: Record<FlowKind, string> = {
   existing: 'awaiting_sede',
-  new: 'awaiting_apellido',
+  new: 'awaiting_obra_social',
 }
 
 /**
@@ -92,6 +97,9 @@ const HAS_PREV_PHASES = new Set([
   'awaiting_professional_selection',
   'awaiting_specialty_selection',
   'awaiting_turno_selection',
+  'awaiting_apellido', // sólo se alcanza en flujo nuevo, después de elegir turno
+  'awaiting_nombre',
+  'awaiting_telefono', // sólo en flujo nuevo por widget
   'awaiting_email',
   'awaiting_confirmation',
   'awaiting_modify_selection',
@@ -140,27 +148,29 @@ export function withBackOption(
 export interface PreviousPhaseContext {
   flow: FlowKind
   searchType?: string
+  /** Canal de origen del flujo nuevo — determina si 'awaiting_telefono' es parte de la secuencia. */
+  channel?: 'whatsapp' | 'widget'
 }
 
 /**
  * Resuelve la fase previa a la fase actual.
  * Devuelve `MAIN_MENU` cuando el paso actual es el primero del flujo.
+ *
+ * Flujo nuevo (desde el reordenamiento del 9/7/2026): obra social -> sede ->
+ * tipo de búsqueda -> (profesional/especialidad) -> turno -> apellido ->
+ * nombre -> [teléfono, sólo widget] -> email -> confirmación.
  */
 export function getPreviousPhase(
   currentPhase: string,
   ctx: PreviousPhaseContext
 ): string {
-  const { flow, searchType } = ctx
+  const { flow, searchType, channel } = ctx
 
   // Primer paso de cada flujo -> menú principal
   if (currentPhase === FIRST_STEP[flow]) return MAIN_MENU
 
   switch (currentPhase) {
-    // --- Flujo nuevo (pasos previos a la sede) ---
-    case 'awaiting_nombre':
-      return 'awaiting_apellido'
-    case 'awaiting_obra_social':
-      return 'awaiting_nombre'
+    // --- Flujo nuevo: obra social y sede ---
     case 'awaiting_obra_social_selection':
       return 'awaiting_obra_social'
     case 'awaiting_sede':
@@ -184,10 +194,17 @@ export function getPreviousPhase(
       // cualquier_medico u otros -> volver a elegir tipo de búsqueda
       return 'awaiting_search_type'
 
+    // --- Flujo nuevo: datos personales (después de elegir turno) ---
+    case 'awaiting_apellido':
+      return 'awaiting_turno_selection'
+    case 'awaiting_nombre':
+      return 'awaiting_apellido'
+    case 'awaiting_telefono':
+      return 'awaiting_nombre'
     case 'awaiting_email':
-      return 'awaiting_turno_selection'
+      return channel === 'widget' ? 'awaiting_telefono' : 'awaiting_nombre'
     case 'awaiting_confirmation':
-      return 'awaiting_turno_selection'
+      return 'awaiting_email'
 
     // --- Modificación de datos -> volver a la confirmación ---
     case 'awaiting_modify_selection':
