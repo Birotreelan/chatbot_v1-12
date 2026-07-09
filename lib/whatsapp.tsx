@@ -1851,6 +1851,7 @@ async function runInterjectionInActiveFlow(
   userMessage: string,
   config: any,
   value: any,
+  isPatientDetectionFlow: boolean = false,
 ): Promise<boolean> {
   const routerLogger = createConversationLogger(userPhoneNumber, config.id, "router-interjection")
   try {
@@ -1940,6 +1941,36 @@ async function runInterjectionInActiveFlow(
     ) {
       routerLogger.info('[Router intercalada] Cede al pipeline', { action: action.type })
       return false
+    }
+
+    // El flujo de detección de paciente (patient_detection) es determinístico y
+    // NO usa el marcador "Para continuar con tu turno:" para su paso actual — ese
+    // marcador pertenece a los flujos legacy de reserva paso a paso. Si acá
+    // scrapeábamos el historial igual (rama de abajo), podíamos resucitar un
+    // mensaje viejo y ya completado (ej: el menú de "tipo de turno" de una
+    // reserva anterior) como si fuera el paso pendiente actual. Para este flujo
+    // resumimos con su propio menú vigente (respeta ventana de recordatorio) en
+    // vez de tocar el historial. Caso Liliana, tel. 1155891028, 9/7/2026: ver
+    // PLAN-DE-TRABAJO.md.
+    if (isPatientDetectionFlow) {
+      const answerDet = (action.type === 'send_and_return' || action.type === 'derive_external')
+        ? action.message.replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '').trimEnd()
+        : ''
+      const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+      const menuMsg = det?.handled && det.message ? det.message : ''
+      const combined = answerDet && menuMsg
+        ? `${answerDet}\n\n${menuMsg}`
+        : (answerDet || menuMsg || 'Perdón, no te entendí. ¿Podés repetirlo?')
+      const ctxDet: DirectResponseContext = {
+        phoneNumberId: value.metadata.phone_number_id,
+        accessToken: config.accessToken,
+        userPhoneNumber,
+        configId: config.id,
+        clienteId: config.cliente_id,
+      }
+      await sendDirectResponse(ctxDet, combined, "router-interjection-patient-detection-resume", (det as any)?.buttons)
+      routerLogger.info('[Router intercalada] Consulta respondida + menú de detección retomado')
+      return true
     }
 
     // A partir de acá NO cedemos al handler del paso (rechazaría el texto libre como dato).
@@ -3124,7 +3155,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // Incremento 2 (universal): cualquier texto que NO sea un input obvio del paso
           // pasa por el router → decide input válido vs consulta intercalada, y nunca deja
           // que el handler del paso rechace una pregunta.
-          const handled = await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value)
+          const handled = await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value, detActive)
           if (handled) return
         }
       }
@@ -5063,7 +5094,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           isNewPatientFlowActive(userPhoneNumber),
           getBookingFlowState(userPhoneNumber, config.id),
         ])
-        const inRealFlow = detA || exA || npA || !!bkA
+        // NOTA: detA (patient_detection) queda afuera de "inRealFlow" a propósito.
+        // Ese flujo es determinístico y tiene su propio mecanismo de resume
+        // (initializePatientDetection → menú actual reconstruido desde el estado
+        // en Redis, respetando la ventana de recordatorio). Incluirlo acá hacía
+        // que se reutilizara el hist-scrape de más abajo (pensado para los flujos
+        // legacy de reserva paso a paso vía OpenAI), lo que podía resucitar un
+        // mensaje viejo del historial de conversación como si fuera el paso
+        // actual — ej. un menú "¿qué tipo de turno necesitas?" de una intención
+        // de reserva anterior, mostrado fuera de contexto. Caso Liliana, tel.
+        // 1155891028, 9/7/2026: ver PLAN-DE-TRABAJO.md.
+        const inRealFlow = exA || npA || !!bkA
         const reschedActive = await isRescheduleFlowActive(userPhoneNumber, config.id)
         // Si hay reagendamiento activo, dejamos que siga por el enqueue (camino legacy).
         if (!reschedActive) {
@@ -5074,7 +5115,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             configId: config.id,
             clienteId: config.cliente_id,
           }
-          if (inRealFlow) {
+          if (detA) {
+            // Flujo de detección de paciente activo: resumir con el menú
+            // determinístico real (respeta ventana de recordatorio), nunca
+            // con historial de OpenAI.
+            const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
+            if (det?.handled && det.message) {
+              await sendDirectResponse(ctxFallback, det.message, "router-fallback-patient-detection-resume", (det as any).buttons)
+            }
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          } else if (inRealFlow) {
             const hist = await import('./conversation-state/conversation-history')
               .then((m) => m.getHistory(userPhoneNumber)).catch(() => [] as any[])
             const TRANSITION = 'Para continuar con tu turno:'

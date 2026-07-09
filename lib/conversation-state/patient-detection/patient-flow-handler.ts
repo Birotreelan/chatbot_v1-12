@@ -682,7 +682,7 @@ export async function processPatientDetectionMessage(
           delete state.postActionContext
           // Mantener phase en awaiting_action_selection para seguir aceptando selecciones
           await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
-          const fullMenu = buildPostActionMenu(firstName, state.turnos || [])
+          const fullMenu = buildPostActionMenu(firstName, state.turnos || [], undefined, undefined, state.hasReminder ?? false)
           return {
             handled: true,
             action: 'go_back_to_menu',
@@ -1152,7 +1152,7 @@ export async function returnPatientToMenu(
   const firstName =
     state.patientFirstName ||
     (state.patientName ? state.patientName.split(' ')[0] : 'Paciente')
-  return buildPostActionMenu(firstName, state.turnos || [], undefined, postActionContext)
+  return buildPostActionMenu(firstName, state.turnos || [], undefined, postActionContext, state.hasReminder ?? false)
 }
 
 /**

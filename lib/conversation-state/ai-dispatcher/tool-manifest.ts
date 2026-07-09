@@ -189,6 +189,7 @@ Usá este tool para:
 - Agradecimientos: "Muchas gracias", "Muy amable".
 - Despedidas: "Hasta luego", "Chau".
 - Preguntas sobre el proceso de reserva/atención: "¿voy a poder elegir el turno?", "¿puedo cancelar después?", "¿es obligatorio darte la obra social?". Respondé breve y veraz (sí va a poder elegir/continuar), sin inventar horarios/precios/datos.
+NO usar para preguntas sobre qué llevar, requisitos, ayuno, duración o preparación para un turno/estudio (ej: "¿debo llevar algo?", "¿tengo que estar en ayunas?") — eso es derivar_consulta_externa, aunque suene casual. Este tool NUNCA debe inventar información clínica o administrativa que el sistema no tiene.
 Responde con empatía y sin iniciar ningún flujo.`,
       parameters: {
         type: 'object',

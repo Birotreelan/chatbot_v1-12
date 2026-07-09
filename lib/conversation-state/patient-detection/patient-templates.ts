@@ -522,7 +522,8 @@ export function buildPostActionMenu(
   firstName: string,
   turnos: any[],
   clinicName: string = DEFAULT_CLINIC_NAME,
-  postActionContext?: 'just_confirmed' | 'just_cancelled'
+  postActionContext?: 'just_confirmed' | 'just_cancelled',
+  hasReminder: boolean = false
 ): string {
   const hasTurnos = turnos && turnos.length > 0
 
@@ -556,23 +557,42 @@ export function buildPostActionMenu(
       msg += `0- Volver al menú anterior\n\n`
     } else if (postActionContext === 'just_cancelled') {
       // El paciente acaba de cancelar: no ofrecer cancelación nuevamente de inmediato.
-      // Menú mínimo: confirmar si el turno lo requiere, o solo consulta / menú completo.
-      if (cat === 'no_confirmado') {
+      // Menú mínimo: confirmar si el turno lo requiere Y hay recordatorio enviado
+      // (mismo criterio que shouldOfferConfirmation), o solo consulta / menú completo.
+      if (cat === 'no_confirmado' && hasReminder) {
         msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
         msg += `1- Confirmar asistencia al turno médico\n`
         msg += `2- Realizar otra consulta\n`
+        msg += `0- Volver al menú anterior\n\n`
+      } else if (cat === 'no_confirmado') {
+        // Sin recordatorio enviado: el turno está lejos, no ofrecer confirmación todavía.
+        msg += `Tenés un turno médico agendado: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+        msg += `1- Realizar otra consulta\n`
         msg += `0- Volver al menú anterior\n\n`
       } else {
         msg += `Tu turno del ${fecha} a las ${hora} con ${prof} en ${sede} *ya está confirmado*.\n\n`
         msg += `1- Realizar otra consulta\n`
         msg += `0- Volver al menú anterior\n\n`
       }
-    } else if (cat === 'no_confirmado') {
+    } else if (cat === 'no_confirmado' && hasReminder) {
+      // Turno no confirmado Y se envió recordatorio → ofrecer confirmación
+      // (mismo criterio que shouldOfferConfirmation/processPatientDetectionMessage).
       msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
       msg += `1- Confirmar asistencia al turno médico\n`
       msg += `2- Cancelar turno médico\n`
       msg += `3- Cancelar el turno médico y solicitar uno nuevo\n`
       msg += `4- Realizar otra consulta\n\n`
+    } else if (cat === 'no_confirmado') {
+      // Sin recordatorio enviado: el turno está lejos, no ofrecer confirmación todavía.
+      // (antes se ofrecía siempre "Confirmar asistencia" acá, aunque el actionMap
+      // de processPatientDetectionMessage YA excluía esa opción por falta de
+      // recordatorio — el mensaje mostrado no coincidía con lo que "1" realmente
+      // hacía, causando que "1" terminara cancelando el turno. Caso Liliana,
+      // tel. 1155891028, 9/7/2026: ver PLAN-DE-TRABAJO.md.)
+      msg += `Tenés un turno médico agendado: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+      msg += `1- Cancelar turno médico\n`
+      msg += `2- Cancelar el turno médico y solicitar uno nuevo\n`
+      msg += `3- Realizar otra consulta\n\n`
     } else if (cat === 'confirmado') {
       // Turno ya confirmado → no ofrecer "Confirmar asistencia" de nuevo
       msg += `Tu turno del ${fecha} a las ${hora} con ${prof} en ${sede} *ya está confirmado*.\n\n`

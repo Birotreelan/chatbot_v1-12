@@ -193,6 +193,21 @@ export async function detectMenuOption(
 }
 
 /**
+ * ¿El mensaje contiene el keyword como palabra/frase completa (no como substring
+ * pegado a otras letras)? Evita falsos positivos como "no" matcheando dentro de
+ * "turno", "notas", "nosotros", etc. — antes se usaba un `.includes()` plano.
+ * Caso real: "1 confirmo el turno para el día 31 de julio..." matcheaba la
+ * keyword "no" (de "Cancelar turno médico") por estar contenida en "turNO",
+ * disparando erróneamente el flujo de cancelación. Ver PLAN-DE-TRABAJO.md.
+ */
+function containsKeyword(normalizedMessage: string, keyword: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // Bordes "manuales" Unicode-aware: no debe estar pegado a otra letra/número.
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu')
+  return re.test(normalizedMessage)
+}
+
+/**
  * Detecta opciones usando keyword matching
  * Rápido (< 1ms), altamente confiable
  */
@@ -208,8 +223,8 @@ function detectByKeywords(
   for (const option of menuOptions) {
     let matches = 0
     for (const keyword of option.keywords) {
-      // Buscar palabra clave como palabra completa o substring
-      if (normalizedMessage.includes(keyword)) {
+      // Palabra/frase completa, no substring pegado (ver containsKeyword arriba).
+      if (containsKeyword(normalizedMessage, keyword)) {
         matches++
       }
     }
