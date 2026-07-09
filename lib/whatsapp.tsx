@@ -1681,6 +1681,16 @@ async function handleDeriveToHuman(
   }
 }
 
+/**
+ * Mensaje para cuando el paciente intenta confirmar/cancelar asistencia fuera de la
+ * ventana de recordatorio (dispatcherAppCtx null = todavía no se le mandó el template
+ * de recordatorio 24-48hs antes del turno). Es comportamiento esperado del negocio —
+ * antes esto no respondía nada y el flujo caía en "Perdón, no te entendí" repetido.
+ */
+function buildConfirmNotYetMessage(): string {
+  return "Tu turno ya está agendado, todavía no hace falta que confirmes — antes de la fecha te vamos a mandar un recordatorio para que confirmes o canceles tu asistencia. Si necesitás algo más mientras tanto, decime."
+}
+
 async function runPrimaryDispatcherNoFlow(
   userPhoneNumber: string,
   userMessage: string,
@@ -1778,6 +1788,10 @@ async function runPrimaryDispatcherNoFlow(
       if (dispatcherAppCtx) {
         const confirmMsg = buildConfirmationMessage(dispatcherAppCtx, 0)
         await sendDirectResponse(ctxDirect, confirmMsg, "router-primary-confirm")
+      } else {
+        // Fuera de la ventana de recordatorio (24-48hs antes del turno) — no confirmamos
+        // todavía, pero le explicamos por qué en vez de dejarlo sin respuesta.
+        await sendDirectResponse(ctxDirect, buildConfirmNotYetMessage(), "router-primary-confirm-not-yet")
       }
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
       return true
@@ -1894,6 +1908,24 @@ async function runInterjectionInActiveFlow(
         return true
       }
       return false
+    }
+
+    // Intento de confirmar/cancelar asistencia en medio de otro flujo activo (ej: viendo
+    // el menú de acciones del turno) y todavía sin ventana de recordatorio abierta.
+    // Antes esto se cedía al pipeline, pero el handler del paso activo no sabe
+    // interpretar "confirmo mi presencia" (solo entiende 1/2/3) y terminaba en
+    // "Perdón, no te entendí" en loop. Lo resolvemos acá directamente.
+    if (action.type === 'trigger_confirm_appointment' && !dispatcherAppCtx) {
+      const ctxNotYet: DirectResponseContext = {
+        phoneNumberId: value.metadata.phone_number_id,
+        accessToken: config.accessToken,
+        userPhoneNumber,
+        configId: config.id,
+        clienteId: config.cliente_id,
+      }
+      await sendDirectResponse(ctxNotYet, buildConfirmNotYetMessage(), "router-interjection-confirm-not-yet")
+      routerLogger.info('[Router intercalada] Confirmación fuera de ventana de recordatorio — respondida directamente')
+      return true
     }
 
     // Respuesta válida al paso, o cambio de intención REAL → ceder al pipeline
@@ -4876,6 +4908,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               if (dispatcherAppCtx) {
                 const confirmMsg = buildConfirmationMessage(dispatcherAppCtx, 0)
                 await sendDirectResponse(dispatcherCtxDirect, confirmMsg, "ai-dispatcher-confirm")
+              } else {
+                await sendDirectResponse(dispatcherCtxDirect, buildConfirmNotYetMessage(), "ai-dispatcher-confirm-not-yet")
               }
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
