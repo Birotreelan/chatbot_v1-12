@@ -1589,16 +1589,18 @@ async function sendHumanOffer(
   await sendDirectResponse(ctx, offerMessage, "human-offer", buttons)
 }
 
-/** Botones de respuesta rápida para la oferta de atención humana (2 opciones). */
+/** Botón de respuesta rápida para la oferta de atención humana (una sola opción). */
 const HUMAN_OFFER_BUTTONS: Array<{ id: string; title: string }> = [
   { id: "1", title: "Atención humana" },
-  { id: "2", title: "Me comunico" },
 ]
 
 /**
  * Gate para las derivaciones al teléfono: si la clínica ofrece atención humana y estamos
- * en horario, ofrece primero hablar con una persona (y deja el teléfono como opción "2").
- * Si no, envía directamente el mensaje con el teléfono, como veníamos haciendo.
+ * en horario, ofrece primero hablar con una persona (un solo botón: "1. Requiero atención
+ * humana"; el teléfono ya se menciona en el cuerpo del mensaje como alternativa). Si el
+ * paciente no elige "1" (ni presiona el botón), se envía el mensaje original con el
+ * teléfono como respuesta por defecto (declineMessage). Si `shouldOfferHuman` da false,
+ * envía directamente el mensaje con el teléfono, como veníamos haciendo.
  */
 async function offerHumanOrSendPhone(
   ctx: DirectResponseContext,
@@ -1611,12 +1613,10 @@ async function offerHumanOrSendPhone(
     const escalationPhone = config.escalationPhoneNumber
     const phoneRef = escalationPhone ? `*${escalationPhone}*` : "la clínica"
     const offerMessage =
-      `Actualmente estás conectado a Iris, un asistente virtual de inteligencia artificial que solo está ` +
-      `preparado para la gestión de turnos. Para otro tipo de consultas puedo derivarte a la atención humana ` +
-      `de ${clinicName} y te atenderán en breve por este mismo canal o puedes contactarnos al ${phoneRef}. ` +
-      `Por favor seleccioná la opción deseada:\n\n` +
-      `1. Requiero atención humana.\n` +
-      `2. Me comunicaré al ${escalationPhone ? escalationPhone : "teléfono de la clínica"}`
+      `Actualmente estás hablando con Iris, un asistente virtual de inteligencia artificial que solo está preparado para la gestión de turnos.\n\n` +
+      `Para otro tipo de consultas puedo derivarte a la atención humana de ${clinicName} y te atenderán en breve por este mismo canal o puedes contactarnos al ${phoneRef}.\n\n` +
+      `Por favor respondé presionando 1 o el botón aquí debajo si deseas hablar con el personal de ${clinicName}:\n\n` +
+      `1. Requiero atención humana.`
     await sendHumanOffer(ctx, config, offerMessage, phoneMessage, HUMAN_OFFER_BUTTONS)
     return
   }
@@ -2369,11 +2369,15 @@ export async function handleMessage(value: any) {
           return
         } else {
           // Respuesta no reconocida → re-ofrecer.
+          // Si la oferta trae declineMessage, viene del gate de un solo botón
+          // (offerHumanOrSendPhone): no mencionamos una opción "2" que no existe.
+          // Si no, es la oferta explícita de 2 botones (handleDeriveToHuman).
           await savePatientMsg()
-          const reOfferMsg =
-            `Por favor elegí una opción:\n\n` +
-            `1. Sí, quiero atención humana\n` +
-            `2. No, sigo con el asistente`
+          const reOfferMsg = pendingOffer.declineMessage
+            ? `Por favor respondé presionando 1 o el botón para que te conectemos con una persona del equipo. Si preferís seguir con el asistente, contame en qué te puedo ayudar.`
+            : `Por favor elegí una opción:\n\n` +
+              `1. Sí, quiero atención humana\n` +
+              `2. No, sigo con el asistente`
           await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, reOfferMsg)
           await updateWhatsAppStats(config.id, { messagesReceived: 1 })
           return
