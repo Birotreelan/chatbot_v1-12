@@ -1,4 +1,15 @@
 /**
+ * Enmascara un token/secreto para logging seguro.
+ * Nunca loguear el token completo: queda expuesto en runtime logs de Vercel
+ * (accesibles a cualquiera con permisos de lectura de logs del proyecto).
+ */
+function maskToken(token: string | undefined | null): string {
+  if (!token) return "(vacío)"
+  if (token.length <= 8) return "***"
+  return `${token.slice(0, 4)}...${token.slice(-4)} (len=${token.length})`
+}
+
+/**
  * Normaliza un número de teléfono al formato internacional de WhatsApp
  * Ejemplo: "3413121395" -> "5493413121395"
  *
@@ -91,8 +102,7 @@ export async function sendWhatsAppMessage(
     console.log("[v0] [WHATSAPP_API] phoneNumberId:", phoneNumberId)
     console.log("[v0] [WHATSAPP_API] to (original):", to)
     console.log("[v0] [WHATSAPP_API] message:", message)
-    console.log("[v0] [WHATSAPP_API] accessToken length:", accessToken?.length || 0)
-    console.log("[v0] [WHATSAPP_API] accessToken:", accessToken)
+    console.log("[v0] [WHATSAPP_API] accessToken:", maskToken(accessToken))
 
     const normalizedPhone = normalizePhoneNumber(to)
 
@@ -257,7 +267,7 @@ export async function sendWhatsAppTemplate(
   wabaId?: string,
 ): Promise<any> {
   try {
-    console.log("[v0] [WHATSAPP_API] sendWhatsAppTemplate - accessToken:", accessToken)
+    console.log("[v0] [WHATSAPP_API] sendWhatsAppTemplate - accessToken:", maskToken(accessToken))
     const normalizedPhone = normalizePhoneNumber(to)
 
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`

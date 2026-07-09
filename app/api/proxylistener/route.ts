@@ -441,7 +441,10 @@ async function handleTemplateSend(data: any) {
       active: config.active,
       hasToken: !!config.accessToken,
     })
-    console.log("[PROXYLISTENER] AccessToken desde config (Redis):", config.accessToken)
+    console.log(
+      "[PROXYLISTENER] AccessToken desde config (Redis):",
+      config.accessToken ? `${config.accessToken.slice(0, 4)}...${config.accessToken.slice(-4)}` : "(vacío)",
+    )
 
     if (!config.active) {
       return NextResponse.json(

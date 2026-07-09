@@ -4,6 +4,7 @@
  */
 
 import { getRedisClient } from '@/lib/redis'
+import { ClinicAPI } from '../../clinic-api'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
