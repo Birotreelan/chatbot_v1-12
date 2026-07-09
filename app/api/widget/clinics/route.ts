@@ -7,6 +7,10 @@ import { getAllWhatsAppConfigs } from "@/lib/db"
  * de configuración completo, incluyendo accessToken/verifyToken/proxy), acá
  * sólo se exponen los campos necesarios para elegir a qué clínica apuntar el
  * widget de prueba.
+ *
+ * `whatsappNumber` se expone porque es el mismo número público que ya recibe
+ * mensajes de pacientes por WhatsApp (no es un secreto) — lo usa el botón de
+ * demo del widget de WhatsApp para armar el link de wa.me.
  */
 export async function GET() {
   try {
@@ -19,6 +23,7 @@ export async function GET() {
         displayName: config.displayName || config.alias || (config.cliente_id as string),
         widgetEnabled: config.widgetEnabled !== false,
         active: config.active !== false,
+        whatsappNumber: config.whatsappNumber || "",
       }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName, "es"))
 

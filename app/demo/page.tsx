@@ -11,12 +11,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { WhatsAppCtaPreview } from "@/components/dashboard/whatsapp-cta-preview"
 
 interface ClinicOption {
   cliente_id: string
   displayName: string
   widgetEnabled: boolean
   active: boolean
+  whatsappNumber?: string
 }
 
 interface WidgetPublicConfig {
@@ -291,6 +293,21 @@ export default function DemoPage() {
                   clínica) aparece en la esquina inferior derecha de esta página — así se prueba también el
                   widget-loader.js tal como lo ve un visitante.
                 </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Widget de WhatsApp</CardTitle>
+                <CardDescription>
+                  Botón directo a WhatsApp para quien prefiera esa vía en vez del chat embebido.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <WhatsAppCtaPreview
+                  clinicName={selectedClinic?.displayName || ""}
+                  whatsappNumber={selectedClinic?.whatsappNumber}
+                />
               </CardContent>
             </Card>
 
