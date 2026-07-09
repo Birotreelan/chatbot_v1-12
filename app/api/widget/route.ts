@@ -36,6 +36,9 @@ export async function GET(request: Request) {
     // teléfono de escalación a cualquier visitante del sitio público.
     // Cache CDN de Vercel: s-maxage=300 → los hits repetidos se sirven desde el
     // CDN sin invocar la función ni tocar Redis.
+    // `whatsappNumber` se suma acá (9/7/2026) para el widget flotante de WhatsApp
+    // (public/whatsapp-widget-loader.js) — no es un dato sensible, es el mismo
+    // número al que ya escriben los pacientes.
     return NextResponse.json(
       {
         id: config.id,
@@ -48,6 +51,7 @@ export async function GET(request: Request) {
         widgetFloatingButtonText: config.widgetFloatingButtonText,
         widgetPrimaryColor: config.widgetPrimaryColor,
         widgetSecondaryColor: config.widgetSecondaryColor,
+        whatsappNumber: config.whatsappNumber || "",
       },
       {
         headers: {

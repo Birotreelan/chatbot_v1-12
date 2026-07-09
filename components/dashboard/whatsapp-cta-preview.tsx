@@ -1,19 +1,11 @@
 "use client"
 
-import type React from "react"
-
-import { Bot, Copy } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { useToast } from "@/hooks/use-toast"
+import { Bot } from "lucide-react"
 
 interface WhatsAppCtaPreviewProps {
   clinicName: string
   whatsappNumber?: string
 }
-
-// Mensaje predefinido que llega ya escrito en WhatsApp al tocar el botón.
-// Dirigido a Iris en primera persona, como lo escribiría un paciente real.
-const PRESET_MESSAGE = "¡Hola Iris! 👋 Quiero agendar un turno."
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -23,75 +15,42 @@ function WhatsAppIcon({ className }: { className?: string }) {
   )
 }
 
-function buildWhatsAppUrl(digits: string, message: string) {
-  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
-}
-
+/**
+ * Ya no renderiza un botón/CTA grande — eso ahora es el widget flotante real
+ * (public/whatsapp-widget-loader.js, esquina inferior izquierda, mismo patrón
+ * que el chat pero mucho más chico). Este componente queda como la
+ * descripción de qué hace ese widget, dentro de la card de la demo.
+ */
 export function WhatsAppCtaPreview({ clinicName, whatsappNumber }: WhatsAppCtaPreviewProps) {
-  const { toast } = useToast()
   const digits = (whatsappNumber || "").replace(/\D/g, "")
   const hasNumber = digits.length >= 8
-  const waUrl = hasNumber ? buildWhatsAppUrl(digits, PRESET_MESSAGE) : ""
-
-  const copyLink = async () => {
-    if (!waUrl || typeof navigator === "undefined" || !navigator.clipboard) return
-    try {
-      await navigator.clipboard.writeText(waUrl)
-      toast({ title: "Copiado", description: "El enlace de WhatsApp se copió al portapapeles." })
-    } catch (error) {
-      console.error("Error al copiar el enlace de WhatsApp:", error)
-    }
-  }
 
   return (
-    <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-emerald-50 p-6">
+    <div>
       <div className="flex items-start gap-4">
         <div className="relative shrink-0">
-          <div className="h-14 w-14 rounded-full bg-[#25D366] flex items-center justify-center shadow-lg shadow-emerald-200">
-            <WhatsAppIcon className="h-7 w-7 text-white" />
+          <div className="h-12 w-12 rounded-full bg-[#25D366] flex items-center justify-center shadow-md shadow-emerald-200">
+            <WhatsAppIcon className="h-6 w-6 text-white" />
           </div>
           {/* Insignia que marca que del otro lado responde un asistente de IA, no una línea humana */}
-          <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-sky-600 border-2 border-white flex items-center justify-center">
-            <Bot className="h-3.5 w-3.5 text-white" />
+          <div className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-sky-600 border-2 border-white flex items-center justify-center">
+            <Bot className="h-3 w-3 text-white" />
           </div>
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-gray-900">¿Preferís WhatsApp?</h3>
-          <p className="text-sm text-gray-600 mt-0.5">
-            Hablá directo con <span className="font-medium text-gray-800">Iris</span>, la asistente virtual de{" "}
+          <p className="text-sm text-gray-600">
+            Hablá directo con <span className="font-medium text-gray-800">Iris</span>, la asistente de IA de{" "}
             {clinicName || "la clínica"}, y agendá tu turno en segundos.
           </p>
         </div>
       </div>
 
-      <div className="mt-5">
-        {hasNumber ? (
-          <>
-            <a
-              href={waUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-[#25D366] hover:bg-[#20bd5a] text-white font-medium py-3 px-6 shadow-md shadow-emerald-200 transition-colors"
-            >
-              <WhatsAppIcon className="h-5 w-5" />
-              Escribirle a Iris por WhatsApp
-            </a>
-            <div className="flex items-center justify-between gap-3 mt-3">
-              <p className="text-xs text-gray-500 truncate">
-                Mensaje predefinido: <span className="italic">"{PRESET_MESSAGE}"</span>
-              </p>
-              <Button variant="ghost" size="sm" className="text-xs shrink-0" onClick={copyLink}>
-                <Copy className="h-3.5 w-3.5 mr-1" />
-                Copiar enlace
-              </Button>
-            </div>
-          </>
-        ) : (
-          <p className="text-sm text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
-            Esta clínica no tiene un "Número de WhatsApp" cargado en su configuración — no se puede generar el enlace.
-          </p>
-        )}
-      </div>
+      {!hasNumber && (
+        <p className="text-sm text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 mt-4">
+          Esta clínica no tiene un "Número de WhatsApp" cargado en su configuración — el botón flotante no se muestra
+          hasta que lo cargue.
+        </p>
+      )}
     </div>
   )
 }

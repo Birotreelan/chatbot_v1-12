@@ -36,11 +36,18 @@ interface WidgetPublicConfig {
 }
 
 const WIDGET_SCRIPT_ID = "demo-widget-loader-script"
+const WHATSAPP_WIDGET_SCRIPT_ID = "demo-whatsapp-widget-loader-script"
 
 function removeFloatingWidget() {
   document.getElementById("chat-widget-button")?.remove()
   document.getElementById("chat-widget-container")?.remove()
   document.getElementById(WIDGET_SCRIPT_ID)?.remove()
+}
+
+function removeFloatingWhatsAppWidget() {
+  document.getElementById("iris-whatsapp-widget-button")?.remove()
+  document.getElementById("iris-whatsapp-widget-styles")?.remove()
+  document.getElementById(WHATSAPP_WIDGET_SCRIPT_ID)?.remove()
 }
 
 export default function DemoPage() {
@@ -115,11 +122,20 @@ export default function DemoPage() {
     script.setAttribute("data-client-id", clienteId)
     document.body.appendChild(script)
 
+    removeFloatingWhatsAppWidget()
+    const whatsappScript = document.createElement("script")
+    whatsappScript.id = WHATSAPP_WIDGET_SCRIPT_ID
+    whatsappScript.src = "/whatsapp-widget-loader.js"
+    whatsappScript.async = true
+    whatsappScript.setAttribute("data-client-id", clienteId)
+    document.body.appendChild(whatsappScript)
+
     setPreviewKey((k) => k + 1)
 
     return () => {
       cancelled = true
       removeFloatingWidget()
+      removeFloatingWhatsAppWidget()
     }
   }, [clienteId])
 
@@ -300,7 +316,8 @@ export default function DemoPage() {
               <CardHeader>
                 <CardTitle>Widget de WhatsApp</CardTitle>
                 <CardDescription>
-                  Botón directo a WhatsApp para quien prefiera esa vía en vez del chat embebido.
+                  Botón flotante chico, esquina inferior izquierda — para quien prefiera esa vía en vez del chat
+                  embebido.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -308,6 +325,26 @@ export default function DemoPage() {
                   clinicName={selectedClinic?.displayName || ""}
                   whatsappNumber={selectedClinic?.whatsappNumber}
                 />
+                <p className="text-xs text-gray-500 mt-4">
+                  El botón real (mismo script que se integra en el sitio de la clínica) aparece en la esquina
+                  inferior izquierda de esta página.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Integración WhatsApp</CardTitle>
+                <CardDescription>
+                  Código para embeber el botón de WhatsApp en el sitio de la clínica seleccionada.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                  <code className="text-sm whitespace-pre">
+                    {`<script\n  src="${baseUrl || "https://tu-dominio.com"}/whatsapp-widget-loader.js"\n  data-client-id="${clienteId}"\n></script>`}
+                  </code>
+                </div>
               </CardContent>
             </Card>
 

@@ -43,7 +43,13 @@ export function middleware(request: NextRequest) {
   }
 
   // Aplicar CORS para todas las rutas del widget
-  if (pathname.startsWith("/widget") || pathname.startsWith("/api/chat")) {
+  // NOTA (9/7/2026): se agregó "/api/widget" acá — antes sólo cubría la página
+  // /widget y /api/chat, pero widget-loader.js y whatsapp-widget-loader.js
+  // corren en el dominio de la clínica (otro origen) y hacen fetch a
+  // /api/widget para traer la configuración pública. Sin este header el
+  // navegador bloquea la lectura de esa respuesta por CORS — el widget
+  // embebido en un sitio externo real nunca podía leer su propia config.
+  if (pathname.startsWith("/widget") || pathname.startsWith("/api/widget") || pathname.startsWith("/api/chat")) {
     const response = NextResponse.next()
 
     // Headers CORS completos
