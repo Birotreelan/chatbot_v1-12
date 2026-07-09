@@ -808,9 +808,10 @@ async function handleObraSocialPhase(
         return {
           handled: true,
           message: contactMsg,
+          action: 'obra_social_no_permite_turnos_online',
         }
       }
-      
+
       state.obraSocialId = obraSocial.id
       state.obraSocialNombre = obraSocial.nombre
       state.obraSocialValidada = true
@@ -928,6 +929,7 @@ async function handleObraSocialSelectionPhase(
         return {
           handled: true,
           message: contactMsgSel,
+          action: 'obra_social_no_permite_turnos_online',
         }
       }
       

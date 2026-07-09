@@ -1,4 +1,4 @@
-import { getWhatsAppConfigByPhoneId, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId, clearAllConversationStates } from "@/lib/db"
+import { getWhatsAppConfigByPhoneId, getWhatsAppConfigById, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId, clearAllConversationStates } from "@/lib/db"
 import { sendWhatsAppMessage, sendWhatsAppInteractive, sendWhatsAppList } from "@/lib/whatsapp-api"
 import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
 import { getAssistantResponse } from "@/lib/openai-tools"
@@ -292,6 +292,7 @@ async function sendExistingPatientResult(
   ctx: DirectResponseContext,
   result: {
     message?: string
+    action?: string
     sedesListRows?: Array<{ id: string; title: string; description?: string }>
     searchTypeButtons?: Array<{ id: string; title: string }>
     turnosButtons?: Array<{ id: string; title: string }>
@@ -302,6 +303,18 @@ async function sendExistingPatientResult(
   phase = "existing_patient_flow"
 ): Promise<void> {
   if (!result.message) return
+
+  // Obra social no habilitada para turnos online: antes esto solo daba el teléfono
+  // de la clínica. Pedido de Nicolás (9/7/2026): ofrecer también atención humana acá
+  // cuando la clínica la tenga activa — mismo criterio que el resto de las
+  // derivaciones (offerHumanOrSendPhone/shouldOfferHuman). Ver PLAN-DE-TRABAJO.md.
+  if (result.action === 'obra_social_no_permite_turnos_online') {
+    const config = await getWhatsAppConfigById(ctx.configId)
+    if (config && (await shouldOfferHuman(config))) {
+      await offerHumanOrSendPhone(ctx, config, result.message, phase)
+      return
+    }
+  }
 
   // Recordar los botones de reply del paso (para re-mostrarlos en una consulta intercalada).
   await saveStepButtons(ctx.userPhoneNumber, ctx.configId, result.searchTypeButtons || result.turnosButtons || [])
@@ -1944,6 +1957,28 @@ async function runInterjectionInActiveFlow(
       return false
     }
 
+    // El paciente pidió algo fuera de alcance (derivar_consulta_externa) en medio de
+    // un flujo activo. Antes esto se resolvía SIEMPRE dando el teléfono de la clínica
+    // nomás, sin ofrecer atención humana (diseño explícito: "sería disruptivo" — ver
+    // comentario más abajo). Pedido de Nicolás (9/7/2026): ofrecer también atención
+    // humana acá cuando la clínica la tenga activa, con el mismo criterio que ya se
+    // usa fuera de un flujo activo (offerHumanOrSendPhone/shouldOfferHuman — solo
+    // depende del flag humanSupport de la clínica y el horario). Se trata como
+    // respuesta TERMINAL del turno (no se combina con "retomar el paso"): la oferta
+    // 1/2 necesita la respuesta inmediata del paciente en el próximo mensaje.
+    if (action.type === 'derive_external' && (await shouldOfferHuman(config))) {
+      const ctxOffer: DirectResponseContext = {
+        phoneNumberId: value.metadata.phone_number_id,
+        accessToken: config.accessToken,
+        userPhoneNumber,
+        configId: config.id,
+        clienteId: config.cliente_id,
+      }
+      await offerHumanOrSendPhone(ctxOffer, config, action.message, "router-interjection-derive-human-offer")
+      routerLogger.info('[Router intercalada] Consulta fuera de alcance — oferta de atención humana')
+      return true
+    }
+
     // El flujo de detección de paciente (patient_detection) es determinístico y
     // NO usa el marcador "Para continuar con tu turno:" para su paso actual — ese
     // marcador pertenece a los flujos legacy de reserva paso a paso. Si acá
@@ -1995,8 +2030,11 @@ async function runInterjectionInActiveFlow(
     if (typeof stepPrompt === 'string' && stepPrompt.includes(TRANSITION)) {
       stepPrompt = stepPrompt.slice(stepPrompt.lastIndexOf(TRANSITION) + TRANSITION.length).trim()
     }
-    // derive_external se trata como send_and_return acá: en medio de un flujo activo NO
-    // ofrecemos atención humana (sería disruptivo); respondemos la consulta y retomamos el paso.
+    // Si llegamos hasta acá con derive_external es porque shouldOfferHuman ya dio
+    // false (clínica sin humanSupport activo o fuera de horario) — el bloque de más
+    // arriba intercepta el caso "ofrecer atención humana" antes de este punto. Acá
+    // se trata como send_and_return: respondemos la consulta con el teléfono y
+    // retomamos el paso.
     const answer = (action.type === 'send_and_return' || action.type === 'derive_external')
       ? action.message.replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '').trimEnd()
       : ''
@@ -4305,6 +4343,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             const _dr = detectionResult as any
             await sendExistingPatientResult(detectionCtx, {
               message: detectionResult.message,
+              action: _dr.action,
               sedesListRows: _dr.sedesListRows,
               searchTypeButtons: _dr.searchTypeButtons,
               turnosButtons: _dr.turnosButtons,
