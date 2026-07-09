@@ -285,12 +285,24 @@ export async function initializeExistingPatientFlow(
     patientLastName?: string
     obraSocialId?: string
     obraSocialNombre?: string
+    /**
+     * Teléfono real del paciente según la ficha de la clínica (campo Celular de la
+     * API). IMPORTANTE para el widget: ahí `phoneNumber` es un sessionId anónimo
+     * (`web_...`), no un teléfono — sin este dato, la reserva quedaría con el
+     * sessionId como "teléfono de contacto". En WhatsApp `phoneNumber` YA es el
+     * teléfono real, así que no hace falta pasarlo (queda como estaba).
+     */
+    patientCelular?: string
   },
   escalationPhoneNumber?: string,
   initialMessage?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_init')
   logger.info('Initializing existing patient flow', { patientId, patientName })
+
+  // Teléfono a usar para la reserva (paciente_datos.telefono) y para futuros
+  // recordatorios. Ver nota en additionalPatientData.patientCelular arriba.
+  const reservationPhone = additionalPatientData?.patientCelular || phoneNumber
 
   const flags = await getEffectiveFeatureFlags(clientId)
   if (!flags.directPacienteExistente) {
@@ -421,7 +433,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
       patientLastName: finalPatientLastName,
       patientDNI: finalPatientDNI,
       patientEmail,
-      patientPhone: phoneNumber,
+      patientPhone: reservationPhone,
       obraSocialId: finalObraSocialId,
       obraSocialNombre: finalObraSocialNombre,
       sedesOpciones: sedesResult.sedes,
@@ -489,7 +501,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
       patientLastName: finalPatientLastName,
       patientDNI: finalPatientDNI,
       patientEmail,
-      patientPhone: phoneNumber,
+      patientPhone: reservationPhone,
       obraSocialId: finalObraSocialId,
       obraSocialNombre: finalObraSocialNombre,
       sedesOpciones: sedesResult.sedes,
@@ -519,7 +531,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     patientLastName: finalPatientLastName,
     patientDNI: finalPatientDNI,
     patientEmail,
-    patientPhone: phoneNumber,
+    patientPhone: reservationPhone,
     obraSocialId: finalObraSocialId,
     obraSocialNombre: finalObraSocialNombre,
     sedesOpciones: sedesResult.sedes,
