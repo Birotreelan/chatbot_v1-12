@@ -2280,10 +2280,16 @@ export async function handleMessage(value: any) {
 
     if (activeSession) {
 
+      // IMPORTANTE: un solo id compartido para el mensaje del paciente. El panel de soporte
+      // (app/api/support/actions/route.ts GET) arma la lista de mensajes combinando el
+      // historial general (saveConversationMessage) + el historial de soporte
+      // (saveSupportMessage) y deduplica por "id" — si acá se generan dos ids distintos
+      // (uno por cada guardado) el mismo mensaje del paciente queda duplicado en el panel.
+      const patientMessageId = nanoid()
 
       // Guardar el mensaje en el historial de conversación
       await saveConversationMessage({
-        id: nanoid(),
+        id: patientMessageId,
         role: "user",
         content: userMessage,
         timestamp: new Date().toISOString(),
@@ -2296,7 +2302,7 @@ export async function handleMessage(value: any) {
 
 
         await addPendingMessageToSession(activeSession.id, {
-          id: nanoid(),
+          id: patientMessageId,
           from: "user",
           content: userMessage,
           timestamp: new Date().toISOString(),
@@ -2313,7 +2319,7 @@ export async function handleMessage(value: any) {
 
 
         const supportMessage: HumanSupportMessage = {
-          id: nanoid(),
+          id: patientMessageId,
           sessionId: activeSession.id,
           role: "user",
           content: userMessage,
