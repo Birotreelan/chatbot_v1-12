@@ -162,6 +162,9 @@ export default function DemoPage() {
   const previewUrl = clienteId
     ? `/widget?clienteId=${encodeURIComponent(clienteId)}&embedded=true&_t=${previewKey}`
     : ""
+  const formPreviewUrl = clienteId
+    ? `/widget-form?clienteId=${encodeURIComponent(clienteId)}&embedded=true&_t=${previewKey}`
+    : ""
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -309,6 +312,58 @@ export default function DemoPage() {
                   clínica) aparece en la esquina inferior derecha de esta página — así se prueba también el
                   widget-loader.js tal como lo ve un visitante.
                 </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <div>
+                  <CardTitle>Widget de Formulario</CardTitle>
+                  <CardDescription>
+                    Mismo motor de agendamiento, pero con inputs, botones y un calendario en vez de chat.
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={reloadPreview}>
+                  Reiniciar formulario
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <div className="border rounded-lg overflow-hidden" style={{ height: 560 }}>
+                  {clienteId ? (
+                    <iframe
+                      key={`form-${previewKey}`}
+                      src={formPreviewUrl}
+                      className="w-full h-full border-0"
+                      title="Vista previa del widget de formulario"
+                    />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+                      Elegí una clínica para ver el formulario
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 mt-3">
+                  A diferencia de los otros dos, acá no se inyecta el botón flotante real en esta página — con el del
+                  chat (derecha) y el de WhatsApp (izquierda) ya presentes, un tercer botón flotante se pisaría con
+                  ellos. Funciona igual que los otros al embeberlo en un sitio real (ver snippet abajo); en producción
+                  se espera que una clínica use un widget de agendamiento u otro, no los tres a la vez.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Integración Formulario</CardTitle>
+                <CardDescription>
+                  Código para embeber el widget de formulario en el sitio de la clínica seleccionada.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                  <code className="text-sm whitespace-pre">
+                    {`<script\n  src="${baseUrl || "https://tu-dominio.com"}/widget-form-loader.js"\n  data-client-id="${clienteId}"\n></script>`}
+                  </code>
+                </div>
               </CardContent>
             </Card>
 

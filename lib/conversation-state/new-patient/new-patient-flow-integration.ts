@@ -211,6 +211,17 @@ async function getFlowState(phone: string): Promise<NewPatientFlowState | null> 
 }
 
 /**
+ * Lectura de sólo consulta del estado del flujo (9/7/2026) — usada por el
+ * widget de formulario (lib/conversation-state/widget/widget-form-flow.ts)
+ * para construir una respuesta estructurada (opciones de obra social/sede/
+ * profesional/especialidad, turnos con fecha y hora) en vez de sólo texto
+ * plano. No modifica nada, es un espejo de `getFlowState`.
+ */
+export async function getNewPatientFlowSnapshot(phone: string): Promise<NewPatientFlowState | null> {
+  return getFlowState(phone)
+}
+
+/**
  * Guarda el estado del flujo en Redis
  */
 async function saveFlowState(phone: string, state: NewPatientFlowState): Promise<void> {
