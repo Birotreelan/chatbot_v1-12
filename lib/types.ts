@@ -317,3 +317,63 @@ export interface GlobalTemplate {
   createdBy?: string // ID del usuario que la creo
   sourceConfigId?: string // ID de la config de donde se extrajo (si aplica)
 }
+
+// ─── Información general de la clínica (base de conocimiento para la IA) ────
+// Carga manual o importada desde el sitio web de la clínica (scraping + IA).
+// Se guarda separado de WhatsAppConfig porque es otro dominio (contenido
+// institucional/clínico, no config técnica de WhatsApp) y lo puede tocar otro
+// perfil de usuario del lado de la clínica.
+
+export interface ClinicInfoSede {
+  nombre?: string
+  direccion?: string
+  comoLlegar?: string // transporte, estacionamiento, referencias
+  horario?: string
+}
+
+export interface ClinicInfoProfesional {
+  nombre: string
+  especialidad?: string
+}
+
+export interface ClinicInfo {
+  clienteId: string
+
+  // Institucional
+  telefonoContacto?: string
+  emailContacto?: string
+  horarioAtencion?: string // horario general de atención al público (no de turnos)
+  sedes?: ClinicInfoSede[]
+
+  // Clínico / servicios (oftalmología)
+  especialidades?: string[]
+  profesionales?: ClinicInfoProfesional[]
+  equipamiento?: string[] // ej: OCT, campo visual computarizado, facoemulsificador
+  obrasSociales?: string[]
+
+  // Instrucciones frecuentes
+  instruccionesPreConsulta?: string // qué traer, preparación, ayuno, etc.
+  cuidadosPostOperatorios?: string // resumen general, siempre con aclaración de seguir indicación del médico
+
+  // Texto libre para lo que no encaja en los campos de arriba
+  informacionAdicional?: string
+
+  // Metadata de origen/gobierno de contenido
+  sourceUrl?: string
+  sourceContentHash?: string // hash del texto scrapeado, para detectar cambios en el sitio
+  updatedAt: string
+  updatedBy?: "import" | "manual"
+}
+
+export type ClinicInfoImportStatus = "pending" | "scraping" | "extracting" | "done" | "error"
+
+export interface ClinicInfoImportJob {
+  id: string
+  clienteId: string
+  sourceUrl: string
+  status: ClinicInfoImportStatus
+  error?: string
+  draft?: ClinicInfo // resultado de la extracción, pendiente de revisión/guardado manual
+  createdAt: string
+  updatedAt: string
+}

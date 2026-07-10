@@ -19,6 +19,7 @@ import type { WhatsAppConfig, AdditionalAssistant } from "@/lib/types"
 import { Plus, Trash2, Info, Users, Bot } from "lucide-react"
 import { ScheduleConfigurator } from "./schedule-configurator"
 import { WhatsAppTemplates } from "./whatsapp-templates"
+import { ClinicInfoTab } from "./clinic-info-tab"
 
 interface WhatsAppConfigFormProps {
   config?: WhatsAppConfig
@@ -255,11 +256,12 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="widget">Widget</TabsTrigger>
           <TabsTrigger value="support">Atención</TabsTrigger>
+          <TabsTrigger value="knowledge">Conocimiento</TabsTrigger>
           <TabsTrigger value="advanced">Avanzado</TabsTrigger>
         </TabsList>
 
@@ -1101,6 +1103,10 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="knowledge" className="space-y-4">
+          <ClinicInfoTab clienteId={config?.cliente_id} />
         </TabsContent>
 
         <TabsContent value="advanced" className="space-y-4">

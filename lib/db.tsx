@@ -1,5 +1,5 @@
 import { Redis } from "@upstash/redis"
-import type { WhatsAppConfig, ThreadInfo, SystemStats, GlobalTemplate } from "./types"
+import type { WhatsAppConfig, ThreadInfo, SystemStats, GlobalTemplate, ClinicInfo, ClinicInfoImportJob } from "./types"
 import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "./utils"
 import { withLock } from "./distributed-lock"
@@ -1117,4 +1117,98 @@ export async function deleteGlobalTemplate(id: string): Promise<boolean> {
 export async function globalTemplateExistsByName(name: string): Promise<boolean> {
   const templates = await getAllGlobalTemplates()
   return templates.some((t) => t.name.toLowerCase() === name.toLowerCase())
+}
+
+// ─── Información general de la clínica (base de conocimiento para la IA) ────
+// Ver lib/types.ts (ClinicInfo). Se guarda separada de WhatsAppConfig, con su
+// propia clave por cliente_id — mismo mecanismo de Redis + fallback en
+// memoria que el resto de este archivo.
+
+const CLINIC_INFO_PREFIX = "clinic_info:"
+const CLINIC_INFO_JOB_PREFIX = "clinic_info_job:"
+const CLINIC_INFO_JOB_TTL_SECONDS = 60 * 60 * 24 // 1 día — son jobs transitorios de importación
+
+const clinicInfoMemoryStorage = new Map<string, ClinicInfo>()
+const clinicInfoJobMemoryStorage = new Map<string, ClinicInfoImportJob>()
+
+export async function getClinicInfo(clienteId: string): Promise<ClinicInfo | null> {
+  try {
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      const data = await redisClient.get(`${CLINIC_INFO_PREFIX}${clienteId}`)
+      if (!data) return null
+      return safeJsonParse(data)
+    } else {
+      return clinicInfoMemoryStorage.get(clienteId) || null
+    }
+  } catch (error) {
+    console.error(`[DB] Error al obtener información de clínica ${clienteId}:`, error)
+    return null
+  }
+}
+
+export async function saveClinicInfo(
+  clienteId: string,
+  updates: Partial<Omit<ClinicInfo, "clienteId">>,
+): Promise<ClinicInfo> {
+  const existing = await getClinicInfo(clienteId)
+
+  const merged: ClinicInfo = {
+    ...(existing || { clienteId, updatedAt: new Date().toISOString() }),
+    ...updates,
+    clienteId,
+    updatedAt: new Date().toISOString(),
+  }
+
+  try {
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      await redisClient.set(`${CLINIC_INFO_PREFIX}${clienteId}`, JSON.stringify(merged))
+    } else {
+      clinicInfoMemoryStorage.set(clienteId, merged)
+    }
+  } catch (error) {
+    console.error(`[DB] Error al guardar información de clínica ${clienteId}:`, error)
+    throw error
+  }
+
+  return merged
+}
+
+export async function getClinicInfoImportJob(jobId: string): Promise<ClinicInfoImportJob | null> {
+  try {
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      const data = await redisClient.get(`${CLINIC_INFO_JOB_PREFIX}${jobId}`)
+      if (!data) return null
+      return safeJsonParse(data)
+    } else {
+      return clinicInfoJobMemoryStorage.get(jobId) || null
+    }
+  } catch (error) {
+    console.error(`[DB] Error al obtener job de importación ${jobId}:`, error)
+    return null
+  }
+}
+
+export async function saveClinicInfoImportJob(job: ClinicInfoImportJob): Promise<ClinicInfoImportJob> {
+  try {
+    const redisClient = getRedisClient()
+
+    if (redisClient) {
+      await redisClient.set(`${CLINIC_INFO_JOB_PREFIX}${job.id}`, JSON.stringify(job), {
+        ex: CLINIC_INFO_JOB_TTL_SECONDS,
+      })
+    } else {
+      clinicInfoJobMemoryStorage.set(job.id, job)
+    }
+  } catch (error) {
+    console.error(`[DB] Error al guardar job de importación ${job.id}:`, error)
+    throw error
+  }
+
+  return job
 }

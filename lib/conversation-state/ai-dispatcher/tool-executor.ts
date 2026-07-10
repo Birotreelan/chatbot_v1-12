@@ -126,6 +126,18 @@ export async function executeDispatcherDecision(
       return { action: { type: 'send_and_return', message }, logNote: `Dispatcher → info turno (${aspecto})` }
     }
 
+    // ── Responder con información institucional de la clínica ───────────────
+    case TOOL_NAMES.RESPONDER_INFO_CLINICA: {
+      const respuesta = decision.args.respuesta as string | undefined
+      if (!respuesta) {
+        // Salvaguarda: si por algún motivo el LLM llamó al tool sin texto,
+        // mejor derivar que mandar un mensaje vacío.
+        const message = buildDerivacionMessage('otro', deps.escalationPhone)
+        return { action: { type: 'derive_external', message }, logNote: 'Dispatcher → info clínica sin respuesta, derivando' }
+      }
+      return { action: { type: 'send_and_return', message: respuesta }, logNote: 'Dispatcher → info institucional de la clínica' }
+    }
+
     // ── Derivar consulta ─────────────────────────────────────────────────────
     // Devuelve derive_external (no send_and_return): whatsapp.tsx decide si primero
     // ofrece atención humana (si la clínica la tiene activa y en horario) o manda el teléfono.

@@ -14,6 +14,9 @@ import { isExistingPatientFlowActive } from '../existing-patient/existing-patien
 import { isNewPatientFlowActive } from '../new-patient/new-patient-flow-integration'
 import { isPatientDetectionFlowActive, getIdentifiedPatient } from '../patient-detection/patient-flow-handler'
 import { getBookingFlowState } from '../booking-flow-handler'
+import { getClinicInfo } from '@/lib/db'
+import { formatClinicInfoForLLM } from '@/lib/clinic-info/context'
+import type { ClinicInfo } from '@/lib/types'
 
 // ============================================================================
 // TIPOS
@@ -51,6 +54,7 @@ export interface DispatcherContext {
   hasActiveFlow: boolean
   conversationHistory: string       // últimos N mensajes formateados
   rawAppointmentContext: any        // ChatbotData completo (para handlers que lo necesiten)
+  clinicInfo: ClinicInfo | null     // base de conocimiento institucional cargada por la clínica (10/7/2026)
 }
 
 // ============================================================================
@@ -99,12 +103,16 @@ function describePhase(phase: string): string {
  * @param configId     ID de configuración del cliente (para booking flow)
  * @param appointmentCtx  ChatbotData ya recuperado por whatsapp.tsx (puede ser null)
  * @param historyLines  Historial ya formateado (puede ser cadena vacía)
+ * @param clienteId    cliente_id de la clínica (para leer su base de conocimiento
+ *                     institucional, ver lib/clinic-info) — opcional para no
+ *                     romper otros call sites que todavía no lo pasan.
  */
 export async function buildDispatcherContext(
   phoneNumber: string,
   configId: string,
   appointmentCtx: any,
-  historyLines: string = ''
+  historyLines: string = '',
+  clienteId?: string
 ): Promise<DispatcherContext> {
 
   // ── Lecturas Redis en paralelo ────────────────────────────────────────────
@@ -116,12 +124,14 @@ export async function buildDispatcherContext(
     newActive,
     detectionActive,
     bookingState,
+    clinicInfo,
   ] = await Promise.all([
     getIdentifiedPatient(phoneNumber),
     isExistingPatientFlowActive(phoneNumber),
     isNewPatientFlowActive(phoneNumber, configId),
     isPatientDetectionFlowActive(phoneNumber),
     getBookingFlowState(phoneNumber, configId),
+    clienteId ? getClinicInfo(clienteId) : Promise.resolve(null),
   ])
 
   // ── Paciente identificado ──────────────────────────────────────────────────
@@ -200,6 +210,7 @@ export async function buildDispatcherContext(
     hasActiveFlow: activeFlow.type !== 'none',
     conversationHistory: historyLines,
     rawAppointmentContext: appointmentCtx,
+    clinicInfo,
   }
 }
 
@@ -239,6 +250,9 @@ export function formatContextForLLM(ctx: DispatcherContext): string {
   if (ctx.conversationHistory) {
     lines.push(`\nHISTORIAL RECIENTE:\n${ctx.conversationHistory}`)
   }
+
+  // Base de conocimiento institucional (cargada por la clínica, ver lib/clinic-info)
+  lines.push(`\n${formatClinicInfoForLLM(ctx.clinicInfo)}`)
 
   return lines.join('\n')
 }

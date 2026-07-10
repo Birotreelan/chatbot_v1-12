@@ -24,6 +24,7 @@ export const TOOL_NAMES = {
   CANCELAR_Y_REAGENDAR:      'cancelar_y_solicitar_nuevo_turno',
   INICIAR_RESERVA:           'iniciar_reserva_turno',
   CONSULTA_INFORMATIVA:      'responder_consulta_informativa',
+  RESPONDER_INFO_CLINICA:    'responder_info_clinica',
   DERIVAR_CONSULTA:          'derivar_consulta_externa',
   RESPUESTA_EMPATICA:        'respuesta_empatica',
   SOLICITAR_HUMANO:          'solicitar_atencion_humana',
@@ -151,6 +152,27 @@ Solo responde información que ya tenemos del turno. No inventes datos.`,
     },
   },
 
+  // ── Responder con información institucional de la clínica ─────────────────
+  {
+    type: 'function',
+    function: {
+      name: TOOL_NAMES.RESPONDER_INFO_CLINICA,
+      description: `El paciente pregunta un dato institucional de la clínica (dirección, cómo llegar, horario de atención, teléfono/email de contacto, especialidades, profesionales, equipamiento, obras sociales aceptadas, qué traer o cómo prepararse antes de la consulta, cuidados post-operatorios generales) Y ese dato está PRESENTE en el bloque "INFORMACIÓN DE LA CLÍNICA" del contexto.
+Usá este tool SOLO si el dato puntual que pregunta el paciente aparece explícitamente en ese bloque. Si el bloque dice "no cargada todavía" o simplemente no incluye el dato pedido, NO uses este tool — usá derivar_consulta_externa en su lugar.
+NUNCA agregues en la respuesta ningún dato que no esté literalmente en ese bloque de contexto.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          respuesta: {
+            type: 'string',
+            description: 'Respuesta breve en español rioplatense (voseo), compuesta ÚNICAMENTE con datos del bloque INFORMACIÓN DE LA CLÍNICA. Sin inventar ni completar nada que no esté ahí.',
+          },
+        },
+        required: ['respuesta'],
+      },
+    },
+  },
+
   // ── Derivar consulta externa ───────────────────────────────────────────────
   {
     type: 'function',
@@ -158,9 +180,9 @@ Solo responde información que ya tenemos del turno. No inventes datos.`,
       name: TOOL_NAMES.DERIVAR_CONSULTA,
       description: `El paciente pregunta algo que este bot no puede responder.
 Usá este tool para:
-- Consultas administrativas: costos, coberturas, obras sociales, documentación, pagos.
-- Consultas médicas: síntomas, medicamentos, diagnósticos, tratamientos.
-- Datos de la clínica que no tenemos en el sistema: dirección, ubicación, cómo llegar, horarios de atención, estacionamiento, teléfono.
+- Consultas administrativas: costos, coberturas, documentación, pagos, autorizaciones de obra social caso por caso.
+- Consultas médicas: síntomas, medicamentos, diagnósticos, tratamientos, gravedad, necesidad de cirugía.
+- Datos de la clínica (dirección, ubicación, cómo llegar, horarios, teléfono, especialidades, obras sociales aceptadas) que NO estén presentes en el bloque "INFORMACIÓN DE LA CLÍNICA" del contexto — si SÍ están ahí, usá responder_info_clinica en su lugar, no este tool.
 - Cualquier consulta fuera del scope de gestión de turnos.
 Redirigirá al teléfono de la clínica. NUNCA inventes estos datos.`,
       parameters: {

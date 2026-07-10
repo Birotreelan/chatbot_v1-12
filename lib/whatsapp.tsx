@@ -1721,7 +1721,7 @@ async function runPrimaryDispatcherNoFlow(
         .catch(() => ''),
     ])
 
-    const dispatcherCtx = await buildDispatcherContext(userPhoneNumber, config.id, dispatcherAppCtx, dispatcherHistory)
+    const dispatcherCtx = await buildDispatcherContext(userPhoneNumber, config.id, dispatcherAppCtx, dispatcherHistory, config.cliente_id)
     const dispatcherResult = await runAIDispatcher(userPhoneNumber, config.id, userMessage, dispatcherCtx)
     if (!dispatcherResult.handled) return false
 
@@ -1874,7 +1874,7 @@ async function runInterjectionInActiveFlow(
     const dispatcherHistory = historyMsgs.map((m: any) => `${m.role === 'user' ? 'Paciente' : 'Bot'}: ${m.text}`).join('\n')
     const dispatcherAppCtx = await getAppointmentContext(userPhoneNumber, config.id).catch(() => null)
 
-    const dispatcherCtx = await buildDispatcherContext(userPhoneNumber, config.id, dispatcherAppCtx, dispatcherHistory)
+    const dispatcherCtx = await buildDispatcherContext(userPhoneNumber, config.id, dispatcherAppCtx, dispatcherHistory, config.cliente_id)
     const dispatcherResult = await runAIDispatcher(userPhoneNumber, config.id, userMessage, dispatcherCtx)
     if (!dispatcherResult.handled) return false
 
@@ -4922,7 +4922,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             userPhoneNumber,
             config.id,
             dispatcherAppCtx,
-            dispatcherHistory
+            dispatcherHistory,
+            config.cliente_id
           )
 
           // Llamar al dispatcher (GPT-4o-mini con function calling)
