@@ -349,6 +349,9 @@ user-select: none;
       widgetContainer.style.display = "block"
       isWidgetVisible = true
       console.log("[WIDGET-LOADER] Widget mostrado")
+      // Si conviven varios widgets Iris en la misma página (chat + formulario),
+      // que abrir uno cierre el otro — avisamos por evento global.
+      window.dispatchEvent(new CustomEvent("iris-widget-toggle", { detail: { widget: "chat", visible: true } }))
     }
   }
 
@@ -366,6 +369,15 @@ user-select: none;
   window.addEventListener("message", (event) => {
     const data = event.data
     if (data && data.source === "iris-widget" && data.type === "close") {
+      hideWidget()
+    }
+  })
+
+  // Exclusión mutua entre widgets Iris: si se abre otro (ej. el de formulario),
+  // cerramos este para no tener dos paneles superpuestos en pantalla.
+  window.addEventListener("iris-widget-toggle", (event) => {
+    const detail = event.detail
+    if (detail && detail.widget !== "chat" && detail.visible) {
       hideWidget()
     }
   })

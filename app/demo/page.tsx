@@ -37,6 +37,7 @@ interface WidgetPublicConfig {
 
 const WIDGET_SCRIPT_ID = "demo-widget-loader-script"
 const WHATSAPP_WIDGET_SCRIPT_ID = "demo-whatsapp-widget-loader-script"
+const FORM_WIDGET_SCRIPT_ID = "demo-form-widget-loader-script"
 
 function removeFloatingWidget() {
   document.getElementById("chat-widget-button")?.remove()
@@ -48,6 +49,13 @@ function removeFloatingWhatsAppWidget() {
   document.getElementById("iris-whatsapp-widget-button")?.remove()
   document.getElementById("iris-whatsapp-widget-styles")?.remove()
   document.getElementById(WHATSAPP_WIDGET_SCRIPT_ID)?.remove()
+}
+
+function removeFloatingFormWidget() {
+  document.getElementById("iris-form-widget-button")?.remove()
+  document.getElementById("iris-form-widget-container")?.remove()
+  document.getElementById("iris-form-widget-styles")?.remove()
+  document.getElementById(FORM_WIDGET_SCRIPT_ID)?.remove()
 }
 
 export default function DemoPage() {
@@ -130,12 +138,26 @@ export default function DemoPage() {
     whatsappScript.setAttribute("data-client-id", clienteId)
     document.body.appendChild(whatsappScript)
 
+    // El widget de formulario se ancla al mismo costado que el chat pero 70px
+    // más arriba (ver widget-form-loader.js), así que convive apilado encima
+    // del botón del chat cerrado en vez de ocultarse. Abrir uno cierra el otro
+    // (evento "iris-widget-toggle"), por lo que nunca quedan dos paneles abiertos
+    // a la vez.
+    removeFloatingFormWidget()
+    const formScript = document.createElement("script")
+    formScript.id = FORM_WIDGET_SCRIPT_ID
+    formScript.src = "/widget-form-loader.js"
+    formScript.async = true
+    formScript.setAttribute("data-client-id", clienteId)
+    document.body.appendChild(formScript)
+
     setPreviewKey((k) => k + 1)
 
     return () => {
       cancelled = true
       removeFloatingWidget()
       removeFloatingWhatsAppWidget()
+      removeFloatingFormWidget()
     }
   }, [clienteId])
 
@@ -309,8 +331,9 @@ export default function DemoPage() {
                 </div>
                 <p className="text-xs text-gray-500 mt-3">
                   Además de esta vista embebida, el botón flotante real (mismo script que se integra en el sitio de la
-                  clínica) aparece en la esquina inferior derecha de esta página — así se prueba también el
-                  widget-loader.js tal como lo ve un visitante.
+                  clínica) aparece en la esquina inferior derecha de esta página, cerrado — así se prueba también el
+                  widget-loader.js tal como lo ve un visitante. El botón del formulario queda apilado justo arriba;
+                  abrir uno cierra el otro automáticamente.
                 </p>
               </CardContent>
             </Card>
@@ -343,10 +366,9 @@ export default function DemoPage() {
                   )}
                 </div>
                 <p className="text-xs text-gray-500 mt-3">
-                  A diferencia de los otros dos, acá no se inyecta el botón flotante real en esta página — con el del
-                  chat (derecha) y el de WhatsApp (izquierda) ya presentes, un tercer botón flotante se pisaría con
-                  ellos. Funciona igual que los otros al embeberlo en un sitio real (ver snippet abajo); en producción
-                  se espera que una clínica use un widget de agendamiento u otro, no los tres a la vez.
+                  El botón flotante real de este widget aparece apilado justo arriba del botón del chat, en la esquina
+                  inferior derecha. Ambos pueden convivir en el mismo sitio: abrir uno cierra el otro automáticamente,
+                  así nunca se superponen dos paneles a la vez.
                 </p>
               </CardContent>
             </Card>

@@ -5,7 +5,23 @@ import type React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Calendar } from "@/components/ui/calendar"
 import { es } from "date-fns/locale"
-import { CalendarDays, ChevronLeft, Loader2, CheckCircle2, AlertCircle, X } from "lucide-react"
+import {
+  CalendarDays,
+  ChevronLeft,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  X,
+  IdCard,
+  Mail,
+  Phone,
+  ListChecks,
+  ClipboardCheck,
+  PencilLine,
+  type LucideIcon,
+} from "lucide-react"
 
 interface WidgetFormProps {
   clienteId: string
@@ -37,6 +53,11 @@ interface FormSummary {
   telefono?: string
 }
 
+interface FormAlert {
+  type: "info" | "warning" | "error"
+  message: string
+}
+
 type FormInputType =
   | "dni"
   | "text"
@@ -53,6 +74,7 @@ interface FormStep {
   done: boolean
   success?: boolean
   message: string
+  alert?: FormAlert
   inputType: FormInputType
   fieldLabel?: string
   placeholder?: string
@@ -60,6 +82,36 @@ interface FormStep {
   turnos?: FormTurno[]
   summary?: FormSummary
   canGoBack?: boolean
+}
+
+// Ícono de cabecera por tipo de control — refuerza visualmente de qué se
+// trata el paso sin necesidad de texto largo (revisión 9/7/2026, 2da vuelta).
+const STEP_ICONS: Record<FormInputType, LucideIcon> = {
+  dni: IdCard,
+  text: PencilLine,
+  email: Mail,
+  tel: Phone,
+  select: ListChecks,
+  "search-type": ListChecks,
+  "turno-picker": CalendarDays,
+  confirmation: ClipboardCheck,
+  info: CheckCircle2,
+}
+
+const ALERT_STYLES: Record<FormAlert["type"], { bg: string; border: string; text: string; Icon: LucideIcon }> = {
+  info: { bg: "bg-sky-50", border: "border-sky-200", text: "text-sky-700", Icon: Info },
+  warning: { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-800", Icon: AlertTriangle },
+  error: { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", Icon: AlertCircle },
+}
+
+function AlertBanner({ alert }: { alert: FormAlert }) {
+  const { bg, border, text, Icon } = ALERT_STYLES[alert.type]
+  return (
+    <div className={`rounded-lg border ${border} ${bg} ${text} text-sm p-3 flex items-start gap-2`}>
+      <Icon className="h-4 w-4 mt-0.5 shrink-0" />
+      <span className="whitespace-pre-wrap">{alert.message}</span>
+    </div>
+  )
 }
 
 function newSessionId() {
@@ -365,6 +417,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
             ) : (
               <AlertCircle className="h-12 w-12 text-orange-500" />
             )}
+            <p className="text-base font-medium text-gray-800 whitespace-pre-wrap">{step.message}</p>
             <button onClick={handleRestart} className="mt-2 text-sm text-sky-600 hover:underline">
               Iniciar una nueva consulta
             </button>
@@ -420,7 +473,20 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
               </button>
             )}
 
-            <p className="text-base font-medium text-gray-800 whitespace-pre-wrap">{step.message}</p>
+            {step.inputType !== "info" &&
+              (() => {
+                const StepIcon = STEP_ICONS[step.inputType]
+                return (
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 rounded-full bg-sky-100 text-sky-600 p-1.5">
+                      <StepIcon className="h-4 w-4" />
+                    </span>
+                    <p className="text-base font-semibold text-gray-800">{step.message}</p>
+                  </div>
+                )
+              })()}
+
+            {step.alert && <AlertBanner alert={step.alert} />}
 
             {renderControl()}
 

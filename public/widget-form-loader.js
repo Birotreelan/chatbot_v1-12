@@ -8,12 +8,13 @@
   // reales, usando el mismo motor de agendamiento por debajo.
   //
   // IDs de elementos DISTINTOS a los del chat (iris-form-widget-* en vez de
-  // chat-widget-*) para que una clínica pueda, si quiere, tener los dos
-  // scripts en la misma página sin que se pisen el DOM — aunque por defecto
-  // ambos se anclan a la misma esquina (son dos formas alternativas de
-  // agendar el mismo turno, se espera que una clínica use una u otra, no
-  // las dos a la vez). Se puede mover con data-position="bottom-left" igual
-  // que en widget-loader.js si hiciera falta que convivan.
+  // chat-widget-*) para que una clínica pueda tener los DOS scripts en la
+  // misma página sin que se pisen el DOM. Por diseño (9/7/2026, 2da vuelta):
+  // este botón se ancla 70px más arriba que el del chat (bottom: 90px en vez
+  // de 20px) para quedar apilado justo encima del botón del chat cerrado, en
+  // el mismo costado por defecto. Además, abrir uno cierra el otro (evento
+  // global "iris-widget-toggle") para que nunca haya dos paneles superpuestos
+  // en pantalla al mismo tiempo.
   console.log("[FORM-WIDGET-LOADER] Iniciando...")
 
   const scriptElement = document.currentScript
@@ -60,7 +61,7 @@
       gap: 12px;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
-      bottom: 20px;
+      bottom: 90px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       color: white;
       font-size: 15px;
@@ -206,6 +207,8 @@
     } else {
       widgetContainer.style.display = "block"
       isWidgetVisible = true
+      // Si el chat (u otro widget Iris) está abierto, que se cierre al abrir éste.
+      window.dispatchEvent(new CustomEvent("iris-widget-toggle", { detail: { widget: "form", visible: true } }))
     }
   }
 
@@ -222,6 +225,14 @@
   window.addEventListener("message", (event) => {
     const data = event.data
     if (data && data.source === "iris-widget" && data.type === "close") {
+      hideWidget()
+    }
+  })
+
+  // Exclusión mutua: si se abre otro widget Iris (ej. el chat), cerramos éste.
+  window.addEventListener("iris-widget-toggle", (event) => {
+    const detail = event.detail
+    if (detail && detail.widget !== "form" && detail.visible) {
       hideWidget()
     }
   })

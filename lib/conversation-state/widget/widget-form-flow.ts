@@ -92,11 +92,24 @@ export interface FormWidgetSummary {
   telefono?: string
 }
 
+export interface FormWidgetAlert {
+  type: 'info' | 'warning' | 'error'
+  message: string
+}
+
 export interface FormWidgetStep {
   phase: string
   done: boolean
   success?: boolean
   message: string
+  /**
+   * Aviso puntual (icono + texto corto) para mostrar ADEMÁS del `message`
+   * principal — se usa sólo cuando el motor compartido tiene algo nuevo y
+   * relevante que decir (ej: "esa obra social no la encontramos", "no había
+   * turnos con ese profesional", "no se pudo completar la reserva"), nunca
+   * para repetir en texto lo que ya se ve en `options`/`turnos`/`summary`.
+   */
+  alert?: FormWidgetAlert
   inputType: FormWidgetInputType
   fieldLabel?: string
   placeholder?: string
@@ -110,12 +123,65 @@ const DNI_MESSAGE = 'Para comenzar, ingresá tu número de DNI (sin puntos).'
 const FEATURE_DISABLED_MESSAGE =
   'Este servicio no está disponible por el momento. Por favor, contactanos directamente para agendar tu turno.'
 
-function dniStep(message: string = DNI_MESSAGE): FormWidgetStep {
-  return { phase: 'awaiting_dni', done: false, message, inputType: 'dni', canGoBack: false }
+function dniStep(alertMessage?: string): FormWidgetStep {
+  return {
+    phase: 'awaiting_dni',
+    done: false,
+    message: DNI_MESSAGE,
+    alert: alertMessage ? { type: 'warning', message: alertMessage } : undefined,
+    inputType: 'dni',
+    canGoBack: false,
+  }
 }
 
 function infoStep(message: string, success: boolean, phase: string): FormWidgetStep {
   return { phase, done: true, success, message, inputType: 'info', canGoBack: false }
+}
+
+/**
+ * Limpia texto crudo del motor compartido (pensado para chat/WhatsApp) antes
+ * de mostrarlo como `alert`: saca el markdown tipo WhatsApp (*negrita*), la
+ * pista "0. Volver al paso anterior/menú principal" (ya no aplica, hay un
+ * botón "Volver" dedicado en la interfaz) y espacios/saltos de línea sobrantes.
+ */
+function cleanBackendText(text?: string): string {
+  if (!text) return ''
+  return text
+    .replace(/\n+0\.\s*\*?Volver[^\n*]*\*?\s*$/i, '')
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/**
+ * Decide si vale la pena mostrar el texto crudo del motor como `alert`.
+ * Regla principal: si la fase NO cambió (previousPhase === newPhase), es
+ * porque el motor está volviendo a pedir lo mismo — típicamente una
+ * validación que falló o un error al reservar, información nueva que no está
+ * en ningún lado más. Si la fase cambió, es progreso normal del flujo y ese
+ * texto sólo repetiría lo que ya se ve en la interfaz (options/turnos/summary),
+ * con una excepción puntual: "no encontré turnos" explica por qué se volvió a
+ * pantalla de búsqueda, y sí vale la pena mostrarlo.
+ */
+function attachAlertIfNeeded(
+  step: FormWidgetStep,
+  previousPhase: string | undefined,
+  rawMessage: string | undefined
+): FormWidgetStep {
+  const cleaned = cleanBackendText(rawMessage)
+  if (!cleaned) return step
+
+  const isRetry = previousPhase !== undefined && previousPhase === step.phase
+  const mentionsNoTurnos = /no encontr(é|e) turnos/i.test(cleaned)
+
+  if (isRetry) {
+    return { ...step, alert: { type: 'warning', message: cleaned } }
+  }
+  if (mentionsNoTurnos) {
+    return { ...step, alert: { type: 'info', message: cleaned } }
+  }
+  return step
 }
 
 /**
@@ -184,6 +250,7 @@ export async function processWidgetFormMessage(
 
     // ── Flujo de paciente nuevo ya activo ──────────────────────────────────
     if (await isNewPatientFlowActive(sessionId)) {
+      const prevSnap = await getNewPatientFlowSnapshot(sessionId)
       const result = await handleNewPatientMessage(
         sessionId,
         userMessage,
@@ -191,11 +258,12 @@ export async function processWidgetFormMessage(
         escalationPhoneNumber,
         searchOptionsConfig
       )
-      return await finalizeNewPatient(sessionId, result, searchOptionsConfig)
+      return await finalizeNewPatient(sessionId, result, searchOptionsConfig, prevSnap?.phase)
     }
 
     // ── Flujo de paciente existente ya activo ──────────────────────────────
     if (await isExistingPatientFlowActive(sessionId)) {
+      const prevSnap = await getExistingPatientFlowSnapshot(sessionId)
       const result = await handleExistingPatientMessage(
         sessionId,
         userMessage,
@@ -203,7 +271,7 @@ export async function processWidgetFormMessage(
         escalationPhoneNumber,
         searchOptionsConfig
       )
-      return await finalizeExistingPatient(sessionId, result, searchOptionsConfig)
+      return await finalizeExistingPatient(sessionId, result, searchOptionsConfig, prevSnap?.phase)
     }
 
     // ── Sin flujo activo: el mensaje debería ser el DNI ────────────────────
@@ -284,14 +352,15 @@ export async function processWidgetFormMessage(
 async function finalizeNewPatient(
   sessionId: string,
   result: NewPatientResult,
-  searchOptionsConfig?: SearchOptionsConfig
+  searchOptionsConfig?: SearchOptionsConfig,
+  previousPhase?: string
 ): Promise<FormWidgetStep> {
   if (result.action === 'back_to_main_menu') return dniStep()
   if (result.action === 'turno_reservado') {
-    return infoStep(result.message || '¡Tu turno fue solicitado con éxito!', true, 'completed')
+    return infoStep(cleanBackendText(result.message) || '¡Tu turno fue solicitado con éxito!', true, 'completed')
   }
   if (result.action === 'obra_social_no_permite_turnos_online') {
-    return infoStep(result.message || FEATURE_DISABLED_MESSAGE, false, 'error')
+    return infoStep(cleanBackendText(result.message) || FEATURE_DISABLED_MESSAGE, false, 'error')
   }
   if (result.shouldCallOpenAI && !result.message) {
     return infoStep(FEATURE_DISABLED_MESSAGE, false, 'error')
@@ -300,22 +369,24 @@ async function finalizeNewPatient(
   const snap = await getNewPatientFlowSnapshot(sessionId)
   if (!snap) {
     // Estado eliminado (ej: reserva cancelada/abandonada) — no hay más pasos.
-    return infoStep(result.message || 'La conversación fue cancelada.', false, 'abandoned')
+    return infoStep(cleanBackendText(result.message) || 'La conversación fue cancelada.', false, 'abandoned')
   }
-  return buildNewPatientStep(snap, searchOptionsConfig, result.message)
+  const step = buildNewPatientStep(snap, searchOptionsConfig)
+  return attachAlertIfNeeded(step, previousPhase, result.message)
 }
 
 async function finalizeExistingPatient(
   sessionId: string,
   result: ExistingPatientResult,
-  searchOptionsConfig?: SearchOptionsConfig
+  searchOptionsConfig?: SearchOptionsConfig,
+  previousPhase?: string
 ): Promise<FormWidgetStep> {
   if (result.action === 'back_to_main_menu') return dniStep()
   if (result.action === 'turno_reservado') {
-    return infoStep(result.message || '¡Tu turno fue solicitado con éxito!', true, 'completed')
+    return infoStep(cleanBackendText(result.message) || '¡Tu turno fue solicitado con éxito!', true, 'completed')
   }
   if (result.action === 'obra_social_no_permite_turnos_online') {
-    return infoStep(result.message || FEATURE_DISABLED_MESSAGE, false, 'error')
+    return infoStep(cleanBackendText(result.message) || FEATURE_DISABLED_MESSAGE, false, 'error')
   }
   if (result.shouldCallOpenAI && !result.message) {
     return infoStep(FEATURE_DISABLED_MESSAGE, false, 'error')
@@ -323,9 +394,10 @@ async function finalizeExistingPatient(
 
   const snap = await getExistingPatientFlowSnapshot(sessionId)
   if (!snap) {
-    return infoStep(result.message || 'La conversación fue cancelada.', false, 'abandoned')
+    return infoStep(cleanBackendText(result.message) || 'La conversación fue cancelada.', false, 'abandoned')
   }
-  return buildExistingPatientStep(snap, searchOptionsConfig, result.message)
+  const step = buildExistingPatientStep(snap, searchOptionsConfig)
+  return attachAlertIfNeeded(step, previousPhase, result.message)
 }
 
 // ─── Construcción del paso estructurado a partir del estado ─────────────────
@@ -343,8 +415,7 @@ interface NormalizedFields {
 
 function buildNewPatientStep(
   state: NewPatientFlowState,
-  searchOptionsConfig?: SearchOptionsConfig,
-  overrideMessage?: string
+  searchOptionsConfig?: SearchOptionsConfig
 ): FormWidgetStep {
   const nombreCompleto = [state.nombre, state.apellido].filter(Boolean).join(' ') || undefined
   return buildStepFromNormalized(
@@ -373,15 +444,13 @@ function buildNewPatientStep(
         telefono: state.telefonoContacto,
       },
     },
-    searchOptionsConfig,
-    overrideMessage
+    searchOptionsConfig
   )
 }
 
 function buildExistingPatientStep(
   state: ExistingPatientFlowState,
-  searchOptionsConfig?: SearchOptionsConfig,
-  overrideMessage?: string
+  searchOptionsConfig?: SearchOptionsConfig
 ): FormWidgetStep {
   const nombreCompleto =
     [state.patientFirstName, state.patientLastName].filter(Boolean).join(' ') || state.patientName || undefined
@@ -413,8 +482,7 @@ function buildExistingPatientStep(
         telefono: state.patientPhone,
       },
     },
-    searchOptionsConfig,
-    overrideMessage
+    searchOptionsConfig
   )
 }
 
@@ -422,21 +490,28 @@ function buildExistingPatientStep(
  * Traduce fase + datos normalizados a un paso estructurado. Es el corazón del
  * adaptador: acá se decide qué control HTML corresponde a cada fase del motor
  * compartido.
+ *
+ * Diseño (revisión 9/7/2026, 2da vuelta): el `message` de cada fase es SIEMPRE
+ * un texto corto y fijo, pensado para una interfaz (no para chat) — nunca
+ * repite en prosa lo que ya se ve en `options`/`turnos`/`summary`, y nunca
+ * incluye instrucciones de comandos de texto (ej. "0. Volver al paso
+ * anterior": ya hay un botón "Volver" dedicado en la interfaz). El texto que
+ * genera el motor compartido (pensado para WhatsApp) sólo se usa, ya
+ * limpio, como `alert` puntual cuando de verdad aporta algo nuevo — eso lo
+ * decide `attachAlertIfNeeded` en base a si la fase cambió o no.
  */
 function buildStepFromNormalized(
   fields: NormalizedFields,
-  searchOptionsConfig: SearchOptionsConfig | undefined,
-  overrideMessage?: string
+  searchOptionsConfig: SearchOptionsConfig | undefined
 ): FormWidgetStep {
   const canGoBack = backKindForPhase(fields.phase, fields.flow) !== null
-  const msg = (fallback: string) => overrideMessage || fallback
 
   switch (fields.phase) {
     case 'awaiting_apellido':
       return {
         phase: fields.phase,
         done: false,
-        message: msg('¿Cuál es tu apellido?'),
+        message: '¿Cuál es tu apellido?',
         inputType: 'text',
         fieldLabel: 'Apellido',
         placeholder: 'Tu apellido',
@@ -447,7 +522,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('¿Cuál es tu nombre?'),
+        message: '¿Cuál es tu nombre?',
         inputType: 'text',
         fieldLabel: 'Nombre',
         placeholder: 'Tu nombre',
@@ -458,7 +533,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Contanos tu obra social o prepaga.'),
+        message: 'Contanos tu obra social o prepaga.',
         inputType: 'text',
         fieldLabel: 'Obra social',
         placeholder: 'Ej: OSDE, Swiss Medical, PAMI, Particular',
@@ -469,7 +544,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Encontramos varias coincidencias. Elegí la tuya:'),
+        message: 'Elegí tu obra social:',
         inputType: 'select',
         fieldLabel: 'Obra social',
         options: (fields.obraSocialOpciones || []).map((o) => ({
@@ -484,7 +559,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('¿En qué sede te gustaría atenderte?'),
+        message: 'Elegí una sede:',
         inputType: 'select',
         fieldLabel: 'Sede',
         options: (fields.sedesOpciones || []).map((s) => ({
@@ -510,7 +585,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('¿Cómo preferís buscar tu turno?'),
+        message: '¿Cómo preferís buscar tu turno?',
         inputType: 'search-type',
         options: opts.map((o) => ({
           id: o.id,
@@ -525,7 +600,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Escribí el nombre o apellido del profesional.'),
+        message: 'Escribí el nombre o apellido del profesional.',
         inputType: 'text',
         fieldLabel: 'Profesional',
         placeholder: 'Ej: García',
@@ -536,7 +611,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Encontramos estos profesionales, elegí uno:'),
+        message: 'Elegí un profesional:',
         inputType: 'select',
         fieldLabel: 'Profesional',
         options: (fields.profesionalesOpciones || []).map((p) => ({
@@ -551,7 +626,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Elegí una especialidad:'),
+        message: 'Elegí una especialidad:',
         inputType: 'select',
         fieldLabel: 'Especialidad',
         options: (fields.especialidadesOpciones || []).map((e) => ({
@@ -562,10 +637,14 @@ function buildStepFromNormalized(
       }
 
     case 'awaiting_turno_selection':
+      // Antes se mostraba acá el texto largo del motor con el listado de
+      // días/horarios (buildTurnosWindowMessage) — quedaba duplicado con el
+      // datepicker + botones de horario, que ya muestran exactamente lo
+      // mismo de forma visual. Ahora el mensaje es sólo el título del paso.
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Elegí el día y el horario que prefieras:'),
+        message: 'Elegí el día y el horario:',
         inputType: 'turno-picker',
         turnos: (fields.turnosOpciones || []).map((t) => ({
           numero: t.numero,
@@ -582,7 +661,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Dejanos tu número de WhatsApp para poder avisarte novedades del turno.'),
+        message: 'Dejanos tu WhatsApp para avisarte novedades del turno.',
         inputType: 'tel',
         fieldLabel: 'WhatsApp',
         placeholder: 'Ej: 1122334455',
@@ -593,24 +672,20 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('¿Cuál es tu email?'),
+        message: '¿Cuál es tu email?',
         inputType: 'email',
         fieldLabel: 'Email',
         placeholder: 'tu@email.com',
         canGoBack,
       }
 
-    case 'awaiting_confirmation': {
-      // El texto que arma el motor compartido (buildConfirmationMessage) está
-      // pensado para chat/WhatsApp (con "**DATOS DEL PACIENTE**" etc.) — para
-      // el formulario usamos el `summary` estructurado en su lugar y sólo
-      // mostramos el texto del motor cuando NO es ese prompt estándar (ej: un
-      // error real al intentar reservar, o una respuesta no reconocida).
-      const isStandardPrompt = !overrideMessage || overrideMessage.includes('DATOS DEL PACIENTE')
+    case 'awaiting_confirmation':
+      // El `summary` estructurado ya muestra todos los datos — el mensaje es
+      // sólo la instrucción de qué hacer con ellos.
       return {
         phase: fields.phase,
         done: false,
-        message: isStandardPrompt ? 'Revisá que tus datos sean correctos antes de confirmar la reserva.' : overrideMessage!,
+        message: 'Revisá que tus datos sean correctos antes de confirmar la reserva.',
         inputType: 'confirmation',
         options: [
           { id: '1', label: 'Sí, confirmar' },
@@ -619,13 +694,12 @@ function buildStepFromNormalized(
         summary: fields.summary,
         canGoBack,
       }
-    }
 
     case 'awaiting_modify_selection':
       return {
         phase: fields.phase,
         done: false,
-        message: msg('¿Qué dato querés modificar?'),
+        message: '¿Qué dato querés modificar?',
         inputType: 'select',
         options: [
           { id: '1', label: 'Nombre y apellido' },
@@ -641,7 +715,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Escribí el dato actualizado.'),
+        message: 'Escribí tu nombre y apellido actualizados.',
         inputType: 'text',
         canGoBack,
       }
@@ -650,7 +724,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Escribí tu DNI actualizado.'),
+        message: 'Escribí tu DNI actualizado.',
         inputType: 'dni',
         canGoBack,
       }
@@ -659,7 +733,7 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Escribí tu obra social actualizada.'),
+        message: 'Escribí tu obra social actualizada.',
         inputType: 'text',
         placeholder: 'Ej: OSDE, Swiss Medical, PAMI, Particular',
         canGoBack,
@@ -667,13 +741,11 @@ function buildStepFromNormalized(
 
     default:
       // Fase no contemplada explícitamente (no debería ocurrir en la práctica,
-      // pero evita romper el widget si el motor agrega una fase nueva) — se
-      // degrada a un input de texto libre con el mensaje que haya generado el
-      // motor, igual que hace el widget de chat.
+      // pero evita romper el widget si el motor agrega una fase nueva).
       return {
         phase: fields.phase,
         done: false,
-        message: msg('Continuemos con tu turno.'),
+        message: 'Continuemos con tu turno.',
         inputType: 'text',
         canGoBack,
       }
