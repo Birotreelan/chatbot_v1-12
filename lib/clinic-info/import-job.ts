@@ -8,6 +8,7 @@
  */
 
 import { nanoid } from "nanoid"
+import { logger } from "@/lib/logger"
 import { getClinicInfoImportJob, saveClinicInfoImportJob } from "@/lib/db"
 import type { ClinicInfoImportJob } from "@/lib/types"
 import { scrapeUrl, ScrapeError } from "./scraper"
@@ -35,18 +36,30 @@ export async function createImportJob(clienteId: string, url: string): Promise<C
  */
 export async function runImportJob(jobId: string): Promise<ClinicInfoImportJob | null> {
   let job = await getClinicInfoImportJob(jobId)
-  if (!job) return null
+  if (!job) {
+    logger.warn("CLINIC-INFO-IMPORT-JOB", `Job ${jobId} no encontrado (¿expiró el TTL de 1 día?)`)
+    return null
+  }
+
+  logger.info("CLINIC-INFO-IMPORT-JOB", `Job ${jobId} (cliente ${job.clienteId}): iniciando para ${job.sourceUrl}`)
 
   try {
     job = { ...job, status: "scraping", updatedAt: new Date().toISOString() }
     await saveClinicInfoImportJob(job)
 
     const scraped = await scrapeUrl(job.sourceUrl)
+    logger.info("CLINIC-INFO-IMPORT-JOB", `Job ${jobId}: scrape OK, ${scraped.text.length} chars extraídos`)
 
     job = { ...job, status: "extracting", updatedAt: new Date().toISOString() }
     await saveClinicInfoImportJob(job)
 
     const extracted = await extractClinicInfoFromText(scraped.text)
+    logger.info("CLINIC-INFO-IMPORT-JOB", `Job ${jobId}: extracción OK`, {
+      camposConDatos: Object.keys(extracted).filter((k) => {
+        const v = (extracted as any)[k]
+        return Array.isArray(v) ? v.length > 0 : !!v
+      }),
+    })
 
     job = {
       ...job,
@@ -70,6 +83,8 @@ export async function runImportJob(jobId: string): Promise<ClinicInfoImportJob |
         : error instanceof Error
           ? error.message
           : "Error desconocido al importar"
+
+    logger.error("CLINIC-INFO-IMPORT-JOB", `Job ${jobId}: falló en fase "${job.status}" — ${message}`, error)
 
     job = { ...job, status: "error", error: message, updatedAt: new Date().toISOString() }
     await saveClinicInfoImportJob(job)
