@@ -878,6 +878,16 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         // redirigimos al flujo de reagendamiento usando turno_cancelado (Sprint 41).
         if (flowState.postCancelAction === 'reschedule') {
           await clearFlowState(userPhoneNumber, config.id)
+
+          // BUGFIX (11/7/2026, caso Belen/1154668024): a diferencia de la rama
+          // 'book_new' (más abajo), acá nunca se confirmaba la cancelación —
+          // el paciente pasaba directo de "1- Sí, cancelar" a un mensaje de
+          // búsqueda de turno nuevo, sin ningún "listo, cancelamos" en el medio.
+          // Mismo mensaje/patrón que 'book_new' (includeRescheduleOffer=false,
+          // ya estamos yendo directo a buscar un turno nuevo).
+          const cancelMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0, false)
+          await sendDirectResponse(ctx, cancelMsg, "cancel_and_reschedule")
+
           // Releer contexto actualizado: turnos[] vacío + turno_cancelado seteado
           const updatedChatbotData = await getAppointmentContext(userPhoneNumber, config.id)
           logger.info("Cancelación confirmada, redirigiendo a reagendamiento")
@@ -5515,71 +5525,119 @@ ${JSON.stringify(functionArgs, null, 2)}`
     // procesar el mensaje con el handler determinístico
     const rescheduleActive = await isRescheduleFlowActive(userPhoneNumber, config.id)
     if (rescheduleActive) {
-      
-      const rescheduleResult = await processRescheduleMessage(
-        userMessage,
-        phoneNumberId,
-        config.accessToken,
-        userPhoneNumber,
-        config.id,
-        config.cliente_id
-      )
-      
-      if (rescheduleResult.handled) {
-        // Guardar el mensaje del usuario antes de salir
-        await saveConversationMessage({
-          id: nanoid(),
-          role: "user",
-          content: userMessage,
-          timestamp: new Date().toISOString(),
-          phoneNumber: userPhoneNumber,
+      // BUGFIX (11/7/2026, casos Belen/1154668024 y Carlos/1169780949): todo este
+      // interceptor corría sin try/catch propio — cualquier excepción en
+      // processRescheduleMessage o en la resolución de "búsqueda ampliada" caía en
+      // el catch genérico de processIndividualMessage, que además solo logueaba
+      // error.message (sin stack). El caso de Carlos probó que el problema no es
+      // exclusivo de un searchType puntual (le pasó con "1", a Belen con "3") —
+      // ambos casos comparten este mismo interceptor, así que se envuelve el
+      // bloque COMPLETO, no solo la llamada a resumeExistingPatientBroadSearch.
+      try {
+        const rescheduleResult = await processRescheduleMessage(
+          userMessage,
+          phoneNumberId,
+          config.accessToken,
+          userPhoneNumber,
+          config.id,
+          config.cliente_id
+        )
+
+        if (rescheduleResult.handled) {
+          // Guardar el mensaje del usuario antes de salir
+          await saveConversationMessage({
+            id: nanoid(),
+            role: "user",
+            content: userMessage,
+            timestamp: new Date().toISOString(),
+            phoneNumber: userPhoneNumber,
+            configId: config.id,
+          })
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+
+        // Si necesita fallback a OpenAI para NLU, continuar con flujo normal
+        if (rescheduleResult.fallbackToOpenAI && rescheduleResult.fallbackContext) {
+          const fc: any = rescheduleResult.fallbackContext
+          // Búsqueda ampliada post-60-días (el paciente ya eligió 1/2/3: médico
+          // particular / especialidad / cualquier médico) y YA estaba identificado
+          // (DNI, obra social y sede vienen del turno recién cancelado). Antes acá
+          // se descartaba ese contexto y el mensaje caía al pipeline genérico de
+          // OpenAI sin ningún dato del paciente, tratándolo como paciente nuevo
+          // (volvía a pedir DNI/apellido/nombre/obra social desde cero). Caso
+          // Margarita, tel. 1140281277, 9/7/2026: ver PLAN-DE-TRABAJO.md.
+          if (fc.type === 'reschedule_broad_search' && fc.paciente) {
+            const resumeResult = await resumeExistingPatientBroadSearch(
+              userPhoneNumber,
+              config.cliente_id,
+              {
+                patientDNI: fc.pacienteDni || fc.paciente.dni || '',
+                patientFirstName: fc.paciente.nombres,
+                patientLastName: fc.paciente.apellido,
+                obraSocialId: fc.obraSocialId,
+                sedeId: fc.sedeId,
+                searchType: fc.searchType,
+              },
+              config.escalationPhoneNumber
+            )
+            if (!resumeResult.shouldCallOpenAI) {
+              const ctxResume: DirectResponseContext = {
+                phoneNumberId: value.metadata.phone_number_id,
+                accessToken: config.accessToken,
+                userPhoneNumber,
+                configId: config.id,
+                clienteId: config.cliente_id,
+              }
+              if (resumeResult?.handled && resumeResult.message) {
+                await sendExistingPatientResult(ctxResume, resumeResult, "reschedule-broad-search-existing")
+              }
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+            // shouldCallOpenAI (ej: feature flag directPacienteExistente apagado) → cede al pipeline normal
+          }
+          // Otros tipos de fallback (NLU ambigua dentro del flujo) → el flujo normal (asst_router) se encarga
+        }
+      } catch (rescheduleError) {
+        // OJO: acá NO hay un `logger` (createConversationLogger) en scope —
+        // processIndividualMessage usa console.error directo en todo el resto
+        // de la función; loguear el error completo (no sólo .message) es lo
+        // que faltaba para poder diagnosticar estos casos la próxima vez.
+        console.error(
+          `[WHATSAPP] Error en interceptor de reagendamiento activo (mensaje="${userMessage.substring(0, 60)}") para ${userPhoneNumber}:`,
+          rescheduleError,
+        )
+
+        // Limpiar TANTO el estado de reagendamiento (por si quedó a mitad de
+        // camino) como el de paciente existente (por si ya se había armado),
+        // para que un reintento no vuelva a chocar con un estado roto.
+        await clearExistingPatientFlow(userPhoneNumber).catch(() => {})
+        try {
+          const { clearRescheduleState } = await import("./conversation-state/reschedule-flow-handler")
+          await clearRescheduleState(userPhoneNumber, config.id)
+        } catch (clearError) {
+          console.error("[WHATSAPP] Error limpiando estado de reagendamiento tras excepción:", clearError)
+        }
+
+        const ctxRescheduleError: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
           configId: config.id,
-        })
+          clienteId: config.cliente_id,
+        }
+        const phoneLine = config.escalationPhoneNumber ? ` al *${config.escalationPhoneNumber}*` : ""
+        // Mensaje genérico a propósito: este catch envuelve TODO el interceptor
+        // de reagendamiento (todas sus fases), no sólo el tramo posterior a una
+        // cancelación — no podemos asumir que el turno ya fue cancelado acá.
+        await sendDirectResponse(
+          ctxRescheduleError,
+          `Tuvimos un problema procesando tu pedido de reagendar el turno. Por favor escribime "turno" para intentar de nuevo, o comunicate directamente con la clínica${phoneLine}.`,
+          "reschedule-flow-error",
+        )
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
         return
-      }
-      
-      // Si necesita fallback a OpenAI para NLU, continuar con flujo normal
-      if (rescheduleResult.fallbackToOpenAI && rescheduleResult.fallbackContext) {
-        const fc: any = rescheduleResult.fallbackContext
-        // Búsqueda ampliada post-60-días (el paciente ya eligió 1/2/3: médico
-        // particular / especialidad / cualquier médico) y YA estaba identificado
-        // (DNI, obra social y sede vienen del turno recién cancelado). Antes acá
-        // se descartaba ese contexto y el mensaje caía al pipeline genérico de
-        // OpenAI sin ningún dato del paciente, tratándolo como paciente nuevo
-        // (volvía a pedir DNI/apellido/nombre/obra social desde cero). Caso
-        // Margarita, tel. 1140281277, 9/7/2026: ver PLAN-DE-TRABAJO.md.
-        if (fc.type === 'reschedule_broad_search' && fc.paciente) {
-          const resumeResult = await resumeExistingPatientBroadSearch(
-            userPhoneNumber,
-            config.cliente_id,
-            {
-              patientDNI: fc.pacienteDni || fc.paciente.dni || '',
-              patientFirstName: fc.paciente.nombres,
-              patientLastName: fc.paciente.apellido,
-              obraSocialId: fc.obraSocialId,
-              sedeId: fc.sedeId,
-              searchType: fc.searchType,
-            },
-            config.escalationPhoneNumber
-          )
-          if (!resumeResult.shouldCallOpenAI) {
-            const ctxResume: DirectResponseContext = {
-              phoneNumberId: value.metadata.phone_number_id,
-              accessToken: config.accessToken,
-              userPhoneNumber,
-              configId: config.id,
-              clienteId: config.cliente_id,
-            }
-            if (resumeResult?.handled && resumeResult.message) {
-              await sendExistingPatientResult(ctxResume, resumeResult, "reschedule-broad-search-existing")
-            }
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-            return
-          }
-          // shouldCallOpenAI (ej: feature flag directPacienteExistente apagado) → cede al pipeline normal
-        }
-        // Otros tipos de fallback (NLU ambigua dentro del flujo) → el flujo normal (asst_router) se encarga
       }
     }
 
@@ -5812,7 +5870,11 @@ ${userMessage}`
     }
 
   } catch (error) {
-    console.error(`[WHATSAPP] Error al procesar mensaje individual para usuario ${userPhoneNumber}:`, (error as Error).message)
+    // BUGFIX (11/7/2026): antes se logueaba sólo (error as Error).message —
+    // se perdía el stack trace, con lo cual cualquier excepción que llegara
+    // hasta este catch (el más externo de toda la función) quedaba prácticamente
+    // indiagnosticable después del hecho. Se loguea el objeto completo.
+    console.error(`[WHATSAPP] Error al procesar mensaje individual para usuario ${userPhoneNumber}:`, error)
 
     const errorMessage =
       "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
