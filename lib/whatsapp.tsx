@@ -1021,10 +1021,80 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
       })
       await clearFlowState(userPhoneNumber, config.id)
 
-      // El paciente eligió mantener el turno → se considera confirmada la asistencia
+      // El paciente eligió mantener el turno → además de la marca interna, avisamos
+      // al proxy de la clínica (Action: "confirmar_turno") para que la asistencia
+      // quede confirmada también en su sistema real, no solo en el bot.
+      // BUGFIX (11/7/2026, caso Analia/1161982843): antes acá solo se llamaba a
+      // markAppointmentConfirmed (marca interna en Redis), a diferencia del flujo de
+      // confirmación directa por texto libre (Sprint 14, ~L3507) que sí llama al proxy.
+      // Best-effort: si el proxy falla, no bloqueamos ni le mostramos un error al
+      // paciente — su pedido real ("no cancelar") ya se cumplió sin tocar el proxy,
+      // así que el mensaje solo evita afirmar una confirmación que no ocurrió.
+      const turnoAConfirmar = chatbotData.turnos[flowState.turnoIndex || 0]
+      let attendanceConfirmedViaProxy = false
+
+      if (config.proxy && turnoAConfirmar?.fecha && chatbotData.paciente?.dni) {
+        try {
+          const confirmPayload = {
+            Cliente_Id: config.cliente_id,
+            Action: "confirmar_turno",
+            fecha: turnoAConfirmar.fecha,
+            paciente_datos: {
+              dni: chatbotData.paciente?.dni,
+            },
+          }
+          logger.info("Enviando confirmacion de asistencia al proxy (mantener turno)", { payload: confirmPayload })
+          const confirmProxyResponse = await fetchWithRetry(
+            config.proxy,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(confirmPayload),
+            },
+            TIMEOUTS.PROXY_TIMEOUT,
+            { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
+          )
+          let confirmProxyBody: { success?: boolean; [key: string]: unknown } | null = null
+          try {
+            const confirmProxyBodyText = await confirmProxyResponse.text()
+            confirmProxyBody = confirmProxyBodyText ? JSON.parse(confirmProxyBodyText) : null
+          } catch {
+            confirmProxyBody = null
+          }
+          attendanceConfirmedViaProxy = confirmProxyResponse.ok && confirmProxyBody?.success === true
+
+          if (attendanceConfirmedViaProxy) {
+            if (config.cliente_id) {
+              await trackAppointmentEvent({
+                clienteId: config.cliente_id,
+                phoneNumber: userPhoneNumber,
+                eventType: "template_confirmed",
+                timestamp: new Date().toISOString(),
+                appointmentId: String(turnoAConfirmar?.agenda_id || ""),
+                metadata: { method: "keep_appointment_after_cancel_prompt" },
+              })
+            }
+          } else {
+            logger.error("El proxy no confirmó la asistencia (mantener turno)", undefined, {
+              httpStatus: confirmProxyResponse.status,
+              body: confirmProxyBody,
+            })
+          }
+        } catch (proxyError) {
+          logger.error("Error enviando confirmacion de asistencia al proxy (mantener turno)", proxyError as Error)
+        }
+      } else {
+        logger.warn("Confirmacion de asistencia al proxy omitida — datos insuficientes", {
+          tieneProxy: !!config.proxy,
+          tieneFecha: !!turnoAConfirmar?.fecha,
+          tieneDni: !!chatbotData.paciente?.dni,
+        })
+      }
+
+      // Marca interna (evita volver a pedir "Confirmar asistencia" para el mismo turno)
       await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(chatbotData))
 
-      const keepMsg = buildKeepAppointmentMessage(chatbotData, flowState.turnoIndex || 0)
+      const keepMsg = buildKeepAppointmentMessage(chatbotData, flowState.turnoIndex || 0, attendanceConfirmedViaProxy)
       await sendDirectResponse(ctx, keepMsg, "awaiting_cancel_confirmation")
 
       // Turno se mantiene → volver al menú con el mismo estado de turnos

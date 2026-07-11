@@ -370,22 +370,31 @@ Escribí el número o el texto de la opción que prefieras:
  */
 export function buildKeepAppointmentMessage(
   chatbotData: ChatbotData,
-  turnoIndex: number = 0
+  turnoIndex: number = 0,
+  attendanceConfirmed: boolean = false
 ): string {
   const nombre = formatPatientName(chatbotData)
   const turno = chatbotData.turnos[turnoIndex]
-  
+  // attendanceConfirmed: true solo si el proxy de la clínica confirmó la
+  // asistencia con éxito (caso Analia, tel. 1161982843, 11/7/2026). Si el
+  // proxy falla, no se afirma nada que no haya pasado: el turno igual sigue
+  // vigente (nunca se llegó a cancelar), pero la confirmación en el sistema
+  // de la clínica quedó pendiente.
+  const intro = attendanceConfirmed
+    ? "Tu turno se mantiene vigente y confirmamos tu asistencia."
+    : "Tu turno se mantiene vigente."
+
   if (!turno) {
-    return `Perfecto, ${nombre}. Tu turno se mantiene vigente. ¡Te esperamos!`
+    return `Perfecto, ${nombre}. ${intro} ¡Te esperamos!`
   }
-  
+
   const fechaCompleta = formatFullDate(turno.fecha)
   const hora = formatTime(turno.hora)
   const profesional = formatProfessionalName(turno)
   const sede = turno.sede
   const direccion = turno.direccion
-  
-  return `Perfecto, ${nombre}. Tu turno se mantiene vigente.
+
+  return `Perfecto, ${nombre}. ${intro}
 
 Te esperamos el ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede} (${direccion}).
 
