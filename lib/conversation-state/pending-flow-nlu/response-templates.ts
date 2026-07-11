@@ -56,12 +56,49 @@ function formatTime(hora: string): string {
   return hora.substring(0, 5)
 }
 
-function formatTurnoDescription(turno: ChatbotDataTurno | null): string {
+/**
+ * Devuelve todos los turnos que comparten la misma fecha que el turno en
+ * `turnoIndex` (el backend cancela juntos todos los turnos de un mismo día,
+ * regla universal del sistema — ver caso Alberto, 11/7/2026).
+ */
+function getTurnosDelMismoDia(chatbotData: ChatbotData, turnoIndex: number): ChatbotDataTurno[] {
+  const turno = chatbotData.turnos?.[turnoIndex]
+  if (!turno) return []
+  return chatbotData.turnos.filter((t) => t.fecha === turno.fecha)
+}
+
+/**
+ * Describe el/los turno(s) pendientes de cancelación. Si hay más de uno en
+ * la misma fecha, los agrupa y pluraliza en vez de citar solo el primero.
+ */
+function formatTurnoDescription(turno: ChatbotDataTurno | null, turnosDelMismoDia?: ChatbotDataTurno[]): string {
   if (!turno) return "tu turno pendiente"
-  
+
+  const grupo = turnosDelMismoDia && turnosDelMismoDia.length > 0 ? turnosDelMismoDia : [turno]
   const fecha = formatFullDate(turno.fecha)
+
+  if (grupo.length > 1) {
+    const lineas = grupo
+      .map((t) => `  • ${formatTime(t.hora)} con ${t.profesional}`)
+      .join('\n')
+    return `tus ${grupo.length} turnos del ${fecha} en la sede ${turno.sede}:\n${lineas}`
+  }
+
   const hora = formatTime(turno.hora)
   return `el turno del ${fecha} a las ${hora} con ${turno.profesional} en la sede ${turno.sede}`
+}
+
+/**
+ * Pie con las opciones 1/2, singular o plural según cuántos turnos del
+ * mismo día estén en juego.
+ */
+function getCancelConfirmationFooter(count: number): string {
+  if (count > 1) {
+    return `1- Sí, cancelar los turnos
+2- No, mantener los turnos y confirmar asistencia.`
+  }
+  return `1- Sí, cancelar el turno
+2- No, mantener el turno y confirmar asistencia.`
 }
 
 // ============================================================================
@@ -76,8 +113,10 @@ function buildCancelConfirmationTemplates(): ResponseTemplates {
     buildResponse: (intent: DetectedIntent, chatbotData: ChatbotData, turnoIndex: number): string => {
       const nombre = formatPatientName(chatbotData)
       const turno = chatbotData.turnos?.[turnoIndex] || null
-      const turnoDesc = formatTurnoDescription(turno)
-      
+      const turnosDelMismoDia = getTurnosDelMismoDia(chatbotData, turnoIndex)
+      const turnoDesc = formatTurnoDescription(turno, turnosDelMismoDia)
+      const footer = getCancelConfirmationFooter(turnosDelMismoDia.length)
+
       const intentAcknowledgments: Record<DetectedIntent, string> = {
         solicitar_turno: "entiendo que querés solicitar un nuevo turno",
         reagendar: "entiendo que querés reagendar tu turno",
@@ -100,16 +139,14 @@ function buildCancelConfirmationTemplates(): ResponseTemplates {
 
 Necesitamos que confirmes tu decisión:
 
-1- Sí, cancelar el turno
-2- No, mantener el turno y confirmar asistencia.`
+${footer}`
       }
       
       // Para reagendar, similar
       if (intent === "reagendar") {
         return `${nombre}, ${ack}. Para poder hacerlo, primero necesitamos que confirmes si querés cancelar ${turnoDesc}.
 
-1- Sí, cancelar el turno
-2- No, mantener el turno y confirmar asistencia.`
+${footer}`
       }
       
       // Para consultas de info
@@ -117,8 +154,7 @@ Necesitamos que confirmes tu decisión:
         return `${nombre}, ${ack}. Con gusto te ayudo, pero primero necesitamos resolver la cancelación pendiente de ${turnoDesc}.
 
 Por favor, indicame:
-1- Sí, cancelar el turno
-2- No, mantener el turno y confirmar asistencia.
+${footer}
 
 Una vez resuelto, podré ayudarte con tu consulta.`
       }
@@ -129,8 +165,7 @@ Una vez resuelto, podré ayudarte con tu consulta.`
 
 ¿Querés cancelar ${turnoDesc}?
 
-1- Sí, cancelar el turno
-2- No, mantener el turno y confirmar asistencia.`
+${footer}`
       }
       
       // Para quejas/frustración
@@ -139,25 +174,23 @@ Una vez resuelto, podré ayudarte con tu consulta.`
 
 Solo necesito que me confirmes si querés cancelar ${turnoDesc}:
 
-1- Sí, cancelar el turno
-2- No, mantener el turno y confirmar asistencia.`
+${footer}`
       }
       
       // Para confirmar turno (contradicción)
       if (intent === "confirmar_turno") {
+        const turnoPlural = turnosDelMismoDia.length > 1 ? "los turnos" : "el turno"
         return `${nombre}, ${ack}, pero actualmente tenemos pendiente una solicitud de cancelación para ${turnoDesc}.
 
-Si querés mantener el turno y confirmar tu asistencia, elegí la opción 2:
+Si querés mantener ${turnoPlural} y confirmar tu asistencia, elegí la opción 2:
 
-1- Sí, cancelar el turno
-2- No, mantener el turno y confirmar asistencia.`
+${footer}`
       }
-      
+
       // Default para "otro" o intenciones no manejadas
       return `${nombre}, ${ack}. Para poder continuar, necesito que me indiques qué querés hacer con ${turnoDesc}:
 
-1- Sí, cancelar el turno
-2- No, mantener el turno y confirmar asistencia.`
+${footer}`
     }
   }
 }
