@@ -562,7 +562,10 @@ export async function handleRescheduleMessage(
   // Fase 5: Esperando opción de búsqueda ampliada (1/2/3)
   if (state.phase === 'awaiting_search_type') {
     const normalized = message.trim().toLowerCase()
-    const isOp1 = /^1\.?$/.test(normalized) || /m[e��]dico|profesional|particular/.test(normalized)
+    // BUGFIX (11/7/2026): la clase de caracteres tenía dos bytes de reemplazo
+    // (U+FFFD) en vez de "é" — mojibake que dejaba "médico" sin matchear nunca
+    // por texto libre (sólo funcionaba escribiendo el número "1" a secas).
+    const isOp1 = /^1\.?$/.test(normalized) || /m[eé]dico|profesional|particular/.test(normalized)
     const isOp2 = /^2\.?$/.test(normalized) || /especialidad/.test(normalized)
     const isOp3 = /^3\.?$/.test(normalized) || /cualquier|disponible/.test(normalized)
 
