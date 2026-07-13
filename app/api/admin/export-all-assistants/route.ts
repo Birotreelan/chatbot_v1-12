@@ -34,9 +34,25 @@ export async function GET(request: NextRequest) {
       widgetAssistantId: c.widgetAssistantId || null,
     }))
 
-    const uniqueAssistantIds = Array.from(
+    let uniqueAssistantIds = Array.from(
       new Set(configs.map((c) => c.whatsappAssistantId).filter((id): id is string => !!id)),
     )
+
+    const onlyParam = request.nextUrl.searchParams.get("only")
+    if (onlyParam) {
+      const wanted = new Set(onlyParam.split(",").map((s) => s.trim()).filter(Boolean))
+      uniqueAssistantIds = uniqueAssistantIds.filter((id) => wanted.has(id))
+    }
+
+    const idsOnly = request.nextUrl.searchParams.get("idsOnly")
+    if (idsOnly === "1") {
+      return NextResponse.json({
+        exportedAt: new Date().toISOString(),
+        totalClinicas: configs.length,
+        clinicas,
+        uniqueAssistantIds,
+      })
+    }
 
     const assistants: Record<string, unknown> = {}
     for (const assistantId of uniqueAssistantIds) {
