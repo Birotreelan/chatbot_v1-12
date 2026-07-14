@@ -512,7 +512,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
                     <span className="shrink-0 rounded-full bg-sky-100 text-sky-600 p-1.5">
                       <StepIcon className="h-4 w-4" />
                     </span>
-                    <p className="text-base font-semibold text-gray-800">{step.message}</p>
+                    <p className="text-base font-semibold text-gray-800 whitespace-pre-wrap">{step.message}</p>
                   </div>
                 )
               })()}
