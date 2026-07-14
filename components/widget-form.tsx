@@ -167,7 +167,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   const rootRef = useRef<HTMLDivElement>(null)
 
   const title = "Solicitud de turnos"
-  const subtitle = "Completá los pasos para agendar un turno con nosotros"
+  const subtitle = "Completá los pasos para agendar tu cita médica oftalmológica."
 
   // ── Inicialización ─────────────────────────────────────────────────────
   useEffect(() => {

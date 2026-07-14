@@ -129,7 +129,8 @@ export interface FormWidgetStep {
   canGoBack?: boolean
 }
 
-const DNI_MESSAGE = 'Para comenzar, ingresá tu número de DNI (sin puntos).'
+const DNI_MESSAGE =
+  'Para comenzar, ingresa tu número de DNI (sin puntos) para verificar si ya sos paciente de nuestra institución o si agendarte como paciente nuevo/a.'
 const FEATURE_DISABLED_MESSAGE =
   'Este servicio no está disponible por el momento. Por favor, contactanos directamente para agendar tu turno.'
 
@@ -546,7 +547,8 @@ function buildStepFromNormalized(
       return {
         phase: fields.phase,
         done: false,
-        message: 'Contanos tu obra social o prepaga.',
+        message:
+          "A continuación, escribí tu Obra Social. Si no tenés, podes escribir 'particular' y te agendaremos un turno sin cobertura.",
         inputType: 'text',
         fieldLabel: 'Obra social',
         placeholder: 'Ej: OSDE, Swiss Medical, PAMI, Particular',
