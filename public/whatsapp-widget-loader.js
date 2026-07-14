@@ -42,7 +42,7 @@
         left: 20px;
         bottom: 20px;
         min-height: 56px;
-        max-width: 320px;
+        max-width: 360px;
         padding: 10px 18px 10px 10px;
         border-radius: 28px;
         background: linear-gradient(135deg, #25D366, #128C7E);
@@ -94,10 +94,22 @@
         height: 9px;
       }
       #iris-whatsapp-widget-text {
+        display: flex;
+        flex-direction: column;
+        text-align: left;
+        line-height: 1.25;
+      }
+      #iris-whatsapp-widget-title {
         color: white;
         font-size: 13px;
-        line-height: 1.3;
-        font-weight: 500;
+        font-weight: 600;
+      }
+      #iris-whatsapp-widget-subtitle {
+        color: white;
+        font-size: 11px;
+        font-weight: 400;
+        font-style: italic;
+        opacity: 0.9;
       }
       @media (max-width: 767px) {
         #iris-whatsapp-widget-button {
@@ -148,12 +160,21 @@
       </span>
     `
 
-    // El texto sí depende de un dato externo (nombre de la clínica) — se arma
-    // con textContent, no con innerHTML, para no quedar expuestos a que un
-    // displayName con caracteres raros rompa el HTML del sitio que lo aloja.
+    // Título (bold) + subtítulo (itálica, más chico y tenue), mismo patrón de
+    // dos formatos que el botón flotante del widget de formulario.
     const textEl = document.createElement("span")
     textEl.id = "iris-whatsapp-widget-text"
-    textEl.textContent = "Solicitar turno por Whatsapp"
+
+    const titleEl = document.createElement("span")
+    titleEl.id = "iris-whatsapp-widget-title"
+    titleEl.textContent = "Reservá tu turno por WhatsApp"
+
+    const subtitleEl = document.createElement("span")
+    subtitleEl.id = "iris-whatsapp-widget-subtitle"
+    subtitleEl.textContent = "Chateá con nuestro asistente de IA y coordiná tu turno de forma simple."
+
+    textEl.appendChild(titleEl)
+    textEl.appendChild(subtitleEl)
 
     link.appendChild(iconWrapper)
     link.appendChild(textEl)
