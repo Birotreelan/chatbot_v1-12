@@ -114,6 +114,7 @@
         z-index: 9999;
         bottom: 90px;
         height: 600px; /* valor inicial; el iframe la ajusta por postMessage según su contenido */
+        min-height: 600px; /* tamaño estándar (calendario + 2 filas de horarios): nunca achica más que esto */
         max-height: calc(100vh - 110px);
         width: 380px;
         max-width: calc(100vw - 40px);
@@ -142,6 +143,7 @@
           max-width: 100% !important;
           height: 100vh !important;
           height: 100dvh !important;
+          min-height: 0 !important; /* en mobile el tamaño estándar desktop no debe forzar overflow en pantallas bajas */
           border-radius: 0 !important;
           box-shadow: none !important;
         }
