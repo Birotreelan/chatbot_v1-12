@@ -18,17 +18,16 @@
   const scriptUrl = new URL(scriptElement.src)
   const baseUrl = `${scriptUrl.protocol}//${scriptUrl.host}`
 
-  // Mensaje predefinido que llega ya escrito en WhatsApp al tocar el botón.
-  // IMPORTANTE: los emojis se escriben con \u{...} (no como el carácter literal)
-  // a propósito — este script corre embebido en sitios de terceros con charset
-  // desconocido/no controlado por nosotros; un emoji literal en el código fuente
-  // puede llegar a decodificarse mal según cómo el navegador interprete el
-  // archivo, mientras que un escape de unicode es puro ASCII y JS lo resuelve
-  // siempre igual sin importar el charset con el que se sirvió el archivo.
-  const PRESET_MESSAGE = "\u00A1Hola Iris! \u{1F44B} Quiero agendar un turno."
+  // Mensaje predefinido que llega ya escrito en WhatsApp al tocar el botón,
+  // personalizado con el nombre de la clínica. Sin emoji: llegaba a destino
+  // como un carácter no reconocible ("�") en algunos sistemas.
+  function buildPresetMessage(clinicName) {
+    const clinicLabel = clinicName ? clinicName : "la cl\u00EDnica"
+    return `\u00A1Hola ${clinicLabel}! Quiero agendar un turno.`
+  }
 
-  function buildWhatsAppUrl(digits) {
-    return `https://wa.me/${digits}?text=${encodeURIComponent(PRESET_MESSAGE)}`
+  function buildWhatsAppUrl(digits, clinicName) {
+    return `https://wa.me/${digits}?text=${encodeURIComponent(buildPresetMessage(clinicName))}`
   }
 
   function injectStyles() {
@@ -121,7 +120,7 @@
 
     const link = document.createElement("a")
     link.id = "iris-whatsapp-widget-button"
-    link.href = buildWhatsAppUrl(digits)
+    link.href = buildWhatsAppUrl(digits, clinicName)
     link.target = "_blank"
     link.rel = "noopener noreferrer"
     link.setAttribute("aria-label", "Hablar con Iris por WhatsApp")
