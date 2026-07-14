@@ -169,7 +169,13 @@
 
     const iframe = document.createElement("iframe")
     const timestamp = Date.now()
-    const widgetUrl = `${config.widgetUrl}?clienteId=${encodeURIComponent(clienteId)}&embedded=true&_t=${timestamp}`
+    // El iframe siempre se renderiza angosto (~380px), tanto en mobile como en
+    // desktop, así que Tailwind no puede distinguir los dos modos por su propio
+    // ancho (por eso el fix anterior con md: no funcionaba). Quien sí sabe en
+    // qué modo está es esta página anfitriona (mismo breakpoint que el media
+    // query de abajo), así que se lo pasamos al iframe por query param.
+    const layoutMode = window.matchMedia("(max-width: 767px)").matches ? "mobile" : "desktop"
+    const widgetUrl = `${config.widgetUrl}?clienteId=${encodeURIComponent(clienteId)}&embedded=true&mode=${layoutMode}&_t=${timestamp}`
     iframe.src = widgetUrl
 
     const loadTimeout = setTimeout(() => {

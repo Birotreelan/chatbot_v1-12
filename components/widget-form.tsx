@@ -151,6 +151,11 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   const [loading, setLoading] = useState(true)
   const [networkError, setNetworkError] = useState(false)
   const [isEmbedded, setIsEmbedded] = useState(false)
+  // Modo de layout mobile/desktop que nos manda widget-form-loader.js por
+  // query param (?mode=mobile|desktop). No se puede inferir con un media
+  // query de Tailwind acá adentro: el iframe siempre es angosto (~380px) en
+  // los dos modos, así que md: nunca se activaba y el scroller no desaparecía.
+  const [isMobileLayout, setIsMobileLayout] = useState(false)
 
   const [textValue, setTextValue] = useState("")
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -168,6 +173,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
     setSessionId(newSessionId())
     if (typeof window !== "undefined") {
       setIsEmbedded(window.self !== window.top)
+      setIsMobileLayout(new URLSearchParams(window.location.search).get("mode") === "mobile")
     }
   }, [])
 
@@ -178,7 +184,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   // nunca haga falta un scroller. En mobile esto se ignora: el contenedor
   // padre fuerza 100dvh con !important sin importar la altura reportada acá.
   useEffect(() => {
-    if (!isEmbedded || typeof window === "undefined" || !rootRef.current) return
+    if (!isEmbedded || isMobileLayout || typeof window === "undefined" || !rootRef.current) return
 
     const el = rootRef.current
     const reportHeight = () => {
@@ -192,7 +198,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
     const observer = new ResizeObserver(reportHeight)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [isEmbedded])
+  }, [isEmbedded, isMobileLayout])
 
   const callApi = useCallback(
     async (message: string, init = false) => {
@@ -271,7 +277,9 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   }
 
   const handleTextChange = (raw: string) => {
-    if (step?.inputType === "dni" || step?.inputType === "tel") {
+    if (step?.inputType === "dni") {
+      setTextValue(raw.replace(/[^\d]/g, "").slice(0, 8))
+    } else if (step?.inputType === "tel") {
       setTextValue(raw.replace(/[^\d]/g, ""))
     } else {
       setTextValue(raw)
@@ -301,6 +309,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
             <input
               type={step.inputType === "dni" ? "text" : step.inputType}
               inputMode={step.inputType === "dni" || step.inputType === "tel" ? "numeric" : undefined}
+              maxLength={step.inputType === "dni" ? 8 : undefined}
               value={textValue}
               onChange={(e) => handleTextChange(e.target.value)}
               onKeyDown={(e) => {
@@ -442,7 +451,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   }
 
   return (
-    <div ref={rootRef} className="flex flex-col h-screen md:h-auto bg-white">
+    <div ref={rootRef} className={`flex flex-col bg-white ${isMobileLayout ? "h-screen" : "h-auto"}`}>
       {!hideHeader && (
         <div
           className="bg-sky-600 text-white p-4 flex items-center justify-between gap-3 flex-shrink-0"
@@ -468,9 +477,11 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto md:overflow-visible p-4 bg-gray-50">
+      <div className={`flex-1 p-4 bg-gray-50 ${isMobileLayout ? "overflow-y-auto" : "overflow-visible"}`}>
         {!step ? (
-          <div className="flex items-center justify-center h-full md:h-auto md:min-h-[160px]">
+          <div
+            className={`flex items-center justify-center ${isMobileLayout ? "h-full" : "h-auto min-h-[160px]"}`}
+          >
             <Loader2 className="h-6 w-6 animate-spin text-sky-600" />
           </div>
         ) : (
