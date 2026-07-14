@@ -80,6 +80,7 @@ interface FormStep {
   placeholder?: string
   options?: FormOption[]
   turnos?: FormTurno[]
+  mostrarProfesionalPorTurno?: boolean
   summary?: FormSummary
   canGoBack?: boolean
 }
@@ -257,9 +258,16 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
     return step.turnos.filter((t) => t.fecha === selectedDate)
   }, [step, selectedDate])
 
+  // El backend nos dice explícitamente cuándo mostrar el profesional (cuando
+  // la búsqueda fue "cualquier médico" — ver widget-form-flow.ts). No lo
+  // inferimos contando profesionales distintos en el día: un día puntual
+  // puede tener casualmente uno solo disponible y el paciente igual necesita
+  // verlo, porque no lo eligió de antemano. Si el backend no manda el flag
+  // (versión vieja desplegada), caemos al conteo como respaldo.
   const mostrarProfesionalPorTurno = useMemo(() => {
+    if (step?.mostrarProfesionalPorTurno !== undefined) return step.mostrarProfesionalPorTurno
     return new Set(turnosDelDia.map((t) => t.profesionalNombre)).size > 1
-  }, [turnosDelDia])
+  }, [step, turnosDelDia])
 
   const handleClose = () => {
     try {

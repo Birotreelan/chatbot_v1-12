@@ -115,6 +115,16 @@ export interface FormWidgetStep {
   placeholder?: string
   options?: FormWidgetOption[]
   turnos?: FormWidgetTurno[]
+  /**
+   * Si true, el frontend debe mostrar el nombre del profesional debajo de
+   * cada horario. Sólo aplica cuando la búsqueda fue "cualquier médico"
+   * (`searchType === 'cualquier_medico'`) — ahí el profesional varía turno a
+   * turno y el paciente necesita verlo para elegir. No se calcula contando
+   * profesionales distintos en el día mostrado: un día puntual puede tener
+   * casualmente un solo profesional disponible y el paciente igual necesita
+   * saber quién es, porque no lo eligió de antemano.
+   */
+  mostrarProfesionalPorTurno?: boolean
   summary?: FormWidgetSummary
   canGoBack?: boolean
 }
@@ -410,6 +420,7 @@ interface NormalizedFields {
   profesionalesOpciones?: ProfessionalOption[]
   especialidadesOpciones?: SpecialtyOption[]
   turnosOpciones?: TurnoOption[]
+  searchType?: 'medico_particular' | 'especialidad' | 'cualquier_medico' | 'cambiar_sede'
   summary: FormWidgetSummary
 }
 
@@ -427,6 +438,7 @@ function buildNewPatientStep(
       profesionalesOpciones: state.profesionalesOpciones,
       especialidadesOpciones: state.especialidadesOpciones,
       turnosOpciones: state.turnosOpciones,
+      searchType: state.searchType,
       summary: {
         dni: state.dni,
         nombreCompleto,
@@ -465,6 +477,7 @@ function buildExistingPatientStep(
       profesionalesOpciones: state.profesionalesOpciones,
       especialidadesOpciones: state.especialidadesOpciones,
       turnosOpciones: state.turnosOpciones,
+      searchType: state.searchType,
       summary: {
         dni: state.patientDNI,
         nombreCompleto,
@@ -654,6 +667,7 @@ function buildStepFromNormalized(
           especialidad: t.especialidad,
           sedeNombre: t.sedeNombre,
         })),
+        mostrarProfesionalPorTurno: fields.searchType === 'cualquier_medico',
         canGoBack,
       }
 
