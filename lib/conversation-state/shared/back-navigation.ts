@@ -204,7 +204,15 @@ export function getPreviousPhase(
     case 'awaiting_email':
       return channel === 'widget' ? 'awaiting_telefono' : 'awaiting_nombre'
     case 'awaiting_confirmation':
-      return 'awaiting_email'
+      // Volver directo a elegir turno (no a re-pedir email/teléfono/nombre/
+      // apellido uno por uno): son datos que ya tenemos guardados y el flujo
+      // hacia adelante (handleTurnoPhase / equivalente en existing-patient) ya
+      // los salta automáticamente si están presentes, así que al elegir un
+      // turno nuevo se vuelve a la confirmación sin pedir nada de nuevo. Antes
+      // esto apuntaba a 'awaiting_email', pero ningún handler de
+      // "volver" tenía un caso para esa fase → caía al default y reiniciaba
+      // todo el flujo desde cero (bug reportado 2026-07-14).
+      return 'awaiting_turno_selection'
 
     // --- Modificación de datos -> volver a la confirmación ---
     case 'awaiting_modify_selection':
