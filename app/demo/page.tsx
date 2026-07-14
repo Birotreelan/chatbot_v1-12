@@ -1,9 +1,8 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -11,7 +10,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { WhatsAppCtaPreview } from "@/components/dashboard/whatsapp-cta-preview"
 
 interface ClinicOption {
   cliente_id: string
@@ -65,7 +63,6 @@ export default function DemoPage() {
   const [config, setConfig] = useState<WidgetPublicConfig | null>(null)
   const [loadingConfig, setLoadingConfig] = useState(false)
   const [baseUrl, setBaseUrl] = useState("")
-  const [previewKey, setPreviewKey] = useState(0)
 
   // Cargar la lista de clínicas y preseleccionar según la URL (?cliente_id=)
   useEffect(() => {
@@ -98,8 +95,8 @@ export default function DemoPage() {
   }, [])
 
   // Cada vez que cambia la clínica seleccionada: actualizar la URL, traer su
-  // configuración pública, y reiniciar tanto el widget flotante (script real,
-  // igual que en el sitio de la clínica) como la vista previa embebida.
+  // configuración pública, y reiniciar los widgets flotantes reales (mismos
+  // scripts que se integran en el sitio de la clínica).
   useEffect(() => {
     if (!clienteId) return
 
@@ -151,8 +148,6 @@ export default function DemoPage() {
     formScript.setAttribute("data-client-id", clienteId)
     document.body.appendChild(formScript)
 
-    setPreviewKey((k) => k + 1)
-
     return () => {
       cancelled = true
       removeFloatingWidget()
@@ -161,32 +156,7 @@ export default function DemoPage() {
     }
   }, [clienteId])
 
-  const reloadPreview = useCallback(() => {
-    setPreviewKey((k) => k + 1)
-  }, [])
-
-  // La vista previa embebida siempre está visible (no es un widget flotante
-  // que se abre/cierra), así que acá no tiene sentido "ocultarla" cuando el
-  // visitante toca la X del header — en su lugar, tratamos ese cierre como
-  // un reinicio de la conversación (mismo efecto que "Reiniciar chat").
-  useEffect(() => {
-    function handleWidgetMessage(event: MessageEvent) {
-      const data = event.data
-      if (data && data.source === "iris-widget" && data.type === "close") {
-        setPreviewKey((k) => k + 1)
-      }
-    }
-    window.addEventListener("message", handleWidgetMessage)
-    return () => window.removeEventListener("message", handleWidgetMessage)
-  }, [])
-
   const selectedClinic = clinics?.find((c) => c.cliente_id === clienteId)
-  const previewUrl = clienteId
-    ? `/widget?clienteId=${encodeURIComponent(clienteId)}&embedded=true&_t=${previewKey}`
-    : ""
-  const formPreviewUrl = clienteId
-    ? `/widget-form?clienteId=${encodeURIComponent(clienteId)}&embedded=true&_t=${previewKey}`
-    : ""
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -305,75 +275,6 @@ export default function DemoPage() {
 
           <div className="space-y-6">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <div>
-                  <CardTitle>Vista previa en vivo</CardTitle>
-                  <CardDescription>Conversación real contra el motor de agendamiento.</CardDescription>
-                </div>
-                <Button variant="outline" size="sm" onClick={reloadPreview}>
-                  Reiniciar chat
-                </Button>
-              </CardHeader>
-              <CardContent>
-                <div className="border rounded-lg overflow-hidden" style={{ height: 520 }}>
-                  {clienteId ? (
-                    <iframe
-                      key={previewKey}
-                      src={previewUrl}
-                      className="w-full h-full border-0"
-                      title="Vista previa del widget"
-                    />
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-gray-400 text-sm">
-                      Elegí una clínica para ver el chat
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 mt-3">
-                  Además de esta vista embebida, el botón flotante real (mismo script que se integra en el sitio de la
-                  clínica) aparece en la esquina inferior derecha de esta página, cerrado — así se prueba también el
-                  widget-loader.js tal como lo ve un visitante. El botón del formulario queda apilado justo arriba;
-                  abrir uno cierra el otro automáticamente.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <div>
-                  <CardTitle>Widget de Formulario</CardTitle>
-                  <CardDescription>
-                    Mismo motor de agendamiento, pero con inputs, botones y un calendario en vez de chat.
-                  </CardDescription>
-                </div>
-                <Button variant="outline" size="sm" onClick={reloadPreview}>
-                  Reiniciar formulario
-                </Button>
-              </CardHeader>
-              <CardContent>
-                <div className="border rounded-lg overflow-hidden" style={{ height: 600 }}>
-                  {clienteId ? (
-                    <iframe
-                      key={`form-${previewKey}`}
-                      src={formPreviewUrl}
-                      className="w-full h-full border-0"
-                      title="Vista previa del widget de formulario"
-                    />
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-gray-400 text-sm">
-                      Elegí una clínica para ver el formulario
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 mt-3">
-                  El botón flotante real de este widget aparece apilado justo arriba del botón del chat, en la esquina
-                  inferior derecha. Ambos pueden convivir en el mismo sitio: abrir uno cierra el otro automáticamente,
-                  así nunca se superponen dos paneles a la vez.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
               <CardHeader>
                 <CardTitle>Integración Formulario</CardTitle>
                 <CardDescription>
@@ -386,26 +287,6 @@ export default function DemoPage() {
                     {`<script\n  src="${baseUrl || "https://tu-dominio.com"}/widget-form-loader.js"\n  data-client-id="${clienteId}"\n></script>`}
                   </code>
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Widget de WhatsApp</CardTitle>
-                <CardDescription>
-                  Botón flotante chico, esquina inferior izquierda — para quien prefiera esa vía en vez del chat
-                  embebido.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <WhatsAppCtaPreview
-                  clinicName={selectedClinic?.displayName || ""}
-                  whatsappNumber={selectedClinic?.whatsappNumber}
-                />
-                <p className="text-xs text-gray-500 mt-4">
-                  El botón real (mismo script que se integra en el sitio de la clínica) aparece en la esquina
-                  inferior izquierda de esta página.
-                </p>
               </CardContent>
             </Card>
 
@@ -424,25 +305,6 @@ export default function DemoPage() {
                 </div>
               </CardContent>
             </Card>
-
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <div className="flex items-start">
-                <svg className="h-5 w-5 text-blue-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                  <path
-                    fillRule="evenodd"
-                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <div className="ml-3 text-sm text-blue-700">
-                  <p className="font-medium text-blue-800 mb-1">Recordatorio</p>
-                  <p>
-                    Esta página solo cambia a qué clínica apunta el widget de prueba — la conversación agenda turnos
-                    reales contra esa clínica. Usá un DNI de prueba, no el de un paciente real.
-                  </p>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </main>
