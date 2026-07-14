@@ -63,10 +63,15 @@ export default function DemoPage() {
   const [config, setConfig] = useState<WidgetPublicConfig | null>(null)
   const [loadingConfig, setLoadingConfig] = useState(false)
   const [baseUrl, setBaseUrl] = useState("")
+  // El widget de chatbot (chat embebido) queda oculto por default — sólo se
+  // muestra (botón flotante + su tarjeta de integración) si la URL trae el
+  // parámetro `chatbot`, ej: /demo?cliente_id=...&chatbot
+  const [showChatbot, setShowChatbot] = useState(false)
 
   // Cargar la lista de clínicas y preseleccionar según la URL (?cliente_id=)
   useEffect(() => {
     setBaseUrl(window.location.origin)
+    setShowChatbot(new URLSearchParams(window.location.search).has("chatbot"))
 
     async function loadClinics() {
       try {
@@ -120,12 +125,14 @@ export default function DemoPage() {
       })
 
     removeFloatingWidget()
-    const script = document.createElement("script")
-    script.id = WIDGET_SCRIPT_ID
-    script.src = "/widget-loader.js"
-    script.async = true
-    script.setAttribute("data-client-id", clienteId)
-    document.body.appendChild(script)
+    if (showChatbot) {
+      const script = document.createElement("script")
+      script.id = WIDGET_SCRIPT_ID
+      script.src = "/widget-loader.js"
+      script.async = true
+      script.setAttribute("data-client-id", clienteId)
+      document.body.appendChild(script)
+    }
 
     removeFloatingWhatsAppWidget()
     const whatsappScript = document.createElement("script")
@@ -154,7 +161,7 @@ export default function DemoPage() {
       removeFloatingWhatsAppWidget()
       removeFloatingFormWidget()
     }
-  }, [clienteId])
+  }, [clienteId, showChatbot])
 
   const selectedClinic = clinics?.find((c) => c.cliente_id === clienteId)
 
@@ -256,27 +263,29 @@ export default function DemoPage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Integración</CardTitle>
-                <CardDescription>
-                  Código para embeber este widget en el sitio de la clínica seleccionada.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
-                  <code className="text-sm whitespace-pre">
-                    {`<script\n  src="${baseUrl || "https://tu-dominio.com"}/widget-loader.js"\n  data-client-id="${clienteId}"\n></script>`}
-                  </code>
-                </div>
-              </CardContent>
-            </Card>
+            {showChatbot && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Integración Widget Chatbot</CardTitle>
+                  <CardDescription>
+                    Código para embeber este widget en el sitio de la clínica seleccionada.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                    <code className="text-sm whitespace-pre">
+                      {`<script\n  src="${baseUrl || "https://tu-dominio.com"}/widget-loader.js"\n  data-client-id="${clienteId}"\n></script>`}
+                    </code>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Integración Formulario</CardTitle>
+                <CardTitle>Integración de Widget "Solicitar turno" para agendamiento web</CardTitle>
                 <CardDescription>
                   Código para embeber el widget de formulario en el sitio de la clínica seleccionada.
                 </CardDescription>
