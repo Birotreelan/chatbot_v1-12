@@ -113,7 +113,7 @@
         position: fixed;
         z-index: 9999;
         bottom: 90px;
-        height: 600px;
+        height: 600px; /* valor inicial; el iframe la ajusta por postMessage según su contenido */
         max-height: calc(100vh - 110px);
         width: 380px;
         max-width: calc(100vw - 40px);
@@ -227,6 +227,15 @@
     const data = event.data
     if (data && data.source === "iris-widget" && data.type === "close") {
       hideWidget()
+    }
+    // El iframe (components/widget-form.tsx) mide su propio contenido y avisa
+    // cuánto necesita, así la caja crece/achica según el paso actual (ej. una
+    // grilla larga de horarios) en vez de tener un alto fijo con scroll interno.
+    // El CSS (#iris-form-widget-container, max-height) ya limita esto a lo que
+    // entra en la pantalla; en mobile el media query fuerza 100dvh con
+    // !important y esto se ignora.
+    if (data && data.source === "iris-form-widget" && data.type === "resize" && widgetContainer) {
+      widgetContainer.style.height = `${data.height}px`
     }
   })
 

@@ -158,6 +158,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
 
   const lastMessageRef = useRef<string>("")
   const lastInitRef = useRef<boolean>(false)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   const title = "Solicitud de turnos"
   const subtitle = "Completá los pasos para agendar un turno con nosotros"
@@ -169,6 +170,29 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
       setIsEmbedded(window.self !== window.top)
     }
   }, [])
+
+  // ── Auto-resize (solo desktop) ─────────────────────────────────────────
+  // En vez de una altura fija con scroll interno, el iframe le avisa a
+  // public/widget-form-loader.js cuánto mide realmente su contenido (header +
+  // paso actual) cada vez que cambia, para que la caja crezca/achique y
+  // nunca haga falta un scroller. En mobile esto se ignora: el contenedor
+  // padre fuerza 100dvh con !important sin importar la altura reportada acá.
+  useEffect(() => {
+    if (!isEmbedded || typeof window === "undefined" || !rootRef.current) return
+
+    const el = rootRef.current
+    const reportHeight = () => {
+      window.parent.postMessage(
+        { source: "iris-form-widget", type: "resize", height: el.scrollHeight },
+        "*",
+      )
+    }
+
+    reportHeight()
+    const observer = new ResizeObserver(reportHeight)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [isEmbedded])
 
   const callApi = useCallback(
     async (message: string, init = false) => {
@@ -345,7 +369,9 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
                       >
                         {t.hora}
                         {mostrarProfesionalPorTurno && (
-                          <div className="text-xs text-gray-500 font-normal truncate">{t.profesionalNombre}</div>
+                          <div className="text-xs text-gray-500 font-normal whitespace-normal break-words leading-tight">
+                            {t.profesionalNombre}
+                          </div>
                         )}
                       </button>
                     ))}
@@ -416,7 +442,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div ref={rootRef} className="flex flex-col h-screen md:h-auto bg-white">
       {!hideHeader && (
         <div
           className="bg-sky-600 text-white p-4 flex items-center justify-between gap-3 flex-shrink-0"
@@ -442,9 +468,9 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+      <div className="flex-1 overflow-y-auto md:overflow-visible p-4 bg-gray-50">
         {!step ? (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex items-center justify-center h-full md:h-auto md:min-h-[160px]">
             <Loader2 className="h-6 w-6 animate-spin text-sky-600" />
           </div>
         ) : (
