@@ -21,7 +21,7 @@ function WhatsAppIcon({ className }: { className?: string }) {
  * que el chat pero mucho más chico). Este componente queda como la
  * descripción de qué hace ese widget, dentro de la card de la demo.
  */
-export function WhatsAppCtaPreview({ clinicName, whatsappNumber }: WhatsAppCtaPreviewProps) {
+export function WhatsAppCtaPreview({ whatsappNumber }: WhatsAppCtaPreviewProps) {
   const digits = (whatsappNumber || "").replace(/\D/g, "")
   const hasNumber = digits.length >= 8
 
@@ -38,10 +38,7 @@ export function WhatsAppCtaPreview({ clinicName, whatsappNumber }: WhatsAppCtaPr
           </div>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-gray-600">
-            Hablá directo con <span className="font-medium text-gray-800">Iris</span>, la asistente de IA de{" "}
-            {clinicName || "la clínica"}, y agendá tu turno en segundos.
-          </p>
+          <p className="text-sm text-gray-600">Solicitar turno por Whatsapp</p>
         </div>
       </div>
 

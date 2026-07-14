@@ -33,7 +33,7 @@
     widgetUrl: `${baseUrl}/widget-form`,
   }
 
-  const BUTTON_TEXT = "Reservá tu turno paso a paso"
+  const BUTTON_TEXT = "Solicitar turno"
 
   let isWidgetVisible = false
   let widgetContainer = null

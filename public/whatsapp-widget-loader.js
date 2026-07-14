@@ -154,8 +154,7 @@
     // displayName con caracteres raros rompa el HTML del sitio que lo aloja.
     const textEl = document.createElement("span")
     textEl.id = "iris-whatsapp-widget-text"
-    const clinicLabel = clinicName ? clinicName : "la clínica"
-    textEl.textContent = `Hablá directo con Iris, la asistente de IA de ${clinicLabel}, y agendá tu turno en segundos.`
+    textEl.textContent = "Solicitar turno por Whatsapp"
 
     link.appendChild(iconWrapper)
     link.appendChild(textEl)
