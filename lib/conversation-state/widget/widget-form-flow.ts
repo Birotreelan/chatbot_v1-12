@@ -129,16 +129,21 @@ export interface FormWidgetStep {
   canGoBack?: boolean
 }
 
-const DNI_MESSAGE =
-  'Para comenzar, ingresa tu número de DNI (sin puntos) para verificar si ya sos paciente de nuestra institución o si agendarte como paciente nuevo/a.'
 const FEATURE_DISABLED_MESSAGE =
   'Este servicio no está disponible por el momento. Por favor, contactanos directamente para agendar tu turno.'
 
-function dniStep(alertMessage?: string): FormWidgetStep {
+function buildDniMessage(clinicName: string): string {
+  return (
+    `¡Gracias por elegir ${clinicName} para agendar tu turno!\n\n` +
+    'Para comenzar, ingresa tu número de DNI (sin puntos) para verificar si ya sos paciente de nuestra institución o si debemos agendarte como nuevo paciente.'
+  )
+}
+
+function dniStep(clinicName: string, alertMessage?: string): FormWidgetStep {
   return {
     phase: 'awaiting_dni',
     done: false,
-    message: DNI_MESSAGE,
+    message: buildDniMessage(clinicName),
     alert: alertMessage ? { type: 'warning', message: alertMessage } : undefined,
     inputType: 'dni',
     canGoBack: false,
@@ -227,6 +232,16 @@ async function getSearchOptionsConfig(clientId: string): Promise<SearchOptionsCo
   }
 }
 
+/** Nombre de la clínica para el saludo inicial del paso de DNI. */
+async function getClinicDisplayName(clientId: string): Promise<string> {
+  try {
+    const config = await getConfigByClienteId(clientId)
+    return config?.displayName || 'nuestra institución'
+  } catch {
+    return 'nuestra institución'
+  }
+}
+
 // ─── Punto de entrada ────────────────────────────────────────────────────────
 
 /**
@@ -246,6 +261,7 @@ export async function processWidgetFormMessage(
 
   try {
     const searchOptionsConfig = await getSearchOptionsConfig(clientId)
+    const clinicName = await getClinicDisplayName(clientId)
 
     if (init) {
       if (await isNewPatientFlowActive(sessionId)) {
@@ -256,7 +272,7 @@ export async function processWidgetFormMessage(
         const snap = await getExistingPatientFlowSnapshot(sessionId)
         if (snap) return buildExistingPatientStep(snap, searchOptionsConfig)
       }
-      return dniStep()
+      return dniStep(clinicName)
     }
 
     // ── Flujo de paciente nuevo ya activo ──────────────────────────────────
@@ -269,7 +285,7 @@ export async function processWidgetFormMessage(
         escalationPhoneNumber,
         searchOptionsConfig
       )
-      return await finalizeNewPatient(sessionId, result, searchOptionsConfig, prevSnap?.phase)
+      return await finalizeNewPatient(sessionId, result, clinicName, searchOptionsConfig, prevSnap?.phase)
     }
 
     // ── Flujo de paciente existente ya activo ──────────────────────────────
@@ -282,13 +298,13 @@ export async function processWidgetFormMessage(
         escalationPhoneNumber,
         searchOptionsConfig
       )
-      return await finalizeExistingPatient(sessionId, result, searchOptionsConfig, prevSnap?.phase)
+      return await finalizeExistingPatient(sessionId, result, clinicName, searchOptionsConfig, prevSnap?.phase)
     }
 
     // ── Sin flujo activo: el mensaje debería ser el DNI ────────────────────
     const dni = extractDNI(userMessage)
     if (!dni) {
-      return dniStep('Ese DNI no parece válido. Ingresá sólo los números (7 u 8 dígitos).')
+      return dniStep(clinicName, 'Ese DNI no parece válido. Ingresá sólo los números (7 u 8 dígitos).')
     }
 
     logger.info('DNI recibido en widget de formulario, validando paciente', {})
@@ -298,7 +314,7 @@ export async function processWidgetFormMessage(
     if (!patientResponse.exito || !patientResponse.datos) {
       // No encontrado → paciente nuevo
       const result = await initializeNewPatientFlow(dni, sessionId, clientId, false, userMessage, 'widget')
-      return await finalizeNewPatient(sessionId, result, searchOptionsConfig)
+      return await finalizeNewPatient(sessionId, result, clinicName, searchOptionsConfig)
     }
 
     // Encontrado → paciente existente. Misma normalización que widget-chat-flow.ts
@@ -351,7 +367,7 @@ export async function processWidgetFormMessage(
       userMessage
     )
 
-    return await finalizeExistingPatient(sessionId, result, searchOptionsConfig)
+    return await finalizeExistingPatient(sessionId, result, clinicName, searchOptionsConfig)
   } catch (error) {
     logger.error('Error procesando mensaje del widget de formulario', error as Error)
     return infoStep('Ocurrió un error inesperado. Por favor, recargá la página e intentá nuevamente.', false, 'error')
@@ -363,10 +379,11 @@ export async function processWidgetFormMessage(
 async function finalizeNewPatient(
   sessionId: string,
   result: NewPatientResult,
+  clinicName: string,
   searchOptionsConfig?: SearchOptionsConfig,
   previousPhase?: string
 ): Promise<FormWidgetStep> {
-  if (result.action === 'back_to_main_menu') return dniStep()
+  if (result.action === 'back_to_main_menu') return dniStep(clinicName)
   if (result.action === 'turno_reservado') {
     return infoStep(cleanBackendText(result.message) || '¡Tu turno fue solicitado con éxito!', true, 'completed')
   }
@@ -389,10 +406,11 @@ async function finalizeNewPatient(
 async function finalizeExistingPatient(
   sessionId: string,
   result: ExistingPatientResult,
+  clinicName: string,
   searchOptionsConfig?: SearchOptionsConfig,
   previousPhase?: string
 ): Promise<FormWidgetStep> {
-  if (result.action === 'back_to_main_menu') return dniStep()
+  if (result.action === 'back_to_main_menu') return dniStep(clinicName)
   if (result.action === 'turno_reservado') {
     return infoStep(cleanBackendText(result.message) || '¡Tu turno fue solicitado con éxito!', true, 'completed')
   }
