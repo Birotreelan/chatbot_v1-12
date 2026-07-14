@@ -35,7 +35,8 @@
     widgetUrl: `${baseUrl}/widget-form`,
   }
 
-  const BUTTON_TEXT = "Solicitar turno"
+  const BUTTON_TITLE = "Reservá tu turno sin llamar"
+  const BUTTON_SUBTITLE = "Disponible las 24 horas desde cualquier dispositivo."
 
   let isWidgetVisible = false
   let widgetContainer = null
@@ -52,7 +53,7 @@
       position: fixed;
       z-index: 9998;
       min-height: 56px;
-      padding: 12px 24px;
+      padding: 10px 22px;
       border-radius: 28px;
       background: linear-gradient(135deg, #0ea5e9, #0284c7);
       cursor: pointer;
@@ -66,9 +67,6 @@
       bottom: 20px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       color: white;
-      font-size: 15px;
-      font-weight: 600;
-      line-height: 1.2;
       max-width: 340px;
       border: 0;
       outline: none;
@@ -78,8 +76,21 @@
       -moz-osx-font-smoothing: grayscale;
     `
 
-    const textSpan = document.createElement("span")
-    textSpan.textContent = BUTTON_TEXT
+    // Título (bold) + subtítulo (itálica, más chico y tenue) — mismo patrón de
+    // dos formatos que el título/subtítulo del panel del widget.
+    const textWrapper = document.createElement("div")
+    textWrapper.style.cssText = `display: flex; flex-direction: column; text-align: left; line-height: 1.25;`
+
+    const titleSpan = document.createElement("span")
+    titleSpan.textContent = BUTTON_TITLE
+    titleSpan.style.cssText = `font-size: 15px; font-weight: 600;`
+
+    const subtitleSpan = document.createElement("span")
+    subtitleSpan.textContent = BUTTON_SUBTITLE
+    subtitleSpan.style.cssText = `font-size: 12px; font-weight: 400; font-style: italic; opacity: 0.9;`
+
+    textWrapper.appendChild(titleSpan)
+    textWrapper.appendChild(subtitleSpan)
 
     // Ícono de calendario (distinto al del chat, para diferenciarlo a simple vista).
     button.innerHTML = `
@@ -89,7 +100,7 @@
         <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
       </svg>
     `
-    button.appendChild(textSpan)
+    button.appendChild(textWrapper)
 
     button.addEventListener("click", toggleWidget)
     button.addEventListener("mouseenter", () => {
