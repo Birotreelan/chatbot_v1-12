@@ -426,7 +426,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
             <CalendarDays className="h-6 w-6 shrink-0" />
             <div className="min-w-0">
               <h3 className="font-semibold text-lg truncate">{title}</h3>
-              <p className="text-sm opacity-90 truncate">{subtitle}</p>
+              <p className="text-sm opacity-90 line-clamp-2">{subtitle}</p>
             </div>
           </div>
           {isEmbedded && (
