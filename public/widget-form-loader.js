@@ -9,12 +9,14 @@
   //
   // IDs de elementos DISTINTOS a los del chat (iris-form-widget-* en vez de
   // chat-widget-*) para que una clínica pueda tener los DOS scripts en la
-  // misma página sin que se pisen el DOM. Por diseño (9/7/2026, 2da vuelta):
-  // este botón se ancla 70px más arriba que el del chat (bottom: 90px en vez
-  // de 20px) para quedar apilado justo encima del botón del chat cerrado, en
-  // el mismo costado por defecto. Además, abrir uno cierra el otro (evento
-  // global "iris-widget-toggle") para que nunca haya dos paneles superpuestos
-  // en pantalla al mismo tiempo.
+  // misma página sin que se pisen el DOM. Por diseño (14/7/2026, 3ra vuelta):
+  // este botón se ancla en bottom: 20px, el mismo costado por defecto que el
+  // chat pero en la posición inferior — así queda alineado horizontalmente
+  // con el botón de WhatsApp (bottom-left), que también usa bottom: 20px. El
+  // botón del chat queda apilado 70px más arriba (bottom: 90px, ver
+  // widget-loader.js). Además, abrir uno cierra el otro (evento global
+  // "iris-widget-toggle") para que nunca haya dos paneles superpuestos en
+  // pantalla al mismo tiempo.
   console.log("[FORM-WIDGET-LOADER] Iniciando...")
 
   const scriptElement = document.currentScript
@@ -61,7 +63,7 @@
       gap: 12px;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
-      bottom: 90px;
+      bottom: 20px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       color: white;
       font-size: 15px;

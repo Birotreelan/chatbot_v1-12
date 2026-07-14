@@ -157,7 +157,7 @@ justify-content: center;
 gap: 12px;
 transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
-bottom: 20px;
+bottom: 90px;
 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 color: white;
 font-size: 15px;

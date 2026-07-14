@@ -142,11 +142,12 @@ export default function DemoPage() {
     whatsappScript.setAttribute("data-client-id", clienteId)
     document.body.appendChild(whatsappScript)
 
-    // El widget de formulario se ancla al mismo costado que el chat pero 70px
-    // más arriba (ver widget-form-loader.js), así que convive apilado encima
-    // del botón del chat cerrado en vez de ocultarse. Abrir uno cierra el otro
-    // (evento "iris-widget-toggle"), por lo que nunca quedan dos paneles abiertos
-    // a la vez.
+    // El widget de formulario se ancla al mismo costado que el chat pero en
+    // bottom: 20px (alineado con el botón de WhatsApp, costado opuesto); el
+    // chat queda apilado 70px más arriba (bottom: 90px, ver widget-loader.js /
+    // widget-form-loader.js), así que conviven en vez de ocultarse uno a otro.
+    // Abrir uno cierra el otro (evento "iris-widget-toggle"), por lo que nunca
+    // quedan dos paneles abiertos a la vez.
     removeFloatingFormWidget()
     const formScript = document.createElement("script")
     formScript.id = FORM_WIDGET_SCRIPT_ID
