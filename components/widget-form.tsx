@@ -151,7 +151,6 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   const [loading, setLoading] = useState(true)
   const [networkError, setNetworkError] = useState(false)
   const [isEmbedded, setIsEmbedded] = useState(false)
-  const [widgetConfig, setWidgetConfig] = useState<any>(null)
 
   const [textValue, setTextValue] = useState("")
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -160,8 +159,8 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   const lastMessageRef = useRef<string>("")
   const lastInitRef = useRef<boolean>(false)
 
-  const title = widgetConfig?.widgetTitle || "Agendar turno"
-  const subtitle = widgetConfig?.widgetSubtitle || "Completá los datos paso a paso"
+  const title = "Solicitud de turnos"
+  const subtitle = "Completá los pasos para agendar un turno con nosotros"
 
   // ── Inicialización ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -170,19 +169,6 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
       setIsEmbedded(window.self !== window.top)
     }
   }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    fetch(`/api/widget?cliente_id=${encodeURIComponent(clienteId)}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled && data) setWidgetConfig(data)
-      })
-      .catch((error) => console.error("[WIDGET-FORM] Error obteniendo configuración:", error))
-    return () => {
-      cancelled = true
-    }
-  }, [clienteId])
 
   const callApi = useCallback(
     async (message: string, init = false) => {
