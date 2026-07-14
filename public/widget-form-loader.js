@@ -112,8 +112,9 @@
       #iris-form-widget-container {
         position: fixed;
         z-index: 9999;
-        top: 20px;
         bottom: 90px;
+        height: 600px;
+        max-height: calc(100vh - 110px);
         width: 380px;
         max-width: calc(100vw - 40px);
         border: none;

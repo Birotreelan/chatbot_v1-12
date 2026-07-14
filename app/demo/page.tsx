@@ -351,7 +351,7 @@ export default function DemoPage() {
                 </Button>
               </CardHeader>
               <CardContent>
-                <div className="border rounded-lg overflow-hidden" style={{ height: 560 }}>
+                <div className="border rounded-lg overflow-hidden" style={{ height: 600 }}>
                   {clienteId ? (
                     <iframe
                       key={`form-${previewKey}`}
