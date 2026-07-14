@@ -575,12 +575,12 @@ function buildStepFromNormalized(
       const labels: Record<string, string> = {
         '1': 'Un profesional en particular',
         '2': 'Por especialidad',
-        '3': 'Cualquier profesional disponible',
+        '3': 'Cualquier oftalmólogo disponible',
       }
       const descriptions: Record<string, string> = {
         '1': 'Ya sé con quién quiero atenderme',
         '2': 'Quiero elegir la especialidad primero',
-        '3': 'Mostrame los turnos más próximos, sin importar quién',
+        '3': 'Ver los turnos próximos, sin profesional específico.',
       }
       return {
         phase: fields.phase,
