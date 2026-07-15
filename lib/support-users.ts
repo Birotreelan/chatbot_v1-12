@@ -34,7 +34,7 @@ export async function createSupportUser(data: {
   tenantId: string | null
   displayName: string
   email?: string
-  role?: "support_agent" | "super_admin"
+  role?: "support_agent" | "super_admin" | "billing_agent"
 }): Promise<SupportUser> {
   const redis = getRedisClient()
   if (!redis) {

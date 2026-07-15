@@ -167,7 +167,7 @@ export interface SupportUser {
   id: string
   username: string
   passwordHash: string // bcrypt hash
-  role: "super_admin" | "support_agent"
+  role: "super_admin" | "support_agent" | "billing_agent"
   tenantId: string | null // null = super_admin (ve todo), string = solo ese cliente
   displayName: string
   email?: string
@@ -179,7 +179,7 @@ export interface SupportUser {
 export interface SessionData {
   userId: string
   username: string
-  role: "super_admin" | "support_agent"
+  role: "super_admin" | "support_agent" | "billing_agent"
   tenantId: string | null
   displayName: string
   // Para SSO multiusuario: identificador único del usuario dentro del tenant

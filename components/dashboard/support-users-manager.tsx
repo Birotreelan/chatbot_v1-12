@@ -35,7 +35,7 @@ export function SupportUsersManager() {
     displayName: "",
     email: "",
     tenantId: "",
-    role: "support_agent" as "support_agent" | "super_admin",
+    role: "support_agent" as "support_agent" | "super_admin" | "billing_agent",
     active: true,
   })
 
@@ -260,7 +260,11 @@ export function SupportUsersManager() {
                       <TableCell>{config?.displayName || user.tenantId || "Todos"}</TableCell>
                       <TableCell>
                         <Badge variant={user.role === "super_admin" ? "default" : "secondary"}>
-                          {user.role === "super_admin" ? "Super Admin" : "Agente"}
+                          {user.role === "super_admin"
+                            ? "Super Admin"
+                            : user.role === "billing_agent"
+                              ? "Agente de Facturación"
+                              : "Agente"}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -366,6 +370,7 @@ export function SupportUsersManager() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="support_agent">Agente de Soporte</SelectItem>
+                  <SelectItem value="billing_agent">Agente de Facturación</SelectItem>
                   <SelectItem value="super_admin">Super Admin</SelectItem>
                 </SelectContent>
               </Select>

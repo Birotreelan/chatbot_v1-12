@@ -338,13 +338,38 @@ export async function requireSupportAgentFromRequest(request: Request): Promise<
   return { session }
 }
 
+// Facturación: accesible tanto para el agente de facturación como para
+// super_admin (que la ve como pestaña dentro de /dashboard).
+export async function requireBillingAgentForApi(): Promise<{ session: SessionData | null; error?: string }> {
+  const session = await getSession()
+  if (!session) {
+    return { session: null, error: "No autenticado" }
+  }
+  if (session.role !== "billing_agent" && session.role !== "super_admin") {
+    return { session: null, error: "No autorizado - se requiere rol de facturación" }
+  }
+  return { session }
+}
+
+// Cada rol tiene su propia área (/dashboard, /support, /facturacion). Este
+// helper decide a dónde mandar a alguien que llegó a un área que no le
+// corresponde, según SU rol real — así evita el ping-pong entre guards que
+// pasaría si cada uno redirigiera siempre al mismo destino fijo (ej:
+// requireSupportAgent -> /dashboard -> requireSuperAdmin -> /support -> ...).
+function homeRouteForRole(role: SessionData["role"]): string {
+  if (role === "super_admin") return "/dashboard"
+  if (role === "support_agent") return "/support"
+  if (role === "billing_agent") return "/facturacion"
+  return "/login"
+}
+
 export async function requireSuperAdmin(): Promise<SessionData> {
   const session = await getSession()
   if (!session) {
     redirect("/login?error=unauthenticated")
   }
   if (session.role !== "super_admin") {
-    redirect("/support")
+    redirect(homeRouteForRole(session.role))
   }
   return session
 }
@@ -355,7 +380,18 @@ export async function requireSupportAgent(): Promise<SessionData> {
     redirect("/login?error=unauthenticated")
   }
   if (session.role !== "support_agent") {
-    redirect("/dashboard")
+    redirect(homeRouteForRole(session.role))
+  }
+  return session
+}
+
+export async function requireBillingAgent(): Promise<SessionData> {
+  const session = await getSession()
+  if (!session) {
+    redirect("/login?error=unauthenticated")
+  }
+  if (session.role !== "billing_agent" && session.role !== "super_admin") {
+    redirect(homeRouteForRole(session.role))
   }
   return session
 }

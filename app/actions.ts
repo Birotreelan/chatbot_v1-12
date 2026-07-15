@@ -12,10 +12,13 @@ export async function login(username: string, password: string) {
       await createSession(result.user)
       revalidatePath("/dashboard")
       revalidatePath("/support")
+      revalidatePath("/facturacion")
 
       // Redirigir según el rol
       if (result.user.role === "super_admin") {
         redirect("/dashboard")
+      } else if (result.user.role === "billing_agent") {
+        redirect("/facturacion")
       } else {
         redirect("/support")
       }
