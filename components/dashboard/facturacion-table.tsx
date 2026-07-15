@@ -54,10 +54,16 @@ export function FacturacionTable() {
   }
 
   const totalGeneral = clientes.reduce((sum, c) => sum + c.totalInteracciones, 0)
+  const esMesEnCurso = month === getCurrentMonthValue()
 
   return (
     <div className="space-y-4">
-      <MonthSelector value={month} onChange={setMonth} />
+      <div className="flex items-center gap-3">
+        <MonthSelector value={month} onChange={setMonth} />
+        {esMesEnCurso && (
+          <span className="text-sm font-semibold text-red-600">Consumo en curso</span>
+        )}
+      </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
