@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { MonthSelector, getCurrentMonthValue, monthValueToRange } from "./month-selector"
+import { monthValueToRange } from "./month-selector"
 
 interface FacturacionCliente {
   clienteId: string
@@ -15,7 +15,6 @@ interface FacturacionCliente {
   totalInteracciones: number
 }
 
-const formatoUSD = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const formatoUSDMoney = new Intl.NumberFormat("es-AR", { style: "currency", currency: "USD", maximumFractionDigits: 2 })
 const formatoARS = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 })
 
@@ -23,23 +22,24 @@ interface FacturacionTableProps {
   title?: string
   apiPath?: string
   cantidadLabel?: string
+  month: string // formato "YYYY-MM", controlado por el contenedor padre
+  dolarVenta: number | null // cotización compartida, controlada por el contenedor padre
 }
 
 export function FacturacionTable({
   title = "Facturación de clientes Wpp con IA",
   apiPath = "/api/facturacion/interacciones",
   cantidadLabel = "Total de Interacciones",
-}: FacturacionTableProps = {}) {
+  month,
+  dolarVenta,
+}: FacturacionTableProps) {
   const [clientes, setClientes] = useState<FacturacionCliente[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [dolarVenta, setDolarVenta] = useState<number | null>(null)
 
   const [precios, setPrecios] = useState<Record<string, number>>({})
   const [guardando, setGuardando] = useState<Record<string, boolean>>({})
-
-  const [month, setMonth] = useState<string>(getCurrentMonthValue())
 
   const loadData = useCallback(async () => {
     try {
@@ -56,7 +56,6 @@ export function FacturacionTable({
       }
       const data = await interaccionesRes.json()
       setClientes(data.clientes || [])
-      setDolarVenta(typeof data.dolarVenta === "number" ? data.dolarVenta : null)
 
       if (preciosRes.ok) {
         const preciosData = await preciosRes.json()
@@ -108,98 +107,82 @@ export function FacturacionTable({
     return sum + c.totalInteracciones * precio
   }, 0)
   const totalGeneralValorARS = dolarVenta ? totalGeneralValorUSD * dolarVenta : 0
-  const esMesEnCurso = month === getCurrentMonthValue()
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <MonthSelector value={month} onChange={setMonth} />
-        {esMesEnCurso && (
-          <span className="text-sm font-semibold text-red-600">Consumo en curso</span>
-        )}
-        <div className="ml-auto flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-2">
-          <span className="text-sm text-muted-foreground">Dolar Venta</span>
-          <span className="text-sm font-semibold">
-            {dolarVenta ? `$${formatoUSD.format(dolarVenta)}` : "—"}
-          </span>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{cantidadLabel} por clínica en el período seleccionado</CardDescription>
         </div>
-      </div>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>{title}</CardTitle>
-            <CardDescription>{cantidadLabel} por clínica en el período seleccionado</CardDescription>
+        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading || refreshing}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
+          Actualizar
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
-          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading || refreshing}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
-            Actualizar
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="flex justify-center items-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : error ? (
-            <div className="text-center py-8 text-destructive text-sm">{error}</div>
-          ) : clientes.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              No hay clientes con datos en este período.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead className="text-right">{cantidadLabel}</TableHead>
-                  <TableHead className="text-right">Valor por unidad (USD)</TableHead>
-                  <TableHead className="text-right">Valor Total Dólares</TableHead>
-                  <TableHead className="text-right">Valor Total Pesos</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {clientes.map((cliente) => {
-                  const precio = precios[cliente.clienteIdBase] ?? 0
-                  const valorTotalUSD = cliente.totalInteracciones * precio
-                  const valorTotalARS = dolarVenta ? valorTotalUSD * dolarVenta : null
-                  return (
-                    <TableRow key={cliente.clienteId}>
-                      <TableCell className="font-medium">{cliente.nombreCliente}</TableCell>
-                      <TableCell className="text-right">
-                        {cliente.totalInteracciones.toLocaleString("es-AR")}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          className="w-28 ml-auto text-right"
-                          value={precios[cliente.clienteIdBase] ?? ""}
-                          onChange={(e) => handlePrecioChange(cliente.clienteIdBase, e.target.value)}
-                          onBlur={() => handlePrecioBlur(cliente.clienteIdBase)}
-                          disabled={guardando[cliente.clienteIdBase]}
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">{formatoUSDMoney.format(valorTotalUSD)}</TableCell>
-                      <TableCell className="text-right">
-                        {valorTotalARS !== null ? formatoARS.format(valorTotalARS) : "—"}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-                <TableRow className="font-semibold bg-muted/50">
-                  <TableCell>Total general</TableCell>
-                  <TableCell className="text-right">{totalGeneral.toLocaleString("es-AR")}</TableCell>
-                  <TableCell />
-                  <TableCell className="text-right">{formatoUSDMoney.format(totalGeneralValorUSD)}</TableCell>
-                  <TableCell className="text-right">{formatoARS.format(totalGeneralValorARS)}</TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+        ) : error ? (
+          <div className="text-center py-8 text-destructive text-sm">{error}</div>
+        ) : clientes.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground text-sm">
+            No hay clientes con datos en este período.
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Cliente</TableHead>
+                <TableHead className="text-right">{cantidadLabel}</TableHead>
+                <TableHead className="text-right">Valor por unidad (USD)</TableHead>
+                <TableHead className="text-right">Valor Total Dólares</TableHead>
+                <TableHead className="text-right">Valor Total Pesos</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {clientes.map((cliente) => {
+                const precio = precios[cliente.clienteIdBase] ?? 0
+                const valorTotalUSD = cliente.totalInteracciones * precio
+                const valorTotalARS = dolarVenta ? valorTotalUSD * dolarVenta : null
+                return (
+                  <TableRow key={cliente.clienteId}>
+                    <TableCell className="font-medium">{cliente.nombreCliente}</TableCell>
+                    <TableCell className="text-right">
+                      {cliente.totalInteracciones.toLocaleString("es-AR")}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="w-28 ml-auto text-right"
+                        value={precios[cliente.clienteIdBase] ?? ""}
+                        onChange={(e) => handlePrecioChange(cliente.clienteIdBase, e.target.value)}
+                        onBlur={() => handlePrecioBlur(cliente.clienteIdBase)}
+                        disabled={guardando[cliente.clienteIdBase]}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">{formatoUSDMoney.format(valorTotalUSD)}</TableCell>
+                    <TableCell className="text-right">
+                      {valorTotalARS !== null ? formatoARS.format(valorTotalARS) : "—"}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+              <TableRow className="font-semibold bg-muted/50">
+                <TableCell>Total general</TableCell>
+                <TableCell className="text-right">{totalGeneral.toLocaleString("es-AR")}</TableCell>
+                <TableCell />
+                <TableCell className="text-right">{formatoUSDMoney.format(totalGeneralValorUSD)}</TableCell>
+                <TableCell className="text-right">{formatoARS.format(totalGeneralValorARS)}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   )
 }
