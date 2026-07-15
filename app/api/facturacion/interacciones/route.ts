@@ -7,9 +7,13 @@ import {
   repartirInteraccionesPorSede,
   CLIENTES_EXCLUIDOS_FACTURACION,
 } from "@/lib/facturacion-sedes"
+import { getDolarVenta } from "@/lib/facturacion-dolar"
 
 interface FacturacionClienteRow {
   clienteId: string
+  // clienteId "real" (sin el sufijo de sede), usado para asociar el precio
+  // por unidad editable, que es un único valor por cliente.
+  clienteIdBase: string
   nombreCliente: string
   totalInteracciones: number
 }
@@ -70,6 +74,7 @@ export async function GET(request: Request) {
           const reparto = repartirInteraccionesPorSede(totalInteracciones, porcentajesSedes)
           return reparto.map((sede, idx) => ({
             clienteId: `${clienteId}::${idx}`,
+            clienteIdBase: clienteId,
             nombreCliente: `${config.displayName} - ${sede.nombre}`,
             totalInteracciones: sede.interacciones,
           }))
@@ -78,6 +83,7 @@ export async function GET(request: Request) {
         return [
           {
             clienteId,
+            clienteIdBase: clienteId,
             nombreCliente: config.displayName,
             totalInteracciones,
           },
@@ -88,9 +94,12 @@ export async function GET(request: Request) {
     const filas = filasPorCliente.flat()
     filas.sort((a, b) => a.nombreCliente.localeCompare(b.nombreCliente))
 
+    const dolarVenta = await getDolarVenta()
+
     return NextResponse.json({
       exito: true,
       filtroFechas: { fechaInicio, fechaFin },
+      dolarVenta,
       clientes: filas,
     })
   } catch (error) {

@@ -5,19 +5,28 @@ import { Loader2, RefreshCw } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { MonthSelector, getCurrentMonthValue, monthValueToRange } from "./month-selector"
 
 interface FacturacionCliente {
   clienteId: string
+  clienteIdBase: string
   nombreCliente: string
   totalInteracciones: number
 }
+
+const formatoUSD = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const formatoARS = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 })
 
 export function FacturacionTable() {
   const [clientes, setClientes] = useState<FacturacionCliente[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [dolarVenta, setDolarVenta] = useState<number | null>(null)
+
+  const [precios, setPrecios] = useState<Record<string, number>>({})
+  const [guardando, setGuardando] = useState<Record<string, boolean>>({})
 
   const [month, setMonth] = useState<string>(getCurrentMonthValue())
 
@@ -25,15 +34,23 @@ export function FacturacionTable() {
     try {
       setError(null)
       const { fechaInicio, fechaFin } = monthValueToRange(month)
-      const response = await fetch(
-        `/api/facturacion/interacciones?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`,
-      )
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}))
+      const [interaccionesRes, preciosRes] = await Promise.all([
+        fetch(`/api/facturacion/interacciones?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`),
+        fetch("/api/facturacion/precios"),
+      ])
+
+      if (!interaccionesRes.ok) {
+        const data = await interaccionesRes.json().catch(() => ({}))
         throw new Error(data.error || "Error al cargar datos de facturación")
       }
-      const data = await response.json()
+      const data = await interaccionesRes.json()
       setClientes(data.clientes || [])
+      setDolarVenta(typeof data.dolarVenta === "number" ? data.dolarVenta : null)
+
+      if (preciosRes.ok) {
+        const preciosData = await preciosRes.json()
+        setPrecios(preciosData.precios || {})
+      }
     } catch (err) {
       console.error("Error cargando facturación:", err)
       setError(err instanceof Error ? err.message : "Error al cargar datos")
@@ -53,7 +70,32 @@ export function FacturacionTable() {
     loadData()
   }
 
+  const handlePrecioChange = (clienteIdBase: string, valor: string) => {
+    const num = parseFloat(valor)
+    setPrecios((prev) => ({ ...prev, [clienteIdBase]: Number.isFinite(num) ? num : 0 }))
+  }
+
+  const handlePrecioBlur = async (clienteIdBase: string) => {
+    const valor = precios[clienteIdBase] ?? 0
+    setGuardando((prev) => ({ ...prev, [clienteIdBase]: true }))
+    try {
+      await fetch("/api/facturacion/precios", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clienteId: clienteIdBase, valor }),
+      })
+    } catch (err) {
+      console.error("Error guardando precio:", err)
+    } finally {
+      setGuardando((prev) => ({ ...prev, [clienteIdBase]: false }))
+    }
+  }
+
   const totalGeneral = clientes.reduce((sum, c) => sum + c.totalInteracciones, 0)
+  const totalGeneralValor = clientes.reduce((sum, c) => {
+    const precio = precios[c.clienteIdBase] ?? 0
+    return sum + (dolarVenta ? precio * dolarVenta : 0)
+  }, 0)
   const esMesEnCurso = month === getCurrentMonthValue()
 
   return (
@@ -69,7 +111,10 @@ export function FacturacionTable() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle>Facturación de clientes Wpp con IA</CardTitle>
-            <CardDescription>Total de interacciones por clínica en el período seleccionado</CardDescription>
+            <CardDescription>
+              Total de interacciones por clínica en el período seleccionado
+              {dolarVenta && ` · Dólar oficial (venta): $${formatoUSD.format(dolarVenta)}`}
+            </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading || refreshing}>
             <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
@@ -93,18 +138,43 @@ export function FacturacionTable() {
                 <TableRow>
                   <TableHead>Cliente</TableHead>
                   <TableHead className="text-right">Total de Interacciones</TableHead>
+                  <TableHead className="text-right">Valor por unidad (USD)</TableHead>
+                  <TableHead className="text-right">Valor total</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {clientes.map((cliente) => (
-                  <TableRow key={cliente.clienteId}>
-                    <TableCell className="font-medium">{cliente.nombreCliente}</TableCell>
-                    <TableCell className="text-right">{cliente.totalInteracciones.toLocaleString("es-AR")}</TableCell>
-                  </TableRow>
-                ))}
+                {clientes.map((cliente) => {
+                  const precio = precios[cliente.clienteIdBase] ?? 0
+                  const valorTotal = dolarVenta ? precio * dolarVenta : null
+                  return (
+                    <TableRow key={cliente.clienteId}>
+                      <TableCell className="font-medium">{cliente.nombreCliente}</TableCell>
+                      <TableCell className="text-right">
+                        {cliente.totalInteracciones.toLocaleString("es-AR")}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="w-28 ml-auto text-right"
+                          value={precios[cliente.clienteIdBase] ?? ""}
+                          onChange={(e) => handlePrecioChange(cliente.clienteIdBase, e.target.value)}
+                          onBlur={() => handlePrecioBlur(cliente.clienteIdBase)}
+                          disabled={guardando[cliente.clienteIdBase]}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {valorTotal !== null ? formatoARS.format(valorTotal) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
                 <TableRow className="font-semibold bg-muted/50">
                   <TableCell>Total general</TableCell>
                   <TableCell className="text-right">{totalGeneral.toLocaleString("es-AR")}</TableCell>
+                  <TableCell />
+                  <TableCell className="text-right">{formatoARS.format(totalGeneralValor)}</TableCell>
                 </TableRow>
               </TableBody>
             </Table>
