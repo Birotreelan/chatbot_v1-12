@@ -19,7 +19,17 @@ const formatoUSD = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, ma
 const formatoUSDMoney = new Intl.NumberFormat("es-AR", { style: "currency", currency: "USD", maximumFractionDigits: 2 })
 const formatoARS = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 })
 
-export function FacturacionTable() {
+interface FacturacionTableProps {
+  title?: string
+  apiPath?: string
+  cantidadLabel?: string
+}
+
+export function FacturacionTable({
+  title = "Facturación de clientes Wpp con IA",
+  apiPath = "/api/facturacion/interacciones",
+  cantidadLabel = "Total de Interacciones",
+}: FacturacionTableProps = {}) {
   const [clientes, setClientes] = useState<FacturacionCliente[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -36,7 +46,7 @@ export function FacturacionTable() {
       setError(null)
       const { fechaInicio, fechaFin } = monthValueToRange(month)
       const [interaccionesRes, preciosRes] = await Promise.all([
-        fetch(`/api/facturacion/interacciones?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`),
+        fetch(`${apiPath}?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`),
         fetch("/api/facturacion/precios"),
       ])
 
@@ -59,7 +69,7 @@ export function FacturacionTable() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [month])
+  }, [month, apiPath])
 
   useEffect(() => {
     setLoading(true)
@@ -118,8 +128,8 @@ export function FacturacionTable() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle>Facturación de clientes Wpp con IA</CardTitle>
-            <CardDescription>Total de interacciones por clínica en el período seleccionado</CardDescription>
+            <CardTitle>{title}</CardTitle>
+            <CardDescription>{cantidadLabel} por clínica en el período seleccionado</CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading || refreshing}>
             <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
@@ -142,7 +152,7 @@ export function FacturacionTable() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Cliente</TableHead>
-                  <TableHead className="text-right">Total de Interacciones</TableHead>
+                  <TableHead className="text-right">{cantidadLabel}</TableHead>
                   <TableHead className="text-right">Valor por unidad (USD)</TableHead>
                   <TableHead className="text-right">Valor Total Dólares</TableHead>
                   <TableHead className="text-right">Valor Total Pesos</TableHead>

@@ -49,3 +49,40 @@ export async function getPreciosUnidad(clienteIds: string[]): Promise<Record<str
   })
   return resultado
 }
+
+async function scanKeys(redis: Redis, pattern: string): Promise<string[]> {
+  const allKeys: string[] = []
+  let cursor = "0"
+  do {
+    const result = await redis.scan(cursor, { match: pattern, count: 100 })
+    cursor = typeof result[0] === "number" ? result[0].toString() : result[0]
+    allKeys.push(...result[1])
+  } while (cursor !== "0")
+  return allKeys
+}
+
+/**
+ * Devuelve TODOS los precios guardados (sin filtrar por una lista de clientes
+ * conocida), ya que hay clientes de "Facturación sin IA" que no existen en
+ * WhatsAppConfig.
+ */
+export async function getAllPreciosUnidad(): Promise<Record<string, number>> {
+  const redis = getRedisClient()
+  if (!redis) return {}
+
+  const keys = await scanKeys(redis, `${PRECIO_UNIDAD_PREFIX}*`)
+  if (keys.length === 0) return {}
+
+  const valores = await Promise.all(keys.map((key) => redis.get<number | string>(key)))
+
+  const resultado: Record<string, number> = {}
+  keys.forEach((key, idx) => {
+    const value = valores[idx]
+    if (value === null || value === undefined) return
+    const num = typeof value === "string" ? parseFloat(value) : value
+    if (!Number.isFinite(num)) return
+    const clienteId = key.slice(PRECIO_UNIDAD_PREFIX.length)
+    resultado[clienteId] = num
+  })
+  return resultado
+}

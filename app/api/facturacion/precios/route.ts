@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server"
 import { requireBillingAgentForApi } from "@/lib/auth"
-import { getAllWhatsAppConfigs } from "@/lib/db"
-import { getPreciosUnidad, setPrecioUnidad } from "@/lib/facturacion-precios"
-import { CLIENTES_EXCLUIDOS_FACTURACION } from "@/lib/facturacion-sedes"
+import { getAllPreciosUnidad, setPrecioUnidad } from "@/lib/facturacion-precios"
 
 export async function GET() {
   try {
@@ -11,12 +9,7 @@ export async function GET() {
       return NextResponse.json({ error: error || "No autorizado" }, { status: 401 })
     }
 
-    const configs = await getAllWhatsAppConfigs()
-    const clienteIds = configs
-      .map((c) => c.cliente_id)
-      .filter((id): id is string => !!id && !CLIENTES_EXCLUIDOS_FACTURACION.includes(id))
-
-    const precios = await getPreciosUnidad(clienteIds)
+    const precios = await getAllPreciosUnidad()
     return NextResponse.json({ exito: true, precios })
   } catch (error) {
     console.error("[FACTURACION_PRECIOS_API] Error:", error)
