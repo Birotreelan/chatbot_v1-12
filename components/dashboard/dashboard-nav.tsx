@@ -34,6 +34,9 @@ export function DashboardNav() {
             <Link href="/dashboard/consumos" className="text-foreground/60 hover:text-foreground">
               Consumos
             </Link>
+            <Link href="/dashboard/facturacion" className="text-foreground/60 hover:text-foreground">
+              Facturación
+            </Link>
             <Link href="/dashboard/config/new" className="text-foreground/60 hover:text-foreground">
               Nuevo Número
             </Link>
