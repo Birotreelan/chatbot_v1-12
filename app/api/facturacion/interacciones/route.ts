@@ -2,7 +2,11 @@ import { NextResponse } from "next/server"
 import { requireBillingAgentForApi } from "@/lib/auth"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import { getAppointmentStatsByClienteIdFiltered } from "@/lib/appointment-stats"
-import { getPorcentajesPorSede, repartirInteraccionesPorSede } from "@/lib/facturacion-sedes"
+import {
+  getPorcentajesPorSede,
+  repartirInteraccionesPorSede,
+  CLIENTES_EXCLUIDOS_FACTURACION,
+} from "@/lib/facturacion-sedes"
 
 interface FacturacionClienteRow {
   clienteId: string
@@ -29,7 +33,9 @@ export async function GET(request: Request) {
     }
 
     const configs = await getAllWhatsAppConfigs()
-    const clientesConId = configs.filter((c) => !!c.cliente_id)
+    const clientesConId = configs.filter(
+      (c) => !!c.cliente_id && !CLIENTES_EXCLUIDOS_FACTURACION.includes(c.cliente_id!),
+    )
 
     const filasPorCliente: FacturacionClienteRow[][] = await Promise.all(
       clientesConId.map(async (config): Promise<FacturacionClienteRow[]> => {

@@ -5,7 +5,7 @@ import { Loader2, RefreshCw } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
-import { DateRangeFilter } from "./date-range-filter"
+import { MonthSelector, getCurrentMonthValue, monthValueToRange } from "./month-selector"
 
 interface FacturacionCliente {
   clienteId: string
@@ -19,16 +19,14 @@ export function FacturacionTable() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const today = new Date().toISOString().split("T")[0]
-  const [startDate, setStartDate] = useState<string | null>(today)
-  const [endDate, setEndDate] = useState<string | null>(today)
+  const [month, setMonth] = useState<string>(getCurrentMonthValue())
 
   const loadData = useCallback(async () => {
-    if (!startDate || !endDate) return
     try {
       setError(null)
+      const { fechaInicio, fechaFin } = monthValueToRange(month)
       const response = await fetch(
-        `/api/facturacion/interacciones?fechaInicio=${startDate}&fechaFin=${endDate}`,
+        `/api/facturacion/interacciones?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`,
       )
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
@@ -43,17 +41,12 @@ export function FacturacionTable() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [startDate, endDate])
+  }, [month])
 
   useEffect(() => {
+    setLoading(true)
     loadData()
   }, [loadData])
-
-  const handleFilterChange = (newStartDate: string | null, newEndDate: string | null) => {
-    setLoading(true)
-    setStartDate(newStartDate)
-    setEndDate(newEndDate)
-  }
 
   const handleRefresh = () => {
     setRefreshing(true)
@@ -64,7 +57,7 @@ export function FacturacionTable() {
 
   return (
     <div className="space-y-4">
-      <DateRangeFilter onFilterChange={handleFilterChange} />
+      <MonthSelector value={month} onChange={setMonth} />
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">

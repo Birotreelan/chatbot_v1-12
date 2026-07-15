@@ -13,6 +13,10 @@ export const CLIENTES_CON_SEDES: Record<string, { porcentajesUrlBase: string }> 
   },
 }
 
+// Clientes de testing/internos que no se facturan y deben omitirse del
+// listado de Facturación.
+export const CLIENTES_EXCLUIDOS_FACTURACION: string[] = ["ab429655-01c2-11ef-8b43-fa16c0a84c04"]
+
 export interface PorcentajeSede {
   Centro_Nombre: string
   porcentaje: number
