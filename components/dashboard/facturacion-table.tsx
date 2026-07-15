@@ -105,16 +105,19 @@ export function FacturacionTable() {
         {esMesEnCurso && (
           <span className="text-sm font-semibold text-red-600">Consumo en curso</span>
         )}
+        <div className="ml-auto flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-2">
+          <span className="text-sm text-muted-foreground">Dolar Venta</span>
+          <span className="text-sm font-semibold">
+            {dolarVenta ? `$${formatoUSD.format(dolarVenta)}` : "—"}
+          </span>
+        </div>
       </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle>Facturación de clientes Wpp con IA</CardTitle>
-            <CardDescription>
-              Total de interacciones por clínica en el período seleccionado
-              {dolarVenta && ` · Dólar oficial (venta): $${formatoUSD.format(dolarVenta)}`}
-            </CardDescription>
+            <CardDescription>Total de interacciones por clínica en el período seleccionado</CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading || refreshing}>
             <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
