@@ -62,7 +62,7 @@ export function FacturacionTable() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle>Facturación por cliente</CardTitle>
+            <CardTitle>Facturación de clientes Wpp con IA</CardTitle>
             <CardDescription>Total de interacciones por clínica en el período seleccionado</CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading || refreshing}>
