@@ -16,6 +16,7 @@ interface FacturacionCliente {
 }
 
 const formatoUSD = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const formatoUSDMoney = new Intl.NumberFormat("es-AR", { style: "currency", currency: "USD", maximumFractionDigits: 2 })
 const formatoARS = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 })
 
 export function FacturacionTable() {
@@ -92,10 +93,11 @@ export function FacturacionTable() {
   }
 
   const totalGeneral = clientes.reduce((sum, c) => sum + c.totalInteracciones, 0)
-  const totalGeneralValor = clientes.reduce((sum, c) => {
+  const totalGeneralValorUSD = clientes.reduce((sum, c) => {
     const precio = precios[c.clienteIdBase] ?? 0
-    return sum + (dolarVenta ? precio * dolarVenta : 0)
+    return sum + c.totalInteracciones * precio
   }, 0)
+  const totalGeneralValorARS = dolarVenta ? totalGeneralValorUSD * dolarVenta : 0
   const esMesEnCurso = month === getCurrentMonthValue()
 
   return (
@@ -142,13 +144,15 @@ export function FacturacionTable() {
                   <TableHead>Cliente</TableHead>
                   <TableHead className="text-right">Total de Interacciones</TableHead>
                   <TableHead className="text-right">Valor por unidad (USD)</TableHead>
-                  <TableHead className="text-right">Valor total</TableHead>
+                  <TableHead className="text-right">Valor Total Dólares</TableHead>
+                  <TableHead className="text-right">Valor Total Pesos</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {clientes.map((cliente) => {
                   const precio = precios[cliente.clienteIdBase] ?? 0
-                  const valorTotal = dolarVenta ? precio * dolarVenta : null
+                  const valorTotalUSD = cliente.totalInteracciones * precio
+                  const valorTotalARS = dolarVenta ? valorTotalUSD * dolarVenta : null
                   return (
                     <TableRow key={cliente.clienteId}>
                       <TableCell className="font-medium">{cliente.nombreCliente}</TableCell>
@@ -167,8 +171,9 @@ export function FacturacionTable() {
                           disabled={guardando[cliente.clienteIdBase]}
                         />
                       </TableCell>
+                      <TableCell className="text-right">{formatoUSDMoney.format(valorTotalUSD)}</TableCell>
                       <TableCell className="text-right">
-                        {valorTotal !== null ? formatoARS.format(valorTotal) : "—"}
+                        {valorTotalARS !== null ? formatoARS.format(valorTotalARS) : "—"}
                       </TableCell>
                     </TableRow>
                   )
@@ -177,7 +182,8 @@ export function FacturacionTable() {
                   <TableCell>Total general</TableCell>
                   <TableCell className="text-right">{totalGeneral.toLocaleString("es-AR")}</TableCell>
                   <TableCell />
-                  <TableCell className="text-right">{formatoARS.format(totalGeneralValor)}</TableCell>
+                  <TableCell className="text-right">{formatoUSDMoney.format(totalGeneralValorUSD)}</TableCell>
+                  <TableCell className="text-right">{formatoARS.format(totalGeneralValorARS)}</TableCell>
                 </TableRow>
               </TableBody>
             </Table>
