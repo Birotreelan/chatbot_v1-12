@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireBillingAgentForApi } from "@/lib/auth"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import { getAppointmentStatsByClienteIdFiltered } from "@/lib/appointment-stats"
+import { getPorcentajesPorSede, repartirInteraccionesPorSede } from "@/lib/facturacion-sedes"
 
 interface FacturacionClienteRow {
   clienteId: string
@@ -30,8 +31,8 @@ export async function GET(request: Request) {
     const configs = await getAllWhatsAppConfigs()
     const clientesConId = configs.filter((c) => !!c.cliente_id)
 
-    const filas: FacturacionClienteRow[] = await Promise.all(
-      clientesConId.map(async (config): Promise<FacturacionClienteRow> => {
+    const filasPorCliente: FacturacionClienteRow[][] = await Promise.all(
+      clientesConId.map(async (config): Promise<FacturacionClienteRow[]> => {
         const clienteId = config.cliente_id!
 
         // Mensajes pagados desde el servicio externo (mismo origen que /api/stats)
@@ -56,14 +57,29 @@ export async function GET(request: Request) {
         const totalInteracciones =
           mensajesPagados + (stats?.totalRescheduleStarted || 0) + (stats?.totalUserInitiated || 0)
 
-        return {
-          clienteId,
-          nombreCliente: config.displayName,
-          totalInteracciones,
+        // Si el cliente tiene múltiples sedes, desglosar el total según los
+        // porcentajes que devuelve el servicio externo de esa clínica.
+        const porcentajesSedes = await getPorcentajesPorSede(clienteId, fechaInicio, fechaFin)
+        if (porcentajesSedes) {
+          const reparto = repartirInteraccionesPorSede(totalInteracciones, porcentajesSedes)
+          return reparto.map((sede, idx) => ({
+            clienteId: `${clienteId}::${idx}`,
+            nombreCliente: `${config.displayName} - ${sede.nombre}`,
+            totalInteracciones: sede.interacciones,
+          }))
         }
+
+        return [
+          {
+            clienteId,
+            nombreCliente: config.displayName,
+            totalInteracciones,
+          },
+        ]
       }),
     )
 
+    const filas = filasPorCliente.flat()
     filas.sort((a, b) => a.nombreCliente.localeCompare(b.nombreCliente))
 
     return NextResponse.json({
