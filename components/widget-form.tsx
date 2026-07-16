@@ -590,7 +590,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
             )}
 
             {step.greeting && (
-              <p className="text-sm text-gray-600 whitespace-pre-wrap">{step.greeting}</p>
+              <p className="text-base text-gray-600 whitespace-pre-wrap">{step.greeting}</p>
             )}
 
             {step.inputType !== "info" &&

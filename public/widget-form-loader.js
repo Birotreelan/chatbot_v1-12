@@ -35,7 +35,7 @@
     widgetUrl: `${baseUrl}/widget-form`,
   }
 
-  const BUTTON_TITLE = "Reservá tu turno sin llamar"
+  const BUTTON_TITLE = "Reservar turno ahora"
   const BUTTON_SUBTITLE = "Disponible las 24 horas desde cualquier dispositivo."
 
   let isWidgetVisible = false
