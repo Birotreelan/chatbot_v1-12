@@ -66,7 +66,8 @@ export async function initializePatientDetection(
   clienteId: string,
   clinicName?: string,
   firstMessage?: string,
-  hasReminder: boolean = false
+  hasReminder: boolean = false,
+  bypassFlag: boolean = false
 ): Promise<PatientDetectionResult> {
   const logger = createConversationLogger(phoneNumber, configId, 'initial_detection_pending')
   logger.info('Initializing patient detection', {})
@@ -74,9 +75,13 @@ export async function initializePatientDetection(
   // Verificar si el feature flag está habilitado
   const flags = await getEffectiveFeatureFlags(configId)
 
-  console.log(`[v0] [INIT_DETECTION] flag directPatientDetection=${flags.directPatientDetection} configId=${configId}`)
+  console.log(`[v0] [INIT_DETECTION] flag directPatientDetection=${flags.directPatientDetection} bypassFlag=${bypassFlag} configId=${configId}`)
 
-  if (!flags.directPatientDetection) {
+  // bypassFlag=true: se usa cuando ya sabemos con certeza (por el contenido
+  // exacto del mensaje) que corresponde mostrar el menú determinístico —
+  // ej. el mensaje predefinido del widget de WhatsApp — sin depender de que
+  // el cliente tenga prendido el flag general de detección por teléfono.
+  if (!flags.directPatientDetection && !bypassFlag) {
     logger.debug('Feature flag disabled, using OpenAI', {})
     return {
       handled: false,

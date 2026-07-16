@@ -120,6 +120,7 @@ import {
   resetDetectionToMainMenu,
   restoreDetectionStateFromCache,
 } from "./conversation-state/patient-detection/patient-flow-integration"
+import { isWhatsAppWidgetPresetMessage } from "./whatsapp-widget-preset-message"
 import {
   initializeExistingPatientFlow,
   handleExistingPatientMessage,
@@ -4032,13 +4033,21 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // ============================================================================
     if (message.type === "text" || message.type === "interactive") {
       const detectionFlags = await getEffectiveFeatureFlags(config.id)
-      
+
       // Verificar si debe usar detección de paciente
       const hasPendingReminder = false // TODO: Verificar si hay recordatorio pendiente en el contexto
       const shouldDetect = await shouldUsePatientDetection(userPhoneNumber, config.id, hasPendingReminder)
-      
-      if (detectionFlags.directPatientDetection && shouldDetect) {
-        
+
+      // Mensaje predefinido del botón flotante de WhatsApp (público en el sitio de
+      // la clínica, public/whatsapp-widget-loader.js): si el texto coincide exacto
+      // ya sabemos la intención (agendar turno) sin pasar por OpenAI, así que
+      // disparamos la misma detección determinística aunque el flag general
+      // directPatientDetection esté apagado para este cliente.
+      const isWidgetPresetMessage =
+        message.type === "text" && isWhatsAppWidgetPresetMessage(userMessage, config.displayName)
+
+      if ((detectionFlags.directPatientDetection && shouldDetect) || isWidgetPresetMessage) {
+
         // Primero verificar si ya hay un flujo de detección activo (Sprint 9a, 9b o 9c)
         const detectionActive = await isPatientDetectionFlowActive(userPhoneNumber) ||
                                await isExistingPatientFlowActive(userPhoneNumber) || 
@@ -4059,7 +4068,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
           const detectionTemplateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
           const detectionHasReminder = detectionTemplateSentAt !== null
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, detectionHasReminder)
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, detectionHasReminder, isWidgetPresetMessage)
 
           console.log("[v0] [SPRINT9A] initializePatientDetection result:", JSON.stringify({ handled: detectionResult.handled, action: detectionResult.action, shouldCallOpenAI: detectionResult.shouldCallOpenAI }))
           
@@ -4106,7 +4115,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           const rehydrationTemplateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
           const rehydrationHasReminder = rehydrationTemplateSentAt !== null
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, rehydrationHasReminder)
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, rehydrationHasReminder, isWidgetPresetMessage)
 
           if (detectionResult.handled && detectionResult.message) {
             const detectionCtx: DirectResponseContext = {
