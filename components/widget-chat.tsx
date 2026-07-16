@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
+import { newWidgetSessionId } from "@/lib/widget-session-id"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Send, MessageCircle, X } from "lucide-react"
@@ -90,7 +91,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
     fetchWidgetConfig()
 
     // Generar session_id único
-    const newSessionId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const newSessionId = newWidgetSessionId()
     setSessionId(newSessionId)
     console.log("[WIDGET-CHAT] 🆔 Session ID generado:", newSessionId)
 

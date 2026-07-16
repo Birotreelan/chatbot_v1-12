@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { newWidgetSessionId } from "@/lib/widget-session-id"
 import { Calendar } from "@/components/ui/calendar"
 import { es } from "date-fns/locale"
 import {
@@ -116,7 +117,7 @@ function AlertBanner({ alert }: { alert: FormAlert }) {
 }
 
 function newSessionId() {
-  return `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  return newWidgetSessionId()
 }
 
 function parseYMD(s: string): Date {

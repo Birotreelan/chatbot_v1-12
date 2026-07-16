@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
+import { newWidgetSessionId } from "@/lib/widget-session-id"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Send, MessageCircle } from "lucide-react"
@@ -49,9 +50,7 @@ export function WidgetChat({ clienteId, config = {}, hideHeader = false }: Widge
   useEffect(() => {
     console.log("[WIDGET-CHAT] 🔄 useEffect de inicialización ejecutándose...")
 
-    const randomPart = Math.random().toString(36).substr(2, 12) // Mayor longitud para más unicidad
-    const timePart = Date.now()
-    const newSessionId = `web_${timePart}_${randomPart}`
+    const newSessionId = newWidgetSessionId()
     setSessionId(newSessionId)
     console.log("[WIDGET-CHAT] 🆔 Session ID generado (único por carga):", newSessionId)
 
