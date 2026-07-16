@@ -173,6 +173,15 @@ export interface NewPatientFlowState {
 export interface NewPatientResult {
   handled: boolean
   message?: string
+  /**
+   * Nota corta y aislada ("Veo que es tu primera vez con nosotros, vamos a
+   * agendarte como paciente nuevo.") — sólo se completa en la inicialización
+   * del flujo (primer paso tras el DNI). Separado de `message` por el mismo
+   * motivo que en existing-patient-flow-integration.ts: el widget de
+   * formulario ya tiene su propio texto fijo para el paso de obra social, no
+   * necesita repetir la instrucción completa pensada para WhatsApp.
+   */
+  greeting?: string
   action?: string
   patientInfo?: {
     dni: string
@@ -309,10 +318,14 @@ export async function initializeNewPatientFlow(
     : state.esFamiliar
       ? `Veo que es la primera vez con nosotros. Para agendar el turno del familiar, necesito algunos datos.\n\nPrimero, decime la *obra social o prepaga* del familiar.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tiene cobertura.`
       : `Veo que es tu primera vez con nosotros. Para agendar tu turno, necesito algunos datos.\n\nPrimero, decime tu *obra social o prepaga*.\n\nEscribi el nombre (por ejemplo: OSDE, Swiss Medical, PAMI, etc.) o *Particular* si no tenés cobertura.`
+  const greeting = state.esFamiliar
+    ? 'Veo que es la primera vez con nosotros. Vamos a agendar el turno del familiar como paciente nuevo.'
+    : 'Veo que es tu primera vez con nosotros. Vamos a agendarte como paciente nuevo.'
 
   return {
     handled: true,
     message: mensaje,
+    greeting,
     patientInfo: { dni },
   }
 }

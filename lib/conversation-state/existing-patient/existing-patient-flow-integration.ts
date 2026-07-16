@@ -143,6 +143,15 @@ export interface ExistingPatientFlowState {
 export interface ExistingPatientResult {
   handled: boolean
   message?: string
+  /**
+   * Saludo corto y aislado ("Hola Juan, te ayudo a agendar un nuevo turno.")
+   * — sólo se completa en la inicialización del flujo (primer paso tras el
+   * DNI), separado de `message` para que el widget de formulario lo pueda
+   * mostrar como texto de bienvenida sin duplicar el listado de sedes/turnos
+   * que `message` trae pensado para WhatsApp. WhatsApp sigue usando `message`
+   * tal cual, no lee este campo.
+   */
+  greeting?: string
   action?: string
   nextPhase?: string
   shouldCallOpenAI?: boolean
@@ -473,6 +482,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
           return {
             handled: true,
             message: `${welcomeMessage}\n\n${turnosResult.message}`,
+            greeting: welcomeMessage,
             nextPhase: turnosResult.nextPhase,
           }
         }
@@ -485,6 +495,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
       return {
         handled: true,
         message: `${welcomeMessage}\n\n${profResult.message}`,
+        greeting: welcomeMessage,
         nextPhase: 'awaiting_professional_selection',
       }
     }
@@ -495,6 +506,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     return {
       handled: true,
       message: `${welcomeMessage}\n\nNo encontré ningún profesional con el nombre "${profesionalMencionado}". ¿Podés escribir el apellido nuevamente?`,
+      greeting: welcomeMessage,
       nextPhase: 'awaiting_professional_name',
     }
   }
@@ -527,6 +539,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     return {
       handled: true,
       message: `${welcomeMessage}\n\n${buildSearchOptionsMessage(sedeFastPath.nombre, undefined)}`,
+      greeting: welcomeMessage,
       nextPhase: 'awaiting_search_type',
       searchTypeButtons: buildSearchOptionsButtons(undefined),
     }
@@ -569,6 +582,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
   return {
     handled: true,
     message: `${welcomeMessage}\n\n${buildSedesMessage(sedesResult.sedes)}`,
+    greeting: welcomeMessage,
     nextPhase: 'awaiting_sede',
     sedesListRows,
   }

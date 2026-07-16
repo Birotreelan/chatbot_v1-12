@@ -76,6 +76,8 @@ interface FormStep {
   success?: boolean
   message: string
   alert?: FormAlert
+  /** Saludo de bienvenida ("Hola Juan, ...") — sólo viene en el primer paso tras el DNI. */
+  greeting?: string
   inputType: FormInputType
   fieldLabel?: string
   placeholder?: string
@@ -585,6 +587,10 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
               >
                 <ChevronLeft className="h-4 w-4" /> Volver
               </button>
+            )}
+
+            {step.greeting && (
+              <p className="text-sm text-gray-600 whitespace-pre-wrap">{step.greeting}</p>
             )}
 
             {step.inputType !== "info" &&

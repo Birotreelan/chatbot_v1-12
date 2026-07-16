@@ -110,6 +110,15 @@ export interface FormWidgetStep {
    * para repetir en texto lo que ya se ve en `options`/`turnos`/`summary`.
    */
   alert?: FormWidgetAlert
+  /**
+   * Saludo de bienvenida ("Hola Juan, te ayudo a agendar un nuevo turno." /
+   * "Veo que es tu primera vez con nosotros, vamos a agendarte como paciente
+   * nuevo.") — sólo presente en el primer paso tras validar el DNI. A
+   * diferencia de `alert`, no es un aviso puntual sino el mismo saludo que ya
+   * usamos en WhatsApp; el frontend lo muestra como texto amigable, sin
+   * ícono de advertencia.
+   */
+  greeting?: string
   /** Sitekey de Turnstile de este cliente — sólo se completa en el paso de confirmación (ver app/api/widget-form/route.ts). */
   turnstileSiteKey?: string
   inputType: FormWidgetInputType
@@ -182,6 +191,22 @@ function cleanBackendText(text?: string): string {
  * con una excepción puntual: "no encontré turnos" explica por qué se volvió a
  * pantalla de búsqueda, y sí vale la pena mostrarlo.
  */
+/**
+ * Cuelga el saludo de bienvenida en el paso, sólo cuando es el primer paso
+ * tras validar el DNI (previousPhase === undefined — ver finalizeNewPatient/
+ * finalizeExistingPatient, que omiten ese argumento en esa llamada puntual).
+ * En cualquier respuesta posterior del mismo flujo no corresponde: ya se
+ * saludó una vez.
+ */
+function attachGreetingIfNeeded(
+  step: FormWidgetStep,
+  previousPhase: string | undefined,
+  greeting: string | undefined
+): FormWidgetStep {
+  if (previousPhase !== undefined || !greeting) return step
+  return { ...step, greeting }
+}
+
 function attachAlertIfNeeded(
   step: FormWidgetStep,
   previousPhase: string | undefined,
@@ -402,7 +427,8 @@ async function finalizeNewPatient(
     return infoStep(cleanBackendText(result.message) || 'La conversación fue cancelada.', false, 'abandoned')
   }
   const step = buildNewPatientStep(snap, searchOptionsConfig)
-  return attachAlertIfNeeded(step, previousPhase, result.message)
+  const withAlert = attachAlertIfNeeded(step, previousPhase, result.message)
+  return attachGreetingIfNeeded(withAlert, previousPhase, result.greeting)
 }
 
 async function finalizeExistingPatient(
@@ -428,7 +454,8 @@ async function finalizeExistingPatient(
     return infoStep(cleanBackendText(result.message) || 'La conversación fue cancelada.', false, 'abandoned')
   }
   const step = buildExistingPatientStep(snap, searchOptionsConfig)
-  return attachAlertIfNeeded(step, previousPhase, result.message)
+  const withAlert = attachAlertIfNeeded(step, previousPhase, result.message)
+  return attachGreetingIfNeeded(withAlert, previousPhase, result.greeting)
 }
 
 // ─── Construcción del paso estructurado a partir del estado ─────────────────
