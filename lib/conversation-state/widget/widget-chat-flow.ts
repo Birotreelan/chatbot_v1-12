@@ -41,6 +41,8 @@ import {
 export interface WidgetChatResult {
   handled: boolean
   message: string
+  /** true cuando este mensaje resultó en una reserva de turno exitosa (para rate limiting de reservas). */
+  reserved?: boolean
 }
 
 const WELCOME_ASK_DNI =
@@ -178,5 +180,9 @@ function finalizeResult(result: {
   if (result.shouldCallOpenAI && !result.message) {
     return { handled: true, message: FEATURE_DISABLED_MESSAGE }
   }
-  return { handled: true, message: result.message || GENERIC_FALLBACK_MESSAGE }
+  return {
+    handled: true,
+    message: result.message || GENERIC_FALLBACK_MESSAGE,
+    reserved: result.action === 'turno_reservado',
+  }
 }

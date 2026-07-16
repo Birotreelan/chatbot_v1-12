@@ -4,6 +4,7 @@ import { getWhatsappConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
 import { looksLikeDNI, checkDniRateLimit, DNI_RATE_LIMIT_MESSAGE } from "@/lib/dni-rate-limit"
 import { isWidgetOriginAllowed } from "@/lib/widget-domain-validation"
+import { hasReachedReservationLimit, recordReservation, RESERVATION_LIMIT_MESSAGE } from "@/lib/reservation-limit"
 
 /**
  * Endpoint del widget embebible (chat en el sitio web de cada clínica).
@@ -66,7 +67,17 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // Tope de RESERVAS COMPLETADAS por IP (no de mensajes): evita que una
+    // persona o un bot llene la agenda reservando turno tras turno.
+    if (await hasReachedReservationLimit(ip)) {
+      return NextResponse.json({ success: true, response: RESERVATION_LIMIT_MESSAGE })
+    }
+
     const result = await processWidgetMessage(session_id, message, config.cliente_id, config.escalationPhoneNumber)
+
+    if (result.reserved) {
+      await recordReservation(ip)
+    }
 
     return NextResponse.json({ success: true, response: result.message })
   } catch (error) {

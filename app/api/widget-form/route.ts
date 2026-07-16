@@ -4,6 +4,7 @@ import { getWhatsappConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
 import { looksLikeDNI, checkDniRateLimit, DNI_RATE_LIMIT_MESSAGE } from "@/lib/dni-rate-limit"
 import { isWidgetOriginAllowed } from "@/lib/widget-domain-validation"
+import { hasReachedReservationLimit, recordReservation, RESERVATION_LIMIT_MESSAGE } from "@/lib/reservation-limit"
 
 /**
  * Endpoint del widget de FORMULARIO (tercer tipo de widget embebible, 9/7/2026).
@@ -52,6 +53,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Origen no autorizado" }, { status: 403 })
     }
 
+    // Tope de RESERVAS COMPLETADAS por IP (no de mensajes): evita que una
+    // persona o un bot llene la agenda reservando turno tras turno.
+    if (await hasReachedReservationLimit(ip)) {
+      return NextResponse.json({
+        success: true,
+        step: {
+          phase: "error",
+          done: true,
+          success: false,
+          message: RESERVATION_LIMIT_MESSAGE,
+          inputType: "info",
+        },
+      })
+    }
+
     if (typeof message === "string" && looksLikeDNI(message) && !(await checkDniRateLimit(ip))) {
       return NextResponse.json({
         success: true,
@@ -85,6 +101,10 @@ export async function POST(request: NextRequest) {
       config.escalationPhoneNumber,
       init === true,
     )
+
+    if (step.phase === "completed" && step.success) {
+      await recordReservation(ip)
+    }
 
     return NextResponse.json({ success: true, step })
   } catch (error) {
