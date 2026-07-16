@@ -111,12 +111,12 @@ export interface FormWidgetStep {
    */
   alert?: FormWidgetAlert
   /**
-   * Saludo de bienvenida ("Hola Juan, te ayudo a agendar un nuevo turno." /
-   * "Veo que es tu primera vez con nosotros, vamos a agendarte como paciente
-   * nuevo.") — sólo presente en el primer paso tras validar el DNI. A
-   * diferencia de `alert`, no es un aviso puntual sino el mismo saludo que ya
-   * usamos en WhatsApp; el frontend lo muestra como texto amigable, sin
-   * ícono de advertencia.
+   * Saludo de bienvenida, redactado específicamente para el widget
+   * ("Gracias, Juan. Te ayudaremos a gestionar tu nuevo turno." / "Gracias,
+   * te agendaremos como paciente nuevo.") — sólo presente en el primer paso
+   * tras validar el DNI. A diferencia de `alert`, no es un aviso puntual: el
+   * frontend lo muestra con el mismo estilo que el título del paso (negro,
+   * sin ícono de advertencia).
    */
   greeting?: string
   /** Sitekey de Turnstile de este cliente — sólo se completa en el paso de confirmación (ver app/api/widget-form/route.ts). */

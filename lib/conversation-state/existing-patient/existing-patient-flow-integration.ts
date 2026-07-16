@@ -144,12 +144,12 @@ export interface ExistingPatientResult {
   handled: boolean
   message?: string
   /**
-   * Saludo corto y aislado ("Hola Juan, te ayudo a agendar un nuevo turno.")
-   * — sólo se completa en la inicialización del flujo (primer paso tras el
-   * DNI), separado de `message` para que el widget de formulario lo pueda
-   * mostrar como texto de bienvenida sin duplicar el listado de sedes/turnos
-   * que `message` trae pensado para WhatsApp. WhatsApp sigue usando `message`
-   * tal cual, no lee este campo.
+   * Saludo corto y aislado, redactado específicamente para el widget
+   * ("Gracias, Juan. Te ayudaremos a gestionar tu nuevo turno.") — sólo se
+   * completa en la inicialización del flujo (primer paso tras el DNI).
+   * Separado de `message` (que sigue con su propia redacción para WhatsApp,
+   * "Hola Juan, te ayudo a agendar un nuevo turno.") para poder tener textos
+   * distintos por canal sin acoplarlos. WhatsApp no lee este campo.
    */
   greeting?: string
   action?: string
@@ -430,6 +430,9 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
 
   const primerNombre = getFirstName(patientName)
   const welcomeMessage = `Hola ${primerNombre}, te ayudo a agendar un nuevo turno.`
+  // Saludo específico para el widget (campo `greeting`, separado de `message`
+  // que sigue usando `welcomeMessage` tal cual para WhatsApp).
+  const widgetGreeting = `Gracias, ${primerNombre}. Te ayudaremos a gestionar tu nuevo turno.`
 
   // Determinar sede: auto-seleccionar si hay solo una o si el paciente dijo "cualquier sede"
   const autoSelectSede = sedesResult.sedes.length === 1 || cualquierSede
@@ -482,7 +485,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
           return {
             handled: true,
             message: `${welcomeMessage}\n\n${turnosResult.message}`,
-            greeting: welcomeMessage,
+            greeting: widgetGreeting,
             nextPhase: turnosResult.nextPhase,
           }
         }
@@ -495,7 +498,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
       return {
         handled: true,
         message: `${welcomeMessage}\n\n${profResult.message}`,
-        greeting: welcomeMessage,
+        greeting: widgetGreeting,
         nextPhase: 'awaiting_professional_selection',
       }
     }
@@ -506,7 +509,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     return {
       handled: true,
       message: `${welcomeMessage}\n\nNo encontré ningún profesional con el nombre "${profesionalMencionado}". ¿Podés escribir el apellido nuevamente?`,
-      greeting: welcomeMessage,
+      greeting: widgetGreeting,
       nextPhase: 'awaiting_professional_name',
     }
   }
@@ -539,7 +542,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     return {
       handled: true,
       message: `${welcomeMessage}\n\n${buildSearchOptionsMessage(sedeFastPath.nombre, undefined)}`,
-      greeting: welcomeMessage,
+      greeting: widgetGreeting,
       nextPhase: 'awaiting_search_type',
       searchTypeButtons: buildSearchOptionsButtons(undefined),
     }
@@ -582,7 +585,7 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
   return {
     handled: true,
     message: `${welcomeMessage}\n\n${buildSedesMessage(sedesResult.sedes)}`,
-    greeting: welcomeMessage,
+    greeting: widgetGreeting,
     nextPhase: 'awaiting_sede',
     sedesListRows,
   }
