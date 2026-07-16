@@ -99,6 +99,15 @@ export interface ExistingPatientFlowState {
   patientDNI: string
   patientEmail?: string
   patientPhone: string
+  /**
+   * Canal de origen del flujo. Determina si se pide 'awaiting_telefono'
+   * cuando la ficha de la clínica no tiene celular cargado (widget, donde el
+   * visitante es anónimo — sin este dato, el `session_id` interno terminaría
+   * usándose como si fuera el teléfono del paciente) o no (WhatsApp, donde el
+   * canal YA es el teléfono real). Por defecto 'whatsapp' para no afectar las
+   * llamadas existentes. Mismo patrón que NewPatientFlowState.channel.
+   */
+  channel?: 'whatsapp' | 'widget'
 
   // Obra social (del paciente existente)
   obraSocialId?: string
@@ -314,14 +323,15 @@ export async function initializeExistingPatientFlow(
     patientCelular?: string
   },
   escalationPhoneNumber?: string,
-  initialMessage?: string
+  initialMessage?: string,
+  /**
+   * Canal de origen — ver comentario en ExistingPatientFlowState.channel.
+   * Por defecto 'whatsapp' para no afectar las llamadas existentes.
+   */
+  channel: 'whatsapp' | 'widget' = 'whatsapp'
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_init')
   logger.info('Initializing existing patient flow', { patientId, patientName })
-
-  // Teléfono a usar para la reserva (paciente_datos.telefono) y para futuros
-  // recordatorios. Ver nota en additionalPatientData.patientCelular arriba.
-  const reservationPhone = additionalPatientData?.patientCelular || phoneNumber
 
   const flags = await getEffectiveFeatureFlags(clientId)
   if (!flags.directPacienteExistente) {
@@ -397,6 +407,47 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
       // Continuar aunque falle la validación
     }
   }
+
+  // Widget: la ficha de la clínica no tiene celular cargado para este paciente
+  // — no usar el session_id anónimo como si fuera su teléfono (ni para
+  // mostrarlo ni para la reserva). Se lo pedimos antes de seguir.
+  // WhatsApp: el canal YA es el teléfono real, nunca entra acá.
+  if (channel === 'widget' && !additionalPatientData?.patientCelular) {
+    const state: ExistingPatientFlowState = {
+      phase: 'awaiting_telefono',
+      patientId,
+      patientName,
+      patientFirstName: finalPatientFirstName,
+      patientLastName: finalPatientLastName,
+      patientDNI: finalPatientDNI,
+      patientEmail,
+      patientPhone: '',
+      obraSocialId: finalObraSocialId,
+      obraSocialNombre: finalObraSocialNombre,
+      channel,
+      turnosMostrados: 0,
+      attempts: 0,
+      createdAt: Date.now(),
+      lastUpdated: Date.now(),
+    }
+    await saveFlowState(phoneNumber, state)
+    logger.info('No hay celular en la ficha, pidiendo telefono (widget)', {})
+
+    const primerNombreTel = getFirstName(finalPatientFirstName || patientName)
+    return {
+      handled: true,
+      message: `Hola ${primerNombreTel}, no tenemos un número de contacto cargado en tu ficha.\n\nNecesito tu *número de WhatsApp*, para poder confirmarte el turno y enviarte recordatorios.\n\nEscribilo con característica, sin el 0 ni el 15 (por ejemplo: *11 2345 6789*).`,
+      greeting: `Gracias, ${primerNombreTel}. Te ayudaremos a gestionar tu nuevo turno.`,
+      nextPhase: 'awaiting_telefono',
+    }
+  }
+
+  // Teléfono a usar para la reserva (paciente_datos.telefono) y para futuros
+  // recordatorios. Ver nota en additionalPatientData.patientCelular arriba.
+  // En 'widget' sin celular en ficha ya se retornó arriba (awaiting_telefono),
+  // así que acá siempre hay un teléfono real (celular de la ficha o, en
+  // WhatsApp, el propio canal).
+  const reservationPhone = additionalPatientData?.patientCelular || phoneNumber
 
   // --- Entity extraction del mensaje inicial ---
   let profesionalMencionado: string | null = null
@@ -738,6 +789,10 @@ export async function handleExistingPatientMessage(
       result = await handleSearchTypePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber, searchOptionsConfig)
       break
 
+    case 'awaiting_telefono':
+      result = await handleTelefonoPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
+      break
+
     case 'awaiting_professional_name':
       result = await handleProfessionalNamePhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
       break
@@ -968,6 +1023,63 @@ async function handleBackNavigation(
       return { handled: true, action: 'back_to_main_menu' }
     }
   }
+}
+
+/**
+ * Fase: Teléfono de contacto (sólo canal widget — ver ExistingPatientFlowState.channel).
+ * La ficha de la clínica no tenía celular cargado para este paciente y se lo
+ * pedimos antes de continuar. Una vez capturado acá, re-ejecutamos la
+ * inicialización pasándolo como `patientCelular` para que el flujo siga
+ * exactamente igual que si hubiera venido de la ficha (sede, tipo de
+ * búsqueda, etc.) — evita duplicar esa lógica en dos lugares.
+ */
+async function handleTelefonoPhase(
+  phoneNumber: string,
+  userMessage: string,
+  clientId: string,
+  state: ExistingPatientFlowState,
+  escalationPhoneNumber?: string
+): Promise<ExistingPatientResult> {
+  const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_telefono_phase')
+
+  const soloDigitos = userMessage.replace(/\D/g, '')
+
+  // Validación básica: entre 8 y 13 dígitos (cubre números argentinos con/sin
+  // característica y con/sin código de país) — misma regla que new-patient.
+  if (soloDigitos.length < 8 || soloDigitos.length > 13) {
+    state.attempts = (state.attempts || 0) + 1
+    await saveFlowState(phoneNumber, state)
+    if (state.attempts >= 3) {
+      return { handled: false, shouldCallOpenAI: true, openAIContext: 'Patient cannot provide valid telefono' }
+    }
+    return {
+      handled: true,
+      message: `No pude reconocer ese número. Por favor, escribilo con característica, sin el 0 ni el 15.\n\nPor ejemplo: *11 2345 6789*`,
+    }
+  }
+
+  logger.info('Telefono capturado, continuando inicializacion', { telefonoLength: soloDigitos.length })
+
+  // additionalPatientData.patientCelular ahora viene completo → la función
+  // ya no vuelve a pedir el teléfono y sigue directo con sede/tipo de búsqueda.
+  return await initializeExistingPatientFlow(
+    phoneNumber,
+    state.patientId,
+    state.patientName,
+    state.patientDNI,
+    state.patientEmail,
+    clientId,
+    {
+      patientFirstName: state.patientFirstName,
+      patientLastName: state.patientLastName,
+      obraSocialId: state.obraSocialId,
+      obraSocialNombre: state.obraSocialNombre,
+      patientCelular: soloDigitos,
+    },
+    escalationPhoneNumber,
+    undefined,
+    state.channel || 'widget'
+  )
 }
 
 /**

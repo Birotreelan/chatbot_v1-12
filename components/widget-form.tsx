@@ -496,7 +496,7 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
                 )}
                 {step.summary.sede && <SummaryRow label="Sede" value={step.summary.sede} />}
                 {step.summary.email && <SummaryRow label="Email" value={step.summary.email} />}
-                {step.summary.telefono && <SummaryRow label="WhatsApp" value={step.summary.telefono} />}
+                {step.summary.telefono && <SummaryRow label="Celular" value={step.summary.telefono} />}
               </div>
             )}
             {step.turnstileSiteKey && <div ref={turnstileContainerRef} className="flex justify-center" />}

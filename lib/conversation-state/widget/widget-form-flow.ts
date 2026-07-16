@@ -391,7 +391,8 @@ export async function processWidgetFormMessage(
         patientCelular: patientCelular || undefined,
       },
       escalationPhoneNumber,
-      userMessage
+      userMessage,
+      'widget'
     )
 
     return await finalizeExistingPatient(sessionId, result, clinicName, searchOptionsConfig)

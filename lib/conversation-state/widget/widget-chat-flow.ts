@@ -152,7 +152,8 @@ export async function processWidgetMessage(
         patientCelular: patientCelular || undefined,
       },
       escalationPhoneNumber,
-      userMessage
+      userMessage,
+      'widget'
     )
 
     return finalizeResult(result)
