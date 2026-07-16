@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { processWidgetFormMessage } from "@/lib/conversation-state/widget/widget-form-flow"
 import { getWhatsappConfigByClienteId } from "@/lib/db"
+import { rateLimit } from "@/lib/rate-limit"
 
 /**
  * Endpoint del widget de FORMULARIO (tercer tipo de widget embebible, 9/7/2026).
@@ -13,6 +14,17 @@ import { getWhatsappConfigByClienteId } from "@/lib/db"
  */
 export async function POST(request: NextRequest) {
   try {
+    const ip = request.headers.get("x-forwarded-for") || "unknown"
+    // Endpoint público sensible (incluye búsqueda de pacientes por DNI):
+    // límite más estricto que el default para dificultar la enumeración.
+    const rateLimitResult = await rateLimit(`widget-form:ip:${ip}`, 20, 60000)
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { success: false, error: "Demasiadas solicitudes. Probá de nuevo en unos minutos." },
+        { status: 429 },
+      )
+    }
+
     const body = await request.json()
     const { message, cliente_id, session_id, init } = body
 

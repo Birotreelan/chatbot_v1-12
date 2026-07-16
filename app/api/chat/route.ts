@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { processWidgetMessage } from "@/lib/conversation-state/widget/widget-chat-flow"
 import { getWhatsappConfigByClienteId } from "@/lib/db"
+import { rateLimit } from "@/lib/rate-limit"
 
 /**
  * Endpoint del widget embebible (chat en el sitio web de cada clínica).
@@ -12,6 +13,18 @@ import { getWhatsappConfigByClienteId } from "@/lib/db"
  */
 export async function POST(request: NextRequest) {
   try {
+    const ip = request.headers.get("x-forwarded-for") || "unknown"
+    // Mismo motor que el widget-form (incluye búsqueda de pacientes por DNI):
+    // límite más estricto que el default para dificultar la enumeración y
+    // acotar el costo de OpenAI ante abuso.
+    const rateLimitResult = await rateLimit(`chat:ip:${ip}`, 20, 60000)
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { success: false, error: "Demasiadas solicitudes. Probá de nuevo en unos minutos." },
+        { status: 429 },
+      )
+    }
+
     const body = await request.json()
     const { message, cliente_id, session_id } = body
 

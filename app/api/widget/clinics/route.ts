@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getAllWhatsAppConfigs } from "@/lib/db"
+import { rateLimit } from "@/lib/rate-limit"
 
 /**
  * Lista liviana de clínicas para el selector de la página de demo del widget
@@ -12,8 +13,14 @@ import { getAllWhatsAppConfigs } from "@/lib/db"
  * mensajes de pacientes por WhatsApp (no es un secreto) — lo usa el botón de
  * demo del widget de WhatsApp para armar el link de wa.me.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const ip = request.headers.get("x-forwarded-for") || "unknown"
+    const rateLimitResult = await rateLimit(`widget-clinics:ip:${ip}`, 30, 60000)
+    if (!rateLimitResult.success) {
+      return NextResponse.json([], { status: 429 })
+    }
+
     const configs = await getAllWhatsAppConfigs()
 
     const clinics = configs

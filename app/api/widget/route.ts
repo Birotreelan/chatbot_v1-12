@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server"
 import { getConfigByClienteId } from "@/lib/db"
+import { rateLimit } from "@/lib/rate-limit"
 
 export async function GET(request: Request) {
+  const ip = request.headers.get("x-forwarded-for") || "unknown"
+  const rateLimitResult = await rateLimit(`widget-config:ip:${ip}`, 60, 60000)
+  if (!rateLimitResult.success) {
+    return NextResponse.json({ error: "Demasiadas solicitudes" }, { status: 429 })
+  }
+
   const { searchParams } = new URL(request.url)
   const cliente_id = searchParams.get("cliente_id")
 
