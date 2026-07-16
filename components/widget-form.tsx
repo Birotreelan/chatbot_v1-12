@@ -120,6 +120,22 @@ function newSessionId() {
   return newWidgetSessionId()
 }
 
+// CAPTCHA (Cloudflare Turnstile) — sólo se exige en el paso de confirmación
+// de reserva (ver app/api/widget-form/route.ts). Si no está configurada la
+// site key, el widget funciona igual que antes, sin CAPTCHA.
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
+const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js"
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (container: HTMLElement, options: Record<string, unknown>) => string
+      reset: (widgetId: string) => void
+      remove: (widgetId: string) => void
+    }
+  }
+}
+
 function parseYMD(s: string): Date {
   const [y, m, d] = s.split("-").map(Number)
   return new Date(y, (m || 1) - 1, d || 1)
@@ -167,6 +183,10 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   const lastInitRef = useRef<boolean>(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
+  const turnstileContainerRef = useRef<HTMLDivElement>(null)
+  const turnstileWidgetIdRef = useRef<string | null>(null)
+
   const title = "Solicitud de turnos"
   const subtitle = "Completá los pasos para agendar tu cita médica oftalmológica."
 
@@ -202,8 +222,54 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
     return () => observer.disconnect()
   }, [isEmbedded, isMobileLayout])
 
+  // ── CAPTCHA (Turnstile) en el paso de confirmación ─────────────────────
+  // Se monta un widget nuevo cada vez que llegamos a un paso de confirmación
+  // (incluso si es un reintento tras fallar la verificación), para que el
+  // token siempre sea fresco. Se desmonta al salir de ese paso.
+  useEffect(() => {
+    if (step?.inputType !== "confirmation" || !TURNSTILE_SITE_KEY) return
+
+    let cancelled = false
+
+    function renderWidget() {
+      if (cancelled || !turnstileContainerRef.current || !window.turnstile) return
+      turnstileWidgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token: string) => setTurnstileToken(token),
+        "expired-callback": () => setTurnstileToken(null),
+        "error-callback": () => setTurnstileToken(null),
+      })
+    }
+
+    if (window.turnstile) {
+      renderWidget()
+    } else {
+      const existing = document.getElementById("iris-turnstile-script")
+      if (!existing) {
+        const script = document.createElement("script")
+        script.id = "iris-turnstile-script"
+        script.src = TURNSTILE_SCRIPT_SRC
+        script.async = true
+        script.defer = true
+        script.onload = renderWidget
+        document.head.appendChild(script)
+      } else {
+        existing.addEventListener("load", renderWidget)
+      }
+    }
+
+    return () => {
+      cancelled = true
+      if (turnstileWidgetIdRef.current && window.turnstile) {
+        window.turnstile.remove(turnstileWidgetIdRef.current)
+      }
+      turnstileWidgetIdRef.current = null
+      setTurnstileToken(null)
+    }
+  }, [step])
+
   const callApi = useCallback(
-    async (message: string, init = false) => {
+    async (message: string, init = false, captchaToken?: string) => {
       if (!sessionId) return
       lastMessageRef.current = message
       lastInitRef.current = init
@@ -213,7 +279,13 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
         const res = await fetch("/api/widget-form", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cliente_id: clienteId, session_id: sessionId, message, init }),
+          body: JSON.stringify({
+            cliente_id: clienteId,
+            session_id: sessionId,
+            message,
+            init,
+            ...(captchaToken ? { turnstileToken: captchaToken } : {}),
+          }),
         })
         const data = await res.json()
         if (data.success && data.step) {
@@ -420,21 +492,26 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
                 {step.summary.telefono && <SummaryRow label="WhatsApp" value={step.summary.telefono} />}
               </div>
             )}
+            {TURNSTILE_SITE_KEY && <div ref={turnstileContainerRef} className="flex justify-center" />}
             <div className="space-y-2">
-              {step.options?.map((opt) => (
-                <button
-                  key={opt.id}
-                  onClick={() => callApi(opt.id)}
-                  disabled={loading}
-                  className={
-                    opt.id === "1"
-                      ? "w-full rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-medium py-3 transition-colors disabled:opacity-50"
-                      : "w-full rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium py-3 transition-colors disabled:opacity-50"
-                  }
-                >
-                  {opt.label}
-                </button>
-              ))}
+              {step.options?.map((opt) => {
+                const isConfirm = opt.id === "1"
+                const waitingCaptcha = isConfirm && !!TURNSTILE_SITE_KEY && !turnstileToken
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => callApi(opt.id, false, isConfirm ? turnstileToken || undefined : undefined)}
+                    disabled={loading || waitingCaptcha}
+                    className={
+                      isConfirm
+                        ? "w-full rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-medium py-3 transition-colors disabled:opacity-50"
+                        : "w-full rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium py-3 transition-colors disabled:opacity-50"
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
             </div>
           </div>
         )

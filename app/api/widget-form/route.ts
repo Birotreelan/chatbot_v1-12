@@ -5,6 +5,19 @@ import { rateLimit } from "@/lib/rate-limit"
 import { looksLikeDNI, checkDniRateLimit, DNI_RATE_LIMIT_MESSAGE } from "@/lib/dni-rate-limit"
 import { isWidgetOriginAllowed } from "@/lib/widget-domain-validation"
 import { hasReachedReservationLimit, recordReservation, RESERVATION_LIMIT_MESSAGE } from "@/lib/reservation-limit"
+import { verifyTurnstileToken } from "@/lib/turnstile"
+import { markAwaitingConfirmation, isAwaitingConfirmation, clearAwaitingConfirmation } from "@/lib/widget-confirmation-gate"
+
+// Mismas palabras que reconoce como "sí" el motor compartido
+// (lib/conversation-state/shared/confirmation-handler.ts). Sólo cuando el
+// mensaje tiene forma de "confirmar" exigimos el CAPTCHA — "No, modificar"
+// (u otra cosa) puede seguir de largo sin verificación, porque no ejecuta
+// ninguna reserva.
+const POSITIVE_CONFIRMATION_WORDS = ["si", "sí", "yes", "confirmo", "confirmar", "ok", "dale", "bueno", "perfecto", "1"]
+function looksLikeConfirmAttempt(msg: string): boolean {
+  const normalized = msg.trim().toLowerCase()
+  return POSITIVE_CONFIRMATION_WORDS.some((w) => normalized.includes(w))
+}
 
 /**
  * Endpoint del widget de FORMULARIO (tercer tipo de widget embebible, 9/7/2026).
@@ -29,7 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { message, cliente_id, session_id, init } = body
+    const { message, cliente_id, session_id, init, turnstileToken } = body
 
     if (!cliente_id || !session_id || (!init && typeof message !== "string")) {
       return NextResponse.json(
@@ -68,6 +81,38 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // CAPTCHA (Turnstile) obligatorio para responder al paso de confirmación
+    // de reserva — el mismo que exigimos por marca del lado del servidor
+    // (no alcanza con que el frontend "diga" que mandó un token: si el
+    // paso previamente enviado a esta sesión fue de confirmación, no se
+    // avanza sin un token válido).
+    if (
+      typeof message === "string" &&
+      looksLikeConfirmAttempt(message) &&
+      (await isAwaitingConfirmation(session_id))
+    ) {
+      const verified = await verifyTurnstileToken(turnstileToken, ip)
+      if (!verified) {
+        // Reenviamos un mensaje "vacío" al motor: no matchea ni sí ni no, así
+        // que re-muestra el paso de confirmación (con el resumen y las
+        // opciones intactas) SIN ejecutar la reserva — mismo camino que ya
+        // usa el motor para "no entendí tu respuesta".
+        const retryStep = await processWidgetFormMessage(
+          session_id,
+          "",
+          config.cliente_id,
+          config.escalationPhoneNumber,
+          false,
+        )
+        retryStep.alert = {
+          type: "warning",
+          message: 'Antes de confirmar, completá la verificación ("No soy un robot") y volvé a intentar.',
+        }
+        return NextResponse.json({ success: true, step: retryStep })
+      }
+      await clearAwaitingConfirmation(session_id)
+    }
+
     if (typeof message === "string" && looksLikeDNI(message) && !(await checkDniRateLimit(ip))) {
       return NextResponse.json({
         success: true,
@@ -104,6 +149,10 @@ export async function POST(request: NextRequest) {
 
     if (step.phase === "completed" && step.success) {
       await recordReservation(ip)
+    }
+
+    if (step.inputType === "confirmation") {
+      await markAwaitingConfirmation(session_id)
     }
 
     return NextResponse.json({ success: true, step })
