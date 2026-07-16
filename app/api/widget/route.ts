@@ -2,6 +2,12 @@ import { NextResponse } from "next/server"
 import { getConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
 
+// Nota: este endpoint NO valida `widgetAllowedDomains` (a diferencia de
+// /api/widget-form y /api/chat). Es CDN-cacheado por cliente_id
+// (Cache-Control s-maxage=300) y no expone PII de pacientes — sólo datos de
+// apariencia ya pensados para ser públicos. Validar el origen acá arriesga
+// servir una respuesta cacheada de un origen a otro (el cache no varía por
+// header Origin), sin ganancia real de seguridad.
 export async function GET(request: Request) {
   const ip = request.headers.get("x-forwarded-for") || "unknown"
   const rateLimitResult = await rateLimit(`widget-config:ip:${ip}`, 60, 60000)

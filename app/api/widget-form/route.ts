@@ -3,6 +3,7 @@ import { processWidgetFormMessage } from "@/lib/conversation-state/widget/widget
 import { getWhatsappConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
 import { looksLikeDNI, checkDniRateLimit, DNI_RATE_LIMIT_MESSAGE } from "@/lib/dni-rate-limit"
+import { isWidgetOriginAllowed } from "@/lib/widget-domain-validation"
 
 /**
  * Endpoint del widget de FORMULARIO (tercer tipo de widget embebible, 9/7/2026).
@@ -44,6 +45,11 @@ export async function POST(request: NextRequest) {
     if (!config) {
       console.log("[API-WIDGET-FORM] Configuración no encontrada para cliente_id:", cliente_id)
       return NextResponse.json({ success: false, error: "Configuración no encontrada" }, { status: 404 })
+    }
+
+    if (!isWidgetOriginAllowed(config, request)) {
+      console.warn("[API-WIDGET-FORM] Origen no autorizado para cliente_id:", cliente_id)
+      return NextResponse.json({ success: false, error: "Origen no autorizado" }, { status: 403 })
     }
 
     if (typeof message === "string" && looksLikeDNI(message) && !(await checkDniRateLimit(ip))) {

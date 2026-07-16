@@ -58,6 +58,13 @@ export interface WhatsAppConfig {
   widgetFloatingButtonText?: string
   widgetShowFloatingText?: boolean
 
+  // SEGURIDAD (2026-07-16): dominios desde los que se permite usar los
+  // widgets públicos (chat/formulario) de esta clínica. Lista separada por
+  // comas, ej: "clinica.com, www.clinica.com". Si está vacío, no se
+  // restringe (compatibilidad con clientes ya embebidos sin configurar esto
+  // todavía).
+  widgetAllowedDomains?: string
+
   stats?: {
     messagesReceived: number
     messagesProcessed: number

@@ -70,6 +70,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     widgetTheme: "light",
     widgetFloatingButtonText: "Obtené tu turno con nuestro asistente virtual",
     widgetShowFloatingText: true,
+    widgetAllowedDomains: "",
     enableSearchByProfessional: true,
     enableSearchBySpecialty: true,
     enableSearchByAnyDoctor: true,
@@ -727,6 +728,21 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                   onCheckedChange={(checked) => updateFormData("widgetEnabled", checked)}
                 />
                 <Label htmlFor="widgetEnabled">Widget habilitado</Label>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="widgetAllowedDomains">Dominios permitidos</Label>
+                <Input
+                  id="widgetAllowedDomains"
+                  value={formData.widgetAllowedDomains || ""}
+                  onChange={(e) => updateFormData("widgetAllowedDomains", e.target.value)}
+                  placeholder="clinica.com, www.clinica.com"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Sitios desde donde se puede usar el widget de esta clínica. Separá varios dominios con coma, sin
+                  "https://" (ej: clinica.com, turnos.clinica.com). Si lo dejás vacío, el widget funciona desde
+                  cualquier sitio (sin restricción).
+                </p>
               </div>
 
               <Separator />

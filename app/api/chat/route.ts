@@ -3,6 +3,7 @@ import { processWidgetMessage } from "@/lib/conversation-state/widget/widget-cha
 import { getWhatsappConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
 import { looksLikeDNI, checkDniRateLimit, DNI_RATE_LIMIT_MESSAGE } from "@/lib/dni-rate-limit"
+import { isWidgetOriginAllowed } from "@/lib/widget-domain-validation"
 
 /**
  * Endpoint del widget embebible (chat en el sitio web de cada clínica).
@@ -47,6 +48,11 @@ export async function POST(request: NextRequest) {
         { success: false, error: "Configuración no encontrada" },
         { status: 404 },
       )
+    }
+
+    if (!isWidgetOriginAllowed(config, request)) {
+      console.warn("[API-CHAT] Origen no autorizado para cliente_id:", cliente_id)
+      return NextResponse.json({ success: false, error: "Origen no autorizado" }, { status: 403 })
     }
 
     if (looksLikeDNI(message) && !(await checkDniRateLimit(ip))) {
