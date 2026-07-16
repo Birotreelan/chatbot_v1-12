@@ -84,6 +84,8 @@ interface FormStep {
   mostrarProfesionalPorTurno?: boolean
   summary?: FormSummary
   canGoBack?: boolean
+  /** Sitekey de Turnstile de ESTE cliente (cada clínica tiene el suyo) — sólo viene en el paso de confirmación. */
+  turnstileSiteKey?: string
 }
 
 // Ícono de cabecera por tipo de control — refuerza visualmente de qué se
@@ -121,9 +123,10 @@ function newSessionId() {
 }
 
 // CAPTCHA (Cloudflare Turnstile) — sólo se exige en el paso de confirmación
-// de reserva (ver app/api/widget-form/route.ts). Si no está configurada la
-// site key, el widget funciona igual que antes, sin CAPTCHA.
-const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
+// de reserva (ver app/api/widget-form/route.ts). Cada cliente tiene su
+// propio sitekey (step.turnstileSiteKey, ver lib/cloudflare-turnstile.ts);
+// si ese cliente todavía no tiene uno provisionado, el widget funciona igual
+// que antes, sin CAPTCHA.
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js"
 
 declare global {
@@ -226,15 +229,17 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
   // Se monta un widget nuevo cada vez que llegamos a un paso de confirmación
   // (incluso si es un reintento tras fallar la verificación), para que el
   // token siempre sea fresco. Se desmonta al salir de ese paso.
+  const turnstileSiteKey = step?.turnstileSiteKey
+
   useEffect(() => {
-    if (step?.inputType !== "confirmation" || !TURNSTILE_SITE_KEY) return
+    if (step?.inputType !== "confirmation" || !turnstileSiteKey) return
 
     let cancelled = false
 
     function renderWidget() {
       if (cancelled || !turnstileContainerRef.current || !window.turnstile) return
       turnstileWidgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
-        sitekey: TURNSTILE_SITE_KEY,
+        sitekey: turnstileSiteKey,
         callback: (token: string) => setTurnstileToken(token),
         "expired-callback": () => setTurnstileToken(null),
         "error-callback": () => setTurnstileToken(null),
@@ -492,11 +497,11 @@ export function WidgetForm({ clienteId, hideHeader = false }: WidgetFormProps) {
                 {step.summary.telefono && <SummaryRow label="WhatsApp" value={step.summary.telefono} />}
               </div>
             )}
-            {TURNSTILE_SITE_KEY && <div ref={turnstileContainerRef} className="flex justify-center" />}
+            {step.turnstileSiteKey && <div ref={turnstileContainerRef} className="flex justify-center" />}
             <div className="space-y-2">
               {step.options?.map((opt) => {
                 const isConfirm = opt.id === "1"
-                const waitingCaptcha = isConfirm && !!TURNSTILE_SITE_KEY && !turnstileToken
+                const waitingCaptcha = isConfirm && !!step.turnstileSiteKey && !turnstileToken
                 return (
                   <button
                     key={opt.id}

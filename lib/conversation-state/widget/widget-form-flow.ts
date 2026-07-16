@@ -110,6 +110,8 @@ export interface FormWidgetStep {
    * para repetir en texto lo que ya se ve en `options`/`turnos`/`summary`.
    */
   alert?: FormWidgetAlert
+  /** Sitekey de Turnstile de este cliente — sólo se completa en el paso de confirmación (ver app/api/widget-form/route.ts). */
+  turnstileSiteKey?: string
   inputType: FormWidgetInputType
   fieldLabel?: string
   placeholder?: string

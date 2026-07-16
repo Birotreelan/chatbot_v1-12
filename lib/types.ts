@@ -65,6 +65,15 @@ export interface WhatsAppConfig {
   // todavía).
   widgetAllowedDomains?: string
 
+  // SEGURIDAD (2026-07-16): CAPTCHA (Cloudflare Turnstile) del paso de
+  // confirmación de reserva de ESTE cliente. Cada clínica tiene su propio
+  // widget de Turnstile (Cloudflare permite máx. 10 dominios por widget, y
+  // acá va a haber cientos de clínicas) — se crea/actualiza automáticamente
+  // vía API de Cloudflare cuando se guarda `widgetAllowedDomains`
+  // (ver lib/cloudflare-turnstile.ts y app/dashboard/actions.ts).
+  widgetTurnstileSiteKey?: string
+  widgetTurnstileSecret?: string
+
   stats?: {
     messagesReceived: number
     messagesProcessed: number

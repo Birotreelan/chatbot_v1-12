@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
       looksLikeConfirmAttempt(message) &&
       (await isAwaitingConfirmation(session_id))
     ) {
-      const verified = await verifyTurnstileToken(turnstileToken, ip)
+      const verified = await verifyTurnstileToken(turnstileToken, ip, config.widgetTurnstileSecret)
       if (!verified) {
         // Reenviamos un mensaje "vacío" al motor: no matchea ni sí ni no, así
         // que re-muestra el paso de confirmación (con el resumen y las
@@ -108,6 +108,7 @@ export async function POST(request: NextRequest) {
           type: "warning",
           message: 'Antes de confirmar, completá la verificación ("No soy un robot") y volvé a intentar.',
         }
+        retryStep.turnstileSiteKey = config.widgetTurnstileSiteKey
         return NextResponse.json({ success: true, step: retryStep })
       }
       await clearAwaitingConfirmation(session_id)
@@ -153,6 +154,7 @@ export async function POST(request: NextRequest) {
 
     if (step.inputType === "confirmation") {
       await markAwaitingConfirmation(session_id)
+      step.turnstileSiteKey = config.widgetTurnstileSiteKey
     }
 
     return NextResponse.json({ success: true, step })

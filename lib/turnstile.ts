@@ -5,20 +5,20 @@
  * de consumir un turno real (ver lib/reservation-limit.ts para el tope
  * complementario de reservas por IP).
  *
- * Requiere las variables de entorno:
- * - NEXT_PUBLIC_TURNSTILE_SITE_KEY (pública, se manda al navegador)
- * - TURNSTILE_SECRET_KEY (privada, SOLO server-side, nunca exponer)
+ * Cada cliente tiene su PROPIO widget de Turnstile (propio sitekey/secret,
+ * ver lib/cloudflare-turnstile.ts) — no hay un secret global. Se recibe el
+ * secret de ese cliente como parámetro (config.widgetTurnstileSecret).
  */
 const VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
-export function isTurnstileConfigured(): boolean {
-  return !!process.env.TURNSTILE_SECRET_KEY && !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
-}
-
-export async function verifyTurnstileToken(token: string | undefined | null, ip: string): Promise<boolean> {
-  const secretKey = process.env.TURNSTILE_SECRET_KEY
-  // Si no está configurado (todavía no se cargaron las env vars), no
-  // bloqueamos — degrada a "sin CAPTCHA" en vez de romper el widget.
+export async function verifyTurnstileToken(
+  token: string | undefined | null,
+  ip: string,
+  secretKey: string | undefined | null,
+): Promise<boolean> {
+  // Si este cliente todavía no tiene su widget de Turnstile configurado, no
+  // bloqueamos — degrada a "sin CAPTCHA" para ese cliente en vez de romper
+  // el widget.
   if (!secretKey) return true
   if (!token) return false
 
