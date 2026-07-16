@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { processWidgetMessage } from "@/lib/conversation-state/widget/widget-chat-flow"
 import { getWhatsappConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
+import { looksLikeDNI, checkDniRateLimit, DNI_RATE_LIMIT_MESSAGE } from "@/lib/dni-rate-limit"
 
 /**
  * Endpoint del widget embebible (chat en el sitio web de cada clínica).
@@ -46,6 +47,10 @@ export async function POST(request: NextRequest) {
         { success: false, error: "Configuración no encontrada" },
         { status: 404 },
       )
+    }
+
+    if (looksLikeDNI(message) && !(await checkDniRateLimit(ip))) {
+      return NextResponse.json({ success: true, response: DNI_RATE_LIMIT_MESSAGE })
     }
 
     if (config.widgetEnabled === false) {

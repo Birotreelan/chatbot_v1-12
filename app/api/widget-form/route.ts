@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { processWidgetFormMessage } from "@/lib/conversation-state/widget/widget-form-flow"
 import { getWhatsappConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
+import { looksLikeDNI, checkDniRateLimit, DNI_RATE_LIMIT_MESSAGE } from "@/lib/dni-rate-limit"
 
 /**
  * Endpoint del widget de FORMULARIO (tercer tipo de widget embebible, 9/7/2026).
@@ -43,6 +44,19 @@ export async function POST(request: NextRequest) {
     if (!config) {
       console.log("[API-WIDGET-FORM] Configuración no encontrada para cliente_id:", cliente_id)
       return NextResponse.json({ success: false, error: "Configuración no encontrada" }, { status: 404 })
+    }
+
+    if (typeof message === "string" && looksLikeDNI(message) && !(await checkDniRateLimit(ip))) {
+      return NextResponse.json({
+        success: true,
+        step: {
+          phase: "awaiting_dni",
+          done: false,
+          success: false,
+          message: DNI_RATE_LIMIT_MESSAGE,
+          inputType: "dni",
+        },
+      })
     }
 
     if (config.widgetEnabled === false) {
