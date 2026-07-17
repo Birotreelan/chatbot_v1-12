@@ -74,6 +74,21 @@ export interface WhatsAppConfig {
   widgetTurnstileSiteKey?: string
   widgetTurnstileSecret?: string
 
+  // LÍNEA TELEFÓNICA (2026-07-16): de dónde sale el número de WhatsApp de
+  // esta clínica. 'clinic' = la clínica trae su propia línea (comportamiento
+  // histórico, sigue existiendo sin cambios: Phone Number ID/Access Token se
+  // pegan a mano). 'telnyx' = línea comprada por nosotros vía API de Telnyx
+  // (ver lib/telnyx.ts). Sólo informativo/de tracking — el registro del
+  // número en WhatsApp (Phone Number ID/Access Token) sigue siendo manual en
+  // ambos casos hasta que avancemos con Tech Provider de Meta.
+  lineSource?: "clinic" | "telnyx"
+  /** Número comprado vía Telnyx en formato E.164 (ej: +5491122334455). */
+  telnyxPhoneNumber?: string
+  /** ID de la orden de compra en Telnyx (number_order), para hacer seguimiento del estado. */
+  telnyxOrderId?: string
+  /** Último estado conocido de la orden de Telnyx (ej: "pending", "success", "failure"). */
+  telnyxOrderStatus?: string
+
   stats?: {
     messagesReceived: number
     messagesProcessed: number

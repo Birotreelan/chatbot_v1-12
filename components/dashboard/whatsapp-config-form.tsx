@@ -16,10 +16,12 @@ import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 import type { WhatsAppConfig, AdditionalAssistant } from "@/lib/types"
-import { Plus, Trash2, Info, Users, Bot } from "lucide-react"
+import { Plus, Trash2, Info, Users, Bot, Loader2, Phone, Search } from "lucide-react"
 import { ScheduleConfigurator } from "./schedule-configurator"
 import { WhatsAppTemplates } from "./whatsapp-templates"
 import { ClinicInfoTab } from "./clinic-info-tab"
+import { searchTelnyxNumbersAction, buyTelnyxNumberAction } from "@/app/dashboard/actions"
+import type { TelnyxAvailableNumber } from "@/lib/telnyx"
 
 interface WhatsAppConfigFormProps {
   config?: WhatsAppConfig
@@ -85,6 +87,17 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
   const [flagsLoading, setFlagsLoading] = useState(false)
   const [flagsSaving, setFlagsSaving] = useState(false)
 
+  // Línea híbrida (16/7/2026): compra de números de Argentina vía Telnyx,
+  // alternativa a que la clínica traiga su propia línea (que sigue siendo
+  // la opción por defecto — no se toca nada de los campos manuales de abajo).
+  const [telnyxSearch, setTelnyxSearch] = useState("")
+  const [telnyxLoading, setTelnyxLoading] = useState(false)
+  const [telnyxResults, setTelnyxResults] = useState<TelnyxAvailableNumber[]>([])
+  const [telnyxSearched, setTelnyxSearched] = useState(false)
+  const [telnyxConfirmNumber, setTelnyxConfirmNumber] = useState<string | null>(null)
+  const [telnyxBuying, setTelnyxBuying] = useState(false)
+  const [telnyxError, setTelnyxError] = useState<string | null>(null)
+
   useEffect(() => {
     if (config) {
       setFormData((prev) => ({
@@ -126,6 +139,47 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
       toast({ title: "Error", description: "No se pudo guardar la configuración.", variant: "destructive" })
     } finally {
       setFlagsSaving(false)
+    }
+  }
+
+  const handleTelnyxSearch = async () => {
+    setTelnyxLoading(true)
+    setTelnyxError(null)
+    setTelnyxConfirmNumber(null)
+    try {
+      const results = await searchTelnyxNumbersAction(telnyxSearch)
+      setTelnyxResults(results)
+      setTelnyxSearched(true)
+      if (results.length === 0) {
+        setTelnyxError("No se encontraron números disponibles con ese criterio. Probá con otro código de área o dejá el campo vacío.")
+      }
+    } catch (err) {
+      setTelnyxError("Error buscando números. Intentá de nuevo.")
+    } finally {
+      setTelnyxLoading(false)
+    }
+  }
+
+  const handleTelnyxBuy = async (phoneNumber: string) => {
+    if (!config?.id) return
+    setTelnyxBuying(true)
+    setTelnyxError(null)
+    try {
+      const result = await buyTelnyxNumberAction(config.id, phoneNumber)
+      if (!result.success) {
+        setTelnyxError(result.error || "No se pudo comprar el número.")
+        return
+      }
+      if (result.config) {
+        setFormData((prev) => ({ ...prev, ...result.config }))
+      }
+      setTelnyxConfirmNumber(null)
+      setTelnyxResults([])
+      toast({ title: "Número comprado", description: `${phoneNumber} ya es tuyo. Falta registrarlo en WhatsApp (ver instrucciones abajo).` })
+    } catch (err) {
+      setTelnyxError("Error de red comprando el número. Verificá si se descontó igual antes de reintentar.")
+    } finally {
+      setTelnyxBuying(false)
     }
   }
 
@@ -451,6 +505,122 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
         </TabsContent>
 
         <TabsContent value="whatsapp" className="space-y-4">
+          <Card className="border-sky-200 bg-sky-50/40">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Phone className="h-5 w-5 text-sky-600" />
+                Obtener línea nueva (Telnyx)
+              </CardTitle>
+              <CardDescription>
+                Alternativa a que la clínica traiga su propia línea de WhatsApp: comprale un número de Argentina
+                desde acá. Esto es opcional — la clínica puede seguir trayendo la suya como siempre, usando los
+                campos manuales de abajo.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!config ? (
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    Guardá esta configuración primero para poder comprarle una línea a esta clínica.
+                  </AlertDescription>
+                </Alert>
+              ) : formData.telnyxPhoneNumber ? (
+                <Alert className="border-green-200 bg-green-50">
+                  <Phone className="h-4 w-4 text-green-600" />
+                  <AlertDescription>
+                    <p className="font-medium text-green-800">Línea comprada: {formData.telnyxPhoneNumber}</p>
+                    <p className="text-sm text-green-700 mt-1">
+                      Estado de la orden en Telnyx: {formData.telnyxOrderStatus || "desconocido"}. Todavía falta el
+                      paso manual: registrar este número como número de WhatsApp Business en el Business Manager de
+                      Meta, y pegar acá abajo el <strong>Phone Number ID</strong> y el <strong>Access Token</strong>{" "}
+                      que te va a dar ese proceso.
+                    </p>
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Código de área (opcional, ej: 11 para Buenos Aires)"
+                      value={telnyxSearch}
+                      onChange={(e) => setTelnyxSearch(e.target.value)}
+                    />
+                    <Button type="button" onClick={handleTelnyxSearch} disabled={telnyxLoading}>
+                      {telnyxLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Search className="h-4 w-4" />
+                      )}
+                      <span className="ml-2">Buscar</span>
+                    </Button>
+                  </div>
+
+                  {telnyxError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{telnyxError}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  {telnyxResults.length > 0 && (
+                    <div className="space-y-2">
+                      {telnyxResults.map((n) => (
+                        <div
+                          key={n.phoneNumber}
+                          className="flex items-center justify-between rounded-md border bg-white p-3"
+                        >
+                          <div>
+                            <p className="font-medium">{n.phoneNumber}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {n.region || "Argentina"}
+                              {n.monthlyCost ? ` · US$${n.monthlyCost}/mes` : ""}
+                            </p>
+                          </div>
+                          {telnyxConfirmNumber === n.phoneNumber ? (
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm text-muted-foreground">¿Confirmás la compra?</span>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => handleTelnyxBuy(n.phoneNumber)}
+                                disabled={telnyxBuying}
+                              >
+                                {telnyxBuying ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sí, comprar"}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setTelnyxConfirmNumber(null)}
+                                disabled={telnyxBuying}
+                              >
+                                Cancelar
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setTelnyxConfirmNumber(n.phoneNumber)}
+                            >
+                              Comprar
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {telnyxSearched && telnyxResults.length === 0 && !telnyxError && (
+                    <p className="text-sm text-muted-foreground">No se encontraron números disponibles.</p>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Configuración de WhatsApp</CardTitle>
