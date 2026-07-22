@@ -8,6 +8,7 @@
 import type { ChatbotData, ChatbotDataTurno } from "./appointment-flow-state"
 import { getTimeBasedGreeting } from "./utils/date-utils"
 import { getFirstName, formatName } from "./utils/name-utils"
+import { htmlToWhatsAppText } from "./utils/html-to-whatsapp"
 
 // ============================================================================
 // HELPERS DE FORMATO
@@ -62,9 +63,24 @@ function formatFullDate(fechaISO: string): string {
 function formatTime(hora: string): string {
   // Si ya viene formateada (15:10), devolverla
   if (hora.length === 5) return hora
-  
+
   // Si viene completa (15:10:00), tomar solo HH:MM
   return hora.substring(0, 5)
+}
+
+/**
+ * Arma el bloque de "Indicaciones de Obra Social" a partir de
+ * chatbotData.paciente.indicaciones_deudor (HTML básico), convertido a
+ * formato WhatsApp. Devuelve "" si no hay indicaciones cargadas.
+ */
+function buildIndicacionesDeudorBlock(chatbotData: ChatbotData): string {
+  const indicaciones = chatbotData.paciente?.indicaciones_deudor
+  if (!indicaciones) return ""
+
+  const texto = htmlToWhatsAppText(indicaciones)
+  if (!texto) return ""
+
+  return `\n\n*Indicaciones de Obra Social:*\n${texto}`
 }
 
 // ============================================================================
@@ -86,18 +102,18 @@ export function buildConfirmationMessage(
   
   if (!turno) {
     // Fallback si no hay turno
-    return `${nombre}, tu confirmación de asistencia fue recibida correctamente. ¡Te esperamos!`
+    return `${nombre}, tu confirmación de asistencia fue recibida correctamente. ¡Te esperamos!${buildIndicacionesDeudorBlock(chatbotData)}`
   }
-  
+
   const fechaCompleta = formatFullDate(turno.fecha)
   const hora = formatTime(turno.hora)
   const profesional = formatProfessionalName(turno)
   const sede = turno.sede
   const direccion = turno.direccion
-  
+
   return `${nombre}, tu confirmación de asistencia fue recibida correctamente. Te esperamos el ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede} (${direccion}).
 
-Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}`
+Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}${buildIndicacionesDeudorBlock(chatbotData)}`
 }
 
 /**
@@ -385,7 +401,7 @@ export function buildKeepAppointmentMessage(
     : "Tu turno se mantiene vigente."
 
   if (!turno) {
-    return `Perfecto, ${nombre}. ${intro} ¡Te esperamos!`
+    return `Perfecto, ${nombre}. ${intro} ¡Te esperamos!${buildIndicacionesDeudorBlock(chatbotData)}`
   }
 
   const fechaCompleta = formatFullDate(turno.fecha)
@@ -398,7 +414,7 @@ export function buildKeepAppointmentMessage(
 
 Te esperamos el ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede} (${direccion}).
 
-Si necesitás algo más, no dudes en escribirme.`
+Si necesitás algo más, no dudes en escribirme.${buildIndicacionesDeudorBlock(chatbotData)}`
 }
 
 /**

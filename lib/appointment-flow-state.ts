@@ -23,6 +23,8 @@ export interface ChatbotDataPaciente {
   mail?: string
   obra_social_id?: string
   obra_social_nombre?: string
+  /** Instrucciones de la obra social/deudor (qué traer, coseguros, etc.), en HTML básico */
+  indicaciones_deudor?: string
 }
 
 export interface ChatbotDataTurno {
