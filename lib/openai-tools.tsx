@@ -1,5 +1,6 @@
 import OpenAI from "openai"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
+import { resolveProxyUrl } from "@/lib/proxy-url-resolver"
 import { getWhatsAppConfigByPhoneId, updateThreadId } from "@/lib/db"
 import { safelyAddMessageToThread } from "./thread-manager"
 import {
@@ -740,8 +741,10 @@ async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string
 // Función para obtener obras sociales
 export async function obtenerObrasSociales(clienteId: string): Promise<string> {
   try {
-    const baseUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
-    if (!baseUrl) {
+    let baseUrl: string
+    try {
+      baseUrl = await resolveProxyUrl(clienteId)
+    } catch {
       return "Error: URL de API no configurada"
     }
 
@@ -772,8 +775,10 @@ export async function obtenerObrasSociales(clienteId: string): Promise<string> {
 // Función para reservar turno
 export async function reservarTurno(clienteId: string, turnoId: string, pacienteDatos: any): Promise<string> {
   try {
-    const baseUrl = process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL
-    if (!baseUrl) {
+    let baseUrl: string
+    try {
+      baseUrl = await resolveProxyUrl(clienteId)
+    } catch {
       return JSON.stringify({
         exito: false,
         error: "URL de API no configurada",

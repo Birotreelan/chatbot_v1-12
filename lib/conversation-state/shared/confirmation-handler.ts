@@ -154,20 +154,43 @@ export async function executeReservation(
     })
 
     if (result.exito) {
-      logger.info('Reserva exitosa', { agendaId: turno.id })
+      // Nuevo (16/7/2026): set_turno puede devolver "confirmacion_humana"
+      // (true/false) indicando si el turno quedó pendiente de aprobación de
+      // la clínica o se agendó directo. Default true (comportamiento de
+      // siempre) si el proxy de esta clínica todavía no manda el campo —
+      // ver nota extensa en fetchProxyApi (lib/api-tools/api-functions.ts)
+      // sobre por qué antes este campo nunca llegaba hasta acá.
+      const confirmacionHumana = (result.datos as { confirmacion_humana?: boolean } | undefined)?.confirmacion_humana ?? true
+
+      logger.info('Reserva exitosa', { agendaId: turno.id, confirmacionHumana })
+
+      const message = confirmacionHumana
+        ? `¡Tu solicitud de turno fue enviada exitosamente!
+
+Importante: Esta solicitud debe ser aprobada por la clínica para que el turno te sea otorgado. Te notificaremos cuando ello ocurra.`
+        : `¡Tu turno fue reservado y confirmado con éxito!
+
+No necesita aprobación adicional — te esperamos en la fecha y hora seleccionadas.`
 
       return {
         success: true,
-        message: `¡Tu solicitud de turno fue enviada exitosamente!
-
-Importante: Esta solicitud debe ser aprobada por la clínica para que el turno te sea otorgado. Te notificaremos cuando ello ocurra.`,
+        message,
       }
     } else {
       logger.error('Error en reserva', new Error(result.error?.mensaje || 'Unknown error'))
 
+      // Nuevo (17/7/2026): "API_ERROR" son mensajes de negocio de la propia
+      // clínica (ej: límite máximo de turnos activos alcanzado) — se
+      // muestran tal cual al paciente. El resto de los códigos (errores de
+      // red, formato, cliente inválido, etc.) son técnicos y se ocultan
+      // detrás del mensaje genérico de siempre.
+      const esErrorDeNegocio = result.error?.codigo === 'API_ERROR' && !!result.error?.mensaje
+
       return {
         success: false,
-        message: 'No se pudo completar la reserva en este momento. Por favor, intenta nuevamente o comunicate directamente con la clinica.',
+        message: esErrorDeNegocio
+          ? result.error!.mensaje
+          : 'No se pudo completar la reserva en este momento. Por favor, intenta nuevamente o comunicate directamente con la clinica.',
         error: result.error?.mensaje || 'Error desconocido',
       }
     }

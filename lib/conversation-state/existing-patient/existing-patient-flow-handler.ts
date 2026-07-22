@@ -113,7 +113,7 @@ export async function handleSedeSelection(
     return { handled: false }
   }
 
-  const clinicAPI = new ClinicAPI(clientId)
+  const clinicAPI = await ClinicAPI.create(clientId)
 
   try {
     // Obtener sedes disponibles
@@ -282,7 +282,7 @@ export async function handleConfirmation(
   }
 
   try {
-    const clinicAPI = new ClinicAPI(clientId)
+    const clinicAPI = await ClinicAPI.create(clientId)
 
     // Reservar turno
     const reservaResponse = await clinicAPI.reservarTurno(
@@ -323,7 +323,7 @@ export async function handleConfirmation(
   */
 
   try {
-    const clinicAPI = new ClinicAPI(clientId)
+    const clinicAPI = await ClinicAPI.create(clientId)
 
     // Reservar turno
     const reservaResponse = await clinicAPI.reservarTurno({

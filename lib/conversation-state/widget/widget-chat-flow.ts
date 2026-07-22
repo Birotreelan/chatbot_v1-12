@@ -98,7 +98,7 @@ export async function processWidgetMessage(
     }
 
     logger.info('DNI recibido en widget, validando paciente', {})
-    const clinicAPI = new ClinicAPI(clientId)
+    const clinicAPI = await ClinicAPI.create(clientId)
     const patientResponse = await clinicAPI.paciente_dni(dni)
 
     if (!patientResponse.exito || !patientResponse.datos) {

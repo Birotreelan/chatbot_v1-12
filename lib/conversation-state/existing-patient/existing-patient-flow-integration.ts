@@ -8,7 +8,7 @@ import { ClinicAPI } from '../../clinic-api'
 import { createConversationLogger } from '../logger'
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
-import { validarObraSocial } from '@/lib/api-tools/api-functions' // 🆕 IMPORT PARA VALIDAR OBRA SOCIAL
+import { validarObraSocial, buscarPaciente } from '@/lib/api-tools/api-functions' // 🆕 IMPORT PARA VALIDAR OBRA SOCIAL / LIMITE DE TURNOS
 import { getFirstName } from '@/lib/utils/name-utils'
 import { extractEntities } from '../entity-extractor'
 import { getHistory } from '../conversation-history'
@@ -225,7 +225,7 @@ async function enrichPatientDataFromAPI(
   logger: ReturnType<typeof createConversationLogger>
 ): Promise<void> {
   try {
-    const clinicAPI = new ClinicAPI(clientId)
+    const clinicAPI = await ClinicAPI.create(clientId)
     const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
     
     if (pacienteResponse.exito && pacienteResponse.datos) {
@@ -405,6 +405,40 @@ Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
     } catch (error) {
       logger.warn('Error validating obra social for existing patient', error as Error)
       // Continuar aunque falle la validación
+    }
+  }
+
+  // 🆕 VALIDAR LÍMITE MÁXIMO DE TURNOS ACTIVOS (17/7/2026)
+  // Llamada extra a get_paciente (además de la que ya hace ClinicAPI más abajo
+  // para buscar al paciente) para conocer "limite_turnos" ANTES de avanzar a
+  // sede/turno, y así evitar que el paciente arme toda la reserva y recién
+  // se entere del rechazo al final (en set_turno). Si la clínica no configuró
+  // límite, "limite_turnos" viene ausente o con maximo: null y no se aplica
+  // ninguna restricción (comportamiento actual sin cambios).
+  if (finalPatientDNI) {
+    try {
+      const limiteCheck = await buscarPaciente(clientId, { dni: finalPatientDNI })
+      const limiteTurnos = limiteCheck.limiteTurnos
+
+      if (limiteTurnos && limiteTurnos.maximo !== null && limiteTurnos.alcanzado) {
+        logger.warn('Paciente alcanzó el límite máximo de turnos activos', {
+          dni: finalPatientDNI,
+          maximo: limiteTurnos.maximo,
+          activos: limiteTurnos.activos,
+        })
+
+        const firstName = getFirstName(finalPatientFirstName || patientName)
+        const saludo = firstName ? `Hola ${firstName}. ` : ''
+        return {
+          handled: true,
+          message: `${saludo}Ya tenés ${limiteTurnos.activos} turno(s) activo(s), el máximo permitido es ${limiteTurnos.maximo}. Para agendar uno nuevo, primero cancelá o completá alguno de tus turnos pendientes.`,
+          action: 'limite_turnos_alcanzado',
+        }
+      }
+    } catch (error) {
+      logger.warn('Error validando límite de turnos, se continúa sin restricción', error as Error)
+      // No bloqueamos el flujo si la consulta falla — mismo criterio que la
+      // validación de obra social de arriba.
     }
   }
 
@@ -1806,7 +1840,7 @@ async function handleConfirmationPhase(
         apellidoMissing: !apellidoParaReserva
       })
       try {
-        const clinicAPI = new ClinicAPI(clientId)
+        const clinicAPI = await ClinicAPI.create(clientId)
         const pacienteResponse = await clinicAPI.paciente_telefono(phoneNumber)
         
         if (pacienteResponse.exito && pacienteResponse.datos) {

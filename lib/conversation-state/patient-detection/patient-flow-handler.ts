@@ -138,7 +138,7 @@ export async function startPatientDetectionFlow(
     }
 
     // Crear instancia de ClinicAPI con el clienteId REAL (no el configId)
-    const clinicAPI = new ClinicAPI(clienteId)
+    const clinicAPI = await ClinicAPI.create(clienteId)
 
     // Buscar paciente por teléfono
     const patientResponse = await clinicAPI.paciente_telefono(phoneNumber)
@@ -415,7 +415,7 @@ export async function processDNIForDisambiguation(
     })
 
     // Validar identidad llamando a get_paciente
-    const clinicAPI = new ClinicAPI(clienteId)
+    const clinicAPI = await ClinicAPI.create(clienteId)
     const patientResponse = await clinicAPI.paciente_dni(foundPatientDNI)
 
     if (!patientResponse.exito || !patientResponse.datos) {

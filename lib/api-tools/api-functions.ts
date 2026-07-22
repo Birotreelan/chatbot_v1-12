@@ -2,14 +2,12 @@ import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse, SedeResponse }
 import { getClinicApiConfig } from "./types"
 import { getRedisClient } from "../redis"
 import { TIMEOUTS, fetchWithTimeout, fetchWithRetry } from "../config/timeouts"
+import { resolveProxyUrl } from "../proxy-url-resolver"
 
-// Obtener la URL del proxy desde las variables de entorno
-function getProxyUrl(): string {
-  const proxyUrl = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL
-  if (!proxyUrl) {
-    throw new Error("PROXY_API_URL o CLINIC_PROXY_URL debe estar configurada en las variables de entorno")
-  }
-  return proxyUrl
+// Obtener la URL del proxy: por clínica (config.proxy) con fallback a las
+// variables de entorno globales — ver lib/proxy-url-resolver.ts
+async function getProxyUrl(clienteId: string): Promise<string> {
+  return resolveProxyUrl(clienteId)
 }
 
 // Prefijo para las claves de caché
@@ -95,7 +93,7 @@ async function fetchProxyApi<T>(
   }
 
   try {
-    const proxyUrl = getProxyUrl()
+    const proxyUrl = await getProxyUrl(clienteId)
 
     // Preparar el cuerpo de la solicitud
     const requestBody = {
@@ -187,15 +185,21 @@ async function fetchProxyApi<T>(
         }
       }
 
+      // Algunas acciones (ej: set_turno) devuelven el contenido plano, sin
+      // envolverlo en un campo "data" — sólo { success, mensaje, turno, ... }
+      // directo. Si no hay data.data, usamos la respuesta completa como
+      // fallback para no perder esos campos (antes quedaba "datos: undefined").
+      const datosExtraidos = data.data !== undefined ? data.data : data
+
       if (shouldUseCache && redis) {
-        const result = { exito: true, datos: data.data }
+        const result = { exito: true, datos: datosExtraidos }
         await redis.setex(cacheKey, CACHE_TTL, compressForCache(result))
         console.log(`[CACHE] 💾 Guardado ${action} (comprimido)`)
       }
 
       return {
         exito: true,
-        datos: data.data,
+        datos: datosExtraidos,
       }
     }
 
@@ -246,11 +250,15 @@ export async function buscarPaciente(
     const pacienteData = resultado.datos.paciente || resultado.datos
     const turnosProximos = resultado.datos.turnos_proximos || []
     const esPrimeraVez = resultado.datos.es_primera_vez ?? null
+    // Límite de turnos activos (17/7/2026) — si la clínica no lo configuró,
+    // resultado.datos.limite_turnos viene ausente/null y no se aplica límite.
+    const limiteTurnos = resultado.datos.limite_turnos ?? null
     return {
       exito: true,
       datos: pacienteData,
       turnosProximos: turnosProximos,
       esPrimeraVez: esPrimeraVez,
+      limiteTurnos: limiteTurnos,
     }
   }
 
@@ -509,7 +517,7 @@ export async function obtenerDatosSede(clienteId: string, sedeId: string): Promi
   }
 
   try {
-    const config = getClinicApiConfig()
+    const config = await getClinicApiConfig(clienteId)
 
     if (!config.baseUrl) {
       console.error("[API] ❌ URL de API no configurada")
@@ -583,7 +591,7 @@ export async function obtenerTodasLasSedes(clienteId: string): Promise<SedesList
   }
 
   try {
-    const config = getClinicApiConfig()
+    const config = await getClinicApiConfig(clienteId)
 
     if (!config.baseUrl) {
       console.error("[API] ❌ URL de API no configurada")
@@ -649,7 +657,7 @@ export async function obtenerTurnosDisponibles(
   try {
     console.log(`[API] 🕒 Obteniendo turnos disponibles para especialidad: ${especialidadId}`)
 
-    const config = getClinicApiConfig()
+    const config = await getClinicApiConfig(clienteId)
 
     const requestBody = {
       Cliente_Id: clienteId,
@@ -700,7 +708,7 @@ export async function confirmarTurno(
   const MAX_RETRIES = 4
   const RETRY_DELAYS = [0, 5000, 10000, 15000] // Espera progresiva entre reintentos
   
-  const config = getClinicApiConfig()
+  const config = await getClinicApiConfig(clienteId)
   const requestBody = {
     Cliente_Id: clienteId,
     Action: "confirmar_turno",
@@ -838,7 +846,7 @@ export async function cancelarTurno(
   const MAX_RETRIES = 4
   const RETRY_DELAYS = [0, 5000, 10000, 15000] // Espera progresiva entre reintentos
   
-  const config = getClinicApiConfig()
+  const config = await getClinicApiConfig(clienteId)
   const requestBody = {
     Cliente_Id: clienteId,
     Action: "cancelar_turno",

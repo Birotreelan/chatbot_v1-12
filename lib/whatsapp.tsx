@@ -10,6 +10,7 @@ import { saveConversationMessage, isConversationPaused, type ConversationMessage
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData } from "./appointment-stats"
+import { cancelPendingReminders } from "@/lib/reminders/reminder-queue"
 import {
   getActiveSessionByPhone,
   addPendingMessageToSession,
@@ -2216,6 +2217,14 @@ export async function handleMessage(value: any) {
       await checkAndTrackUserInitiated(config.cliente_id, userPhoneNumber)
     }
 
+    // 🆕 Recordatorios de reintento (17/7/2026): CUALQUIER respuesta del paciente
+    // cancela los recordatorios de reintento (24h / segundo / último) que
+    // todavía estén pendientes en QStash — ya no tiene sentido insistir si
+    // el paciente ya contestó. Best-effort: nunca debe bloquear el mensaje.
+    cancelPendingReminders(config.id, userPhoneNumber).catch((error) => {
+      console.warn("[WHATSAPP] Error cancelando recordatorios pendientes (no crítico):", error)
+    })
+
     // ============================================================================
     // INTERCEPTOR GLOBAL DE BOTONES DE MENÚ PRINCIPAL
     // Si el usuario presiona un botón del menú principal ("Solicitar turno", "Turno familiar",
@@ -4331,7 +4340,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
           const { ClinicAPI } = await import('./clinic-api')
-          const clinicAPI = new ClinicAPI(config.cliente_id)
+          const clinicAPI = await ClinicAPI.create(config.cliente_id)
           const patientResponse = await clinicAPI.paciente_dni(dniOnly)
 
           if (!patientResponse.exito || !patientResponse.datos) {

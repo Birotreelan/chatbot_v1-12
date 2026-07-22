@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server"
-import { getWhatsAppConfigByPhoneIdFresh, getAllWhatsAppConfigs, getThreadForUser } from "@/lib/db"
-import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp-api"
-import { safelyAddMessageToThread } from "@/lib/thread-manager"
+import { getWhatsAppConfigByPhoneIdFresh, getAllWhatsAppConfigs } from "@/lib/db"
+import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "@/lib/utils"
-import { trackAppointmentEvent, trackTemplateSent, getTemplateSentTime, markPendingReschedule } from "@/lib/appointment-stats"
-import { extractAndFormatDate } from "@/lib/utils/date-utils"
-import { saveAppointmentContext } from "@/lib/appointment-flow-state"
+import { trackAppointmentEvent, getTemplateSentTime, markPendingReschedule } from "@/lib/appointment-stats"
+import { sendReminderTemplate } from "@/lib/reminders/send-reminder-template"
+import { calcularRecordatorios, type RecordatoriosConfig } from "@/lib/reminders/schedule-calculator"
+import { assignSegundoRecordatorioSlot, saveReminderQueue, type QueuedReminder } from "@/lib/reminders/reminder-queue"
+import { scheduleMessage } from "@/lib/queue"
 
 export async function POST(request: Request) {
   try {
@@ -208,161 +209,10 @@ async function handleButtonResponse(data: any) {
   }
 }
 
-// Función para extraer información del turno desde el template
-function extractAppointmentInfo(templateBody: any): any {
-  try {
-    const appointmentInfo = {
-      fecha: null,
-      hora: null,
-      profesional: null,
-      especialidad: null,
-      lugar: null,
-    }
-
-    // Si el Body es string, intentar parsearlo
-    const templateData = typeof templateBody === "string" ? JSON.parse(templateBody) : templateBody
-
-    // Buscar en los componentes del template
-    if (templateData.template && templateData.template.components) {
-      for (const component of templateData.template.components) {
-        if (component.type === "body" && component.parameters) {
-          // Los parámetros venguen en este orden:
-          // [0] = Nombre de la clínica
-          // [1] = Fecha
-          // [2] = Hora
-          // [3] = Profesional
-          // [4] = Lugar/Dirección
-          const params = component.parameters
-
-          if (params.length >= 2 && params[1].text) {
-            // Segundo parámetro es la fecha
-            appointmentInfo.fecha = params[1].text
-          }
-
-          if (params.length >= 3 && params[2].text) {
-            // Tercer parámetro es la hora
-            appointmentInfo.hora = params[2].text
-          }
-
-          if (params.length >= 4 && params[3].text) {
-            // Cuarto parámetro es el profesional
-            appointmentInfo.profesional = params[3].text
-          }
-
-          if (params.length >= 5 && params[4].text) {
-            // Quinto parámetro es el lugar
-            appointmentInfo.lugar = params[4].text
-          }
-        }
-      }
-    }
-
-    // También buscar en el texto plano si no encontramos en los parámetros
-    if (!appointmentInfo.fecha || !appointmentInfo.hora) {
-      const bodyText = JSON.stringify(templateData)
-
-      // Buscar patrones de fecha (DD/MM/YYYY)
-      const fechaMatch = bodyText.match(/(\d{1,2}\/\d{1,2}\/\d{4})/g)
-      if (fechaMatch && fechaMatch.length > 0) {
-        appointmentInfo.fecha = fechaMatch[0]
-      }
-
-      // Buscar patrones de hora (HH:MM)
-      const horaMatch = bodyText.match(/(\d{1,2}:\d{2})/g)
-      if (horaMatch && horaMatch.length > 0) {
-        appointmentInfo.hora = horaMatch[0]
-      }
-
-      // Buscar nombres de profesionales (palabras que empiecen con mayúscula)
-      const profesionalMatch = bodyText.match(/([A-Z][a-z]+,?\s+[A-Z][a-z]+)/g)
-      if (profesionalMatch && profesionalMatch.length > 0) {
-        appointmentInfo.profesional = profesionalMatch[0]
-      }
-    }
-
-    console.log("[PROXYLISTENER] Información del turno extraída:", appointmentInfo)
-    return appointmentInfo
-  } catch (error) {
-    console.error("[PROXYLISTENER] Error al extraer información del turno:", error)
-    return null
-  }
-}
-
-// Función para extraer contenido legible de la plantilla
-function extractTemplateContent(templateBody: any, chatbotData?: any): string {
-  try {
-    const templateData = typeof templateBody === "string" ? JSON.parse(templateBody) : templateBody
-
-    if (!templateData.template) {
-      return "Plantilla enviada"
-    }
-
-    const templateName = templateData.template.name || "plantilla_desconocida"
-    let content = `Plantilla: ${templateName}\n\n`
-
-    // Parse chatbot data if available
-    let chatbotDataParsed = null
-    if (chatbotData) {
-      try {
-        chatbotDataParsed = typeof chatbotData === "string" ? JSON.parse(chatbotData) : chatbotData
-      } catch (e) {
-        console.error("[PROXYLISTENER] Error parsing chatbot data:", e)
-      }
-    }
-
-    // Extract parameters from body component
-    if (templateData.template.components) {
-      for (const component of templateData.template.components) {
-        if (component.type === "body" && component.parameters) {
-          const params = component.parameters.filter((p: any) => p.type === "text" && p.text).map((p: any) => p.text)
-
-          if (params.length > 0) {
-            // Check if we have chatbot data with multiple appointments
-            if (chatbotDataParsed && chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
-              const turnos = chatbotDataParsed.turnos
-              const clinica = params[0] || chatbotDataParsed.clinica || "la clínica"
-              const fecha = turnos[0]?.fecha || params[1] || "próximamente"
-
-              if (turnos.length > 1) {
-                // Multiple appointments format
-                content += `Hola! Nos comunicamos desde ${clinica} para recordarle que tiene los siguientes turnos el día ${fecha}:\n\n`
-
-                turnos.forEach((turno: any) => {
-                  content += `  ●   ${turno.hora || "hora a confirmar"} horas con ${turno.profesional || "el profesional"}  en ${turno.direccion || turno.sede || "nuestra sede"}.\n`
-                })
-
-                content += `\nPor favor, confirme o cancele su asistencia.\nMuchas gracias.`
-              } else {
-                // Single appointment format
-                const turno = turnos[0]
-                content += `Hola! Nos comunicamos desde ${clinica} para recordarle que tiene un turno el día ${turno.fecha || fecha}, a las ${turno.hora || "a confirmar"} horas con ${turno.profesional || "el profesional"} en ${turno.direccion || turno.sede || "nuestra sede"}.\n\n`
-                content += `Por favor, confirme o cancele su asistencia.`
-              }
-            } else if (templateName.includes("confirmacion") || templateName.includes("recordatorio")) {
-              // Fallback to parameter-based extraction for single appointment
-              const [clinica, fecha, hora, profesional, lugar] = params
-              content += `Hola! Nos comunicamos desde ${clinica || "la clínica"} para recordarle que tiene un turno el día ${fecha || "próximamente"}, a las ${hora || "a confirmar"} horas con ${profesional || "el profesional"} en ${lugar || "nuestra sede"}.\n\n`
-              content += `Por favor, confirme o cancele su asistencia.`
-            } else {
-              // Generic template
-              content += params.join(" | ")
-            }
-          }
-        }
-      }
-    }
-
-    return content
-  } catch (error) {
-    console.error("[PROXYLISTENER] Error extracting template content:", error)
-    return "Plantilla enviada (contenido no disponible)"
-  }
-}
-
 // Función para manejar envío de templates
 async function handleTemplateSend(data: any) {
   try {
-    const { Cliente_Id, Phone_Number_Id, Phone, Type, Body, Chatbot_Data, Sede_Id } = data
+    const { Cliente_Id, Phone_Number_Id, Phone, Type, Body, Chatbot_Data, Sede_Id, Recordatorios_Config } = data
 
     console.log("[PROXYLISTENER] Parámetros extraídos:")
     console.log("[PROXYLISTENER] - Cliente_Id:", Cliente_Id)
@@ -492,285 +342,34 @@ async function handleTemplateSend(data: any) {
       })
       console.log("[PROXYLISTENER] ✅ Mensaje de texto guardado en Redis")
     } else {
-      whatsappResponse = await sendWhatsAppTemplate(
-        config.phoneNumberId,
-        config.accessToken,
+      // Envío + tracking + notificación a OpenAI: lógica compartida con los
+      // reintentos de recordatorio (ver lib/reminders/send-reminder-template.ts)
+      whatsappResponse = await sendReminderTemplate({
+        config,
         destinationPhone,
+        cleanPhoneNumber,
         Body,
-        config.wabaId,
-      )
-
-      const templateContent = extractTemplateContent(Body, Chatbot_Data)
-      await saveConversationMessage({
-        id: nanoid(),
-        role: "assistant",
-        content: templateContent,
-        timestamp: new Date().toISOString(),
-        phoneNumber: cleanPhoneNumber,
-        configId: config.id,
-        messageType: "template",
+        Chatbot_Data,
+        Sede_Id,
       })
-      console.log("[PROXYLISTENER] ✅ Mensaje de plantilla guardado en Redis")
 
-      const appointmentInfo = extractAppointmentInfo(Body)
-      console.log(`[PROXYLISTENER] 📊 config.id: ${config.id}`)
-      console.log(`[PROXYLISTENER] 📊 config.cliente_id: ${config.cliente_id || "NO DISPONIBLE"}`)
-
-      if (config.cliente_id) {
-        console.log(`[PROXYLISTENER] 📊 Trackeando template con cliente_id: ${config.cliente_id}`)
-        await trackTemplateSent(config.cliente_id, cleanPhoneNumber, appointmentInfo)
-        console.log(`[PROXYLISTENER] ✅ Template tracked para cliente_id: ${config.cliente_id}`)
-      } else {
-        console.warn(`[PROXYLISTENER] ⚠️ No hay cliente_id para config ${config.id}, no se puede trackear template`)
-      }
-
-      // Notificar a OpenAI sobre la plantilla enviada
-      try {
-        console.log("[PROXYLISTENER] Notificando a OpenAI sobre plantilla enviada...")
-
-        const threadResult = await getThreadForUser(cleanPhoneNumber, config.id)
-
-        if (!threadResult || !threadResult.threadId) {
-          console.error("[PROXYLISTENER] ❌ No se pudo obtener threadId válido")
-          console.error("[PROXYLISTENER] threadResult:", threadResult)
-          throw new Error("ThreadId no disponible")
-        }
-
-        console.log("[PROXYLISTENER] Thread obtenido:", threadResult.threadId)
-        console.log("[PROXYLISTENER] Tipo de threadId:", typeof threadResult.threadId)
-
-        // Extraer información del turno desde el template
-        // (appointmentInfo ya fue extraído arriba)
-
-        // Analizar plantilla
-        const templateAnalysis = {
-          name: "plantilla_desconocida",
-          content: "Plantilla enviada",
-          appointmentInfo: appointmentInfo,
-        }
-
+      // 🆕 Recordatorios_Config (17/7/2026): programar reintentos (24h / segundo /
+      // último) para este mismo turno, además del envío síncrono de arriba.
+      // Viene como string JSON, hermano de Chatbot_Data (no anidado adentro).
+      if (Recordatorios_Config) {
         try {
-          const templateData = typeof Body === "string" ? JSON.parse(Body) : Body
-          console.log("[PROXYLISTENER] Datos de plantilla parseados:", JSON.stringify(templateData, null, 2))
-
-          if (templateData.template && templateData.template.name) {
-            templateAnalysis.name = templateData.template.name
-          } else if (templateData.name) {
-            templateAnalysis.name = templateData.name
-          }
-
-          if (templateData.template && templateData.template.components) {
-            const components = templateData.template.components
-            let textContent = ""
-
-            for (const component of components) {
-              if (component.type === "body" && component.parameters) {
-                textContent = `Plantilla ${templateAnalysis.name} con parámetros enviada`
-                break
-              }
-            }
-
-            if (textContent) {
-              templateAnalysis.content = textContent
-            }
-          }
-
-          console.log("[PROXYLISTENER] Análisis de plantilla completado:", templateAnalysis)
+          await scheduleFollowUpReminders({
+            Recordatorios_Config,
+            Body,
+            Chatbot_Data,
+            config,
+            destinationPhone,
+            cleanPhoneNumber,
+            Sede_Id,
+          })
         } catch (e) {
-          console.log("[PROXYLISTENER] Error al parsear template data:", e)
+          console.error("[PROXYLISTENER] ⚠️ Error programando recordatorios de reintento (continuando):", e)
         }
-
-        let chatbotDataParsed = null
-        if (Chatbot_Data) {
-          try {
-            chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
-            console.log("[PROXYLISTENER] 📋 ===== CHATBOT_DATA PARSEADO =====")
-            console.log("[PROXYLISTENER] Chatbot_Data completo:", JSON.stringify(chatbotDataParsed, null, 2))
-
-            if (chatbotDataParsed.paciente) {
-              console.log("[PROXYLISTENER] 👤 Datos del paciente:")
-              console.log("[PROXYLISTENER]   - Nombres:", chatbotDataParsed.paciente.nombres)
-              console.log("[PROXYLISTENER]   - Apellido:", chatbotDataParsed.paciente.apellido)
-              console.log("[PROXYLISTENER]   - DNI:", chatbotDataParsed.paciente.dni)
-              console.log("[PROXYLISTENER]   - Teléfono:", chatbotDataParsed.paciente.telefono)
-              console.log("[PROXYLISTENER]   - Mail:", chatbotDataParsed.paciente.mail || "(VACÍO)")
-              console.log("[PROXYLISTENER]   - Obra Social ID:", chatbotDataParsed.paciente.obra_social_id)
-              console.log("[PROXYLISTENER]   - Obra Social Nombre:", chatbotDataParsed.paciente.obra_social_nombre)
-            }
-
-            if (chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
-              console.log("[PROXYLISTENER] 📅 Turnos encontrados:", chatbotDataParsed.turnos.length)
-              chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
-                console.log(`[PROXYLISTENER] Turno ${index + 1}:`)
-                console.log(`[PROXYLISTENER]   - Fecha: ${turno.fecha}`)
-                console.log(`[PROXYLISTENER]   - Hora: ${turno.hora}`)
-                console.log(`[PROXYLISTENER]   - Profesional: ${turno.profesional}`)
-                console.log(`[PROXYLISTENER]   - Profesional ID: ${turno.profesional_id}`)
-                console.log(`[PROXYLISTENER]   - Sede: ${turno.sede}`)
-                console.log(`[PROXYLISTENER]   - Dirección: ${turno.direccion}`)
-                console.log(`[PROXYLISTENER]   - Agenda ID: ${turno.agenda_id}`)
-              })
-            }
-
-            console.log("[PROXYLISTENER] =====================================")
-          } catch (e) {
-            console.error("[PROXYLISTENER] ❌ Error al parsear Chatbot_Data:", e)
-          }
-        }
-
-        // Guardar el Chatbot_Data en Redis para respuestas directas (sin OpenAI)
-        if (chatbotDataParsed && config && cleanPhoneNumber) {
-          try {
-            // Enriquecer el contexto con appointment_id (del primer turno) y proxyUrl
-            // para que whatsapp.tsx pueda llamar al proxy al confirmar por texto libre
-            const firstTurno = Array.isArray(chatbotDataParsed.turnos) && chatbotDataParsed.turnos[0]
-            if (firstTurno && firstTurno.agenda_id && !chatbotDataParsed.appointment_id) {
-              chatbotDataParsed.appointment_id = firstTurno.agenda_id
-            }
-            if (!chatbotDataParsed.proxyUrl) {
-              chatbotDataParsed.proxyUrl = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL || null
-            }
-            await saveAppointmentContext(cleanPhoneNumber, config.id, chatbotDataParsed)
-            console.log("[PROXYLISTENER] ✅ Contexto de turno guardado en Redis para respuestas directas", {
-              appointment_id: chatbotDataParsed.appointment_id,
-              tieneProxyUrl: !!chatbotDataParsed.proxyUrl,
-            })
-          } catch (e) {
-            console.error("[PROXYLISTENER] ⚠️ Error guardando contexto en Redis (continuando):", e)
-          }
-        }
-
-        let notificationMessage = `[SISTEMA_PLANTILLA]
-Plantilla_Nombre: ${templateAnalysis.name}
-Plantilla_Contenido: ${templateAnalysis.content}`
-
-        // Agregar información del turno si está disponible
-        if (appointmentInfo && (appointmentInfo.fecha || appointmentInfo.hora || appointmentInfo.profesional)) {
-          // Format the date with day of week if available
-          const fechaFormateada = appointmentInfo.fecha
-            ? extractAndFormatDate(appointmentInfo.fecha)
-            : "No especificada"
-
-          notificationMessage += `
-Turno_Fecha: ${fechaFormateada}
-Turno_Hora: ${appointmentInfo.hora || "No especificada"}
-Turno_Profesional: ${appointmentInfo.profesional || "No especificado"}
-Turno_Lugar: ${appointmentInfo.lugar || "No especificado"}`
-        }
-
-        if (chatbotDataParsed) {
-          notificationMessage += `
-
-[CONTEXTO_COMPLETO_TURNO]`
-
-          // Información del paciente
-          if (chatbotDataParsed.paciente) {
-            const paciente = chatbotDataParsed.paciente
-
-            if (!paciente.mail || paciente.mail.trim() === "") {
-              console.warn("[PROXYLISTENER] ⚠️ ADVERTENCIA: El campo 'mail' está vacío en Chatbot_Data")
-            }
-
-            notificationMessage += `
-Paciente_Nombres: ${paciente.nombres || ""}
-Paciente_Apellido: ${paciente.apellido || ""}
-Paciente_DNI: ${paciente.dni || ""}
-Paciente_Telefono: ${paciente.telefono || ""}
-Paciente_Mail: ${paciente.mail || ""}
-Paciente_Obra_Social_ID: ${paciente.obra_social_id || ""}
-Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`
-
-            console.log("[PROXYLISTENER] 📝 Bloque CONTEXTO_COMPLETO_TURNO generado:")
-            console.log(`[PROXYLISTENER]   Paciente_Nombres: ${paciente.nombres || ""}`)
-            console.log(`[PROXYLISTENER]   Paciente_Apellido: ${paciente.apellido || ""}`)
-            console.log(`[PROXYLISTENER]   Paciente_DNI: ${paciente.dni || ""}`)
-            console.log(`[PROXYLISTENER]   Paciente_Telefono: ${paciente.telefono || ""}`)
-            console.log(`[PROXYLISTENER]   Paciente_Mail: ${paciente.mail || "(VACÍO)"}`)
-            console.log(`[PROXYLISTENER]   Paciente_Obra_Social_ID: ${paciente.obra_social_id || ""}`)
-            console.log(`[PROXYLISTENER]   Paciente_Obra_Social: ${paciente.obra_social_nombre || ""}`)
-          }
-
-          // Información de los turnos
-          if (chatbotDataParsed.turnos && Array.isArray(chatbotDataParsed.turnos)) {
-            notificationMessage += `
-
-Cantidad_Turnos: ${chatbotDataParsed.cantidad_turnos || chatbotDataParsed.turnos.length}`
-
-            chatbotDataParsed.turnos.forEach((turno: any, index: number) => {
-              const fechaFormateada = turno.fecha ? extractAndFormatDate(turno.fecha) : ""
-
-              notificationMessage += `
-
-Turno_${index + 1}:
-  - Fecha: ${fechaFormateada}
-  - Fecha_Formateada: ${turno.fecha_formateada || ""}
-  - Hora: ${turno.hora || ""}
-  - Hora_Formateada: ${turno.hora_formateada || ""}
-  - Profesional: ${turno.profesional || ""}
-  - Profesional_ID: ${turno.profesional_id || ""}
-  - Sede: ${turno.sede || ""}
-  - Dirección: ${turno.direccion || ""}
-  - Agenda_ID: ${turno.agenda_id || ""}`
-            })
-          }
-
-          // Información de la clínica y tipo de mensaje
-          if (chatbotDataParsed.clinica) {
-            notificationMessage += `
-
-Clinica: ${chatbotDataParsed.clinica}`
-          }
-
-          if (chatbotDataParsed.tipo_mensaje) {
-            notificationMessage += `
-Tipo_Mensaje: ${chatbotDataParsed.tipo_mensaje}`
-          }
-
-          if (Sede_Id) {
-            notificationMessage += `
-Sede_ID: ${Sede_Id}`
-            console.log(`[PROXYLISTENER] 📍 Sede_ID agregado al contexto: ${Sede_Id}`)
-          }
-
-          notificationMessage += `
-[/CONTEXTO_COMPLETO_TURNO]`
-        } else {
-          console.warn("[PROXYLISTENER] ⚠️ ADVERTENCIA: No se recibió Chatbot_Data en la solicitud")
-
-          if (Sede_Id) {
-            notificationMessage += `
-Sede_ID: ${Sede_Id}`
-            console.log(`[PROXYLISTENER] 📍 Sede_ID agregado (sin contexto completo): ${Sede_Id}`)
-          }
-        }
-
-        notificationMessage += `
-[/SISTEMA_PLANTILLA]`
-
-        console.log("[PROXYLISTENER] 🔍 Validando threadId antes de agregar mensaje:", threadResult.threadId)
-
-        if (!threadResult.threadId || typeof threadResult.threadId !== "string") {
-          throw new Error(`ThreadId inválido: ${threadResult.threadId} (tipo: ${typeof threadResult.threadId})`)
-        }
-
-        console.log("[v0] 🚀 ===== ENVIANDO MENSAJE A OPENAI =====")
-        console.log("[v0] ThreadID:", threadResult.threadId)
-        console.log("[v0] Mensaje completo que se enviará:")
-        console.log(notificationMessage)
-        console.log("[v0] ==========================================")
-
-        await safelyAddMessageToThread(threadResult.threadId, {
-          role: "user",
-          content: notificationMessage,
-        })
-
-        console.log("[v0] ✅ MENSAJE ENVIADO A OPENAI EXITOSAMENTE")
-        console.log("[PROXYLISTENER] Notificación enviada a OpenAI exitosamente")
-        console.log("[PROXYLISTENER] 📤 Mensaje enviado a OpenAI:")
-        console.log(notificationMessage)
-      } catch (error: any) {
-        console.error("[PROXYLISTENER] Error al notificar a OpenAI:", error)
-        console.error("[PROXYLISTENER] Stack trace:", error.stack)
       }
     }
 
@@ -785,5 +384,92 @@ Sede_ID: ${Sede_Id}`
       },
       { status: 500 },
     )
+  }
+}
+
+// URL base del deploy — mismo valor hardcodeado que ya usa lib/queue.ts (enqueueMessage)
+const REMINDERS_BASE_URL = "https://treelan-bot.vercel.app"
+
+/**
+ * Programa en QStash los recordatorios de reintento (24h / segundo / último)
+ * de un turno, a partir de "Recordatorios_Config" (string JSON, hermano de
+ * Chatbot_Data). No afecta el envío síncrono ya realizado — esto es
+ * exclusivamente para los reintentos futuros.
+ */
+async function scheduleFollowUpReminders(params: {
+  Recordatorios_Config: string
+  Body: any
+  Chatbot_Data?: string | any
+  config: any
+  destinationPhone: string
+  cleanPhoneNumber: string
+  Sede_Id?: string
+}): Promise<void> {
+  const { Recordatorios_Config, Body, Chatbot_Data, config, destinationPhone, cleanPhoneNumber, Sede_Id } = params
+
+  let recordatoriosConfig: RecordatoriosConfig
+  try {
+    recordatoriosConfig =
+      typeof Recordatorios_Config === "string" ? JSON.parse(Recordatorios_Config) : Recordatorios_Config
+  } catch (e) {
+    console.error("[PROXYLISTENER] ❌ Recordatorios_Config no es JSON válido, se omite el encolado:", e)
+    return
+  }
+
+  const chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
+  const firstTurno = Array.isArray(chatbotDataParsed?.turnos) ? chatbotDataParsed.turnos[0] : null
+
+  if (!firstTurno?.fecha || !firstTurno?.hora) {
+    console.warn("[PROXYLISTENER] ⚠️ No hay turno con fecha/hora en Chatbot_Data, se omite el encolado de recordatorios")
+    return
+  }
+
+  const planificados = calcularRecordatorios(firstTurno.fecha, firstTurno.hora, recordatoriosConfig)
+  if (planificados.length === 0) {
+    console.log("[PROXYLISTENER] 📅 No hay recordatorios de reintento para programar (flags en false o ya pasaron)")
+    return
+  }
+
+  const queued: QueuedReminder[] = []
+
+  for (const reminder of planificados) {
+    let sendAtUnix: number
+    if (reminder.kind === "segundo") {
+      sendAtUnix = await assignSegundoRecordatorioSlot(
+        config.id,
+        reminder.ventanaKey,
+        reminder.ventanaInicioUnix,
+        reminder.ventanaFinUnix,
+      )
+    } else {
+      sendAtUnix = reminder.sendAtUnix
+    }
+
+    const { messageId, success } = await scheduleMessage(
+      `${REMINDERS_BASE_URL}/api/reminders/deliver`,
+      {
+        Cliente_Id: config.cliente_id,
+        Phone_Number_Id: config.phoneNumberId,
+        Phone: destinationPhone,
+        Body,
+        Chatbot_Data,
+        Sede_Id,
+        kind: reminder.kind,
+        configId: config.id,
+        agendaId: firstTurno.agenda_id,
+      },
+      sendAtUnix,
+    )
+
+    if (success && messageId) {
+      queued.push({ messageId, kind: reminder.kind, sendAtUnix })
+    } else {
+      console.error(`[PROXYLISTENER] ⚠️ No se pudo programar recordatorio "${reminder.kind}" en QStash`)
+    }
+  }
+
+  if (queued.length > 0) {
+    await saveReminderQueue(config.id, cleanPhoneNumber, queued)
+    console.log(`[PROXYLISTENER] ✅ ${queued.length} recordatorio(s) de reintento programado(s) para ${cleanPhoneNumber}`)
   }
 }

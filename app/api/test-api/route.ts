@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
 import * as apiFunctions from "@/lib/api-tools/api-functions"
+import { resolveProxyUrl } from "@/lib/proxy-url-resolver"
 
 // Actualizar la ruta de API de prueba para utilizar los nuevos endpoints
 export async function POST(req: NextRequest) {
@@ -30,12 +31,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Obtener la URL del proxy desde las variables de entorno
-    const proxy = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL
-
-    if (!proxy) {
+    // Proxy dinámico por clínica (config.proxy), con fallback a las env vars
+    // globales — ver lib/proxy-url-resolver.ts. Nota: esta ruta de test ya
+    // llamaba a apiFunctions.* con una firma desactualizada (pasando "proxy"
+    // como primer argumento, cuando esas funciones toman clienteId) — eso es
+    // preexistente y no se modificó acá, solo se migró el origen de la URL.
+    let proxy: string
+    try {
+      proxy = await resolveProxyUrl(config.cliente_id)
+    } catch {
       return NextResponse.json(
-        { success: false, error: "PROXY_API_URL no está configurada en las variables de entorno" },
+        { success: false, error: "No hay Proxy URL configurada (ni por clínica ni en las variables de entorno globales)" },
         { status: 500 },
       )
     }

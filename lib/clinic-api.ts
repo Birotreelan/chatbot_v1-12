@@ -1,5 +1,6 @@
 import type { ApiResponse, Paciente } from "./api-tools/types"
 import { TIMEOUTS, fetchWithTimeout } from "./config/timeouts"
+import { resolveProxyUrl } from "./proxy-url-resolver"
 
 // Función helper para obtener fechas dinámicas
 function getDefaultDateRange(): string {
@@ -19,13 +20,23 @@ export class ClinicAPI {
   private proxyUrl: string
   private clienteId: string
 
-  constructor(clienteId: string) {
+  constructor(clienteId: string, proxyUrl: string) {
     this.clienteId = clienteId
-    this.proxyUrl = process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL || ""
+    this.proxyUrl = proxyUrl
 
     if (!this.proxyUrl) {
-      throw new Error("PROXY_API_URL o CLINIC_PROXY_URL debe estar configurada en las variables de entorno")
+      throw new Error("No hay Proxy URL configurada para este cliente (ni en su ficha ni en las variables de entorno globales)")
     }
+  }
+
+  /**
+   * Forma recomendada de instanciar ClinicAPI: resuelve la Proxy URL dinámica
+   * por cliente (config.proxy, con fallback a las variables de entorno
+   * globales) antes de construir la instancia — ver lib/proxy-url-resolver.ts.
+   */
+  static async create(clienteId: string): Promise<ClinicAPI> {
+    const proxyUrl = await resolveProxyUrl(clienteId)
+    return new ClinicAPI(clienteId, proxyUrl)
   }
 
   /**
@@ -431,13 +442,14 @@ export class ClinicAPI {
 }
 
 /**
- * Crea una instancia de ClinicAPI con la URL del proxy y el ID del cliente
+ * Crea una instancia de ClinicAPI con la URL del proxy (dinámica por
+ * cliente, ver ClinicAPI.create) y el ID del cliente
  */
-export function createClinicAPI(clienteId: string): ClinicAPI {
+export async function createClinicAPI(clienteId: string): Promise<ClinicAPI> {
   if (!clienteId) {
     throw new Error("Se requiere el ID del cliente para crear una instancia de ClinicAPI")
   }
-  return new ClinicAPI(clienteId)
+  return ClinicAPI.create(clienteId)
 }
 
 /**
@@ -462,7 +474,7 @@ export async function validateDNI(
       }
     }
 
-    const clinicAPI = createClinicAPI(clienteId)
+    const clinicAPI = await createClinicAPI(clienteId)
     const response = await clinicAPI.paciente_dni(dni)
 
     if (response.exito && response.datos) {
@@ -521,7 +533,7 @@ export async function searchTurnos(
       console.log(`[SEARCH-TURNOS] 📅 Usando rango de fechas dinámico: ${rangoFechas}`)
     }
 
-    const clinicAPI = createClinicAPI(clienteId)
+    const clinicAPI = await createClinicAPI(clienteId)
     const response = await clinicAPI.buscarTurnosDisponibles(
       rangoFechas,
       params.profesional,
@@ -583,7 +595,7 @@ export async function reserveTurno(
       }
     }
 
-    const clinicAPI = createClinicAPI(clienteId)
+    const clinicAPI = await createClinicAPI(clienteId)
     const response = await clinicAPI.reservarTurno(params.agendaId, {
       dni: params.dni,
       nombre: params.nombre,

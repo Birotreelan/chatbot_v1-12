@@ -1,3 +1,5 @@
+import { resolveProxyUrl } from "../proxy-url-resolver"
+
 // Interfaz para datos del paciente
 export interface Paciente {
   id?: string
@@ -46,6 +48,16 @@ export interface ApiResponse<T> {
   }
   turnosProximos?: Cita[]
   esPrimeraVez?: boolean | null
+  /**
+   * Límite de turnos activos permitidos por paciente (17/7/2026). Ausente o
+   * con maximo: null => la clínica no configuró límite, no se aplica ninguna
+   * restricción.
+   */
+  limiteTurnos?: {
+    maximo: number | null
+    activos: number
+    alcanzado: boolean
+  } | null
 }
 
 // Interfaz para disponibilidad horaria
@@ -92,10 +104,20 @@ export interface ApiConfig {
   timeout: number
 }
 
-// Función para obtener la configuración de la API de la clínica
-export function getClinicApiConfig(): ApiConfig {
+// Función para obtener la configuración de la API de la clínica: URL propia
+// del cliente (config.proxy) con fallback a las variables de entorno
+// globales — ver lib/proxy-url-resolver.ts. Nunca lanza: si nada está
+// configurado, baseUrl queda "" (los callers ya manejan ese caso).
+export async function getClinicApiConfig(clienteId: string): Promise<ApiConfig> {
+  let baseUrl = ""
+  try {
+    baseUrl = await resolveProxyUrl(clienteId)
+  } catch {
+    // resolveProxyUrl lanza si no hay URL configurada ni por clínica ni
+    // globalmente — acá se traduce a baseUrl vacío, como devolvía antes.
+  }
   return {
-    baseUrl: process.env.CLINIC_PROXY_URL || process.env.PROXY_API_URL || "",
+    baseUrl,
     timeout: 30000,
   }
 }
