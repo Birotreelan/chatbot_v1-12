@@ -4402,14 +4402,71 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         }
 
         if (detectionResult?.action === 'new_patient_dni_pending') {
-          // Paciente nuevo ingresó DNI — derivar al flujo de paciente nuevo
+          // Paciente escribió su DNI luego de que la búsqueda por teléfono no lo
+          // encontró (ej: está escribiendo desde un número distinto al que tiene
+          // cargado en la ficha). Antes de darlo de alta como nuevo, revalidamos
+          // el DNI contra get_paciente — si SÍ existe, es un paciente existente
+          // contactando desde otro teléfono, no uno nuevo.
           const dniOnly = userMessage.trim().replace(/[^0-9]/g, '')
-          const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, false, userMessage, 'whatsapp')
-          if (newPatientResult?.handled && newPatientResult.message) {
-            await sendExistingPatientResult(detectionCtx, newPatientResult, "new_patient_flow")
-            await completePatientDetectionFlow(userPhoneNumber, config.id)
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-            return
+          const { ClinicAPI: ClinicAPIDni } = await import('./clinic-api')
+          const clinicAPIDni = await ClinicAPIDni.create(config.cliente_id)
+          const dniPatientResponse = await clinicAPIDni.paciente_dni(dniOnly)
+
+          if (dniPatientResponse.exito && dniPatientResponse.datos) {
+            // Encontrado por DNI → es un paciente existente, aunque el teléfono no matcheaba
+            const patientData = dniPatientResponse.datos
+            let paciente: any = null
+            if (patientData.paciente) {
+              paciente = patientData.paciente
+            } else if (Array.isArray(patientData) && patientData.length > 0) {
+              paciente = patientData[0]
+            } else {
+              paciente = patientData
+            }
+
+            const pacienteId = paciente.paciente_id || paciente.Id || paciente.id || ''
+            const pacienteName = paciente.nombre || `${(paciente.Nombres || paciente.nombres || '').trim()} ${(paciente.Apellido || paciente.apellido || '').trim()}`.trim()
+            const pacienteDNI = (paciente.Nrodoc || paciente.dni || dniOnly).toString()
+            const pacienteEmail = (() => {
+              const raw = (paciente.Mail || paciente.mail || paciente.Email || paciente.email || '').trim()
+              return raw === '-' || raw === 'NO USA' ? '' : raw
+            })()
+            const pacienteCelular = (paciente.Celular || paciente.celular || paciente.Telefono || paciente.telefono || '').trim()
+            const pacienteObraSocialId = (paciente.Deudor_Id || paciente.deudor_id || '').toString().trim()
+            const pacienteObraSocialNombre = (paciente.Deudor_Nombre || paciente.deudor_nombre || '').toString().trim()
+
+            const existingFromOtherPhoneResult = await initializeExistingPatientFlow(
+              userPhoneNumber,
+              pacienteId,
+              pacienteName,
+              pacienteDNI,
+              pacienteEmail || undefined,
+              config.cliente_id,
+              {
+                patientFirstName: (paciente.Nombres || paciente.nombres || '').trim(),
+                patientLastName: (paciente.Apellido || paciente.apellido || '').trim(),
+                patientCelular: pacienteCelular,
+                obraSocialId: pacienteObraSocialId,
+                obraSocialNombre: pacienteObraSocialNombre,
+              },
+              config.escalationPhoneNumber,
+              userMessage
+            )
+            if (existingFromOtherPhoneResult?.handled && existingFromOtherPhoneResult.message) {
+              await sendExistingPatientResult(detectionCtx, existingFromOtherPhoneResult, "existing_patient_other_phone")
+              await completePatientDetectionFlow(userPhoneNumber, config.id)
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+          } else {
+            // No encontrado tampoco por DNI → recién ahí es efectivamente un paciente nuevo
+            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, false, userMessage, 'whatsapp')
+            if (newPatientResult?.handled && newPatientResult.message) {
+              await sendExistingPatientResult(detectionCtx, newPatientResult, "new_patient_flow")
+              await completePatientDetectionFlow(userPhoneNumber, config.id)
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
           }
         }
 
