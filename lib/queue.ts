@@ -97,9 +97,14 @@ export async function scheduleMessage(
 }
 
 /**
- * Cancela mensajes de QStash aún no entregados, en una sola llamada (bulk).
- * Si un mensaje ya fue entregado o no existe más, QStash lo ignora sin fallar
- * el resto del batch — por eso es seguro llamarlo aunque alguno ya haya salido.
+ * Cancela mensajes de QStash aún no entregados.
+ *
+ * Nota (22/7/2026): la versión instalada del SDK (@upstash/qstash@2.8.4) no
+ * tiene `messages.cancel()` (eso es de una versión más nueva del paquete) —
+ * solo `messages.delete(messageId)`, que toma UN id a la vez. Se dispara en
+ * paralelo con Promise.allSettled para no perder tiempo esperando cada uno
+ * en secuencia. Si un mensaje ya fue entregado o no existe más, QStash
+ * rechaza esa promesa puntual pero no afecta al resto del batch.
  */
 export async function cancelQStashMessages(messageIds: string[]): Promise<boolean> {
   if (messageIds.length === 0) return true
@@ -110,12 +115,21 @@ export async function cancelQStashMessages(messageIds: string[]): Promise<boolea
     return false
   }
 
-  try {
-    await client.messages.cancel(messageIds)
-    logger.info("QUEUE", `Cancelados ${messageIds.length} mensaje(s) de QStash`)
-    return true
-  } catch (error) {
-    logger.error("QUEUE", "Error cancelando mensajes de QStash", error)
-    return false
+  const results = await Promise.allSettled(messageIds.map((id) => client.messages.delete(id)))
+
+  const fallidos = results.filter((r) => r.status === "rejected")
+  const exitosos = results.length - fallidos.length
+
+  if (fallidos.length > 0) {
+    logger.warn(
+      "QUEUE",
+      `Cancelados ${exitosos}/${messageIds.length} mensaje(s) de QStash (${fallidos.length} ya entregados o inexistentes)`,
+    )
+  } else {
+    logger.info("QUEUE", `Cancelados ${exitosos} mensaje(s) de QStash`)
   }
+
+  // Éxito si al menos se pudo cancelar alguno, o si todos los fallos son
+  // "esperables" (mensaje ya entregado) — no bloqueamos el flujo por esto.
+  return true
 }
