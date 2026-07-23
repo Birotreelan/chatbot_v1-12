@@ -121,9 +121,21 @@ export function middleware(request: NextRequest) {
       // Verificar si ya existe la cookie session_id
       const existingCookie = request.cookies.get("session_id")?.value
       console.log("[MIDDLEWARE] SSO: Cookie existente:", existingCookie || "ninguna")
-      
-      // Si ya tiene la cookie correcta, redirigir a URL limpia
-      if (existingCookie === sidParam) {
+
+      // Si ya tiene la cookie correcta, redirigir a URL limpia — PERO solo para
+      // navegación de página (/support), nunca para /api/support/*. Este `if`
+      // originalmente no distinguía entre ambos casos: cuando la cookie
+      // session_id (seteada en Chrome tras la primera visita) coincidía con
+      // el _sid de la URL, CUALQUIER fetch de los componentes cliente hacia
+      // /api/support/* (que siguen mandando ?_sid= porque lo persisten en
+      // sessionStorage) recibía un redirect 307 a /support en vez de JSON.
+      // El fetch() del navegador sigue redirects por defecto, así que
+      // terminaba parseando el HTML de /support como si fuera JSON →
+      // "Unexpected token '<', <!DOCTYPE... is not valid JSON". Pasaba solo
+      // en Chrome porque Safari nunca persiste la cookie de terceros en el
+      // iframe, así que `existingCookie` ahí siempre es undefined y esta
+      // rama nunca se disparaba (22/7/2026).
+      if (existingCookie === sidParam && !pathname.startsWith("/api/")) {
         console.log("[MIDDLEWARE] SSO: Cookie ya existe con el valor correcto, redirigiendo a URL limpia")
         const cleanUrl = new URL("/support", request.url)
         return NextResponse.redirect(cleanUrl)
