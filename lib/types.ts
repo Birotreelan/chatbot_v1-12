@@ -17,6 +17,8 @@ export interface WhatsAppConfig {
   cliente_id?: string
   proxy?: string
   escalationPhoneNumber?: string
+  /** Si es false, el cliente se omite de ambos reportes de /facturacion. Default true. */
+  mostrarEnFacturacion?: boolean
 
   // Configuración de opciones de búsqueda disponibles para pacientes
   enableSearchByProfessional?: boolean

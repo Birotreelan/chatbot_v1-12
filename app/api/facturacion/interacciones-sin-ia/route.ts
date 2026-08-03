@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { requireBillingAgentForApi } from "@/lib/auth"
+import { getAllWhatsAppConfigs } from "@/lib/db"
 import { CLIENTES_EXCLUIDOS_FACTURACION } from "@/lib/facturacion-sedes"
 import { getDolarVenta } from "@/lib/facturacion-dolar"
 
@@ -48,8 +49,18 @@ export async function GET(request: Request) {
       )
       if (externalResponse.ok) {
         const data: ConsumosSinIAResponse = await externalResponse.json()
+
+        // Clientes con mostrarEnFacturacion === false, cruzados por cliente_id
+        // (los clientes "sin IA" pueden no tener WhatsAppConfig asociado; en
+        // ese caso no están en este set y pasan el filtro por default).
+        const configs = await getAllWhatsAppConfigs()
+        const ocultos = new Set(
+          configs.filter((c) => c.mostrarEnFacturacion === false && c.cliente_id).map((c) => c.cliente_id!),
+        )
+
         filas = (data.clientes || [])
           .filter((c) => !CLIENTES_EXCLUIDOS_FACTURACION.includes(c.cliente_id))
+          .filter((c) => !ocultos.has(c.cliente_id))
           .map((c) => ({
             clienteId: c.cliente_id,
             clienteIdBase: c.cliente_id,

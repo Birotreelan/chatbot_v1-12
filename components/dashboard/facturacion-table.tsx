@@ -41,13 +41,17 @@ export function FacturacionTable({
   const [precios, setPrecios] = useState<Record<string, number>>({})
   const [guardando, setGuardando] = useState<Record<string, boolean>>({})
 
+  const [alias, setAlias] = useState<Record<string, string>>({})
+  const [guardandoAlias, setGuardandoAlias] = useState<Record<string, boolean>>({})
+
   const loadData = useCallback(async () => {
     try {
       setError(null)
       const { fechaInicio, fechaFin } = monthValueToRange(month)
-      const [interaccionesRes, preciosRes] = await Promise.all([
+      const [interaccionesRes, preciosRes, aliasRes] = await Promise.all([
         fetch(`${apiPath}?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`),
         fetch("/api/facturacion/precios"),
+        fetch("/api/facturacion/alias"),
       ])
 
       if (!interaccionesRes.ok) {
@@ -60,6 +64,11 @@ export function FacturacionTable({
       if (preciosRes.ok) {
         const preciosData = await preciosRes.json()
         setPrecios(preciosData.precios || {})
+      }
+
+      if (aliasRes.ok) {
+        const aliasData = await aliasRes.json()
+        setAlias(aliasData.alias || {})
       }
     } catch (err) {
       console.error("Error cargando facturación:", err)
@@ -101,6 +110,26 @@ export function FacturacionTable({
     }
   }
 
+  const handleAliasChange = (clienteIdBase: string, valor: string) => {
+    setAlias((prev) => ({ ...prev, [clienteIdBase]: valor }))
+  }
+
+  const handleAliasBlur = async (clienteIdBase: string) => {
+    const valor = alias[clienteIdBase] ?? ""
+    setGuardandoAlias((prev) => ({ ...prev, [clienteIdBase]: true }))
+    try {
+      await fetch("/api/facturacion/alias", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clienteId: clienteIdBase, alias: valor }),
+      })
+    } catch (err) {
+      console.error("Error guardando alias:", err)
+    } finally {
+      setGuardandoAlias((prev) => ({ ...prev, [clienteIdBase]: false }))
+    }
+  }
+
   const totalGeneral = clientes.reduce((sum, c) => sum + c.totalInteracciones, 0)
   const totalGeneralValorUSD = clientes.reduce((sum, c) => {
     const precio = precios[c.clienteIdBase] ?? 0
@@ -136,6 +165,7 @@ export function FacturacionTable({
             <TableHeader>
               <TableRow>
                 <TableHead>Cliente</TableHead>
+                <TableHead>Alias</TableHead>
                 <TableHead className="text-right">{cantidadLabel}</TableHead>
                 <TableHead className="text-right">Valor por unidad (USD)</TableHead>
                 <TableHead className="text-right">Valor Total Dólares</TableHead>
@@ -150,6 +180,17 @@ export function FacturacionTable({
                 return (
                   <TableRow key={cliente.clienteId}>
                     <TableCell className="font-medium">{cliente.nombreCliente}</TableCell>
+                    <TableCell>
+                      <Input
+                        type="text"
+                        placeholder="—"
+                        className="w-36"
+                        value={alias[cliente.clienteIdBase] ?? ""}
+                        onChange={(e) => handleAliasChange(cliente.clienteIdBase, e.target.value)}
+                        onBlur={() => handleAliasBlur(cliente.clienteIdBase)}
+                        disabled={guardandoAlias[cliente.clienteIdBase]}
+                      />
+                    </TableCell>
                     <TableCell className="text-right">
                       {cliente.totalInteracciones.toLocaleString("es-AR")}
                     </TableCell>
@@ -174,6 +215,7 @@ export function FacturacionTable({
               })}
               <TableRow className="font-semibold bg-muted/50">
                 <TableCell>Total general</TableCell>
+                <TableCell />
                 <TableCell className="text-right">{totalGeneral.toLocaleString("es-AR")}</TableCell>
                 <TableCell />
                 <TableCell className="text-right">{formatoUSDMoney.format(totalGeneralValorUSD)}</TableCell>

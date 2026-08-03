@@ -38,7 +38,10 @@ export async function GET(request: Request) {
 
     const configs = await getAllWhatsAppConfigs()
     const clientesConId = configs.filter(
-      (c) => !!c.cliente_id && !CLIENTES_EXCLUIDOS_FACTURACION.includes(c.cliente_id!),
+      (c) =>
+        !!c.cliente_id &&
+        !CLIENTES_EXCLUIDOS_FACTURACION.includes(c.cliente_id!) &&
+        c.mostrarEnFacturacion !== false,
     )
 
     const filasPorCliente: FacturacionClienteRow[][] = await Promise.all(

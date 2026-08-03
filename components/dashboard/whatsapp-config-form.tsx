@@ -45,6 +45,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     cliente_id: "",
     proxy: "",
     escalationPhoneNumber: "",
+    mostrarEnFacturacion: true,
     additionalAssistants: [],
     businessHours: [],
     whatsappSupportHours: [],
@@ -406,6 +407,15 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                   onCheckedChange={(checked) => updateFormData("active", checked)}
                 />
                 <Label htmlFor="active">Configuración activa</Label>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="mostrarEnFacturacion"
+                  checked={formData.mostrarEnFacturacion !== false}
+                  onCheckedChange={(checked) => updateFormData("mostrarEnFacturacion", checked)}
+                />
+                <Label htmlFor="mostrarEnFacturacion">Mostrar en facturación</Label>
               </div>
             </CardContent>
           </Card>

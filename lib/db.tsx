@@ -112,6 +112,7 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     webhookUrl: config.webhookUrl,
     cliente_id: config.cliente_id,
     proxy: config.proxy,
+    mostrarEnFacturacion: config.mostrarEnFacturacion !== undefined ? config.mostrarEnFacturacion : true,
     additionalAssistants: config.additionalAssistants || [],
     // Añadir configuraciones por defecto del widget
     widgetEnabled: config.widgetEnabled !== undefined ? config.widgetEnabled : true,
