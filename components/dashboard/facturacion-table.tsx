@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, RefreshCw } from "lucide-react"
+import { Loader2, RefreshCw, Plus, X } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -44,7 +44,7 @@ export function FacturacionTable({
   const [alias, setAlias] = useState<Record<string, string>>({})
   const [guardandoAlias, setGuardandoAlias] = useState<Record<string, boolean>>({})
 
-  const [cuit, setCuit] = useState<Record<string, string>>({})
+  const [cuit, setCuit] = useState<Record<string, string[]>>({})
   const [guardandoCuit, setGuardandoCuit] = useState<Record<string, boolean>>({})
 
   const loadData = useCallback(async () => {
@@ -119,44 +119,77 @@ export function FacturacionTable({
     }
   }
 
-  const handleAliasChange = (clienteIdBase: string, valor: string) => {
-    setAlias((prev) => ({ ...prev, [clienteIdBase]: valor }))
+  // Alias y CUIT se guardan por clienteId (clave de la FILA, no del cliente
+  // real): un cliente multi-sede tiene un clienteIdBase compartido pero un
+  // clienteId distinto por sede (sufijo "::0", "::1", ...). Si se usara
+  // clienteIdBase acá, todas las sedes de un mismo cliente compartirían el
+  // mismo alias/CUIT (bug reportado: campos "encadenados" entre sedes). El
+  // precio por unidad SÍ sigue usando clienteIdBase a propósito, porque es un
+  // único valor por cliente real, no por sede.
+  const handleAliasChange = (clienteId: string, valor: string) => {
+    setAlias((prev) => ({ ...prev, [clienteId]: valor }))
   }
 
-  const handleAliasBlur = async (clienteIdBase: string) => {
-    const valor = alias[clienteIdBase] ?? ""
-    setGuardandoAlias((prev) => ({ ...prev, [clienteIdBase]: true }))
+  const handleAliasBlur = async (clienteId: string) => {
+    const valor = alias[clienteId] ?? ""
+    setGuardandoAlias((prev) => ({ ...prev, [clienteId]: true }))
     try {
       await fetch("/api/facturacion/alias", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clienteId: clienteIdBase, alias: valor }),
+        body: JSON.stringify({ clienteId, alias: valor }),
       })
     } catch (err) {
       console.error("Error guardando alias:", err)
     } finally {
-      setGuardandoAlias((prev) => ({ ...prev, [clienteIdBase]: false }))
+      setGuardandoAlias((prev) => ({ ...prev, [clienteId]: false }))
     }
   }
 
-  const handleCuitChange = (clienteIdBase: string, valor: string) => {
-    setCuit((prev) => ({ ...prev, [clienteIdBase]: valor }))
+  // El CUIT es una lista (un cliente puede tener más de un CUIT). Si todavía
+  // no hay nada cargado para esa fila, se muestra un único input vacío para
+  // poder empezar a escribir.
+  const getCuitList = (clienteId: string): string[] => {
+    const lista = cuit[clienteId]
+    return lista && lista.length > 0 ? lista : [""]
   }
 
-  const handleCuitBlur = async (clienteIdBase: string) => {
-    const valor = cuit[clienteIdBase] ?? ""
-    setGuardandoCuit((prev) => ({ ...prev, [clienteIdBase]: true }))
+  const handleCuitChange = (clienteId: string, index: number, valor: string) => {
+    setCuit((prev) => {
+      const lista = [...(prev[clienteId] ?? [""])]
+      lista[index] = valor
+      return { ...prev, [clienteId]: lista }
+    })
+  }
+
+  const saveCuitList = async (clienteId: string, lista: string[]) => {
+    setGuardandoCuit((prev) => ({ ...prev, [clienteId]: true }))
     try {
       await fetch("/api/facturacion/cuit", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clienteId: clienteIdBase, cuit: valor }),
+        body: JSON.stringify({ clienteId, cuit: lista }),
       })
     } catch (err) {
       console.error("Error guardando CUIT:", err)
     } finally {
-      setGuardandoCuit((prev) => ({ ...prev, [clienteIdBase]: false }))
+      setGuardandoCuit((prev) => ({ ...prev, [clienteId]: false }))
     }
+  }
+
+  const handleCuitBlur = (clienteId: string) => {
+    saveCuitList(clienteId, getCuitList(clienteId))
+  }
+
+  const handleAddCuit = (clienteId: string) => {
+    setCuit((prev) => ({ ...prev, [clienteId]: [...(prev[clienteId] ?? [""]), ""] }))
+  }
+
+  const handleRemoveCuit = (clienteId: string, index: number) => {
+    const listaActual = getCuitList(clienteId)
+    const nuevaLista = listaActual.filter((_, i) => i !== index)
+    setCuit((prev) => ({ ...prev, [clienteId]: nuevaLista }))
+    saveCuitList(clienteId, nuevaLista)
   }
 
   const totalGeneral = clientes.reduce((sum, c) => sum + c.totalInteracciones, 0)
@@ -215,22 +248,55 @@ export function FacturacionTable({
                         type="text"
                         placeholder="—"
                         className="w-36"
-                        value={alias[cliente.clienteIdBase] ?? ""}
-                        onChange={(e) => handleAliasChange(cliente.clienteIdBase, e.target.value)}
-                        onBlur={() => handleAliasBlur(cliente.clienteIdBase)}
-                        disabled={guardandoAlias[cliente.clienteIdBase]}
+                        value={alias[cliente.clienteId] ?? ""}
+                        onChange={(e) => handleAliasChange(cliente.clienteId, e.target.value)}
+                        onBlur={() => handleAliasBlur(cliente.clienteId)}
+                        disabled={guardandoAlias[cliente.clienteId]}
                       />
                     </TableCell>
                     <TableCell>
-                      <Input
-                        type="text"
-                        placeholder="—"
-                        className="w-36"
-                        value={cuit[cliente.clienteIdBase] ?? ""}
-                        onChange={(e) => handleCuitChange(cliente.clienteIdBase, e.target.value)}
-                        onBlur={() => handleCuitBlur(cliente.clienteIdBase)}
-                        disabled={guardandoCuit[cliente.clienteIdBase]}
-                      />
+                      <div className="space-y-1">
+                        {getCuitList(cliente.clienteId).map((valor, idx) => {
+                          const lista = getCuitList(cliente.clienteId)
+                          const esUltimo = idx === lista.length - 1
+                          return (
+                            <div key={idx} className="flex items-center gap-1">
+                              <Input
+                                type="text"
+                                placeholder="—"
+                                className="w-32"
+                                value={valor}
+                                onChange={(e) => handleCuitChange(cliente.clienteId, idx, e.target.value)}
+                                onBlur={() => handleCuitBlur(cliente.clienteId)}
+                                disabled={guardandoCuit[cliente.clienteId]}
+                              />
+                              {esUltimo ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0"
+                                  onClick={() => handleAddCuit(cliente.clienteId)}
+                                  title="Agregar otro CUIT"
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                </Button>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0"
+                                  onClick={() => handleRemoveCuit(cliente.clienteId, idx)}
+                                  title="Quitar este CUIT"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
                       {cliente.totalInteracciones.toLocaleString("es-AR")}

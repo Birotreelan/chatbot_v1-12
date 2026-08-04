@@ -1,8 +1,10 @@
 import { Redis } from "@upstash/redis"
 
-// CUIT editable por cliente, usado en la sección de Facturación para poder
-// identificar el dato fiscal de cada cliente. Es un único valor por cliente,
-// no varía por mes. Sigue el mismo patrón que lib/facturacion-alias.ts.
+// CUIT(s) editables por cliente, usado en la sección de Facturación para
+// poder identificar el/los dato(s) fiscal(es) de cada cliente. Un cliente
+// puede tener más de un CUIT (ej: sedes con razón social distinta), por eso
+// se guarda como array. No varía por mes. Sigue el mismo patrón que
+// lib/facturacion-alias.ts.
 const CUIT_PREFIX = "facturacion:cuit:"
 
 function getRedisClient() {
@@ -14,39 +16,48 @@ function getRedisClient() {
   }
 }
 
-export async function getCuit(clienteId: string): Promise<string | null> {
-  const redis = getRedisClient()
-  if (!redis) return null
-
-  const value = await redis.get<string>(`${CUIT_PREFIX}${clienteId}`)
-  return value ?? null
+function normalize(value: unknown): string[] {
+  if (!value) return []
+  // Compat con el formato anterior (un único string, antes de soportar lista)
+  if (typeof value === "string") return [value]
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string")
+  return []
 }
 
-export async function setCuit(clienteId: string, cuit: string): Promise<void> {
+export async function getCuitList(clienteId: string): Promise<string[]> {
+  const redis = getRedisClient()
+  if (!redis) return []
+
+  const value = await redis.get<string[] | string>(`${CUIT_PREFIX}${clienteId}`)
+  return normalize(value)
+}
+
+export async function setCuitList(clienteId: string, cuits: string[]): Promise<void> {
   const redis = getRedisClient()
   if (!redis) throw new Error("Redis no está disponible")
 
-  const trimmed = cuit.trim()
-  if (!trimmed) {
-    // CUIT vacío: se borra la key en vez de guardar un string vacío
+  const limpio = cuits.map((c) => c.trim()).filter(Boolean)
+  if (limpio.length === 0) {
     await redis.del(`${CUIT_PREFIX}${clienteId}`)
     return
   }
 
-  await redis.set(`${CUIT_PREFIX}${clienteId}`, trimmed)
+  await redis.set(`${CUIT_PREFIX}${clienteId}`, limpio)
 }
 
-/** Devuelve un mapa clienteId -> CUIT para la lista de clienteIds dada. */
-export async function getCuits(clienteIds: string[]): Promise<Record<string, string>> {
+/** Devuelve un mapa clienteId -> lista de CUIT para la lista de clienteIds dada. */
+export async function getCuitLists(clienteIds: string[]): Promise<Record<string, string[]>> {
   const redis = getRedisClient()
   if (!redis || clienteIds.length === 0) return {}
 
-  const valores = await Promise.all(clienteIds.map((id) => redis.get<string>(`${CUIT_PREFIX}${id}`)))
+  const valores = await Promise.all(
+    clienteIds.map((id) => redis.get<string[] | string>(`${CUIT_PREFIX}${id}`)),
+  )
 
-  const resultado: Record<string, string> = {}
+  const resultado: Record<string, string[]> = {}
   clienteIds.forEach((id, idx) => {
-    const value = valores[idx]
-    if (value) resultado[id] = value
+    const lista = normalize(valores[idx])
+    if (lista.length > 0) resultado[id] = lista
   })
   return resultado
 }
@@ -67,21 +78,21 @@ async function scanKeys(redis: Redis, pattern: string): Promise<string[]> {
  * conocida), ya que hay clientes de "Facturación sin IA" que no existen en
  * WhatsAppConfig.
  */
-export async function getAllCuits(): Promise<Record<string, string>> {
+export async function getAllCuitLists(): Promise<Record<string, string[]>> {
   const redis = getRedisClient()
   if (!redis) return {}
 
   const keys = await scanKeys(redis, `${CUIT_PREFIX}*`)
   if (keys.length === 0) return {}
 
-  const valores = await Promise.all(keys.map((key) => redis.get<string>(key)))
+  const valores = await Promise.all(keys.map((key) => redis.get<string[] | string>(key)))
 
-  const resultado: Record<string, string> = {}
+  const resultado: Record<string, string[]> = {}
   keys.forEach((key, idx) => {
-    const value = valores[idx]
-    if (!value) return
+    const lista = normalize(valores[idx])
+    if (lista.length === 0) return
     const clienteId = key.slice(CUIT_PREFIX.length)
-    resultado[clienteId] = value
+    resultado[clienteId] = lista
   })
   return resultado
 }

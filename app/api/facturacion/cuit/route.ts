@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { requireBillingAgentForApi } from "@/lib/auth"
-import { getAllCuits, setCuit } from "@/lib/facturacion-cuit"
+import { getAllCuitLists, setCuitList } from "@/lib/facturacion-cuit"
 
 export async function GET() {
   try {
@@ -9,7 +9,7 @@ export async function GET() {
       return NextResponse.json({ error: error || "No autorizado" }, { status: 401 })
     }
 
-    const cuit = await getAllCuits()
+    const cuit = await getAllCuitLists()
     return NextResponse.json({ exito: true, cuit })
   } catch (error) {
     console.error("[FACTURACION_CUIT_API] Error:", error)
@@ -30,12 +30,13 @@ export async function PUT(request: Request) {
     if (!clienteId || typeof clienteId !== "string") {
       return NextResponse.json({ error: "clienteId es obligatorio" }, { status: 400 })
     }
-    if (typeof cuit !== "string") {
-      return NextResponse.json({ error: "cuit debe ser un string" }, { status: 400 })
+    if (!Array.isArray(cuit) || cuit.some((c) => typeof c !== "string")) {
+      return NextResponse.json({ error: "cuit debe ser un array de strings" }, { status: 400 })
     }
 
-    await setCuit(clienteId, cuit)
-    return NextResponse.json({ exito: true, clienteId, cuit: cuit.trim() })
+    await setCuitList(clienteId, cuit)
+    const limpio = cuit.map((c: string) => c.trim()).filter(Boolean)
+    return NextResponse.json({ exito: true, clienteId, cuit: limpio })
   } catch (error) {
     console.error("[FACTURACION_CUIT_API] Error guardando CUIT:", error)
     return NextResponse.json({ error: "Error al guardar el CUIT" }, { status: 500 })
