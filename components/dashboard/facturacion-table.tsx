@@ -44,14 +44,18 @@ export function FacturacionTable({
   const [alias, setAlias] = useState<Record<string, string>>({})
   const [guardandoAlias, setGuardandoAlias] = useState<Record<string, boolean>>({})
 
+  const [cuit, setCuit] = useState<Record<string, string>>({})
+  const [guardandoCuit, setGuardandoCuit] = useState<Record<string, boolean>>({})
+
   const loadData = useCallback(async () => {
     try {
       setError(null)
       const { fechaInicio, fechaFin } = monthValueToRange(month)
-      const [interaccionesRes, preciosRes, aliasRes] = await Promise.all([
+      const [interaccionesRes, preciosRes, aliasRes, cuitRes] = await Promise.all([
         fetch(`${apiPath}?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`),
         fetch("/api/facturacion/precios"),
         fetch("/api/facturacion/alias"),
+        fetch("/api/facturacion/cuit"),
       ])
 
       if (!interaccionesRes.ok) {
@@ -69,6 +73,11 @@ export function FacturacionTable({
       if (aliasRes.ok) {
         const aliasData = await aliasRes.json()
         setAlias(aliasData.alias || {})
+      }
+
+      if (cuitRes.ok) {
+        const cuitData = await cuitRes.json()
+        setCuit(cuitData.cuit || {})
       }
     } catch (err) {
       console.error("Error cargando facturación:", err)
@@ -130,6 +139,26 @@ export function FacturacionTable({
     }
   }
 
+  const handleCuitChange = (clienteIdBase: string, valor: string) => {
+    setCuit((prev) => ({ ...prev, [clienteIdBase]: valor }))
+  }
+
+  const handleCuitBlur = async (clienteIdBase: string) => {
+    const valor = cuit[clienteIdBase] ?? ""
+    setGuardandoCuit((prev) => ({ ...prev, [clienteIdBase]: true }))
+    try {
+      await fetch("/api/facturacion/cuit", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clienteId: clienteIdBase, cuit: valor }),
+      })
+    } catch (err) {
+      console.error("Error guardando CUIT:", err)
+    } finally {
+      setGuardandoCuit((prev) => ({ ...prev, [clienteIdBase]: false }))
+    }
+  }
+
   const totalGeneral = clientes.reduce((sum, c) => sum + c.totalInteracciones, 0)
   const totalGeneralValorUSD = clientes.reduce((sum, c) => {
     const precio = precios[c.clienteIdBase] ?? 0
@@ -166,6 +195,7 @@ export function FacturacionTable({
               <TableRow>
                 <TableHead>Cliente</TableHead>
                 <TableHead>Alias</TableHead>
+                <TableHead>CUIT</TableHead>
                 <TableHead className="text-right">{cantidadLabel}</TableHead>
                 <TableHead className="text-right">Valor por unidad (USD)</TableHead>
                 <TableHead className="text-right">Valor Total Dólares</TableHead>
@@ -189,6 +219,17 @@ export function FacturacionTable({
                         onChange={(e) => handleAliasChange(cliente.clienteIdBase, e.target.value)}
                         onBlur={() => handleAliasBlur(cliente.clienteIdBase)}
                         disabled={guardandoAlias[cliente.clienteIdBase]}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        type="text"
+                        placeholder="—"
+                        className="w-36"
+                        value={cuit[cliente.clienteIdBase] ?? ""}
+                        onChange={(e) => handleCuitChange(cliente.clienteIdBase, e.target.value)}
+                        onBlur={() => handleCuitBlur(cliente.clienteIdBase)}
+                        disabled={guardandoCuit[cliente.clienteIdBase]}
                       />
                     </TableCell>
                     <TableCell className="text-right">
@@ -215,6 +256,7 @@ export function FacturacionTable({
               })}
               <TableRow className="font-semibold bg-muted/50">
                 <TableCell>Total general</TableCell>
+                <TableCell />
                 <TableCell />
                 <TableCell className="text-right">{totalGeneral.toLocaleString("es-AR")}</TableCell>
                 <TableCell />
