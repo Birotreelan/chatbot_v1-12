@@ -69,8 +69,13 @@ export async function setClientFeatureFlags(
     const updated = { ...current, ...flags }
 
     const key = `${FEATURE_FLAGS_PREFIX}${configId}`
-    // TTL de 7 días - Upstash serializa automáticamente, no usar JSON.stringify
-    await redis.setex(key, 7 * 24 * 60 * 60, updated as unknown as string)
+    // Sin TTL a propósito (6/8/2026): antes tenía setex de 7 días y el flag se
+    // desactivaba solo, sin ningún error ni log, cuando vencía la clave en Redis
+    // (caso directPatientDetection: funcionaba y de repente dejó de responder
+    // con el menú determinístico porque la clave expiró). Los feature flags
+    // deben persistir hasta que alguien los cambie explícitamente.
+    // Upstash serializa automáticamente, no usar JSON.stringify.
+    await redis.set(key, updated as unknown as string)
 
     console.info(`[FEATURE-FLAGS] ✓ Flags actualizados para ${configId}`, {
       updated,
@@ -168,8 +173,10 @@ export async function setGlobalFeatureFlags(flags: Partial<FeatureFlags>): Promi
   const current = await getGlobalFeatureFlags()
   const updated = { ...current, ...flags }
 
-  // Upstash serializa automáticamente, no usar JSON.stringify
-  await redis.setex(GLOBAL_FLAGS_KEY, 30 * 24 * 60 * 60, updated as unknown as string)
+  // Sin TTL a propósito (6/8/2026, mismo motivo que setClientFeatureFlags):
+  // los flags globales no deben vencerse solos. Upstash serializa
+  // automáticamente, no usar JSON.stringify.
+  await redis.set(GLOBAL_FLAGS_KEY, updated as unknown as string)
 }
 
 /**
