@@ -1855,12 +1855,20 @@ async function runPrimaryDispatcherNoFlow(
 
     if (action.type === 'init_patient_detection' || action.type === 'init_new_patient_flow' || action.type === 'init_familiar_flow') {
       const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
-      if (detResult?.handled && detResult.message) {
-        // Enviar con los botones del menú (1/2/3) si el resultado los trae.
-        await sendDirectResponse(ctxDirect, detResult.message, "router-primary-menu", (detResult as any).buttons)
+      // Antes devolvía `true` (mensaje "manejado") incondicionalmente, aunque
+      // detResult.handled fuera false (flag directPatientDetection OFF) — el
+      // caller cortaba con `if (handled) return` sin haber enviado nada al
+      // paciente. Ahora solo se marca como manejado si realmente se envió/
+      // resolvió algo; si no, el caller sigue al pipeline normal de OpenAI.
+      if (detResult?.handled) {
+        if (detResult.message) {
+          // Enviar con los botones del menú (1/2/3) si el resultado los trae.
+          await sendDirectResponse(ctxDirect, detResult.message, "router-primary-menu", (detResult as any).buttons)
+        }
+        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+        return true
       }
-      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-      return true
+      return false
     }
 
     if (action.type === 'init_existing_patient_flow') {
@@ -5138,11 +5146,19 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               const detResult = await initializePatientDetection(
                 userPhoneNumber, config.id, config.cliente_id, config.displayName
               )
-              if (detResult?.handled && detResult.message) {
-                await sendDirectResponse(dispatcherCtxDirect, detResult.message, "ai-dispatcher-menu")
+              // Bug (6/8/2026): el return era incondicional, así que cuando el
+              // flag directPatientDetection está OFF (detResult.handled=false,
+              // shouldCallOpenAI=true) el mensaje se marcaba como procesado sin
+              // enviar ninguna respuesta ("hoal" sin contestar). Ahora solo se
+              // corta acá si realmente se manejó; si no, cae al pipeline normal
+              // de OpenAI más abajo.
+              if (detResult?.handled) {
+                if (detResult.message) {
+                  await sendDirectResponse(dispatcherCtxDirect, detResult.message, "ai-dispatcher-menu")
+                }
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
               }
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
             }
 
             if (action.type === 'init_existing_patient_flow') {
@@ -5197,11 +5213,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               if (await requestFamiliarDni(userPhoneNumber, config, dispatcherCtxDirect)) return
               // Sin detección activa → menú normal (el paciente puede elegir "2").
               const detFam = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName)
-              if (detFam?.handled && detFam.message) {
-                await sendDirectResponse(dispatcherCtxDirect, detFam.message, "ai-dispatcher-familiar")
+              if (detFam?.handled) {
+                if (detFam.message) {
+                  await sendDirectResponse(dispatcherCtxDirect, detFam.message, "ai-dispatcher-familiar")
+                }
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
               }
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
             }
 
             if (action.type === 'init_new_patient_flow') {
@@ -5211,11 +5229,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               const detResult = await initializePatientDetection(
                 userPhoneNumber, config.id, config.cliente_id, config.displayName
               )
-              if (detResult?.handled && detResult.message) {
-                await sendDirectResponse(dispatcherCtxDirect, detResult.message, "ai-dispatcher-new-patient")
+              if (detResult?.handled) {
+                if (detResult.message) {
+                  await sendDirectResponse(dispatcherCtxDirect, detResult.message, "ai-dispatcher-new-patient")
+                }
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
               }
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
             }
 
             if (action.type === 'continue_active_flow') {
@@ -5259,30 +5279,40 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                 return
               }
-              // Sin flujo activo reconocido: mostrar menú principal
+              // Sin flujo activo reconocido: mostrar menú principal. Si
+              // directPatientDetection está OFF, initializePatientDetection
+              // devuelve handled:false + shouldCallOpenAI:true — antes acá se
+              // ignoraba esa señal y se cortaba sin responder nada (mismo bug
+              // que "hoal" sin contestar, 6/8/2026). Ahora cae a OpenAI.
               const noFlowResult = await initializePatientDetection(
                 userPhoneNumber, config.id, config.cliente_id, config.displayName
               )
-              if (noFlowResult?.handled && noFlowResult.message) {
-                await sendDirectResponse(dispatcherCtxDirect, noFlowResult.message, "ai-dispatcher-no-flow-menu")
+              if (noFlowResult?.handled) {
+                if (noFlowResult.message) {
+                  await sendDirectResponse(dispatcherCtxDirect, noFlowResult.message, "ai-dispatcher-no-flow-menu")
+                }
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
               }
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
             }
 
             // action.type === 'passthrough' → con dispatcher activo, mostrar menú principal
-            // en lugar de caer a OpenAI (que puede inventar información incorrecta)
+            // en lugar de caer a OpenAI (que puede inventar información incorrecta).
+            // Igual que arriba: si el menú determinístico está deshabilitado por
+            // flag, es preferible ceder a OpenAI antes que no responder nada.
             if (action.type === 'passthrough') {
               createConversationLogger(userPhoneNumber, config.id, "ai-dispatcher")
                 .info('[Dispatcher] Passthrough — mostrando menú principal')
               const passthroughResult = await initializePatientDetection(
                 userPhoneNumber, config.id, config.cliente_id, config.displayName
               )
-              if (passthroughResult?.handled && passthroughResult.message) {
-                await sendDirectResponse(dispatcherCtxDirect, passthroughResult.message, "ai-dispatcher-passthrough-menu")
+              if (passthroughResult?.handled) {
+                if (passthroughResult.message) {
+                  await sendDirectResponse(dispatcherCtxDirect, passthroughResult.message, "ai-dispatcher-passthrough-menu")
+                }
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
               }
-              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              return
             }
           }
         } catch (dispatcherError) {
@@ -5300,11 +5330,15 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             const errorResult = await initializePatientDetection(
               userPhoneNumber, config.id, config.cliente_id, config.displayName
             )
-            if (errorResult?.handled && errorResult.message) {
-              await sendDirectResponse(errorCtxDirect, errorResult.message, "ai-dispatcher-error-menu")
+            if (errorResult?.handled) {
+              if (errorResult.message) {
+                await sendDirectResponse(errorCtxDirect, errorResult.message, "ai-dispatcher-error-menu")
+              }
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
             }
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-            return
+            // Igual que el resto: si el flag está OFF (handled:false), no cortar
+            // en silencio — caer al enqueue normal (OpenAI) como último recurso.
           } catch {
             // Si incluso el fallback falla, caer al enqueue como último recurso
           }
