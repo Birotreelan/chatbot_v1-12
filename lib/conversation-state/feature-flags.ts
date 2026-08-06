@@ -205,6 +205,16 @@ const GLOBAL_CODE_FEATURE_FLAG_OVERRIDES: Partial<FeatureFlags> = {
   // (caso Susana / caso "Siiii gracias", tel. 1123517624). Válido para todos los
   // clientes, no solo Vision Salud / Salud Ocular.
   directConfirmCancelDetection: true,
+
+  // Activado el 6/8/2026 a pedido explícito de Nicolás: "es algo que veníamos
+  // usando, debería estar activa". Con este flag OFF, el AI Dispatcher delegaba
+  // el saludo inicial ("hola" en frío, sin recordatorio activo) al asistente de
+  // OpenAI, que responde de forma libre sin el menú numerado con botones
+  // (1- Solicitar turno / 2- Turno para familiar / 3- Otra consulta) que arma
+  // initializePatientDetection en lib/conversation-state/patient-detection/
+  // patient-flow-integration.ts. Con el flag ON, ese flujo determinístico
+  // vuelve a ser el que responde, en vez de OpenAI.
+  directPatientDetection: true,
 }
 
 function applyCodeOverrides(_configId: string, flags: FeatureFlags): FeatureFlags {
