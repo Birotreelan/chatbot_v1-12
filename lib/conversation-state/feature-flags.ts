@@ -222,6 +222,41 @@ const GLOBAL_CODE_FEATURE_FLAG_OVERRIDES: Partial<FeatureFlags> = {
   // patient-flow-integration.ts. Con el flag ON, ese flujo determinístico
   // vuelve a ser el que responde, en vez de OpenAI.
   directPatientDetection: true,
+
+  // Activados el 6/8/2026, mismo día y mismo motivo que directPatientDetection:
+  // son la familia completa de flags "Sprint 1-18" del sistema determinístico
+  // (detección de paciente → paciente existente/nuevo → booking → selección de
+  // turno → confirmación/cancelación → DNI → despedidas → consultas
+  // informativas → NLU de fallback). Se pasan la posta unos a otros: al activar
+  // solo directPatientDetection, el menú inicial funcionaba pero el siguiente
+  // paso (ej. "1- Solicitar turno" → initializeExistingPatientFlow) se cortaba
+  // en silencio porque directPacienteExistente seguía OFF (mismo bug de fondo:
+  // el flag correspondiente vencido por el TTL de setClientFeatureFlags/
+  // setGlobalFeatureFlags, ya corregido). Se activa toda la familia junta para
+  // no seguir pisando el mismo problema flag por flag en cada paso del flujo.
+  //
+  // Quedan afuera a propósito (requieren decisión aparte, no son parte de esta
+  // cadena determinística): humanSupport / humanSupportOfferToPatient
+  // (subsistema de atención humana, depende de agentes configurados por
+  // cliente) e intentRouterClinicaOffer / intentRouterFull (arquitectura
+  // alternativa "piloto" que reemplaza al AI Dispatcher como decisor primario).
+  directConfirmation: true,
+  directCancellation: true,
+  directTurnSelection: true,
+  directDNIExtraction: true,
+  antiRepetitionFarewell: true,
+  directReagendamiento: true,
+  directPacienteNuevo: true,
+  directPacienteExistente: true,
+  directBookingFlow: true,
+  pendingFlowContextualNLU: true,
+  directFarewellDetection: true,
+  directWrongNumberDetection: true,
+  reciprocalFarewellSilence: true,
+  directInformationalQuery: true,
+  postActionContextHandler: true,
+  nluFallbackRouter: true,
+  flowInterruptionHandler: true,
 }
 
 function applyCodeOverrides(_configId: string, flags: FeatureFlags): FeatureFlags {
