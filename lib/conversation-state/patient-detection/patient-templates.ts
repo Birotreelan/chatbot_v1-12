@@ -244,9 +244,10 @@ function buildExistingPatientNoTurnosGreeting(
   if (permitirNuevoTurno === false) {
     const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
     return (
-      `Gracias por comunicarte con ${clinicName}, ${firstName}.\n\n` +
+      `¡Hola, ${firstName}!\n\n` +
+      `Gracias por comunicarte con ${clinicName}.\n\n` +
       `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
-      `Para otras consultas, comunicate al *${numeroDerivacion}*.`
+      `Para realizar otras consultas, comunicate con nosotros al *${numeroDerivacion}*.`
     )
   }
 
