@@ -104,7 +104,7 @@ export async function initializePatientDetection(
   }
 
   try {
-    const detectionResult = await startPatientDetectionFlow(phoneNumber, configId, clienteId, permitirNuevoTurno, permitirCancelacion)
+    const detectionResult = await startPatientDetectionFlow(phoneNumber, configId, clienteId, permitirNuevoTurno, permitirCancelacion, escalationPhoneNumber)
     console.log(`[v0] [INIT_DETECTION] startPatientDetectionFlow result: isNewPatient=${detectionResult.isNewPatient} error=${detectionResult.error} multiplePatients=${detectionResult.multiplePatients?.length}`)
 
     if (detectionResult.error) {

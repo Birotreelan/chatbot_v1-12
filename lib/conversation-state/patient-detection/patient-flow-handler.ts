@@ -108,6 +108,8 @@ interface PatientDetectionState {
   permitirNuevoTurno?: boolean
   /** false si WhatsAppConfig.permitirCancelacion del cliente está desactivado. Default true (permitido). */
   permitirCancelacion?: boolean
+  /** WhatsAppConfig.escalationPhoneNumber del cliente, para mensajes de derivación cuando no queda ninguna gestión disponible. */
+  escalationPhoneNumber?: string
   detectedAt: number
   attempts: number
 }
@@ -122,7 +124,8 @@ export async function startPatientDetectionFlow(
   configId: string,
   clienteId: string,
   permitirNuevoTurno?: boolean,
-  permitirCancelacion?: boolean
+  permitirCancelacion?: boolean,
+  escalationPhoneNumber?: string
 ): Promise<{
   isNewPatient: boolean
   multiplePatients?: any[]
@@ -158,6 +161,7 @@ export async function startPatientDetectionFlow(
         patientPhone: phoneNumber,
         permitirNuevoTurno,
         permitirCancelacion,
+        escalationPhoneNumber,
         detectedAt: Date.now(),
         attempts: 1,
       }
@@ -238,6 +242,7 @@ export async function startPatientDetectionFlow(
         multiplePatients: multiplePatients,
         permitirNuevoTurno,
         permitirCancelacion,
+        escalationPhoneNumber,
         detectedAt: Date.now(),
         attempts: 1,
       }
@@ -314,6 +319,7 @@ export async function startPatientDetectionFlow(
       turnosQx: turnosQxFromResponse,
       permitirNuevoTurno,
       permitirCancelacion,
+      escalationPhoneNumber,
       detectedAt: Date.now(),
       attempts: 0,
     }
@@ -698,7 +704,16 @@ export async function processPatientDetectionMessage(
           delete state.postActionContext
           // Mantener phase en awaiting_action_selection para seguir aceptando selecciones
           await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
-          const fullMenu = buildPostActionMenu(firstName, state.turnos || [], undefined, undefined, state.hasReminder ?? false)
+          const fullMenu = buildPostActionMenu(
+            firstName,
+            state.turnos || [],
+            undefined,
+            undefined,
+            state.hasReminder ?? false,
+            state.permitirCancelacion,
+            state.permitirNuevoTurno,
+            state.escalationPhoneNumber
+          )
           return {
             handled: true,
             action: 'go_back_to_menu',
@@ -1201,7 +1216,16 @@ export async function returnPatientToMenu(
   const firstName =
     state.patientFirstName ||
     (state.patientName ? state.patientName.split(' ')[0] : 'Paciente')
-  return buildPostActionMenu(firstName, state.turnos || [], undefined, postActionContext, state.hasReminder ?? false)
+  return buildPostActionMenu(
+    firstName,
+    state.turnos || [],
+    undefined,
+    postActionContext,
+    state.hasReminder ?? false,
+    state.permitirCancelacion,
+    state.permitirNuevoTurno,
+    state.escalationPhoneNumber
+  )
 }
 
 /**

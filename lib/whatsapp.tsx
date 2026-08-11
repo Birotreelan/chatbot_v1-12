@@ -992,10 +992,12 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
           logger.info("Contexto post-acción guardado (cancelación)")
         }
 
-        const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0)
-        // Botones de reagendar solo si el turno admite reagendamiento (igual criterio que el builder)
-        const offersReschedule = chatbotData.turnos[flowState.turnoIndex || 0]?.admite_reagendamiento !== false
-        await sendDirectResponse(ctx, successMsg, "awaiting_cancel_confirmation", offersReschedule ? RESCHEDULE_OFFER_BUTTONS : undefined)
+        // includeRescheduleOffer usa admiteReagendamiento (ya calculado arriba con el
+        // criterio correcto: turno.admite_reagendamiento Y config.permitirReagendamiento).
+        // Antes se recalculaba acá sin chequear el toggle, por lo que un cliente con
+        // permitirReagendamiento=false igual veía la oferta de reagendar tras cancelar.
+        const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0, admiteReagendamiento)
+        await sendDirectResponse(ctx, successMsg, "awaiting_cancel_confirmation", admiteReagendamiento ? RESCHEDULE_OFFER_BUTTONS : undefined)
 
         // Si no hay flujo de reagendamiento, el turno quedó cancelado → volver al menú sin él
         if (!admiteReagendamiento) {
@@ -3469,8 +3471,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         const profesional = profesionalRaw
           ? profesionalRaw.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
           : ''
-        const admiteReagendamiento: boolean = rawCtx.admite_reagendamiento === true
-          || rawCtx.turnos?.[0]?.admite_reagendamiento === true
+        const admiteReagendamiento: boolean = (rawCtx.admite_reagendamiento === true
+          || rawCtx.turnos?.[0]?.admite_reagendamiento === true)
+          && config.permitirReagendamiento !== false
         const telefonoContacto: string = rawCtx.telefono_contacto || ''
 
         // Siempre limpiar el contexto — próximos mensajes van al flujo normal

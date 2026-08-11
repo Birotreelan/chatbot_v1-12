@@ -352,7 +352,7 @@ function buildSingleTurnoGreeting(
       `*${firstName}, ¡bienvenido nuevamente a ${clinicName}!*\n\n` +
       `Tenés un turno médico programado para el ${fecha} a las ${hora} h, con ${profesional}, en la sede ${sede}.\n\n` +
       `Si necesitás cancelar el turno, podés hacerlo presionando el botón que aparece a continuación.\n\n` +
-      `Para realizar otras consultas o reprogramar tu turno, comunicate con nosotros al *${numeroDerivacion}*.`
+      `Si necesitás realizar otras consultas o reprogramar tu turno, comunicate con nosotros al *${numeroDerivacion}*.`
     )
   }
 
@@ -592,11 +592,25 @@ export function buildPostActionMenu(
   turnos: any[],
   clinicName: string = DEFAULT_CLINIC_NAME,
   postActionContext?: 'just_confirmed' | 'just_cancelled',
-  hasReminder: boolean = false
+  hasReminder: boolean = false,
+  permitirCancelacion?: boolean,
+  permitirNuevoTurno?: boolean,
+  escalationPhoneNumber?: string
 ): string {
   const hasTurnos = turnos && turnos.length > 0
+  const puedeCancelar = permitirCancelacion !== false
+  const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false
 
   if (!hasTurnos) {
+    if (permitirNuevoTurno === false) {
+      // Sin turnos y sin posibilidad de solicitar uno nuevo → nada gestionable
+      // por este medio, derivar directamente sin ofrecer menú.
+      const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+      return (
+        `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
+        `Para otras consultas, comunicate al *${numeroDerivacion}*.`
+      )
+    }
     return (
       `¿En qué más puedo ayudarte?\n\n` +
       `1- Solicitar un turno médico\n` +
@@ -620,7 +634,8 @@ export function buildPostActionMenu(
 
     if (postActionContext === 'just_confirmed') {
       // El paciente acaba de confirmar: no ofrecer cancelación de inmediato.
-      // Menú mínimo: solo otra consulta o volver al menú completo.
+      // Menú mínimo: solo otra consulta o volver al menú completo. No depende de
+      // los toggles nuevos (no ofrece cancelar ni solicitar turno nuevo).
       msg += `Tu turno del ${fecha} a las ${hora} con ${prof} en ${sede} *ya está confirmado*. ✓\n\n`
       msg += `1- Realizar otra consulta\n`
       msg += `0- Volver al menú anterior\n\n`
@@ -628,6 +643,7 @@ export function buildPostActionMenu(
       // El paciente acaba de cancelar: no ofrecer cancelación nuevamente de inmediato.
       // Menú mínimo: confirmar si el turno lo requiere Y hay recordatorio enviado
       // (mismo criterio que shouldOfferConfirmation), o solo consulta / menú completo.
+      // No depende de los toggles nuevos (no ofrece cancelar ni solicitar turno nuevo).
       if (cat === 'no_confirmado' && hasReminder) {
         msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
         msg += `1- Confirmar asistencia al turno médico\n`
@@ -643,37 +659,57 @@ export function buildPostActionMenu(
         msg += `1- Realizar otra consulta\n`
         msg += `0- Volver al menú anterior\n\n`
       }
-    } else if (cat === 'no_confirmado' && hasReminder) {
-      // Turno no confirmado Y se envió recordatorio → ofrecer confirmación
-      // (mismo criterio que shouldOfferConfirmation/processPatientDetectionMessage).
-      msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
-      msg += `1- Confirmar asistencia al turno médico\n`
-      msg += `2- Cancelar turno médico\n`
-      msg += `3- Cancelar el turno médico y solicitar uno nuevo\n`
-      msg += `4- Realizar otra consulta\n\n`
-    } else if (cat === 'no_confirmado') {
-      // Sin recordatorio enviado: el turno está lejos, no ofrecer confirmación todavía.
-      // (antes se ofrecía siempre "Confirmar asistencia" acá, aunque el actionMap
-      // de processPatientDetectionMessage YA excluía esa opción por falta de
-      // recordatorio — el mensaje mostrado no coincidía con lo que "1" realmente
-      // hacía, causando que "1" terminara cancelando el turno. Caso Liliana,
-      // tel. 1155891028, 9/7/2026: ver PLAN-DE-TRABAJO.md.)
-      msg += `Tenés un turno médico agendado: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
-      msg += `1- Cancelar turno médico\n`
-      msg += `2- Cancelar el turno médico y solicitar uno nuevo\n`
-      msg += `3- Realizar otra consulta\n\n`
-    } else if (cat === 'confirmado') {
-      // Turno ya confirmado → no ofrecer "Confirmar asistencia" de nuevo
-      msg += `Tu turno del ${fecha} a las ${hora} con ${prof} en ${sede} *ya está confirmado*.\n\n`
-      msg += `1- Cancelar el turno\n`
-      msg += `2- Cancelar el turno y solicitar uno nuevo\n`
-      msg += `3- Realizar otra consulta\n\n`
     } else {
-      // pendiente_aprobacion
-      msg += `Tenés un turno pendiente de aprobación: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
-      msg += `1- Cancelar el turno\n`
-      msg += `2- Cancelar el turno y solicitar uno nuevo\n`
-      msg += `3- Realizar otra consulta\n\n`
+      // Sin postActionContext: acá sí se ofrece cancelar / cancelar-y-nuevo, y deben
+      // quedar gateados por los toggles del cliente (mismo criterio que el actionMap
+      // de processPatientDetectionMessage, con el que este texto debe mantenerse en
+      // sincronía).
+      const puedeConfirmar = cat === 'no_confirmado' && hasReminder
+      const esNoConfirmado = cat === 'no_confirmado'
+
+      if (puedeConfirmar) {
+        msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+      } else if (esNoConfirmado) {
+        // Sin recordatorio enviado: el turno está lejos, no ofrecer confirmación todavía.
+        // (antes se ofrecía siempre "Confirmar asistencia" acá, aunque el actionMap
+        // de processPatientDetectionMessage YA excluía esa opción por falta de
+        // recordatorio — el mensaje mostrado no coincidía con lo que "1" realmente
+        // hacía, causando que "1" terminara cancelando el turno. Caso Liliana,
+        // tel. 1155891028, 9/7/2026: ver PLAN-DE-TRABAJO.md.)
+        msg += `Tenés un turno médico agendado: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+      } else if (cat === 'confirmado') {
+        msg += `Tu turno del ${fecha} a las ${hora} con ${prof} en ${sede} *ya está confirmado*.\n\n`
+      } else {
+        msg += `Tenés un turno pendiente de aprobación: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
+      }
+
+      const opciones: string[] = []
+      if (puedeConfirmar) opciones.push('Confirmar asistencia al turno médico')
+      if (puedeCancelar) opciones.push(esNoConfirmado ? 'Cancelar turno médico' : 'Cancelar el turno')
+      if (puedeCancelarYNuevo) opciones.push(esNoConfirmado ? 'Cancelar el turno médico y solicitar uno nuevo' : 'Cancelar el turno y solicitar uno nuevo')
+
+      if (opciones.length === 0) {
+        // Ninguna gestión disponible por este medio (restricciones del cliente
+        // activas y sin turno pendiente de confirmación) → derivar sin menú.
+        const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+        msg += `Para cualquier gestión sobre este turno, contactanos al: *${numeroDerivacion}*`
+        return msg
+      }
+
+      if (!puedeConfirmar && puedeCancelar && !puedeCancelarYNuevo) {
+        // Única gestión disponible: cancelar. Igual que en el saludo, no se ofrece
+        // "Otra consulta" — el resto de las consultas se derivan al número de derivación.
+        msg += `1- ${esNoConfirmado ? 'Cancelar turno médico' : 'Cancelar el turno'}\n\n`
+        const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+        msg += `Si necesitás realizar otras consultas o reprogramar tu turno, comunicate con nosotros al *${numeroDerivacion}*.`
+        return msg
+      }
+
+      opciones.push('Realizar otra consulta')
+      opciones.forEach((op, i) => {
+        msg += `${i + 1}- ${op}\n`
+      })
+      msg += `\n`
     }
   } else {
     msg += `*Tus turnos agendados:*\n\n`
@@ -695,15 +731,23 @@ export function buildPostActionMenu(
     })
 
     if (postActionContext === 'just_cancelled') {
-      // Acaba de cancelar un turno — no ofrecer cancelación nuevamente de inmediato
+      // Acaba de cancelar un turno — no ofrecer cancelación nuevamente de inmediato.
+      // No depende de los toggles nuevos.
       msg += `1- Confirmar asistencia a un turno\n`
       msg += `2- Realizar otra consulta\n`
       msg += `0- Volver al menú anterior\n\n`
     } else {
-      msg += `1- Confirmar asistencia a un turno\n`
-      msg += `2- Cancelar un turno\n`
-      msg += `3- Cancelar un turno y solicitar uno nuevo\n`
-      msg += `4- Realizar otra consulta\n\n`
+      // "Confirmar" siempre se ofrece acá (comportamiento pre-existente con múltiples
+      // turnos, no depende de hasReminder ni de los toggles). Cancelar / cancelar-y-nuevo
+      // sí quedan gateados por los toggles del cliente.
+      const opciones: string[] = ['Confirmar asistencia a un turno']
+      if (puedeCancelar) opciones.push('Cancelar un turno')
+      if (puedeCancelarYNuevo) opciones.push('Cancelar un turno y solicitar uno nuevo')
+      opciones.push('Realizar otra consulta')
+      opciones.forEach((op, i) => {
+        msg += `${i + 1}- ${op}\n`
+      })
+      msg += `\n`
     }
   }
 
