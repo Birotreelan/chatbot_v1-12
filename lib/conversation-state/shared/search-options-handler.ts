@@ -75,6 +75,20 @@ function getAvailableOptions(config?: SearchOptionsConfig): Array<{ number: numb
 }
 
 /**
+ * Si el cliente tiene una sola opción de búsqueda habilitada, la devuelve
+ * directamente para que el flujo la ejecute sin mostrar el menú (no tiene
+ * sentido obligar al paciente a elegir cuando no hay elección real). Si hay
+ * 0 (config inválida), 2 o 3 opciones habilitadas, devuelve null.
+ */
+export function getSingleSearchType(config?: SearchOptionsConfig): SearchType | null {
+  const availableOptions = getAvailableOptions(config)
+  if (availableOptions.length === 1) {
+    return availableOptions[0].key as SearchType
+  }
+  return null
+}
+
+/**
  * Devuelve los botones de tipo de búsqueda para WhatsApp Reply Buttons.
  * Cada botón usa el número renumerado como id y el label como title (max 20 chars).
  */

@@ -150,6 +150,13 @@ export interface PreviousPhaseContext {
   searchType?: string
   /** Canal de origen del flujo nuevo — determina si 'awaiting_telefono' es parte de la secuencia. */
   channel?: 'whatsapp' | 'widget'
+  /**
+   * WhatsAppConfig.modoMedicoParticular. Cuando es 'lista', la fase
+   * 'awaiting_professional_name' se saltea (se va directo a
+   * 'awaiting_professional_selection'), así que el paso previo de esta última
+   * pasa a ser 'awaiting_search_type' en vez de 'awaiting_professional_name'.
+   */
+  modoMedicoParticular?: 'nombre' | 'lista'
 }
 
 /**
@@ -164,7 +171,7 @@ export function getPreviousPhase(
   currentPhase: string,
   ctx: PreviousPhaseContext
 ): string {
-  const { flow, searchType, channel } = ctx
+  const { flow, searchType, channel, modoMedicoParticular } = ctx
 
   // Primer paso de cada flujo -> menú principal
   if (currentPhase === FIRST_STEP[flow]) return MAIN_MENU
@@ -183,7 +190,9 @@ export function getPreviousPhase(
     case 'awaiting_professional_name':
       return 'awaiting_search_type'
     case 'awaiting_professional_selection':
-      return 'awaiting_professional_name'
+      // En modo 'lista' se llega acá directo desde 'awaiting_search_type' (se
+      // saltea 'awaiting_professional_name', que no se muestra nunca en ese modo).
+      return modoMedicoParticular === 'lista' ? 'awaiting_search_type' : 'awaiting_professional_name'
     case 'awaiting_specialty_selection':
       return 'awaiting_search_type'
 

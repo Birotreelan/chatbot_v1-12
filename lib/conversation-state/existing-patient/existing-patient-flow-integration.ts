@@ -27,6 +27,7 @@ import {
   buildSearchOptionsButtons,
   handleSearchTypeSelection,
   buildProfessionalNameRequestMessage,
+  getSingleSearchType,
   type SearchOptionsConfig,
 } from '../shared/search-options-handler'
 import {
@@ -904,7 +905,7 @@ async function handleBackNavigation(
   escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'back_navigation')
-  const prev = getPreviousPhase(state.phase, { flow: 'existing', searchType: state.searchType })
+  const prev = getPreviousPhase(state.phase, { flow: 'existing', searchType: state.searchType, modoMedicoParticular: searchOptionsConfig?.modoMedicoParticular })
 
   // Primer paso -> volver al menú principal de detección
   if (prev === MAIN_MENU) {
@@ -958,6 +959,14 @@ async function handleBackNavigation(
       state.especialidadesOpciones = undefined
       state.turnosOpciones = undefined
       state.turnoSeleccionado = undefined
+
+      // Si hay una sola opción de búsqueda habilitada, no tiene sentido volver
+      // a un menú de un solo ítem: re-ejecutarla directamente.
+      const singleSearchType = getSingleSearchType(searchOptionsConfig)
+      if (singleSearchType) {
+        return await executeSearchType(phoneNumber, clientId, state, singleSearchType, escalationPhoneNumber, searchOptionsConfig)
+      }
+
       state.phase = 'awaiting_search_type'
       await saveFlowState(phoneNumber, state)
       return {
@@ -1158,11 +1167,20 @@ async function handleSedePhase(
   if (result.selectedSede) {
     state.sedeId = result.selectedSede.id
     state.sedeNombre = result.selectedSede.nombre
-    state.phase = 'awaiting_search_type'
     state.attempts = 0
-    await saveFlowState(phoneNumber, state)
 
     logger.info('Sede selected', { sedeId: state.sedeId, sedeName: state.sedeNombre })
+
+    // Si el cliente tiene una sola opción de búsqueda habilitada, saltear el
+    // menú "¿cómo querés buscar tu turno?" y ejecutarla directamente.
+    const singleSearchType = getSingleSearchType(searchOptionsConfig)
+    if (singleSearchType) {
+      logger.info('Unica opcion de busqueda habilitada, saltando menu', { searchType: singleSearchType })
+      return await executeSearchType(phoneNumber, clientId, state, singleSearchType, escalationPhoneNumber, searchOptionsConfig)
+    }
+
+    state.phase = 'awaiting_search_type'
+    await saveFlowState(phoneNumber, state)
 
     return {
       handled: true,
@@ -1230,6 +1248,53 @@ async function handleMedicoParticularSearchType(
 }
 
 /**
+ * Ejecuta la acción correspondiente a un tipo de búsqueda ya determinado — ya
+ * sea porque el paciente lo eligió en el menú, o porque es la única opción
+ * habilitada para el cliente y se saltea el menú directamente (ver
+ * getSingleSearchType / handleSedePhase).
+ */
+async function executeSearchType(
+  phoneNumber: string,
+  clientId: string,
+  state: ExistingPatientFlowState,
+  searchType: NonNullable<ExistingPatientFlowState['searchType']>,
+  escalationPhoneNumber?: string,
+  searchOptionsConfig?: SearchOptionsConfig
+): Promise<ExistingPatientResult> {
+  state.searchType = searchType
+  state.attempts = 0
+
+  if (searchType === 'medico_particular') {
+    return await handleMedicoParticularSearchType(phoneNumber, clientId, state, searchOptionsConfig)
+  }
+
+  if (searchType === 'especialidad') {
+    const espResult = await fetchSpecialties(clientId)
+    if (!espResult.success || !espResult.especialidades) {
+      return {
+        handled: true,
+        message: buildSpecialtiesErrorMessage(),
+        nextPhase: 'error',
+      }
+    }
+
+    state.especialidadesOpciones = espResult.especialidades
+    state.phase = 'awaiting_specialty_selection'
+    await saveFlowState(phoneNumber, state)
+
+    return {
+      handled: true,
+      message: buildSpecialtiesMessage(espResult.especialidades),
+      nextPhase: 'awaiting_specialty_selection',
+    }
+  }
+
+  // cualquier_medico: buscar turnos sin filtro de profesional
+  await saveFlowState(phoneNumber, state)
+  return await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
+}
+
+/**
  * Fase: Tipo de busqueda
  */
 async function handleSearchTypePhase(
@@ -1258,42 +1323,8 @@ async function handleSearchTypePhase(
   })
 
   if (result.searchType) {
-    state.searchType = result.searchType
-    state.attempts = 0
-
-    if (result.searchType === 'medico_particular') {
-      return await handleMedicoParticularSearchType(phoneNumber, clientId, state, searchOptionsConfig)
-    }
-
-    if (result.searchType === 'especialidad') {
-      // Obtener especialidades
-      const espResult = await fetchSpecialties(clientId)
-      if (!espResult.success || !espResult.especialidades) {
-        return {
-          handled: true,
-          message: buildSpecialtiesErrorMessage(),
-          nextPhase: 'error',
-        }
-      }
-
-      state.especialidadesOpciones = espResult.especialidades
-      state.phase = 'awaiting_specialty_selection'
-      await saveFlowState(phoneNumber, state)
-
-      return {
-        handled: true,
-        message: buildSpecialtiesMessage(espResult.especialidades),
-        nextPhase: 'awaiting_specialty_selection',
-      }
-    }
-
-    if (result.searchType === 'cualquier_medico') {
-      // Buscar turnos sin filtro de profesional
-      logger.info('[SEARCH_TYPE] Opcion "cualquier_medico" seleccionada - buscando turnos sin filtro de profesional', {
-        sedeId: state.sedeId,
-        sedeNombre: state.sedeNombre,
-      })
-      return await searchAndShowTurnos(phoneNumber, clientId, state, escalationPhoneNumber)
+    if (result.searchType === 'medico_particular' || result.searchType === 'especialidad' || result.searchType === 'cualquier_medico') {
+      return await executeSearchType(phoneNumber, clientId, state, result.searchType, escalationPhoneNumber, searchOptionsConfig)
     }
 
     if (result.searchType === 'cambiar_sede') {
@@ -1315,6 +1346,7 @@ async function handleSearchTypePhase(
       state.turnosOpciones = undefined
       state.searchType = undefined
       state.phase = 'awaiting_sede'
+      state.attempts = 0
       await saveFlowState(phoneNumber, state)
 
       // Reutilizar las sedes ya cargadas; si no estuvieran, dejar que OpenAI maneje
