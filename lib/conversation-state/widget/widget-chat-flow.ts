@@ -74,7 +74,8 @@ export async function processWidgetMessage(
   sessionId: string,
   userMessage: string,
   clientId: string,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  permitirNuevoTurno?: boolean,
 ): Promise<WidgetChatResult> {
   const logger = createConversationLogger(sessionId, clientId, 'widget_chat')
 
@@ -103,7 +104,7 @@ export async function processWidgetMessage(
 
     if (!patientResponse.exito || !patientResponse.datos) {
       // No encontrado → paciente nuevo
-      const result = await initializeNewPatientFlow(dni, sessionId, clientId, false, userMessage, 'widget')
+      const result = await initializeNewPatientFlow(dni, sessionId, clientId, false, userMessage, 'widget', permitirNuevoTurno, escalationPhoneNumber)
       return finalizeResult(result)
     }
 
@@ -153,7 +154,8 @@ export async function processWidgetMessage(
       },
       escalationPhoneNumber,
       userMessage,
-      'widget'
+      'widget',
+      permitirNuevoTurno,
     )
 
     return finalizeResult(result)

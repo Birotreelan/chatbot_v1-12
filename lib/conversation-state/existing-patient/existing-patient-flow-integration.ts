@@ -328,10 +328,27 @@ export async function initializeExistingPatientFlow(
    * Canal de origen — ver comentario en ExistingPatientFlowState.channel.
    * Por defecto 'whatsapp' para no afectar las llamadas existentes.
    */
-  channel: 'whatsapp' | 'widget' = 'whatsapp'
+  channel: 'whatsapp' | 'widget' = 'whatsapp',
+  /**
+   * Restricción por configuración del cliente (WhatsAppConfig.permitirNuevoTurno,
+   * default true). Esta función siempre desemboca en reservar un turno nuevo
+   * (paciente identificado), tanto si viene de "Solicitar turno" como de
+   * "Cancelar y solicitar uno nuevo".
+   */
+  permitirNuevoTurno?: boolean,
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_init')
   logger.info('Initializing existing patient flow', { patientId, patientName })
+
+  if (permitirNuevoTurno === false) {
+    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+    logger.info('Nuevo turno deshabilitado por configuración del cliente')
+    return {
+      handled: true,
+      message: `Actualmente no es posible solicitar turnos nuevos por este medio.\n\nPara agendar un turno, por favor contactanos al: *${numeroDerivacion}*`,
+      action: 'nuevo_turno_no_permitido',
+    }
+  }
 
   const flags = await getEffectiveFeatureFlags(clientId)
   if (!flags.directPacienteExistente) {

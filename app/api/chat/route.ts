@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, response: RESERVATION_LIMIT_MESSAGE })
     }
 
-    const result = await processWidgetMessage(session_id, message, config.cliente_id, config.escalationPhoneNumber)
+    const result = await processWidgetMessage(session_id, message, config.cliente_id, config.escalationPhoneNumber, config.permitirNuevoTurno)
 
     if (result.reserved) {
       await recordReservation(ip)

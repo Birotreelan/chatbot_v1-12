@@ -81,7 +81,10 @@ export function buildExistingPatientGreeting(
   turnos: any[],
   clinicName: string = DEFAULT_CLINIC_NAME,
   turnosQx: any[] = [],
-  hasReminder: boolean = false
+  hasReminder: boolean = false,
+  permitirNuevoTurno?: boolean,
+  permitirCancelacion?: boolean,
+  escalationPhoneNumber?: string
 ): string {
   const firstName = getFirstName(patientName)
   const hasTurnos = turnos && turnos.length > 0
@@ -89,21 +92,21 @@ export function buildExistingPatientGreeting(
 
   // CASO: Solo cirugías (sin turnos médicos gestionables)
   if (!hasTurnos && hasTurnosQx) {
-    return buildSoloCirugiaGreeting(firstName, turnosQx, clinicName)
+    return buildSoloCirugiaGreeting(firstName, turnosQx, clinicName, permitirNuevoTurno)
   }
 
   // CASO: Sin turnos agendados
   if (!hasTurnos) {
-    return buildExistingPatientNoTurnosGreeting(patientName, clinicName)
+    return buildExistingPatientNoTurnosGreeting(patientName, clinicName, permitirNuevoTurno)
   }
 
   // CASO: Turnos médicos (con o sin cirugías)
   // Construir el saludo médico base y agregar sección de cirugías si corresponde
   let mensaje: string
   if (turnos.length === 1) {
-    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName, hasReminder)
+    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName, hasReminder, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber)
   } else {
-    mensaje = buildMultipleTurnosGreeting(firstName, turnos, clinicName)
+    mensaje = buildMultipleTurnosGreeting(firstName, turnos, clinicName, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber)
   }
 
   // Si además hay cirugías, insertar bloque informativo antes del pie del menú
@@ -173,7 +176,8 @@ function buildBloqueCirugias(turnosQx: any[]): string {
 function buildSoloCirugiaGreeting(
   firstName: string,
   turnosQx: any[],
-  clinicName: string
+  clinicName: string,
+  permitirNuevoTurno?: boolean
 ): string {
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
@@ -208,9 +212,13 @@ function buildSoloCirugiaGreeting(
 
   mensaje += `La gestión de turnos quirúrgicos (cancelación, modificación o confirmación) debe realizarse comunicándote directamente con la clínica.\n\n`
   mensaje += `¿En qué más te puedo ayudar?\n\n`
-  mensaje += `1- Solicitar un turno médico\n`
-  mensaje += `2- Solicitar turno para un familiar\n`
-  mensaje += `3- Realizar otra consulta\n\n`
+  if (permitirNuevoTurno === false) {
+    mensaje += `1- Realizar otra consulta\n\n`
+  } else {
+    mensaje += `1- Solicitar un turno médico\n`
+    mensaje += `2- Solicitar turno para un familiar\n`
+    mensaje += `3- Realizar otra consulta\n\n`
+  }
   mensaje += `Respondé con el número o presioná el botón de tu preferencia.`
 
   return mensaje
@@ -222,9 +230,20 @@ function buildSoloCirugiaGreeting(
  */
 function buildExistingPatientNoTurnosGreeting(
   patientName: string,
-  clinicName: string = DEFAULT_CLINIC_NAME
+  clinicName: string = DEFAULT_CLINIC_NAME,
+  permitirNuevoTurno?: boolean
 ): string {
   const firstName = getFirstName(patientName)
+
+  if (permitirNuevoTurno === false) {
+    return (
+      `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n` +
+      `Soy Iris, tu asistente virtual de inteligencia artificial.\n\n` +
+      `Veo que actualmente no tenés turnos agendados. ¿En qué te puedo ayudar?\n\n` +
+      `1- Realizar otra consulta\n\n` +
+      `Respondé con el número o presioná el botón de tu preferencia.`
+    )
+  }
 
   return (
     `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n` +
@@ -271,7 +290,10 @@ function buildSingleTurnoGreeting(
   firstName: string,
   turno: any,
   clinicName: string,
-  hasReminder: boolean = false
+  hasReminder: boolean = false,
+  permitirCancelacion?: boolean,
+  permitirNuevoTurno?: boolean,
+  escalationPhoneNumber?: string
 ): string {
   const fecha = formatearFecha(turno.Fecha || turno.fecha)
   const hora = formatearHora(turno.Hora || turno.hora || '')
@@ -281,42 +303,47 @@ function buildSingleTurnoGreeting(
   const sede = turno.Centro_Nombre || turno.sede || clinicName
   const categoria = classifyTurnoEstado(turno)
 
+  // Comportamiento original (sin cambios respecto a producción): "Confirmar" se
+  // ofrece cuando hay recordatorio enviado y el turno todavía no fue confirmado.
+  // No depende de ningún toggle nuevo.
+  const puedeConfirmar = categoria === 'no_confirmado' && hasReminder
+  const puedeCancelar = permitirCancelacion !== false
+  const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false
+
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
-  mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
+  mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
 
   if (categoria === 'confirmado') {
-    // Turno ya confirmado por el paciente → no ofrecer "Confirmar asistencia" de nuevo.
     mensaje += `*Tu asistencia al turno del ${fecha} a las ${hora} con ${profesional} en la sede ${sede} ya está confirmada.*\n\n`
-    mensaje += `¿En qué más te podemos ayudar?\n\n`
-    mensaje += `1- Cancelar el turno\n`
-    mensaje += `2- Cancelar el turno y solicitar uno nuevo\n`
-    mensaje += `3- Realizar otra consulta\n\n`
   } else if (categoria === 'no_confirmado' && hasReminder) {
-    // Turno no confirmado Y se envió recordatorio → ofrecer confirmación.
     mensaje += `*Veo que tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}, pero todavía no confirmaste tu asistencia.*\n\n`
-    mensaje += `¿En qué te podemos ayudar?\n\n`
-    mensaje += `1- Confirmar asistencia al turno médico\n`
-    mensaje += `2- Cancelar turno médico\n`
-    mensaje += `3- Cancelar el turno médico y solicitar uno nuevo\n`
-    mensaje += `4- Realizar otra consulta\n\n`
   } else if (categoria === 'no_confirmado') {
-    // Turno no confirmado pero sin recordatorio enviado → no ofrecer confirmación todavía.
     mensaje += `*Veo que tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
-    mensaje += `¿En qué te podemos ayudar?\n\n`
-    mensaje += `1- Cancelar turno médico\n`
-    mensaje += `2- Cancelar el turno médico y solicitar uno nuevo\n`
-    mensaje += `3- Realizar otra consulta\n\n`
   } else {
     // Pendiente de aprobación por la clínica (o estado desconocido): la confirmación
     // de asistencia NO está disponible, por eso se omite esa opción.
     mensaje += `*Veo que ya tenés un turno médico pendiente de aprobación por parte de la clínica, agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
-    mensaje += `¿En qué te podemos ayudar?\n\n`
-    mensaje += `1- Cancelar turno médico\n`
-    mensaje += `2- Cancelar el turno médico y solicitar uno nuevo\n`
-    mensaje += `3- Realizar otra consulta\n\n`
   }
 
-  mensaje += `Respondé con el número de opción que prefieras.`
+  const opciones: string[] = []
+  if (puedeConfirmar) opciones.push('Confirmar asistencia al turno médico')
+  if (puedeCancelar) opciones.push('Cancelar el turno médico')
+  if (puedeCancelarYNuevo) opciones.push('Cancelar el turno médico y solicitar uno nuevo')
+
+  if (opciones.length === 0) {
+    // Ninguna gestión disponible por este medio (todas las restricciones activas) →
+    // informar el estado del turno y derivar directamente, sin menú numerado.
+    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+    mensaje += `Para cualquier gestión sobre este turno, contactanos al: *${numeroDerivacion}*`
+    return mensaje
+  }
+
+  opciones.push('Realizar otra consulta')
+  mensaje += `¿En qué te podemos ayudar?\n\n`
+  opciones.forEach((op, i) => {
+    mensaje += `${i + 1}- ${op}\n`
+  })
+  mensaje += `\nRespondé con el número de opción que prefieras.`
 
   return mensaje
 }
@@ -327,10 +354,13 @@ function buildSingleTurnoGreeting(
 function buildMultipleTurnosGreeting(
   firstName: string,
   turnos: any[],
-  clinicName: string
+  clinicName: string,
+  permitirCancelacion?: boolean,
+  permitirNuevoTurno?: boolean,
+  escalationPhoneNumber?: string
 ): string {
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
-  mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
+  mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
   mensaje += `*Veo que tenés ${turnos.length} turnos médicos agendados:*\n\n`
 
   turnos.forEach((turno, idx) => {
@@ -351,12 +381,22 @@ function buildMultipleTurnosGreeting(
     mensaje += `   ${profesional}${estadoTexto}\n\n`
   })
 
+  // Comportamiento original: con múltiples turnos, "Confirmar asistencia" siempre se
+  // ofrece (no depende de hasReminder, así era en producción). Cancelar/cancelar+nuevo
+  // sí respetan las restricciones del cliente (toggles nuevos).
+  const puedeCancelar = permitirCancelacion !== false
+  const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false
+
+  const opciones: string[] = ['Confirmar asistencia a un turno']
+  if (puedeCancelar) opciones.push('Cancelar un turno')
+  if (puedeCancelarYNuevo) opciones.push('Cancelar un turno y solicitar uno nuevo')
+
+  opciones.push('Realizar otra consulta')
   mensaje += `¿En qué te podemos ayudar?\n\n`
-  mensaje += `1- Confirmar asistencia a un turno\n`
-  mensaje += `2- Cancelar un turno\n`
-  mensaje += `3- Cancelar un turno y solicitar uno nuevo\n`
-  mensaje += `4- Realizar otra consulta\n\n`
-  mensaje += `Respondé con el número de opción que prefieras.`
+  opciones.forEach((op, i) => {
+    mensaje += `${i + 1}- ${op}\n`
+  })
+  mensaje += `\nRespondé con el número de opción que prefieras.`
 
   return mensaje
 }
@@ -366,8 +406,19 @@ function buildMultipleTurnosGreeting(
  * Se solicita intención: turno o consulta
  */
 export function buildNewPatientGreeting(
-  clinicName: string = DEFAULT_CLINIC_NAME
+  clinicName: string = DEFAULT_CLINIC_NAME,
+  permitirNuevoTurno?: boolean
 ): string {
+  if (permitirNuevoTurno === false) {
+    return (
+      `*¡Bienvenido a ${clinicName}!*\n\n` +
+      `Soy Iris, tu asistente virtual de inteligencia artificial.\n\n` +
+      `¿En qué te puedo ayudar?\n\n` +
+      `1- Realizar otra consulta\n\n` +
+      `Respondé con el número o presioná el botón de tu preferencia.`
+    )
+  }
+
   return (
     `*¡Bienvenido a ${clinicName}!*\n\n` +
     `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar o cancelar turnos.\n\n` +

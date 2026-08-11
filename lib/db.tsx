@@ -113,6 +113,9 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     cliente_id: config.cliente_id,
     proxy: config.proxy,
     mostrarEnFacturacion: config.mostrarEnFacturacion !== undefined ? config.mostrarEnFacturacion : true,
+    permitirNuevoTurno: config.permitirNuevoTurno !== undefined ? config.permitirNuevoTurno : true,
+    permitirReagendamiento: config.permitirReagendamiento !== undefined ? config.permitirReagendamiento : true,
+    permitirCancelacion: config.permitirCancelacion !== undefined ? config.permitirCancelacion : true,
     additionalAssistants: config.additionalAssistants || [],
     // Añadir configuraciones por defecto del widget
     widgetEnabled: config.widgetEnabled !== undefined ? config.widgetEnabled : true,

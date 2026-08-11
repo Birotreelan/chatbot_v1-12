@@ -67,7 +67,19 @@ export async function initializePatientDetection(
   clinicName?: string,
   firstMessage?: string,
   hasReminder: boolean = false,
-  bypassFlag: boolean = false
+  bypassFlag: boolean = false,
+  /**
+   * WhatsAppConfig.permitirNuevoTurno del cliente (default true). Cuando es
+   * false, se ocultan del menú "Solicitar turno" y "Turno para familiar" —
+   * el bloqueo funcional real ocurre río abajo en initializeNewPatientFlow/
+   * initializeExistingPatientFlow, esto es sólo para no ofrecer una opción
+   * que después se va a rechazar.
+   */
+  permitirNuevoTurno?: boolean,
+  /** WhatsAppConfig.permitirCancelacion del cliente (default true). */
+  permitirCancelacion?: boolean,
+  /** WhatsAppConfig.escalationPhoneNumber — para los mensajes de derivación cuando no queda ninguna gestión disponible. */
+  escalationPhoneNumber?: string
 ): Promise<PatientDetectionResult> {
   const logger = createConversationLogger(phoneNumber, configId, 'initial_detection_pending')
   logger.info('Initializing patient detection', {})
@@ -91,7 +103,7 @@ export async function initializePatientDetection(
   }
 
   try {
-    const detectionResult = await startPatientDetectionFlow(phoneNumber, configId, clienteId)
+    const detectionResult = await startPatientDetectionFlow(phoneNumber, configId, clienteId, permitirNuevoTurno, permitirCancelacion)
     console.log(`[v0] [INIT_DETECTION] startPatientDetectionFlow result: isNewPatient=${detectionResult.isNewPatient} error=${detectionResult.error} multiplePatients=${detectionResult.multiplePatients?.length}`)
 
     if (detectionResult.error) {
@@ -110,12 +122,14 @@ export async function initializePatientDetection(
       logger.info('New patient detected', { phone: phoneNumber })
       return {
         handled: true,
-        message: buildNewPatientGreeting(clinicName),
-        buttons: [
-          { id: "1", title: "Solicitar turno" },
-          { id: "2", title: "Turno para familiar" },
-          { id: "3", title: "Otra consulta" },
-        ],
+        message: buildNewPatientGreeting(clinicName, permitirNuevoTurno),
+        buttons: permitirNuevoTurno === false
+          ? [{ id: "1", title: "Otra consulta" }]
+          : [
+              { id: "1", title: "Solicitar turno" },
+              { id: "2", title: "Turno para familiar" },
+              { id: "3", title: "Otra consulta" },
+            ],
         patientInfo: {
           isNewPatient: true,
         },
@@ -171,7 +185,10 @@ export async function initializePatientDetection(
       detectionResult.turnos || [],
       clinicName,
       detectionResult.turnosQx || [],
-      hasReminder
+      hasReminder,
+      permitirNuevoTurno,
+      permitirCancelacion,
+      escalationPhoneNumber
     )
 
     // Incluir botones interactivos para los casos con exactamente 3 opciones:
@@ -179,11 +196,13 @@ export async function initializePatientDetection(
     // - Solo cirugías (sin turnos médicos)
     const greetingButtons: Array<{ id: string; title: string }> | undefined =
       (!hasTurnos)
-        ? [
-            { id: "1", title: "Solicitar turno" },
-            { id: "2", title: "Turno para familiar" },
-            { id: "3", title: "Otra consulta" },
-          ]
+        ? (permitirNuevoTurno === false
+            ? [{ id: "1", title: "Otra consulta" }]
+            : [
+                { id: "1", title: "Solicitar turno" },
+                { id: "2", title: "Turno para familiar" },
+                { id: "3", title: "Otra consulta" },
+              ])
         : undefined
 
     return {

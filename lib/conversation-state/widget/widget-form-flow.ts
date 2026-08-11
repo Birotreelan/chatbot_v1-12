@@ -282,7 +282,8 @@ export async function processWidgetFormMessage(
   userMessage: string,
   clientId: string,
   escalationPhoneNumber?: string,
-  init: boolean = false
+  init: boolean = false,
+  permitirNuevoTurno?: boolean,
 ): Promise<FormWidgetStep> {
   const logger = createConversationLogger(sessionId, clientId, 'widget_form')
 
@@ -340,7 +341,7 @@ export async function processWidgetFormMessage(
 
     if (!patientResponse.exito || !patientResponse.datos) {
       // No encontrado → paciente nuevo
-      const result = await initializeNewPatientFlow(dni, sessionId, clientId, false, userMessage, 'widget')
+      const result = await initializeNewPatientFlow(dni, sessionId, clientId, false, userMessage, 'widget', permitirNuevoTurno, escalationPhoneNumber)
       return await finalizeNewPatient(sessionId, result, clinicName, searchOptionsConfig)
     }
 
@@ -392,7 +393,8 @@ export async function processWidgetFormMessage(
       },
       escalationPhoneNumber,
       userMessage,
-      'widget'
+      'widget',
+      permitirNuevoTurno,
     )
 
     return await finalizeExistingPatient(sessionId, result, clinicName, searchOptionsConfig)

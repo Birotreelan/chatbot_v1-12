@@ -104,6 +104,10 @@ interface PatientDetectionState {
   multiplePatients?: any[] // Array de pacientes si hay múltiples
   postActionContext?: 'just_confirmed' // Contexto post-acción para adaptar el menú de retorno
   hasReminder?: boolean      // true si se envió un recordatorio de turno (template WhatsApp) sin respuesta
+  /** false si WhatsAppConfig.permitirNuevoTurno del cliente está desactivado. Default true (permitido). */
+  permitirNuevoTurno?: boolean
+  /** false si WhatsAppConfig.permitirCancelacion del cliente está desactivado. Default true (permitido). */
+  permitirCancelacion?: boolean
   detectedAt: number
   attempts: number
 }
@@ -116,7 +120,9 @@ interface PatientDetectionState {
 export async function startPatientDetectionFlow(
   phoneNumber: string,
   configId: string,
-  clienteId: string
+  clienteId: string,
+  permitirNuevoTurno?: boolean,
+  permitirCancelacion?: boolean
 ): Promise<{
   isNewPatient: boolean
   multiplePatients?: any[]
@@ -150,6 +156,8 @@ export async function startPatientDetectionFlow(
       const newPatientState: PatientDetectionState = {
         phase: 'awaiting_contact_intent',
         patientPhone: phoneNumber,
+        permitirNuevoTurno,
+        permitirCancelacion,
         detectedAt: Date.now(),
         attempts: 1,
       }
@@ -228,6 +236,8 @@ export async function startPatientDetectionFlow(
         phase: 'awaiting_dni_for_disambiguation',
         patientPhone: phoneNumber,
         multiplePatients: multiplePatients,
+        permitirNuevoTurno,
+        permitirCancelacion,
         detectedAt: Date.now(),
         attempts: 1,
       }
@@ -302,6 +312,8 @@ export async function startPatientDetectionFlow(
       obraSocialNombre: obraSocialNombre,
       turnos: turnos,
       turnosQx: turnosQxFromResponse,
+      permitirNuevoTurno,
+      permitirCancelacion,
       detectedAt: Date.now(),
       attempts: 0,
     }
@@ -621,10 +633,13 @@ export async function processPatientDetectionMessage(
     // Mapear acciones según fase
     if (state.phase === 'awaiting_contact_intent') {
       // NUEVA FASE: Paciente nuevo selecciona: 1-Turno, 2-Consulta
-      const intentMap: Record<number, string> = {
-        1: 'book_appointment_intent', // Usuario quiere agendar turno
-        2: 'other_inquiry_intent',     // Usuario quiere hacer otra consulta
-      }
+      // Si permitirNuevoTurno está desactivado, el saludo sólo ofrece "1- Otra consulta".
+      const intentMap: Record<number, string> = state.permitirNuevoTurno === false
+        ? { 1: 'other_inquiry_intent' }
+        : {
+            1: 'book_appointment_intent', // Usuario quiere agendar turno
+            2: 'other_inquiry_intent',     // Usuario quiere hacer otra consulta
+          }
 
       logger.info('Contact intent selection detected', {
         selection,
@@ -702,6 +717,7 @@ export async function processPatientDetectionMessage(
       // La confirmación de asistencia solo se ofrece cuando el turno está "Confirmado"
       // (ya confirmado) o "No confirmado" (el paciente todavía puede confirmar). Cuando
       // está "Pendiente de aprobación" por la clínica, se omite la opción 1 y se renumera.
+      // Comportamiento original, no depende de los toggles nuevos.
       const singleTurno = hasTurnos && state.turnos!.length === 1 ? state.turnos![0] : null
       const singleTurnoSinConfirmacion =
         !!singleTurno && !shouldOfferConfirmation(singleTurno, state.hasReminder ?? false)
@@ -709,38 +725,52 @@ export async function processPatientDetectionMessage(
       let actionMap: Record<number, string>
 
       if (hasTurnos) {
-        if (singleTurnoSinConfirmacion) {
-          // Turno pendiente de aprobación o sin recordatorio enviado:
-          // 1-Cancelar, 2-Cancelar y solicitar uno nuevo, 3-Otra consulta
-          actionMap = {
-            1: 'cancel_appointment',
-            2: 'cancel_and_book_new_appointment',
-            3: 'other_inquiry_intent',
-          }
+        // Con un solo turno, "Confirmar" sólo se ofrece si corresponde según el estado
+        // del turno (shouldOfferConfirmation). Con múltiples turnos, "Confirmar" siempre
+        // se ofrece (comportamiento pre-existente, no depende de hasReminder). Ninguno de
+        // los dos depende de los toggles nuevos.
+        const isSingleTurno = state.turnos!.length === 1
+        const puedeConfirmar = isSingleTurno ? !singleTurnoSinConfirmacion : true
+        const puedeCancelar = state.permitirCancelacion !== false
+        const puedeCancelarYNuevo = state.permitirCancelacion !== false && state.permitirNuevoTurno !== false
+
+        const acciones: string[] = []
+        if (puedeConfirmar) acciones.push('confirm_appointment')
+        if (puedeCancelar) acciones.push('cancel_appointment')
+        if (puedeCancelarYNuevo) acciones.push('cancel_and_book_new_appointment')
+
+        if (acciones.length === 0) {
+          // Ninguna gestión disponible (restricciones del cliente activas y sin turno
+          // pendiente de confirmación) → el saludo ya mostró sólo info + derivación,
+          // sin menú numerado.
+          actionMap = {}
         } else {
-          // Turno no confirmado CON recordatorio: 1-Confirmar, 2-Cancelar,
-          // 3-Cancelar y solicitar uno nuevo, 4-Otra consulta
-          actionMap = {
-            1: 'confirm_appointment',
-            2: 'cancel_appointment',
-            3: 'cancel_and_book_new_appointment',
-            4: 'other_inquiry_intent',
-          }
+          acciones.push('other_inquiry_intent')
+          actionMap = {}
+          acciones.forEach((accion, i) => {
+            actionMap[i + 1] = accion
+          })
         }
       } else if (soloQx) {
         // Paciente SOLO con cirugías (no gestionables): 1-Solicitar turno, 2-Familiar, 3-Otra consulta
-        actionMap = {
-          1: 'book_new_appointment',
-          2: 'familiar_appointment_intent',
-          3: 'other_inquiry_intent',
-        }
+        // Si el cliente tiene desactivado permitirNuevoTurno, ambas opciones de reserva
+        // (propia y para familiar) se ocultan del menú — sólo queda "Otra consulta".
+        actionMap = state.permitirNuevoTurno === false
+          ? { 1: 'other_inquiry_intent' }
+          : {
+              1: 'book_new_appointment',
+              2: 'familiar_appointment_intent',
+              3: 'other_inquiry_intent',
+            }
       } else {
         // Paciente SIN turnos: 1-Solicitar turno, 2-Familiar, 3-Otra consulta
-        actionMap = {
-          1: 'book_new_appointment',
-          2: 'familiar_appointment_intent',
-          3: 'other_inquiry_intent',
-        }
+        actionMap = state.permitirNuevoTurno === false
+          ? { 1: 'other_inquiry_intent' }
+          : {
+              1: 'book_new_appointment',
+              2: 'familiar_appointment_intent',
+              3: 'other_inquiry_intent',
+            }
       }
 
       logger.info('Action map selected', {
@@ -823,10 +853,12 @@ export async function processPatientDetectionMessage(
       const selectedOptionNumber = detectionResult.selectedOption
 
       if (state.phase === 'awaiting_contact_intent') {
-        const intentMap: Record<number, string> = {
-          1: 'book_appointment_intent',
-          2: 'other_inquiry_intent',
-        }
+        const intentMap: Record<number, string> = state.permitirNuevoTurno === false
+          ? { 1: 'other_inquiry_intent' }
+          : {
+              1: 'book_appointment_intent',
+              2: 'other_inquiry_intent',
+            }
 
         const action = intentMap[selectedOptionNumber || 0]
 
@@ -859,32 +891,41 @@ export async function processPatientDetectionMessage(
         let actionMap: Record<number, string>
 
         if (hasTurnos) {
-          if (singleTurnoSinConfirmacion) {
-            actionMap = {
-              1: 'cancel_appointment',
-              2: 'cancel_and_book_new_appointment',
-              3: 'other_inquiry_intent',
-            }
+          const isSingleTurno = state.turnos!.length === 1
+          const puedeConfirmar = isSingleTurno ? !singleTurnoSinConfirmacion : true
+          const puedeCancelar = state.permitirCancelacion !== false
+          const puedeCancelarYNuevo = state.permitirCancelacion !== false && state.permitirNuevoTurno !== false
+
+          const acciones: string[] = []
+          if (puedeConfirmar) acciones.push('confirm_appointment')
+          if (puedeCancelar) acciones.push('cancel_appointment')
+          if (puedeCancelarYNuevo) acciones.push('cancel_and_book_new_appointment')
+
+          if (acciones.length === 0) {
+            actionMap = {}
           } else {
-            actionMap = {
-              1: 'confirm_appointment',
-              2: 'cancel_appointment',
-              3: 'cancel_and_book_new_appointment',
-              4: 'other_inquiry_intent',
-            }
+            acciones.push('other_inquiry_intent')
+            actionMap = {}
+            acciones.forEach((accion, i) => {
+              actionMap[i + 1] = accion
+            })
           }
         } else if (soloQx) {
-          actionMap = {
-            1: 'book_new_appointment',
-            2: 'familiar_appointment_intent',
-            3: 'other_inquiry_intent',
-          }
+          actionMap = state.permitirNuevoTurno === false
+            ? { 1: 'other_inquiry_intent' }
+            : {
+                1: 'book_new_appointment',
+                2: 'familiar_appointment_intent',
+                3: 'other_inquiry_intent',
+              }
         } else {
-          actionMap = {
-            1: 'book_new_appointment',
-            2: 'familiar_appointment_intent',
-            3: 'other_inquiry_intent',
-          }
+          actionMap = state.permitirNuevoTurno === false
+            ? { 1: 'other_inquiry_intent' }
+            : {
+                1: 'book_new_appointment',
+                2: 'familiar_appointment_intent',
+                3: 'other_inquiry_intent',
+              }
         }
 
         const action = actionMap[selectedOptionNumber || 0]

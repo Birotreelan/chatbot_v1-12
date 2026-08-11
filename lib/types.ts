@@ -25,6 +25,14 @@ export interface WhatsAppConfig {
   enableSearchBySpecialty?: boolean
   enableSearchByAnyDoctor?: boolean
 
+  // Restricciones de acciones disponibles para pacientes. Default true (permitido).
+  /** Si es false, el paciente no puede solicitar un turno nuevo (ni como paciente nuevo ni existente). */
+  permitirNuevoTurno?: boolean
+  /** Si es false, el paciente no puede reagendar un turno cancelado/existente. */
+  permitirReagendamiento?: boolean
+  /** Si es false, el paciente no puede cancelar un turno por este medio. */
+  permitirCancelacion?: boolean
+
   healthStatus?: "AVAILABLE" | "LIMITED" | "BLOCKED"
   lastHealthCheck?: string
   healthCheckError?: string

@@ -103,6 +103,7 @@ export async function POST(request: NextRequest) {
           config.cliente_id,
           config.escalationPhoneNumber,
           false,
+          config.permitirNuevoTurno,
         )
         retryStep.alert = {
           type: "warning",
@@ -146,6 +147,7 @@ export async function POST(request: NextRequest) {
       config.cliente_id,
       config.escalationPhoneNumber,
       init === true,
+      config.permitirNuevoTurno,
     )
 
     if (step.phase === "completed" && step.success) {

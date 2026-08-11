@@ -75,6 +75,9 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     enableSearchByProfessional: true,
     enableSearchBySpecialty: true,
     enableSearchByAnyDoctor: true,
+    permitirNuevoTurno: true,
+    permitirReagendamiento: true,
+    permitirCancelacion: true,
     ...config,
   })
 
@@ -398,6 +401,67 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                     <AlertDescription className="text-red-700">{errors.searchOptions}</AlertDescription>
                   </Alert>
                 )}
+              </div>
+
+              <Separator className="my-4" />
+
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Restricciones de Turnos</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Controla qué acciones puede realizar el paciente por este medio.
+                  </p>
+                </div>
+
+                <div className="space-y-3 pl-0">
+                  <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                    <Switch
+                      id="permitirNuevoTurno"
+                      checked={formData.permitirNuevoTurno !== false}
+                      onCheckedChange={(checked) => updateFormData("permitirNuevoTurno", checked)}
+                    />
+                    <div className="flex-1">
+                      <Label htmlFor="permitirNuevoTurno" className="text-sm font-medium">
+                        Permitir solicitar turno nuevo
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Si se desactiva, el paciente no podrá reservar un turno nuevo por este medio
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                    <Switch
+                      id="permitirReagendamiento"
+                      checked={formData.permitirReagendamiento !== false}
+                      onCheckedChange={(checked) => updateFormData("permitirReagendamiento", checked)}
+                    />
+                    <div className="flex-1">
+                      <Label htmlFor="permitirReagendamiento" className="text-sm font-medium">
+                        Permitir reagendar turno cancelado
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Si se desactiva, el paciente no podrá reagendar un turno cancelado por este medio
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                    <Switch
+                      id="permitirCancelacion"
+                      checked={formData.permitirCancelacion !== false}
+                      onCheckedChange={(checked) => updateFormData("permitirCancelacion", checked)}
+                    />
+                    <div className="flex-1">
+                      <Label htmlFor="permitirCancelacion" className="text-sm font-medium">
+                        Permitir cancelar turno
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Si se desactiva, el paciente no podrá cancelar un turno por este medio
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="flex items-center space-x-2">

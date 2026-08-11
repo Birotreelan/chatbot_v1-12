@@ -257,10 +257,26 @@ export async function initializeNewPatientFlow(
   clientId: string,
   esFamiliar?: boolean,
   initialMessage?: string,
-  channel?: 'whatsapp' | 'widget'
+  channel?: 'whatsapp' | 'widget',
+  permitirNuevoTurno?: boolean,
+  escalationPhoneNumber?: string,
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'new_patient_init')
   logger.info('Initializing new patient flow', { dni, esFamiliar, channel })
+
+  // Restricción por configuración del cliente (WhatsAppConfig.permitirNuevoTurno,
+  // default true). Corta ANTES de cualquier lógica de flujo, distinto de los
+  // feature flags de Redis: esto es una decisión de negocio por cliente, no
+  // un rollout de funcionalidad.
+  if (permitirNuevoTurno === false) {
+    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+    logger.info('Nuevo turno deshabilitado por configuración del cliente')
+    return {
+      handled: true,
+      message: `Actualmente no es posible solicitar turnos nuevos por este medio.\n\nPara agendar un turno, por favor contactanos al: *${numeroDerivacion}*`,
+      action: 'nuevo_turno_no_permitido',
+    }
+  }
 
   const flags = await getEffectiveFeatureFlags(clientId)
   if (!flags.directPacienteNuevo) {
