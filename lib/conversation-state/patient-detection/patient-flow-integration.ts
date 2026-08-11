@@ -24,6 +24,7 @@ import {
   buildFamiliarDNIRequestContextualMessage,
 } from './patient-templates'
 import { detectFamiliarIntent } from './familiar-intent-detector'
+import { classifyTurnoEstado } from './turno-estado'
 
 /**
  * Patient Detection Flow Integration
@@ -122,9 +123,9 @@ export async function initializePatientDetection(
       logger.info('New patient detected', { phone: phoneNumber })
       return {
         handled: true,
-        message: buildNewPatientGreeting(clinicName, permitirNuevoTurno),
+        message: buildNewPatientGreeting(clinicName, permitirNuevoTurno, escalationPhoneNumber),
         buttons: permitirNuevoTurno === false
-          ? [{ id: "1", title: "Otra consulta" }]
+          ? undefined
           : [
               { id: "1", title: "Solicitar turno" },
               { id: "2", title: "Turno para familiar" },
@@ -191,19 +192,35 @@ export async function initializePatientDetection(
       escalationPhoneNumber
     )
 
+    // Único turno, sin posibilidad de confirmar (no hubo recordatorio) ni de
+    // cancelar-y-agendar-nuevo (permitirNuevoTurno=false): el saludo ofrece
+    // solo el botón "Cancelar turno" — debe coincidir con la lógica de
+    // buildSingleTurnoGreeting (patient-templates.ts) y con el actionMap de
+    // patient-flow-handler.ts.
+    const singleTurno = detectionResult.turnos && detectionResult.turnos.length === 1
+      ? detectionResult.turnos[0]
+      : null
+    const singleTurnoSoloCancelar =
+      !!singleTurno &&
+      !(classifyTurnoEstado(singleTurno) === 'no_confirmado' && hasReminder) &&
+      permitirCancelacion !== false &&
+      permitirNuevoTurno === false
+
     // Incluir botones interactivos para los casos con exactamente 3 opciones:
     // - Sin turnos (ni médicos ni quirúrgicos)
     // - Solo cirugías (sin turnos médicos)
     const greetingButtons: Array<{ id: string; title: string }> | undefined =
-      (!hasTurnos)
-        ? (permitirNuevoTurno === false
-            ? [{ id: "1", title: "Otra consulta" }]
-            : [
-                { id: "1", title: "Solicitar turno" },
-                { id: "2", title: "Turno para familiar" },
-                { id: "3", title: "Otra consulta" },
-              ])
-        : undefined
+      singleTurnoSoloCancelar
+        ? [{ id: "1", title: "Cancelar turno" }]
+        : (!hasTurnos)
+            ? (permitirNuevoTurno === false
+                ? undefined
+                : [
+                    { id: "1", title: "Solicitar turno" },
+                    { id: "2", title: "Turno para familiar" },
+                    { id: "3", title: "Otra consulta" },
+                  ])
+            : undefined
 
     return {
       handled: true,

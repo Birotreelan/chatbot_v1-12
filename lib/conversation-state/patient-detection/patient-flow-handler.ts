@@ -633,9 +633,10 @@ export async function processPatientDetectionMessage(
     // Mapear acciones según fase
     if (state.phase === 'awaiting_contact_intent') {
       // NUEVA FASE: Paciente nuevo selecciona: 1-Turno, 2-Consulta
-      // Si permitirNuevoTurno está desactivado, el saludo sólo ofrece "1- Otra consulta".
+      // Si permitirNuevoTurno está desactivado, el saludo no ofrece menú ni botón
+      // (mensaje de derivación puro) → no hay ninguna opción numérica válida.
       const intentMap: Record<number, string> = state.permitirNuevoTurno === false
-        ? { 1: 'other_inquiry_intent' }
+        ? {}
         : {
             1: 'book_appointment_intent', // Usuario quiere agendar turno
             2: 'other_inquiry_intent',     // Usuario quiere hacer otra consulta
@@ -744,6 +745,11 @@ export async function processPatientDetectionMessage(
           // pendiente de confirmación) → el saludo ya mostró sólo info + derivación,
           // sin menú numerado.
           actionMap = {}
+        } else if (isSingleTurno && !puedeConfirmar && puedeCancelar && !puedeCancelarYNuevo) {
+          // Única gestión disponible: cancelar. El saludo muestra sólo el botón
+          // "Cancelar turno" (id "1"), sin "Otra consulta" — el resto se deriva
+          // por texto. Debe coincidir con buildSingleTurnoGreeting.
+          actionMap = { 1: 'cancel_appointment' }
         } else {
           acciones.push('other_inquiry_intent')
           actionMap = {}
@@ -753,10 +759,10 @@ export async function processPatientDetectionMessage(
         }
       } else if (soloQx) {
         // Paciente SOLO con cirugías (no gestionables): 1-Solicitar turno, 2-Familiar, 3-Otra consulta
-        // Si el cliente tiene desactivado permitirNuevoTurno, ambas opciones de reserva
-        // (propia y para familiar) se ocultan del menú — sólo queda "Otra consulta".
+        // Si el cliente tiene desactivado permitirNuevoTurno, el saludo es un mensaje
+        // puro de derivación (sin menú ni botón) → ninguna opción numérica es válida.
         actionMap = state.permitirNuevoTurno === false
-          ? { 1: 'other_inquiry_intent' }
+          ? {}
           : {
               1: 'book_new_appointment',
               2: 'familiar_appointment_intent',
@@ -765,7 +771,7 @@ export async function processPatientDetectionMessage(
       } else {
         // Paciente SIN turnos: 1-Solicitar turno, 2-Familiar, 3-Otra consulta
         actionMap = state.permitirNuevoTurno === false
-          ? { 1: 'other_inquiry_intent' }
+          ? {}
           : {
               1: 'book_new_appointment',
               2: 'familiar_appointment_intent',
@@ -854,7 +860,7 @@ export async function processPatientDetectionMessage(
 
       if (state.phase === 'awaiting_contact_intent') {
         const intentMap: Record<number, string> = state.permitirNuevoTurno === false
-          ? { 1: 'other_inquiry_intent' }
+          ? {}
           : {
               1: 'book_appointment_intent',
               2: 'other_inquiry_intent',
@@ -903,6 +909,8 @@ export async function processPatientDetectionMessage(
 
           if (acciones.length === 0) {
             actionMap = {}
+          } else if (isSingleTurno && !puedeConfirmar && puedeCancelar && !puedeCancelarYNuevo) {
+            actionMap = { 1: 'cancel_appointment' }
           } else {
             acciones.push('other_inquiry_intent')
             actionMap = {}
@@ -912,7 +920,7 @@ export async function processPatientDetectionMessage(
           }
         } else if (soloQx) {
           actionMap = state.permitirNuevoTurno === false
-            ? { 1: 'other_inquiry_intent' }
+            ? {}
             : {
                 1: 'book_new_appointment',
                 2: 'familiar_appointment_intent',
@@ -920,7 +928,7 @@ export async function processPatientDetectionMessage(
               }
         } else {
           actionMap = state.permitirNuevoTurno === false
-            ? { 1: 'other_inquiry_intent' }
+            ? {}
             : {
                 1: 'book_new_appointment',
                 2: 'familiar_appointment_intent',

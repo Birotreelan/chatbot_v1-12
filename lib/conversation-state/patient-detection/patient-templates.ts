@@ -92,12 +92,12 @@ export function buildExistingPatientGreeting(
 
   // CASO: Solo cirugías (sin turnos médicos gestionables)
   if (!hasTurnos && hasTurnosQx) {
-    return buildSoloCirugiaGreeting(firstName, turnosQx, clinicName, permitirNuevoTurno)
+    return buildSoloCirugiaGreeting(firstName, turnosQx, clinicName, permitirNuevoTurno, escalationPhoneNumber)
   }
 
   // CASO: Sin turnos agendados
   if (!hasTurnos) {
-    return buildExistingPatientNoTurnosGreeting(patientName, clinicName, permitirNuevoTurno)
+    return buildExistingPatientNoTurnosGreeting(patientName, clinicName, permitirNuevoTurno, escalationPhoneNumber)
   }
 
   // CASO: Turnos médicos (con o sin cirugías)
@@ -177,7 +177,8 @@ function buildSoloCirugiaGreeting(
   firstName: string,
   turnosQx: any[],
   clinicName: string,
-  permitirNuevoTurno?: boolean
+  permitirNuevoTurno?: boolean,
+  escalationPhoneNumber?: string
 ): string {
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
@@ -211,14 +212,18 @@ function buildSoloCirugiaGreeting(
   }
 
   mensaje += `La gestión de turnos quirúrgicos (cancelación, modificación o confirmación) debe realizarse comunicándote directamente con la clínica.\n\n`
-  mensaje += `¿En qué más te puedo ayudar?\n\n`
+
   if (permitirNuevoTurno === false) {
-    mensaje += `1- Realizar otra consulta\n\n`
-  } else {
-    mensaje += `1- Solicitar un turno médico\n`
-    mensaje += `2- Solicitar turno para un familiar\n`
-    mensaje += `3- Realizar otra consulta\n\n`
+    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+    mensaje += `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n`
+    mensaje += `Para otras consultas, comunicate al *${numeroDerivacion}*.`
+    return mensaje
   }
+
+  mensaje += `¿En qué más te puedo ayudar?\n\n`
+  mensaje += `1- Solicitar un turno médico\n`
+  mensaje += `2- Solicitar turno para un familiar\n`
+  mensaje += `3- Realizar otra consulta\n\n`
   mensaje += `Respondé con el número o presioná el botón de tu preferencia.`
 
   return mensaje
@@ -231,17 +236,17 @@ function buildSoloCirugiaGreeting(
 function buildExistingPatientNoTurnosGreeting(
   patientName: string,
   clinicName: string = DEFAULT_CLINIC_NAME,
-  permitirNuevoTurno?: boolean
+  permitirNuevoTurno?: boolean,
+  escalationPhoneNumber?: string
 ): string {
   const firstName = getFirstName(patientName)
 
   if (permitirNuevoTurno === false) {
+    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
     return (
-      `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n` +
-      `Soy Iris, tu asistente virtual de inteligencia artificial.\n\n` +
-      `Veo que actualmente no tenés turnos agendados. ¿En qué te puedo ayudar?\n\n` +
-      `1- Realizar otra consulta\n\n` +
-      `Respondé con el número o presioná el botón de tu preferencia.`
+      `Gracias por comunicarte con ${clinicName}, ${firstName}.\n\n` +
+      `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
+      `Para otras consultas, comunicate al *${numeroDerivacion}*.`
     )
   }
 
@@ -338,6 +343,19 @@ function buildSingleTurnoGreeting(
     return mensaje
   }
 
+  if (!puedeConfirmar && puedeCancelar && !puedeCancelarYNuevo) {
+    // Única gestión disponible: cancelar. En lugar de un menú numerado con
+    // "Otra consulta", se ofrece directamente el botón de cancelar y se deriva
+    // el resto de las consultas (incluido reagendar) al número de derivación.
+    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+    return (
+      `*${firstName}, ¡bienvenido nuevamente a ${clinicName}!*\n\n` +
+      `Tenés un turno médico programado para el ${fecha} a las ${hora} h, con ${profesional}, en la sede ${sede}.\n\n` +
+      `Si necesitás cancelar el turno, podés hacerlo presionando el botón que aparece a continuación.\n\n` +
+      `Para realizar otras consultas o reprogramar tu turno, comunicate con nosotros al *${numeroDerivacion}*.`
+    )
+  }
+
   opciones.push('Realizar otra consulta')
   mensaje += `¿En qué te podemos ayudar?\n\n`
   opciones.forEach((op, i) => {
@@ -407,15 +425,15 @@ function buildMultipleTurnosGreeting(
  */
 export function buildNewPatientGreeting(
   clinicName: string = DEFAULT_CLINIC_NAME,
-  permitirNuevoTurno?: boolean
+  permitirNuevoTurno?: boolean,
+  escalationPhoneNumber?: string
 ): string {
   if (permitirNuevoTurno === false) {
+    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
     return (
-      `*¡Bienvenido a ${clinicName}!*\n\n` +
-      `Soy Iris, tu asistente virtual de inteligencia artificial.\n\n` +
-      `¿En qué te puedo ayudar?\n\n` +
-      `1- Realizar otra consulta\n\n` +
-      `Respondé con el número o presioná el botón de tu preferencia.`
+      `Gracias por comunicarte con ${clinicName}.\n\n` +
+      `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
+      `Para otras consultas, comunicate al *${numeroDerivacion}*.`
     )
   }
 
