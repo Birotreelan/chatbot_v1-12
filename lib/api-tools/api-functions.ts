@@ -344,6 +344,26 @@ export async function buscarProfesionales(
   return resultado
 }
 
+// Función para listar TODOS los profesionales, sin filtro de búsqueda (usada por el
+// modo "lista completa" de la opción "Médico en particular"). A diferencia de
+// buscarProfesionales, no envía el parámetro "busqueda" en absoluto.
+export async function obtenerTodosLosProfesionales(
+  clienteId: string,
+  useCache = true,
+): Promise<ApiResponse<{ id: string; nombre: string; especialidad?: string }[]>> {
+  const resultado = await fetchProxyApi<any>(clienteId, "get_profesionales", {}, useCache)
+
+  if (resultado.exito && resultado.datos) {
+    const profesionales = resultado.datos.profesionales || resultado.datos
+    return {
+      exito: true,
+      datos: Array.isArray(profesionales) ? profesionales : [],
+    }
+  }
+
+  return resultado
+}
+
 // Función para obtener turnos disponibles o agendados
 export async function obtenerTurnos(
   clienteId: string,

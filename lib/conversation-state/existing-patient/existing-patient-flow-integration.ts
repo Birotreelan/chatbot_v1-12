@@ -41,6 +41,7 @@ import {
   buildProfessionalsListMessage,
   handleProfessionalSelection,
   handleProfessionalNameInput,
+  listAllProfessionals,
   type ProfessionalInterruptionOptions,
 } from '../shared/professional-handler'
 import {
@@ -718,7 +719,8 @@ export async function resumeExistingPatientBroadSearch(
     /** Tipo de búsqueda ya elegido por el paciente en el flujo de reagendamiento. */
     searchType: 'por_profesional' | 'por_especialidad' | 'cualquier_medico'
   },
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  searchOptionsConfig?: SearchOptionsConfig
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'existing_patient_resume_broad_search')
   logger.info('Resuming existing patient flow for broad search (from reschedule)', {
@@ -770,14 +772,7 @@ export async function resumeExistingPatientBroadSearch(
   state.searchType = searchTypeMap[params.searchType] || 'cualquier_medico'
 
   if (state.searchType === 'medico_particular') {
-    state.phase = 'awaiting_professional_name'
-    await saveFlowState(phoneNumber, state)
-    return {
-      handled: true,
-      message: buildProfessionalNameRequestMessage(),
-      nextPhase: 'awaiting_professional_name',
-      atrasButton: true,
-    }
+    return await handleMedicoParticularSearchType(phoneNumber, clientId, state, searchOptionsConfig)
   }
 
   if (state.searchType === 'especialidad') {
@@ -1189,6 +1184,52 @@ async function handleSedePhase(
 }
 
 /**
+ * Maneja la selección del tipo de búsqueda "medico_particular": según
+ * WhatsAppConfig.modoMedicoParticular (mutuamente excluyentes), pide el nombre
+ * al paciente (default, comportamiento original) o lista todos los
+ * profesionales disponibles para que elija por número.
+ */
+async function handleMedicoParticularSearchType(
+  phoneNumber: string,
+  clientId: string,
+  state: ExistingPatientFlowState,
+  searchOptionsConfig?: SearchOptionsConfig
+): Promise<ExistingPatientResult> {
+  if (searchOptionsConfig?.modoMedicoParticular === 'lista') {
+    const listResult = await listAllProfessionals(clientId)
+
+    if (!listResult.success || !listResult.profesionales) {
+      state.phase = 'awaiting_search_type'
+      await saveFlowState(phoneNumber, state)
+      return {
+        handled: true,
+        message: listResult.error || 'No hay profesionales disponibles en este momento.',
+        nextPhase: 'awaiting_search_type',
+      }
+    }
+
+    state.profesionalesOpciones = listResult.profesionales
+    state.phase = 'awaiting_professional_selection'
+    await saveFlowState(phoneNumber, state)
+    return {
+      handled: true,
+      message: buildProfessionalsListMessage(listResult.profesionales),
+      nextPhase: 'awaiting_professional_selection',
+      atrasButton: true,
+    }
+  }
+
+  state.phase = 'awaiting_professional_name'
+  await saveFlowState(phoneNumber, state)
+  return {
+    handled: true,
+    message: buildProfessionalNameRequestMessage(),
+    nextPhase: 'awaiting_professional_name',
+    atrasButton: true,
+  }
+}
+
+/**
  * Fase: Tipo de busqueda
  */
 async function handleSearchTypePhase(
@@ -1221,14 +1262,7 @@ async function handleSearchTypePhase(
     state.attempts = 0
 
     if (result.searchType === 'medico_particular') {
-      state.phase = 'awaiting_professional_name'
-      await saveFlowState(phoneNumber, state)
-      return {
-        handled: true,
-        message: buildProfessionalNameRequestMessage(),
-        nextPhase: 'awaiting_professional_name',
-        atrasButton: true,
-      }
+      return await handleMedicoParticularSearchType(phoneNumber, clientId, state, searchOptionsConfig)
     }
 
     if (result.searchType === 'especialidad') {

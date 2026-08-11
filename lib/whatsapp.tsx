@@ -4222,6 +4222,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               enableSearchByProfessional: config.enableSearchByProfessional !== false,
               enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
               enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+              modoMedicoParticular: config.modoMedicoParticular,
             }
           )
         } else if (await isNewPatientFlowActive(userPhoneNumber)) {
@@ -4234,6 +4235,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               enableSearchByProfessional: config.enableSearchByProfessional !== false,
               enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
               enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+              modoMedicoParticular: config.modoMedicoParticular,
             }
           )
         }
@@ -4607,6 +4609,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     enableSearchByProfessional: config.enableSearchByProfessional !== false,
                     enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
                     enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+                    modoMedicoParticular: config.modoMedicoParticular,
                   }
                 )
                 if (existingResult?.handled && existingResult.message) {
@@ -5309,6 +5312,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     enableSearchByProfessional: config.enableSearchByProfessional !== false,
                     enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
                     enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+                    modoMedicoParticular: config.modoMedicoParticular,
                   }
                 )
                 if (existRes?.handled && existRes.message) {
@@ -5830,7 +5834,13 @@ ${JSON.stringify(functionArgs, null, 2)}`
                 sedeId: fc.sedeId,
                 searchType: fc.searchType,
               },
-              config.escalationPhoneNumber
+              config.escalationPhoneNumber,
+              {
+                enableSearchByProfessional: config.enableSearchByProfessional !== false,
+                enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
+                enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+                modoMedicoParticular: config.modoMedicoParticular,
+              }
             )
             if (!resumeResult.shouldCallOpenAI) {
               const ctxResume: DirectResponseContext = {

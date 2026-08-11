@@ -75,6 +75,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     enableSearchByProfessional: true,
     enableSearchBySpecialty: true,
     enableSearchByAnyDoctor: true,
+    modoMedicoParticular: "nombre" as "nombre" | "lista",
     permitirNuevoTurno: true,
     permitirReagendamiento: true,
     permitirCancelacion: true,
@@ -347,20 +348,42 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </div>
 
                 <div className="space-y-3 pl-0">
-                  <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
-                    <Switch
-                      id="enableSearchByProfessional"
-                      checked={formData.enableSearchByProfessional !== false}
-                      onCheckedChange={(checked) => updateFormData("enableSearchByProfessional", checked)}
-                    />
-                    <div className="flex-1">
-                      <Label htmlFor="enableSearchByProfessional" className="text-sm font-medium">
-                        Médico en particular
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        Permite buscar por nombre específico del profesional
-                      </p>
+                  <div className="space-y-2 p-2 rounded-md bg-muted/30">
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id="enableSearchByProfessional"
+                        checked={formData.enableSearchByProfessional !== false}
+                        onCheckedChange={(checked) => updateFormData("enableSearchByProfessional", checked)}
+                      />
+                      <div className="flex-1">
+                        <Label htmlFor="enableSearchByProfessional" className="text-sm font-medium">
+                          Médico en particular
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          Permite buscar por nombre específico del profesional
+                        </p>
+                      </div>
                     </div>
+
+                    {formData.enableSearchByProfessional !== false && (
+                      <div className="pl-9 pt-1 space-y-1">
+                        <Label htmlFor="modoMedicoParticular" className="text-xs font-medium text-muted-foreground">
+                          Cómo elige el paciente al profesional
+                        </Label>
+                        <Select
+                          value={formData.modoMedicoParticular || "nombre"}
+                          onValueChange={(value) => updateFormData("modoMedicoParticular", value)}
+                        >
+                          <SelectTrigger id="modoMedicoParticular" className="h-9">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="nombre">El paciente escribe el nombre del profesional</SelectItem>
+                            <SelectItem value="lista">Mostrar la lista completa de profesionales para elegir</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">

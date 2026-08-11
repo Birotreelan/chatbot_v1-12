@@ -3,7 +3,7 @@
  */
 
 import { createConversationLogger } from '../logger'
-import { buscarProfesionales } from '../../api-tools/api-functions'
+import { buscarProfesionales, obtenerTodosLosProfesionales } from '../../api-tools/api-functions'
 import { extractSelection } from '../selection-extractor'
 import { detectFlowInterruption } from './flow-interruption-handler'
 import type { ProfessionalOption, HandlerResult } from './types'
@@ -52,20 +52,66 @@ export async function searchProfessionals(
 }
 
 /**
- * Construye mensaje con lista de profesionales encontrados
+ * Lista TODOS los profesionales disponibles, sin filtro de búsqueda.
+ * Usada por el modo "lista completa" de la opción "Médico en particular"
+ * (WhatsAppConfig.modoMedicoParticular === 'lista').
+ */
+export async function listAllProfessionals(
+  clientId: string
+): Promise<{
+  success: boolean
+  profesionales?: ProfessionalOption[]
+  error?: string
+}> {
+  try {
+    const result = await obtenerTodosLosProfesionales(clientId)
+
+    if (!result.exito || !result.datos || result.datos.length === 0) {
+      return {
+        success: false,
+        error: 'No hay profesionales disponibles en este momento.',
+      }
+    }
+
+    const profesionalesFormateados: ProfessionalOption[] = result.datos.map((prof: any, index: number) => ({
+      numero: index + 1,
+      id: prof.Id || prof.id,
+      nombre: prof.Nombre_Completo || prof.nombre_completo || prof.Nombre || prof.nombre,
+      especialidad: prof.Especialidad || prof.especialidad,
+    }))
+
+    return {
+      success: true,
+      profesionales: profesionalesFormateados,
+    }
+  } catch (error) {
+    console.error('[professional-handler] Error listing all professionals:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    }
+  }
+}
+
+/**
+ * Construye mensaje con lista de profesionales encontrados.
+ * @param searchTerm Si se omite (modo "lista completa"), no se muestra el
+ *   mensaje de "encontré a X" ni "coinciden con Y" — se listan directamente.
  */
 export function buildProfessionalsListMessage(
   profesionales: ProfessionalOption[],
-  searchTerm: string
+  searchTerm?: string
 ): string {
-  if (profesionales.length === 1) {
+  if (profesionales.length === 1 && searchTerm) {
     const prof = profesionales[0]
     return `Encontre a *${prof.nombre}*${prof.especialidad ? ` (${prof.especialidad})` : ''}.
 
 Voy a buscar los turnos disponibles con este profesional.`
   }
 
-  let message = `Encontre ${profesionales.length} profesionales que coinciden con "${searchTerm}":\n\n`
+  let message = searchTerm
+    ? `Encontre ${profesionales.length} profesionales que coinciden con "${searchTerm}":\n\n`
+    : `Estos son los profesionales disponibles:\n\n`
 
   profesionales.forEach((prof) => {
     message += `${prof.numero}. *${prof.nombre}*`

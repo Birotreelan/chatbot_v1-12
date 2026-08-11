@@ -253,6 +253,7 @@ async function getSearchOptionsConfig(clientId: string): Promise<SearchOptionsCo
       enableSearchByProfessional: config.enableSearchByProfessional !== false,
       enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
       enableSearchByAnyDoctor: config.enableSearchByAnyDoctor !== false,
+      modoMedicoParticular: config.modoMedicoParticular,
     }
   } catch {
     return undefined

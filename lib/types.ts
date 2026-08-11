@@ -24,6 +24,13 @@ export interface WhatsAppConfig {
   enableSearchByProfessional?: boolean
   enableSearchBySpecialty?: boolean
   enableSearchByAnyDoctor?: boolean
+  /**
+   * Submenú de "Médico en particular" (solo aplica si enableSearchByProfessional
+   * está habilitado). 'nombre' (default): el paciente escribe el nombre del
+   * profesional. 'lista': se le muestra la lista completa de profesionales para
+   * que elija por número. Mutuamente excluyentes.
+   */
+  modoMedicoParticular?: 'nombre' | 'lista'
 
   // Restricciones de acciones disponibles para pacientes. Default true (permitido).
   /** Si es false, el paciente no puede solicitar un turno nuevo (ni como paciente nuevo ni existente). */

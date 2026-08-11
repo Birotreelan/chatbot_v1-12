@@ -11,6 +11,8 @@ export interface SearchOptionsConfig {
   enableSearchByProfessional?: boolean
   enableSearchBySpecialty?: boolean
   enableSearchByAnyDoctor?: boolean
+  /** Submenú de "Médico en particular". 'nombre' (default) o 'lista'. Ver WhatsAppConfig.modoMedicoParticular. */
+  modoMedicoParticular?: 'nombre' | 'lista'
 }
 
 /**

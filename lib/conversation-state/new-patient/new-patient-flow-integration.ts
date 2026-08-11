@@ -53,6 +53,7 @@ import {
   handleProfessionalNameInput,
   handleProfessionalSelection,
   buildProfessionalsListMessage,
+  listAllProfessionals,
   type ProfessionalInterruptionOptions,
 } from '../shared/professional-handler'
 import {
@@ -1199,6 +1200,49 @@ async function handleSedePhase(
 }
 
 /**
+ * Maneja la selección del tipo de búsqueda "medico_particular": según
+ * WhatsAppConfig.modoMedicoParticular (mutuamente excluyentes), pide el nombre
+ * al paciente (default, comportamiento original) o lista todos los
+ * profesionales disponibles para que elija por número.
+ */
+async function handleMedicoParticularSearchType(
+  phone: string,
+  clientId: string,
+  state: NewPatientFlowState,
+  searchOptionsConfig?: SearchOptionsConfig
+): Promise<NewPatientResult> {
+  if (searchOptionsConfig?.modoMedicoParticular === 'lista') {
+    const listResult = await listAllProfessionals(clientId)
+
+    if (!listResult.success || !listResult.profesionales) {
+      state.phase = 'awaiting_search_type'
+      await saveFlowState(phone, state)
+      return {
+        handled: true,
+        message: listResult.error || 'No hay profesionales disponibles en este momento.',
+      }
+    }
+
+    state.profesionalesOpciones = listResult.profesionales
+    state.phase = 'awaiting_professional_selection'
+    await saveFlowState(phone, state)
+    return {
+      handled: true,
+      message: buildProfessionalsListMessage(listResult.profesionales),
+      atrasButton: true,
+    }
+  }
+
+  state.phase = 'awaiting_professional_name'
+  await saveFlowState(phone, state)
+  return {
+    handled: true,
+    message: buildProfessionalNameRequestMessage(),
+    atrasButton: true,
+  }
+}
+
+/**
  * Fase: Tipo de busqueda (reutiliza modulo compartido)
  */
 async function handleSearchTypePhase(
@@ -1216,13 +1260,7 @@ async function handleSearchTypePhase(
     state.attempts = 0
 
     if (result.searchType === 'medico_particular') {
-      state.phase = 'awaiting_professional_name'
-      await saveFlowState(phone, state)
-      return {
-        handled: true,
-        message: buildProfessionalNameRequestMessage(),
-        atrasButton: true,
-      }
+      return await handleMedicoParticularSearchType(phone, clientId, state, searchOptionsConfig)
     }
 
     if (result.searchType === 'especialidad') {
