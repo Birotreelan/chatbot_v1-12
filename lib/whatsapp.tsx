@@ -885,9 +885,9 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
           // 'book_new' (más abajo), acá nunca se confirmaba la cancelación —
           // el paciente pasaba directo de "1- Sí, cancelar" a un mensaje de
           // búsqueda de turno nuevo, sin ningún "listo, cancelamos" en el medio.
-          // Mismo mensaje/patrón que 'book_new' (includeRescheduleOffer=false,
+          // Mismo mensaje/patrón que 'book_new' (transitionToNewBooking=true,
           // ya estamos yendo directo a buscar un turno nuevo).
-          const cancelMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0, false)
+          const cancelMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0, false, true)
           await sendDirectResponse(ctx, cancelMsg, "cancel_and_reschedule")
 
           // Releer contexto actualizado: turnos[] vacío + turno_cancelado seteado
@@ -906,10 +906,10 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
           logger.info("Cancelacion exitosa, iniciando flujo de reserva nueva (postCancelAction=book_new)")
 
           // Confirmar la cancelación antes de iniciar la reserva nueva.
-          // includeRescheduleOffer=false: el paciente ya eligió "cancelar y solicitar uno nuevo",
+          // transitionToNewBooking=true: el paciente ya eligió "cancelar y solicitar uno nuevo",
           // por lo que NO se muestra el menú de reagendamiento (1. Reagendar / 2. No reagendar);
           // en su lugar transicionamos directamente al flujo de reserva (selección de sede).
-          const cancelMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0, false)
+          const cancelMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0, false, true)
           await sendDirectResponse(ctx, cancelMsg, "cancel_and_book_new")
 
           // Recuperar identificadores del paciente desde el cache de detección

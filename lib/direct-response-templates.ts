@@ -340,30 +340,41 @@ Si querés agendar un nuevo turno, escribime cuando quieras.`
  *           1. Reagendar el turno en otra fecha y horario.
  *           2. No quiero reagendar mi turno."
  *
- * @param includeRescheduleOffer Cuando es false (p.ej. el paciente eligió
- *   "Cancelar y solicitar uno nuevo"), se omite el menú de reagendamiento y se
- *   muestra una transición directa al flujo de reserva de un turno nuevo.
+ * @param includeRescheduleOffer Cuando es false, se omite el menú de reagendamiento
+ *   (turno no admite reagendar, o el cliente tiene permitirReagendamiento=false).
+ *   Solo suprime el menú — no agrega ningún texto adicional.
+ * @param transitionToNewBooking Cuando es true (el paciente eligió "Cancelar y
+ *   solicitar uno nuevo"), se omite el menú de reagendamiento y en su lugar se
+ *   muestra una transición directa al flujo de reserva de un turno nuevo. Tiene
+ *   prioridad sobre includeRescheduleOffer.
  */
 export function buildCancellationSuccessMessage(
   chatbotData: ChatbotData,
   turnoIndex: number = 0,
-  includeRescheduleOffer: boolean = true
+  includeRescheduleOffer: boolean = true,
+  transitionToNewBooking: boolean = false
 ): string {
   const nombre = formatPatientName(chatbotData)
   const turno = chatbotData.turnos[turnoIndex]
-  
+
   // Verificar si el turno admite reagendamiento
   const admiteReagendamiento = turno?.admite_reagendamiento !== false
-  
+
   let message = `Gracias, ${nombre}. La cancelación fue procesada correctamente.`
-  
+
   // El paciente ya pidió "cancelar y solicitar uno nuevo": no ofrecer el menú de
   // reagendamiento, sino transicionar directamente al flujo de reserva (selección de sede).
-  if (!includeRescheduleOffer) {
+  if (transitionToNewBooking) {
     message += ` Te ayudaré a agendar un nuevo turno.`
     return message
   }
-  
+
+  // Reagendamiento no disponible (turno no lo admite o el cliente lo tiene
+  // desactivado): cancelación simple, sin texto adicional ni menú.
+  if (!includeRescheduleOffer) {
+    return message
+  }
+
   if (admiteReagendamiento) {
     message += `
 
