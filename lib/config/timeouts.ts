@@ -25,16 +25,33 @@ export function createTimeoutController(timeoutMs: number): { controller: AbortC
   return { controller, timeoutId }
 }
 
-// Esto soluciona el error UND_ERR_CONNECT_TIMEOUT que ocurre a los 10 segundos
-function createExtendedTimeoutAgent(connectTimeoutMs: number): Agent {
-  return new Agent({
-    connect: {
-      timeout: connectTimeoutMs,
-    },
-    // También aumentar otros timeouts relacionados
-    bodyTimeout: connectTimeoutMs,
-    headersTimeout: connectTimeoutMs,
-  })
+// Esto soluciona el error UND_ERR_CONNECT_TIMEOUT que ocurre a los 10 segundos.
+//
+// IMPORTANTE (2026-08-13): el Agent se cachea y se REUTILIZA entre llamadas —
+// antes se creaba uno nuevo por request y se cerraba con `agent.close()` en el
+// `finally` de fetchWithTimeout. Ese close() espera a que la conexión quede
+// libre, pero fetch() ya había resuelto solo con los headers (el caller recién
+// lee el body después, afuera de esta función) — para respuestas grandes
+// (ej: get_turnos, ~28 KB) el close() quedaba esperando a drenar un body que
+// todavía nadie había empezado a leer, y la función se colgaba indefinidamente
+// hasta que Vercel mataba la ejecución por maxDuration. Reutilizar el Agent
+// (patrón estándar de undici) evita el deadlock y de paso ahorra reconexiones.
+const agentCache = new Map<number, Agent>()
+
+function getSharedAgent(connectTimeoutMs: number): Agent {
+  let agent = agentCache.get(connectTimeoutMs)
+  if (!agent) {
+    agent = new Agent({
+      connect: {
+        timeout: connectTimeoutMs,
+      },
+      // También aumentar otros timeouts relacionados
+      bodyTimeout: connectTimeoutMs,
+      headersTimeout: connectTimeoutMs,
+    })
+    agentCache.set(connectTimeoutMs, agent)
+  }
+  return agent
 }
 
 // Helper para fetch con timeout extendido (incluye timeout de conexión)
@@ -43,7 +60,7 @@ export async function fetchWithTimeout(url: string, options: RequestInit = {}, t
 
   // Usar el mayor entre el timeout solicitado y el CONNECT_TIMEOUT configurado
   const connectTimeout = Math.max(timeoutMs, TIMEOUTS.CONNECT_TIMEOUT)
-  const agent = createExtendedTimeoutAgent(connectTimeout)
+  const agent = getSharedAgent(connectTimeout)
 
   try {
     const response = await fetch(url, {
@@ -64,10 +81,8 @@ export async function fetchWithTimeout(url: string, options: RequestInit = {}, t
       throw new Error(`Connection timeout after ${connectTimeout}ms to ${url}. El servidor externo no responde.`)
     }
     throw error
-  } finally {
-    // Cerrar el agent para liberar recursos
-    await agent.close()
   }
+  // Nota: ya no cerramos el agent acá — ver comentario arriba de getSharedAgent.
 }
 
 // Errores que se pueden reintentar (transitorios)
