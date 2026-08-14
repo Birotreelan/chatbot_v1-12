@@ -15,12 +15,12 @@ import type { WhatsAppConfig } from "@/lib/types"
  *     "displayName": "Salud Ocular",          // requerido — "Nombre de la Configuración"
  *     "phoneNumberId": "672289632642260",      // requerido
  *     "cliente_id": "faf82cd7-4b56-...",       // requerido
+ *     "accessToken": "EAAa...",                // requerido — Access Token de WhatsApp
+ *     "proxy": "https://...",                  // requerido — Proxy URL (pestaña Avanzado)
  *     "wabaId": "2506532436395025",            // opcional
  *     "whatsappNumber": "+54 9 11 3688-0068",  // opcional
  *     "alias": "Clínica Central",              // opcional (uso interno)
  *     "escalationPhoneNumber": "0800 345 9393",// opcional — "Número de Derivación"
- *     "accessToken": "...",                    // opcional — puede cargarse después
- *     "proxy": "https://...",                  // opcional — puede cargarse después
  *     "active": true                           // opcional, default true
  *   }
  */
@@ -55,11 +55,15 @@ export async function POST(request: NextRequest) {
   const displayName = toTrimmedString(body.displayName)
   const phoneNumberId = toTrimmedString(body.phoneNumberId)
   const clienteId = toTrimmedString(body.cliente_id)
+  const accessToken = toTrimmedString(body.accessToken)
+  const proxy = toTrimmedString(body.proxy)
 
   const missing = [
     !displayName && "displayName",
     !phoneNumberId && "phoneNumberId",
     !clienteId && "cliente_id",
+    !accessToken && "accessToken",
+    !proxy && "proxy",
   ].filter(Boolean)
 
   if (missing.length > 0) {
@@ -96,12 +100,12 @@ export async function POST(request: NextRequest) {
     displayName,
     phoneNumberId,
     cliente_id: clienteId,
+    accessToken,
+    proxy,
     wabaId: toTrimmedString(body.wabaId) || "",
     whatsappNumber: toTrimmedString(body.whatsappNumber),
     alias: toTrimmedString(body.alias),
     escalationPhoneNumber: toTrimmedString(body.escalationPhoneNumber),
-    accessToken: toTrimmedString(body.accessToken) || "",
-    proxy: toTrimmedString(body.proxy),
     active: typeof body.active === "boolean" ? body.active : true,
   }
 
