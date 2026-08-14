@@ -65,7 +65,7 @@ export async function GET(request: Request) {
             clienteId: c.cliente_id,
             clienteIdBase: c.cliente_id,
             nombreCliente: c.cliente,
-            totalInteracciones: c.mensajes_pagados,
+            totalInteracciones: c.mensajes_pagados || 0,
           }))
       } else {
         console.warn(`[FACTURACION_SIN_IA_API] Error ${externalResponse.status} consultando servicio externo`)

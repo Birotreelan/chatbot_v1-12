@@ -192,10 +192,14 @@ export function FacturacionTable({
     saveCuitList(clienteId, nuevaLista)
   }
 
-  const totalGeneral = clientes.reduce((sum, c) => sum + c.totalInteracciones, 0)
+  // Defensivo: totalInteracciones puede venir undefined/null si la fuente de
+  // datos (servicio externo) no trae el campo para algún cliente puntual —
+  // ver bug reportado 2026-08-13 (crasheaba toda la tabla con
+  // "undefined is not an object (evaluating 'e.totalInteracciones.toLocaleString')").
+  const totalGeneral = clientes.reduce((sum, c) => sum + (c.totalInteracciones || 0), 0)
   const totalGeneralValorUSD = clientes.reduce((sum, c) => {
     const precio = precios[c.clienteIdBase] ?? 0
-    return sum + c.totalInteracciones * precio
+    return sum + (c.totalInteracciones || 0) * precio
   }, 0)
   const totalGeneralValorARS = dolarVenta ? totalGeneralValorUSD * dolarVenta : 0
 
@@ -238,7 +242,8 @@ export function FacturacionTable({
             <TableBody>
               {clientes.map((cliente) => {
                 const precio = precios[cliente.clienteIdBase] ?? 0
-                const valorTotalUSD = cliente.totalInteracciones * precio
+                const totalInteracciones = cliente.totalInteracciones || 0
+                const valorTotalUSD = totalInteracciones * precio
                 const valorTotalARS = dolarVenta ? valorTotalUSD * dolarVenta : null
                 return (
                   <TableRow key={cliente.clienteId}>
@@ -299,7 +304,7 @@ export function FacturacionTable({
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      {cliente.totalInteracciones.toLocaleString("es-AR")}
+                      {totalInteracciones.toLocaleString("es-AR")}
                     </TableCell>
                     <TableCell className="text-right">
                       <Input
