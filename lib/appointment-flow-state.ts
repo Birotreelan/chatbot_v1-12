@@ -637,6 +637,56 @@ export async function getStepButtons(
 }
 
 // ============================================================================
+// PROMPT DEL PASO ACTUAL (Refactor Paso 3, 18/8/2026)
+// Guarda el TEXTO del último mensaje de paso enviado, para poder re-mostrarlo
+// literalmente ante un "no te entendí" o una consulta intercalada — en vez de
+// inferirlo buscando un marcador de texto fijo ("Para continuar con tu turno:")
+// dentro del último mensaje del historial de conversación. Ese scraping era
+// frágil (y ya estaba roto en la práctica: ningún handler de paso produce hoy
+// ese marcador literal, así que siempre reenviaba el ÚLTIMO mensaje del bot tal
+// cual, sin importar cuál fuera) y se rompía en silencio si el texto de algún
+// handler cambiaba. Se guarda junto a (mismo prefijo temporal que) los botones
+// del paso, en sendDirectResponse/sendExistingPatientResult — los dos puntos de
+// envío que cubren prácticamente todos los mensajes de los flujos por pasos.
+// ============================================================================
+
+const STEP_PROMPT_PREFIX = "step_prompt"
+const STEP_PROMPT_TTL = 60 * 60 // 1 hora, igual que los botones del paso
+
+export async function saveStepPrompt(
+  phone: string,
+  configId: string,
+  message: string,
+): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  try {
+    const key = `${STEP_PROMPT_PREFIX}:${configId}:${phone}`
+    if (message && message.trim()) {
+      await redis.set(key, message, { ex: STEP_PROMPT_TTL })
+    } else {
+      await redis.del(key)
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+export async function getStepPrompt(
+  phone: string,
+  configId: string,
+): Promise<string | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+  try {
+    const val = await redis.get(`${STEP_PROMPT_PREFIX}:${configId}:${phone}`)
+    return typeof val === "string" && val.trim() ? val : null
+  } catch {
+    return null
+  }
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 

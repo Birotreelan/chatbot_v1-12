@@ -48,6 +48,8 @@ import {
   clearClinicaCancellationOffer,
   saveStepButtons,
   getStepButtons,
+  saveStepPrompt,
+  getStepPrompt,
   type ChatbotData,
   type ChatbotDataTurno,
   type ChatbotDataTurnoCancelado,
@@ -68,6 +70,7 @@ import {
 } from "./direct-response-templates"
 import { createConversationLogger } from "./conversation-state/logger"
 import { getEffectiveFeatureFlags } from "./conversation-state/feature-flags"
+import { resolveActiveFlow } from "./conversation-state/active-flow"
 import { resolveState } from "./conversation-state/router"
 import { composeReentryMessage } from "./conversation-state/router/compose-reentry"
 import { handleFarewellIfDetected, detectFarewellPreFlow, detectReciprocalFarewellPreFlow } from "./conversation-state/farewell-handler"
@@ -270,10 +273,12 @@ async function sendDirectResponse(
 
     await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
 
-    // Recordar los botones del paso actual (para re-mostrarlos en una consulta intercalada).
-    // No lo hacemos para la propia respuesta intercalada (no debe pisar el paso real).
-    if (phase !== "router-interjection-resume") {
+    // Recordar los botones y el texto del paso actual (para re-mostrarlos en una
+    // consulta intercalada o un "no te entendí"). No lo hacemos para la propia
+    // respuesta intercalada/fallback (no deben pisar el paso real que reemplazan).
+    if (phase !== "router-interjection-resume" && phase !== "router-fallback-resume") {
       await saveStepButtons(ctx.userPhoneNumber, ctx.configId, buttons || [])
+      await saveStepPrompt(ctx.userPhoneNumber, ctx.configId, message)
     }
 
     logger.info("Respuesta directa enviada", { messageLength: message.length })
@@ -318,8 +323,10 @@ async function sendExistingPatientResult(
     }
   }
 
-  // Recordar los botones de reply del paso (para re-mostrarlos en una consulta intercalada).
+  // Recordar los botones y el texto de reply del paso (para re-mostrarlos ante una
+  // consulta intercalada o un "no te entendí" — Refactor Paso 3, 18/8/2026).
   await saveStepButtons(ctx.userPhoneNumber, ctx.configId, result.searchTypeButtons || result.turnosButtons || [])
+  await saveStepPrompt(ctx.userPhoneNumber, ctx.configId, result.message)
 
   const _saveHistory = async (msg: string) => {
     await saveConversationMessage({ id: nanoid(), role: "assistant", content: msg, timestamp: new Date().toISOString(), phoneNumber: ctx.userPhoneNumber, configId: ctx.configId })
@@ -1937,6 +1944,38 @@ async function runPrimaryDispatcherNoFlow(
   }
 }
 
+// Refactor Paso 4 (18/8/2026): vocabulario de pregunta típico en WhatsApp informal
+// SIN "?" tipeado (ej. "cuando puedo", "que dia hay", "atienden los sabados"). Antes,
+// un token corto de 1-2 palabras que empezara con una de estas se trataba igual como
+// "input obvio" (dato del paso) y se mandaba directo al handler, que lo rechazaba
+// como dato inválido en vez de dejar que el router lo reconozca como una consulta
+// intercalada real. No es una reescritura de la heurística — es una excepción
+// puntual a la regla de "token corto = dato", calibrable si aparecen más casos.
+const QUESTION_WORDS = new Set([
+  'que', 'cual', 'cuales', 'como', 'cuando', 'donde', 'porque',
+  'cuanto', 'cuanta', 'cuantos', 'cuantas', 'quien', 'quienes',
+  'puedo', 'puede', 'podes', 'pueden', 'hay', 'tienen', 'tenes',
+  'atienden', 'trabajan', 'aceptan', 'cubre', 'cubren', 'cuesta',
+  'vale', 'hace', 'hacen', 'es', 'sera', 'sirve',
+])
+
+function normalizeWordForQuestionCheck(word: string): string {
+  // Rango Unicode U+0300 a U+036F: marcas diacriticas combinantes (tildes, etc.)
+  // que quedan sueltas tras normalize('NFD') (ej: la a con tilde se separa en la
+  // letra base mas el combining mark, y esta linea descarta ese combining mark).
+  const combiningMarksStart = 0x0300
+  const combiningMarksEnd = 0x036f
+  const normalized = word.toLowerCase().normalize('NFD')
+  let result = ''
+  for (let i = 0; i < normalized.length; i++) {
+    const code = normalized.charCodeAt(i)
+    if (code < combiningMarksStart || code > combiningMarksEnd) {
+      result += normalized[i]
+    }
+  }
+  return result
+}
+
 /**
  * Heurística barata: ¿el mensaje es un input OBVIO de un paso (número, DNI, email,
  * "0", o un token corto tipo nombre/apellido/obra social)?
@@ -1955,7 +1994,12 @@ function isObviousStepInput(message: string): boolean {
   if (/^\S+@\S+\.\S+$/.test(t)) return true         // email
   // Token corto sin signos de pregunta: probable nombre / apellido / obra social / "particular".
   const words = t.split(/\s+/)
-  if (words.length <= 2 && t.length <= 25 && !t.includes('?') && /[a-záéíóúñ]/i.test(t)) return true
+  if (words.length <= 2 && t.length <= 25 && !t.includes('?') && /[a-záéíóúñ]/i.test(t)) {
+    const firstWord = normalizeWordForQuestionCheck(words[0])
+    if (!QUESTION_WORDS.has(firstWord)) return true
+    // Empieza con vocabulario de pregunta sin "?" — no lo tratamos como obvio,
+    // cede al router/dispatcher para que decida si es una consulta intercalada.
+  }
   return false
 }
 
@@ -2135,11 +2179,16 @@ async function runInterjectionInActiveFlow(
     // - send_and_return → respuesta controlada (consulta/derivación/empática).
     // - init_patient_detection u otro (el dispatcher no pudo clasificar) → "no entendí".
     // En ambos casos respondemos y RE-MOSTRAMOS el paso, para no romper el flujo.
+    // Refactor Paso 3 (18/8/2026): antes esto buscaba un marcador de texto fijo
+    // ("Para continuar con tu turno:") dentro del último mensaje del historial para
+    // aislar "solo la parte del paso" — pero ningún handler produce ese marcador, así
+    // que en la práctica siempre se usaba el último mensaje del bot completo, sin
+    // recortar, y de paso se arriesgaba a traer un mensaje que no fuera el del paso
+    // (ej. otro texto suelto guardado en el historial). Ahora se lee el prompt del
+    // paso guardado explícitamente al enviarlo (sendDirectResponse/
+    // sendExistingPatientResult), exacto y sin depender del historial.
     const TRANSITION = 'Para continuar con tu turno:'
-    let stepPrompt = [...historyMsgs].reverse().find((m: any) => m.role === 'bot')?.text
-    if (typeof stepPrompt === 'string' && stepPrompt.includes(TRANSITION)) {
-      stepPrompt = stepPrompt.slice(stepPrompt.lastIndexOf(TRANSITION) + TRANSITION.length).trim()
-    }
+    const stepPrompt = await getStepPrompt(userPhoneNumber, config.id)
     // Si llegamos hasta acá con derive_external es porque shouldOfferHuman ya dio
     // false (clínica sin humanSupport activo o fuera de horario) — el bloque de más
     // arriba intercepta el caso "ofrecer atención humana" antes de este punto. Acá
@@ -3275,12 +3324,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
       const reciprocalFlags = await getEffectiveFeatureFlags(config.id)
 
       // No silenciar si el paciente está en medio de un flujo activo.
+      // (Refactor Paso 2: cálculo centralizado — ver lib/conversation-state/active-flow.ts.
+      // No incluye pendingFlowState, igual que antes del refactor.)
+      const reciprocalFlow = await resolveActiveFlow(userPhoneNumber, config.id)
       const reciprocalActiveFlow =
-        (await isPatientDetectionFlowActive(userPhoneNumber)) ||
-        (await isExistingPatientFlowActive(userPhoneNumber)) ||
-        (await isNewPatientFlowActive(userPhoneNumber)) ||
-        (await isRescheduleFlowActive(userPhoneNumber, config.id)) ||
-        !!(await getBookingFlowState(userPhoneNumber, config.id))
+        reciprocalFlow.detection || reciprocalFlow.existing || reciprocalFlow.newPatient ||
+        reciprocalFlow.reschedule || reciprocalFlow.booking
 
       if (reciprocalFlags.reciprocalFarewellSilence && !reciprocalActiveFlow) {
         const reciprocalResult = await detectReciprocalFarewellPreFlow(
@@ -3365,37 +3414,46 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // ni contexto de clínica, el AI Dispatcher decide primero (router primario),
     // antes de la cascada de interceptores de regex de abajo.
     // ============================================================================
+    // dispatcherAlreadyAttempted: evita la doble invocación del AI Dispatcher para
+    // el mismo mensaje (Refactor Paso 1, 18/8/2026). Antes, si el router primario o
+    // el de intercalada corrían acá y no resolvían nada (passthrough/continue_active_flow),
+    // el mensaje caía por la cascada y, si tampoco se resolvía ahí, el bloque
+    // "AI DISPATCHER (Sprint 60)" volvía a llamar a GPT-4o-mini con el MISMO mensaje
+    // y contexto — una segunda consulta redundante en costo y latencia. Ahora, si el
+    // dispatcher ya se consultó acá (haya resuelto o no), Sprint 60 no vuelve a llamarlo;
+    // el "retiro controlado del fallback libre" (más abajo) sigue cubriendo la respuesta.
+    let dispatcherAlreadyAttempted = false
     if (message.type === "text" && config.cliente_id) {
       const fullRouterOn = (await getEffectiveFeatureFlags(config.id)).intentRouterFull === true
       if (fullRouterOn) {
-        const [detActive, exActive, npActive, rsActive, pendingFS, bookingFS, clinicaFU, apptCtx] = await Promise.all([
-          isPatientDetectionFlowActive(userPhoneNumber),
-          isExistingPatientFlowActive(userPhoneNumber),
-          isNewPatientFlowActive(userPhoneNumber),
-          isRescheduleFlowActive(userPhoneNumber, config.id),
-          getFlowState(userPhoneNumber, config.id),
-          getBookingFlowState(userPhoneNumber, config.id),
-          getClinicaFollowupData(userPhoneNumber, config.id),
+        // Refactor Paso 2: cálculo centralizado (antes: Promise.all copiado a mano
+        // acá y en otros puntos del archivo — ver lib/conversation-state/active-flow.ts
+        // para la única fuente de verdad de "¿hay un flujo activo?").
+        const [activeFlow, apptCtx] = await Promise.all([
+          resolveActiveFlow(userPhoneNumber, config.id),
           getAppointmentContext(userPhoneNumber, config.id).catch(() => null),
         ])
+        const detActive = activeFlow.detection
         const tipoClinica = (apptCtx as any)?.tipo_mensaje
         const hasClinicaTemplate = tipoClinica === 'turno_cancelado_clinica' || tipoClinica === 'turno_confirmado_clinica'
         // Flujo "real" de conversación (booking/detección/reagendamiento), sin contar clínica.
-        const hasRealFlow = detActive || exActive || npActive || rsActive || !!pendingFS || !!bookingFS
+        const hasRealFlow = activeFlow.hasRealFlow
         // El reagendamiento tiene su PROPIA selección de turno (texto libre incluido);
         // no lo interceptamos con el router de intercalada para no romperla.
-        const hasInterjectionFlow = detActive || exActive || npActive || !!pendingFS || !!bookingFS
-        const hasClinicaContext = !!clinicaFU || hasClinicaTemplate
+        const hasInterjectionFlow = activeFlow.hasInterjectionFlow
+        const hasClinicaContext = activeFlow.clinicaFollowup || hasClinicaTemplate
         const hasActiveFlow = hasRealFlow || hasClinicaContext
 
         if (!hasActiveFlow) {
           // Incremento 1: sin flujo activo → dispatcher primario decide la intención.
+          dispatcherAlreadyAttempted = true
           const handled = await runPrimaryDispatcherNoFlow(userPhoneNumber, userMessage, config, value)
           if (handled) return
         } else if (hasInterjectionFlow && !hasClinicaContext && !isObviousStepInput(userMessage)) {
           // Incremento 2 (universal): cualquier texto que NO sea un input obvio del paso
           // pasa por el router → decide input válido vs consulta intercalada, y nunca deja
           // que el handler del paso rechace una pregunta.
+          dispatcherAlreadyAttempted = true
           const handled = await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value, detActive)
           if (handled) return
         }
@@ -3609,14 +3667,11 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // guarda, "15" (selección de turno) fue clasificado por el NLU como aclaración
     // de horario y desvió el flujo; además cada mensaje pagaba 1-2 llamadas a GPT.
     // ============================================================================
+    // Refactor Paso 2: mismo cálculo que la guarda de arriba, centralizado
+    // (ver lib/conversation-state/active-flow.ts → hasStepFlow).
     const stepFlowActiveForPreflows =
       (message.type === "text" || message.type === "button" || message.type === "interactive")
-        ? (
-            (await isRescheduleFlowActive(userPhoneNumber, config.id)) ||
-            (await isExistingPatientFlowActive(userPhoneNumber)) ||
-            (await isNewPatientFlowActive(userPhoneNumber)) ||
-            !!(await getBookingFlowState(userPhoneNumber, config.id))
-          )
+        ? (await resolveActiveFlow(userPhoneNumber, config.id)).hasStepFlow
         : false
     if (stepFlowActiveForPreflows) {
       console.info("[PREFLOW-GUARD] Flujo por pasos activo — interceptores Sprint 14/16/17 omitidos")
@@ -3945,12 +4000,11 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
       // No interceptar despedidas si el paciente está en medio de un flujo activo:
       // evita falsos positivos que secuestran respuestas del flujo (ej: un DNI leído como "chau").
+      // (Refactor Paso 2: cálculo centralizado — ver lib/conversation-state/active-flow.ts.)
+      const farewellFlow = await resolveActiveFlow(userPhoneNumber, config.id)
       const farewellActiveFlow =
-        (await isPatientDetectionFlowActive(userPhoneNumber)) ||
-        (await isExistingPatientFlowActive(userPhoneNumber)) ||
-        (await isNewPatientFlowActive(userPhoneNumber)) ||
-        (await isRescheduleFlowActive(userPhoneNumber, config.id)) ||
-        !!(await getBookingFlowState(userPhoneNumber, config.id))
+        farewellFlow.detection || farewellFlow.existing || farewellFlow.newPatient ||
+        farewellFlow.reschedule || farewellFlow.booking
 
       if (farewellFlags.directFarewellDetection && !farewellActiveFlow) {
 
@@ -3988,12 +4042,11 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
       // No interceptar "número equivocado" si el paciente está en medio de un flujo
       // activo: evita que respuestas como "no tengo turno" cierren la conversación.
+      // (Refactor Paso 2: cálculo centralizado — ver lib/conversation-state/active-flow.ts.)
+      const wrongNumberFlow = await resolveActiveFlow(userPhoneNumber, config.id)
       const wrongNumberActiveFlow =
-        (await isPatientDetectionFlowActive(userPhoneNumber)) ||
-        (await isExistingPatientFlowActive(userPhoneNumber)) ||
-        (await isNewPatientFlowActive(userPhoneNumber)) ||
-        (await isRescheduleFlowActive(userPhoneNumber, config.id)) ||
-        !!(await getBookingFlowState(userPhoneNumber, config.id))
+        wrongNumberFlow.detection || wrongNumberFlow.existing || wrongNumberFlow.newPatient ||
+        wrongNumberFlow.reschedule || wrongNumberFlow.booking
 
       if (wrongNumberFlags.directWrongNumberDetection && !wrongNumberActiveFlow) {
 
@@ -5185,8 +5238,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // Solo activo cuando aiDispatcher flag está ON.
     // Si toma una decisión, ejecuta el handler correcto y retorna.
     // Si no (error / passthrough), cae al enqueueUserMessage normal.
+    // NOTA (Refactor Paso 1, 18/8/2026): se saltea por completo si el dispatcher ya
+    // se consultó más arriba (router primario / intercalada, ver dispatcherAlreadyAttempted)
+    // para no volver a llamar a GPT-4o-mini con el mismo mensaje. Esto sólo afecta a
+    // clientes con intentRouterFull ON; para el resto, este sigue siendo el único punto
+    // de invocación, sin cambios.
     // ============================================================================
-    if (message.type === "text") {
+    if (message.type === "text" && !dispatcherAlreadyAttempted) {
       const dispatcherFlags = await getEffectiveFeatureFlags(config.id)
       if (dispatcherFlags.aiDispatcher) {
         try {
@@ -5482,12 +5540,14 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     if (message.type === "text" && config.cliente_id) {
       const routerFullFallback = (await getEffectiveFeatureFlags(config.id)).intentRouterFull === true
       if (routerFullFallback) {
-        const [detA, exA, npA, bkA] = await Promise.all([
-          isPatientDetectionFlowActive(userPhoneNumber),
-          isExistingPatientFlowActive(userPhoneNumber),
-          isNewPatientFlowActive(userPhoneNumber),
-          getBookingFlowState(userPhoneNumber, config.id),
-        ])
+        // Refactor Paso 2: cálculo centralizado (antes: Promise.all propio acá,
+        // más una llamada aparte a isRescheduleFlowActive un poco más abajo — ver
+        // lib/conversation-state/active-flow.ts).
+        const activeFlowFallback = await resolveActiveFlow(userPhoneNumber, config.id)
+        const detA = activeFlowFallback.detection
+        const exA = activeFlowFallback.existing
+        const npA = activeFlowFallback.newPatient
+        const bkA = activeFlowFallback.booking
         // NOTA: detA (patient_detection) queda afuera de "inRealFlow" a propósito.
         // Ese flujo es determinístico y tiene su propio mecanismo de resume
         // (initializePatientDetection → menú actual reconstruido desde el estado
@@ -5499,7 +5559,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // de reserva anterior, mostrado fuera de contexto. Caso Liliana, tel.
         // 1155891028, 9/7/2026: ver PLAN-DE-TRABAJO.md.
         const inRealFlow = exA || npA || !!bkA
-        const reschedActive = await isRescheduleFlowActive(userPhoneNumber, config.id)
+        const reschedActive = activeFlowFallback.reschedule
         // Si hay reagendamiento activo, dejamos que siga por el enqueue (camino legacy).
         if (!reschedActive) {
           const ctxFallback: DirectResponseContext = {
@@ -5530,13 +5590,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           } else if (inRealFlow) {
-            const hist = await import('./conversation-state/conversation-history')
-              .then((m) => m.getHistory(userPhoneNumber)).catch(() => [] as any[])
+            // Refactor Paso 3 (18/8/2026): antes se buscaba el marcador "Para continuar
+            // con tu turno:" en el último mensaje del historial (nunca coincidía, ver
+            // nota en runInterjectionInActiveFlow más arriba). Ahora se lee el prompt
+            // del paso guardado explícitamente al enviarlo, exacto y sin scraping.
             const TRANSITION = 'Para continuar con tu turno:'
-            let step = [...hist].reverse().find((m: any) => m.role === 'bot')?.text
-            if (typeof step === 'string' && step.includes(TRANSITION)) {
-              step = step.slice(step.lastIndexOf(TRANSITION) + TRANSITION.length).trim()
-            }
+            const step = await getStepPrompt(userPhoneNumber, config.id)
             const btns = await getStepButtons(userPhoneNumber, config.id)
             const fbMsg = step && step.trim()
               ? `Perdón, no te entendí. ${TRANSITION}\n\n${step.trim()}`
