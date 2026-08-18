@@ -498,7 +498,16 @@ function isConfirmation(msg: string): boolean {
 
 /** Cancelación del turno */
 function isCancellation(msg: string): boolean {
-  return /\b(cancelo|cancelar( el turno)?|tengo que cancelar|quiero cancelar|no puedo (ir|asistir|concurrir)|no (voy|ire|asistire)|no voy a poder|no podre ir|no podré ir|baja el turno|bajar el turno|dar de baja el turno)\b/.test(msg)
+  // Bug encontrado 18/8/2026 (caso tel. 1164160904): "Por favor cancele mi turno"
+  // (imperativo formal "usted") no matcheaba ninguna variante — solo estaban
+  // cubiertas "cancelo"/"cancelar". El mensaje traía además "estoy muy mal del
+  // estomago", que sí matcheaba isComplaint() (regla #8, evaluada DESPUÉS de
+  // cancelación #5 pero alcanzada porque esta regla no matcheaba primero), así
+  // que el pedido de cancelación real terminaba respondido como si fuera una
+  // queja genérica, sin buscar el turno ni ofrecer cancelarlo. Se agregan las
+  // conjugaciones de imperativo más comunes en español rioplatense (formal
+  // "cancele", informal "cancela"/"cancelame"/"cancelalo").
+  return /\b(cancelo|cancela|cancele|cancelame|cancelalo|cancelar( el turno)?|tengo que cancelar|quiero cancelar|no puedo (ir|asistir|concurrir)|no (voy|ire|asistire)|no voy a poder|no podre ir|no podré ir|baja el turno|bajar el turno|dar de baja el turno)\b/.test(msg)
 }
 
 /** Reagendamiento */

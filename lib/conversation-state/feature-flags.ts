@@ -238,8 +238,7 @@ const GLOBAL_CODE_FEATURE_FLAG_OVERRIDES: Partial<FeatureFlags> = {
   // Quedan afuera a propósito (requieren decisión aparte, no son parte de esta
   // cadena determinística): humanSupport / humanSupportOfferToPatient
   // (subsistema de atención humana, depende de agentes configurados por
-  // cliente) e intentRouterClinicaOffer / intentRouterFull (arquitectura
-  // alternativa "piloto" que reemplaza al AI Dispatcher como decisor primario).
+  // cliente) e intentRouterClinicaOffer (variante no usada de intentRouterFull).
   directConfirmation: true,
   directCancellation: true,
   directTurnSelection: true,
@@ -257,6 +256,24 @@ const GLOBAL_CODE_FEATURE_FLAG_OVERRIDES: Partial<FeatureFlags> = {
   postActionContextHandler: true,
   nluFallbackRouter: true,
   flowInterruptionHandler: true,
+
+  // Activado el 18/8/2026, pedido explícito de Nicolás: pasar el AI Dispatcher
+  // a ser decisor primario (en vez de solo el filtro previo a enqueueUserMessage)
+  // para TODOS los clientes, como primer paso hacia una versión más
+  // conversacional/fluida ("revisión integral para nueva versión", 18/8/2026).
+  // Con este flag ON: (a) runPrimaryDispatcherNoFlow decide antes que la
+  // cascada de interceptores regex/Sprint 9-18, y (b) runInterjectionInActiveFlow
+  // queda habilitado, permitiendo que un mensaje dentro de un flujo de reserva
+  // activo (ej: "en realidad quiero cancelar") cambie de intención sin perder
+  // el estado, reusando el mismo manifest de 12 tools del dispatcher (ver
+  // lib/conversation-state/ai-dispatcher/tool-manifest.ts).
+  //
+  // Este es un cambio de comportamiento amplio (afecta el routing de CADA
+  // mensaje entrante, no un flujo puntual) — si aparece algún patrón de
+  // regresión en producción, revertir sacando esta entrada (no hace falta
+  // tocar nada más) es más rápido que hacerlo vía Redis global porque no
+  // depende de tener acceso directo a producción.
+  intentRouterFull: true,
 }
 
 function applyCodeOverrides(_configId: string, flags: FeatureFlags): FeatureFlags {

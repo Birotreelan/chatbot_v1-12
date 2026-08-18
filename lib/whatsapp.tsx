@@ -1111,8 +1111,13 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
       const keepMsg = buildKeepAppointmentMessage(chatbotData, flowState.turnoIndex || 0, attendanceConfirmedViaProxy)
       await sendDirectResponse(ctx, keepMsg, "awaiting_cancel_confirmation")
 
-      // Turno se mantiene → volver al menú con el mismo estado de turnos
-      const menuAfterKeep = await returnPatientToMenu(userPhoneNumber)
+      // Turno se mantiene → volver al menú con contexto 'just_confirmed' para que NO
+      // vuelva a ofrecer cancelar de inmediato (bug reportado 18/8/2026, caso Maria tel.
+      // 1138743665: acá faltaba el postActionContext que sí usan las demás 7 llamadas a
+      // returnPatientToMenu del archivo — sin él, se mostraba el menú por default, que
+      // SÍ ofrece cancelar, justo después de que la paciente pidió explícitamente
+      // mantener el turno).
+      const menuAfterKeep = await returnPatientToMenu(userPhoneNumber, chatbotData.turnos, 'just_confirmed')
       if (menuAfterKeep) await sendDirectResponse(ctx, menuAfterKeep, "return_to_menu")
 
       return true
@@ -1623,6 +1628,7 @@ async function sendHumanSupportReasonMenu(
   phoneNumberId: string,
   accessToken: string,
   to: string,
+  configId: string,
 ): Promise<void> {
   const body = buildHumanSupportReasonMenu()
   try {
@@ -1630,6 +1636,11 @@ async function sendHumanSupportReasonMenu(
   } catch {
     await sendWhatsAppMessage(phoneNumberId, accessToken, to, body)
   }
+  // Bug encontrado 18/8/2026: este mensaje no se guardaba en el historial de
+  // conversación (mismo patrón que el saludo de Sprint9A y la lista de sedes),
+  // por lo que no aparecía en el visor de conversaciones del dashboard.
+  await saveConversationMessage({ id: nanoid(), role: "assistant", content: body, timestamp: new Date().toISOString(), phoneNumber: to, configId })
+  appendToHistory(to, { role: 'bot', text: body, timestamp: Date.now() }).catch(() => {})
 }
 
 /** Mensaje cuando el paciente pide atención humana FUERA del horario de atención. */
@@ -2526,7 +2537,7 @@ export async function handleMessage(value: any) {
           // Aceptó → todavía NO creamos la sesión: le preguntamos el motivo (lista).
           await savePatientMsg()
           await setPendingHumanSupportOffer(config.id, userPhoneNumber, { ...pendingOffer, stage: "reason" })
-          await sendHumanSupportReasonMenu(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber)
+          await sendHumanSupportReasonMenu(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, config.id)
           await updateWhatsAppStats(config.id, { messagesReceived: 1 })
           return
         } else if (normalized === "2") {
@@ -2538,6 +2549,9 @@ export async function handleMessage(value: any) {
             pendingOffer.declineMessage ||
             "Entendido. Seguís con el asistente virtual. Si necesitás algo más, avisame."
           await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, declineMsg)
+          // Bug encontrado 18/8/2026: faltaba guardar la respuesta del bot en el historial.
+          await saveConversationMessage({ id: nanoid(), role: "assistant", content: declineMsg, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
+          appendToHistory(userPhoneNumber, { role: 'bot', text: declineMsg, timestamp: Date.now() }).catch(() => {})
           await updateWhatsAppStats(config.id, { messagesReceived: 1 })
           return
         } else {
@@ -2552,6 +2566,9 @@ export async function handleMessage(value: any) {
               `1. Sí, quiero atención humana\n` +
               `2. No, sigo con el asistente`
           await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, reOfferMsg)
+          // Bug encontrado 18/8/2026: faltaba guardar la respuesta del bot en el historial.
+          await saveConversationMessage({ id: nanoid(), role: "assistant", content: reOfferMsg, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
+          appendToHistory(userPhoneNumber, { role: 'bot', text: reOfferMsg, timestamp: Date.now() }).catch(() => {})
           await updateWhatsAppStats(config.id, { messagesReceived: 1 })
           return
         }
@@ -2562,7 +2579,7 @@ export async function handleMessage(value: any) {
       if (!selected) {
         // Selección inválida → volver a mostrar el menú de motivos (lista).
         await savePatientMsg()
-        await sendHumanSupportReasonMenu(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber)
+        await sendHumanSupportReasonMenu(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, config.id)
         await updateWhatsAppStats(config.id, { messagesReceived: 1 })
         return
       }
@@ -2584,6 +2601,9 @@ export async function handleMessage(value: any) {
         })
         const confirmMsg = `Perfecto, te derivo a atención humana de ${pendingOffer.displayName || "la clínica"} por: ${selected.label}. En unos instantes te van a atender.`
         await sendWhatsAppMessage(pendingOffer.phoneNumberId, pendingOffer.accessToken, userPhoneNumber, confirmMsg)
+        // Bug encontrado 18/8/2026: faltaba guardar la respuesta del bot en el historial.
+        await saveConversationMessage({ id: nanoid(), role: "assistant", content: confirmMsg, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
+        appendToHistory(userPhoneNumber, { role: 'bot', text: confirmMsg, timestamp: Date.now() }).catch(() => {})
       } catch (err) {
         console.error("[WHATSAPP] Error creando sesión desde oferta:", err)
       }
@@ -3456,6 +3476,22 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           dispatcherAlreadyAttempted = true
           const handled = await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value, detActive)
           if (handled) return
+        } else {
+          // Hueco detectado 18/8/2026 (caso tel. 1164160904): si hasActiveFlow es true
+          // pero hasInterjectionFlow es false (solo puede pasar por reagendamiento activo
+          // en solitario, o por hasClinicaContext sin ningún flujo real), NINGUNA rama de
+          // arriba corre — el mensaje cae directo a la cascada de regex/NLU-fallback vieja
+          // sin que el AI Dispatcher llegue siquiera a evaluarlo, sin dejar rastro claro en
+          // los logs de por qué. Se loguea explícitamente para poder confirmarlo con
+          // certeza la próxima vez, antes de decidir si conviene ampliar la cobertura acá
+          // (Refactor Paso 5) — no se toca el comportamiento todavía porque el caso del
+          // reagendamiento en solitario está excluido a propósito (ver comentario arriba)
+          // y no queremos arriesgar esa exclusión sin evidencia de que el otro caso
+          // (solo hasClinicaContext) es el que realmente está ocurriendo.
+          createConversationLogger(userPhoneNumber, config.id, "router-primary-gap").warn(
+            "[Router primario] Ninguna rama ejecutada — mensaje cae a la cascada vieja sin pasar por el AI Dispatcher",
+            { hasActiveFlow, hasInterjectionFlow, hasClinicaContext, isObvio: isObviousStepInput(userMessage) }
+          )
         }
       }
     }
@@ -4234,26 +4270,15 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               clienteId: config.cliente_id,
             }
 
+            // Bug encontrado 18/8/2026 (caso Irma, tel. 1144062891): este saludo se
+            // mandaba con sendWhatsAppInteractive() directo, sin pasar por
+            // sendDirectResponse() — por eso WhatsApp lo entregaba bien pero nunca
+            // quedaba guardado en el historial (saveConversationMessage/appendToHistory),
+            // así que no aparecía en el visor de conversaciones del dashboard.
+            // sendDirectResponse ya maneja el envío interactivo con fallback a texto
+            // plano internamente, así que no hace falta duplicar esa lógica acá.
             const greetingText = detectionResult.message || ""
-            if (detectionResult.buttons && detectionResult.buttons.length > 0) {
-              // Enviar como mensaje interactivo con Reply Buttons
-              try {
-                await sendWhatsAppInteractive(
-                  value.metadata.phone_number_id,
-                  config.accessToken,
-                  userPhoneNumber,
-                  greetingText,
-                  detectionResult.buttons,
-                )
-              } catch (btnErr) {
-                // Fallback a mensaje de texto si interactive falla
-                console.warn("[v0] [SPRINT9A] Interactive send failed, fallback to text:", btnErr)
-                await sendDirectResponse(detectionCtx, greetingText, "initial_detection_pending")
-              }
-            } else {
-              await sendDirectResponse(detectionCtx, greetingText, "initial_detection_pending")
-            }
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            await sendDirectResponse(detectionCtx, greetingText, "initial_detection_pending", detectionResult.buttons)
             return
           }
         } else if (!detectionActive && !existingAppointmentCtx && alreadyIdentified) {
@@ -4279,23 +4304,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               clienteId: config.cliente_id,
             }
 
-            if (detectionResult.buttons && detectionResult.buttons.length > 0) {
-              try {
-                await sendWhatsAppInteractive(
-                  value.metadata.phone_number_id,
-                  config.accessToken,
-                  userPhoneNumber,
-                  detectionResult.message,
-                  detectionResult.buttons,
-                )
-              } catch (btnErr) {
-                console.warn("[v0] [SPRINT9A] Interactive send failed (rehydration), fallback to text:", btnErr)
-                await sendDirectResponse(detectionCtx, detectionResult.message, "rehydrated_patient_detection")
-              }
-            } else {
-              await sendDirectResponse(detectionCtx, detectionResult.message, "rehydrated_patient_detection")
-            }
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            // Mismo bug que en la rama de arriba (18/8/2026): usar sendDirectResponse
+            // en vez de sendWhatsAppInteractive directo, para que quede guardado en
+            // el historial/dashboard.
+            await sendDirectResponse(detectionCtx, detectionResult.message, "rehydrated_patient_detection", detectionResult.buttons)
             return
           }
         }
@@ -4974,6 +4986,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                       listRows,
                       "Sedes disponibles",
                     )
+                    // Bug encontrado 18/8/2026 (mismo patrón que el saludo de Sprint9A):
+                    // sendWhatsAppList() no pasa por sendDirectResponse, así que sin este
+                    // guardado explícito el mensaje nunca quedaba en el historial ni en
+                    // el visor de conversaciones del dashboard.
+                    await saveConversationMessage({ id: nanoid(), role: "assistant", content: listBody, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
+                    appendToHistory(userPhoneNumber, { role: 'bot', text: listBody, timestamp: Date.now() }).catch(() => {})
+                    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                   } catch (listErr) {
                     // Fallback a texto plano con lista numerada
                     bookingLogger.warn("List message failed, fallback to text", listErr as Error)
@@ -4988,23 +5007,18 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             }
 
             // Cuando se transiciona a awaiting_search_type_selection, enviar con Reply Buttons
+            // Bug encontrado 18/8/2026 (mismo patrón que el saludo de Sprint9A): este
+            // mensaje se mandaba con sendWhatsAppInteractive() directo y, si el envío
+            // funcionaba, cortaba con `return` sin pasar por sendDirectResponse — así
+            // que nunca quedaba guardado en el historial ni visible en el dashboard.
+            // sendDirectResponse ya maneja interactive + fallback a texto internamente.
             if (bookingResult.nextStep === "awaiting_search_type_selection") {
-              try {
-                await sendWhatsAppInteractive(
-                  value.metadata.phone_number_id,
-                  config.accessToken,
-                  userPhoneNumber,
-                  bookingResult.confirmationMessage,
-                  [
-                    { id: "1", title: "Médico particular" },
-                    { id: "2", title: "Por especialidad" },
-                    { id: "3", title: "Cualquier médico" },
-                  ],
-                )
-                return
-              } catch (intErr) {
-                bookingLogger.warn("Interactive failed for search type, fallback to text", intErr as Error)
-              }
+              await sendDirectResponse(bookingCtx, bookingResult.confirmationMessage, "booking-flow", [
+                { id: "1", title: "Médico particular" },
+                { id: "2", title: "Por especialidad" },
+                { id: "3", title: "Cualquier médico" },
+              ])
+              return
             }
 
             await sendDirectResponse(bookingCtx, bookingResult.confirmationMessage, "booking-flow")
