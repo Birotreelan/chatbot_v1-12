@@ -13,7 +13,7 @@ import { createConversationLogger } from '../logger'
 import { openai } from '@/lib/openai'
 import { detectFlowInterruption } from './flow-interruption-handler'
 import { detectTurnoFilter } from './turno-filter-extractor'
-import { buildTurnosFilteredMessage, buildTurnosWindowMessage, SEARCH_DAYS } from './turnos-handler'
+import { buildTurnosFilteredMessage, buildTurnosWindowMessage, formatHoraSinHipervinculo, SEARCH_DAYS } from './turnos-handler'
 import type { TurnoOption, HandlerResult, SearchType } from './types'
 import { parseOptionNumber } from '../selection-extractor'
 
@@ -53,7 +53,7 @@ export function buildInvalidSelectionMessage(
     message += `*${fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1)}*\n`
 
     turnosDia.forEach((turno) => {
-      const hora = turno.hora && turno.hora !== 'undefined' && turno.hora.trim() ? turno.hora.trim() : 'Horario a confirmar'
+      const hora = formatHoraSinHipervinculo(turno.hora && turno.hora !== 'undefined' && turno.hora.trim() ? turno.hora.trim() : 'Horario a confirmar')
       const profesional = turno.profesionalNombre && turno.profesionalNombre !== 'undefined' && turno.profesionalNombre.trim() ? turno.profesionalNombre.trim() : 'Profesional a confirmar'
       message += `  ${turno.numero}. ${hora} - ${profesional}\n`
     })

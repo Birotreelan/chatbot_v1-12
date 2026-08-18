@@ -11,6 +11,7 @@
 
 import { openai } from '@/lib/openai'
 import type { TurnoOption } from './booking-flow-handler'
+import { formatHoraSinHipervinculo } from './shared/turnos-handler'
 
 // ============================================================================
 // TIPOS
@@ -305,7 +306,7 @@ export function buildFilteredTurnoListMessage(
     const fechaStr = `${DIAS_NOMBRES_ES[date.getDay()]} ${d} de ${MESES_ES[mo - 1]}`
     msg += `*${fechaStr}*\n`
     for (const t of dayTurnos) {
-      const hora = t.horaFormateada || t.hora.substring(0, 5)
+      const hora = formatHoraSinHipervinculo(t.horaFormateada || t.hora.substring(0, 5))
       msg += ` ${t.numero}. ${hora} - ${t.profesionalNombre}\n`
     }
     msg += '\n'
@@ -345,7 +346,7 @@ export function buildNoFilterResultsMessage(
     const fechaStr = `${DIAS_NOMBRES_ES[date.getDay()]} ${d} de ${MESES_ES[mo - 1]}`
     msg += `*${fechaStr}*\n`
     for (const t of dayTurnos) {
-      const hora = t.horaFormateada || t.hora.substring(0, 5)
+      const hora = formatHoraSinHipervinculo(t.horaFormateada || t.hora.substring(0, 5))
       msg += ` ${t.numero}. ${hora} - ${t.profesionalNombre}\n`
     }
     msg += '\n'
@@ -386,7 +387,7 @@ export function buildNewDateSearchTurnoListMessage(
     const fechaStr = `${DIAS_NOMBRES_ES[date.getDay()]} ${d} de ${MESES_ES[mo - 1]}`
     msg += `*${fechaStr}*\n`
     for (const t of dayTurnos) {
-      const hora = t.horaFormateada || t.hora.substring(0, 5)
+      const hora = formatHoraSinHipervinculo(t.horaFormateada || t.hora.substring(0, 5))
       msg += ` ${t.numero}. ${hora} - ${t.profesionalNombre}\n`
     }
     msg += '\n'

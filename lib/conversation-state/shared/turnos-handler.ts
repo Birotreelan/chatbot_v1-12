@@ -17,6 +17,20 @@ import type { TurnoOption, HandlerResult } from './types'
 export const SEARCH_DAYS = 60
 export const WINDOW_DAYS = 15
 
+/**
+ * Inserta un espacio de ancho cero (invisible) dentro del horario, después de
+ * los ":", para evitar que WhatsApp interprete secuencias como "08:00"
+ * repetidas en una lista larga como un número de teléfono y las muestre como
+ * hipervínculo tocable — pacientes tocaban ese "link" pensando que así
+ * seleccionaban el turno. El caracter no cambia lo que ve el paciente.
+ * Pedido de Nicolás, 18/8/2026.
+ */
+const ZERO_WIDTH_SPACE = String.fromCharCode(8203) // U+200B
+
+export function formatHoraSinHipervinculo(hora: string): string {
+  return hora.replace(':', ':' + ZERO_WIDTH_SPACE)
+}
+
 // ─── Helpers de fecha ────────────────────────────────────────────────────────
 
 function formatDateForApi(date: Date): string {
@@ -210,7 +224,10 @@ export function buildTurnosWindowMessage(
     message += `encontré *${totalFound} turno${totalFound !== 1 ? 's' : ''}* disponible${totalFound !== 1 ? 's' : ''} para los próximos ${SEARCH_DAYS} días`
     if (profesionalNombre) message += ` con *${profesionalNombre}*`
     if (sedeName) message += ` en *${sedeName}*`
-    message += `. Te mostraré los turnos más próximos a la fecha actual:\n\n`
+    // La frase "Respondé con el número..." se repite acá (además de al final del
+    // mensaje) para que quede clara apenas empieza la lista, no sólo al final de
+    // un mensaje potencialmente largo. Pedido de Nicolás, 18/8/2026.
+    message += `. Te mostraré los turnos más próximos a la fecha actual. Respondé con el *número* del turno que preferís.\n\n`
   }
 
   // Agrupar por fecha
@@ -224,7 +241,7 @@ export function buildTurnosWindowMessage(
     const fechaFmt = formatDateForDisplay(fecha)
     message += `*${fechaFmt.charAt(0).toUpperCase() + fechaFmt.slice(1)}*\n`
     turnos.forEach(t => {
-      const hora = t.hora && t.hora !== 'N/A' ? t.hora : 'Horario a confirmar'
+      const hora = formatHoraSinHipervinculo(t.hora && t.hora !== 'N/A' ? t.hora : 'Horario a confirmar')
       // Mostrar profesional por turno cuando no hay un profesional fijo (cualquier médico / especialidad)
       const profLine = profesionalNombre ? '' : ` - ${t.profesionalNombre}`
       message += `  ${t.numero}. ${hora}${profLine}\n`
@@ -271,7 +288,7 @@ export function buildTurnosFilteredMessage(
     const fechaFmt = formatDateForDisplay(fecha)
     message += `*${fechaFmt.charAt(0).toUpperCase() + fechaFmt.slice(1)}*\n`
     turnos.forEach(t => {
-      const hora = t.hora && t.hora !== 'N/A' ? t.hora : 'Horario a confirmar'
+      const hora = formatHoraSinHipervinculo(t.hora && t.hora !== 'N/A' ? t.hora : 'Horario a confirmar')
       const profLine = profesionalNombre ? '' : ` - ${t.profesionalNombre}`
       message += `  ${t.numero}. ${hora}${profLine}\n`
     })
