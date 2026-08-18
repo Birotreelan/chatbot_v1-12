@@ -510,6 +510,29 @@ async function confirmarTurnoEnProxy(
  * - true: respuesta manejada completamente
  * - object: respuesta especial (ej: reagendamiento) que necesita procesamiento posterior
  */
+/**
+ * Paso 5a (Refactor, 18/8/2026): último recurso antes de re-mostrar sin cambios el
+ * prompt de un flujo pendiente. Antes, cualquier respuesta que no matcheara el
+ * reconocedor local de la rama (dígito exacto, sí/no) volvía a mostrar el mismo
+ * mensaje siempre — sin importar si el paciente pedía algo claro ("no quiero
+ * cancelar ninguno", "me pasás la dirección"). Caso Felipe, tel. 1161995183,
+ * 18/8/2026: ver PLAN-DE-TRABAJO.md. Reusa el mismo mecanismo que ya usan los
+ * flujos "reales" (runInterjectionInActiveFlow) para darle al AI Dispatcher una
+ * oportunidad de detectar cambio de intención o una consulta intercalada antes
+ * de darnos por vencidos. Gateado por intentRouterFull para poder desactivarlo
+ * sin tocar el resto del código si hiciera falta.
+ */
+async function tryPendingFlowInterjectionFallback(
+  userPhoneNumber: string,
+  userMessage: string,
+  config: any,
+  value: any,
+  flags: any,
+): Promise<boolean> {
+  if (flags?.intentRouterFull !== true) return false
+  return await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value, false)
+}
+
 async function handlePendingFlowResponse(
   userMessage: string,
   userPhoneNumber: string,
@@ -579,8 +602,13 @@ async function handlePendingFlowResponse(
     const seleccion = match ? parseInt(match[0], 10) : NaN
 
     if (isNaN(seleccion) || seleccion < 1 || seleccion > maxOpcion) {
-      // Selección inválida: re-mostrar la lista sin cambiar el estado
+      // Selección inválida: antes de re-mostrar la lista, darle una oportunidad al
+      // AI Dispatcher (Paso 5a) — puede ser un cambio de intención o una consulta
+      // intercalada, no necesariamente ruido.
       logger.warn("Selección de turno inválida", { userMessage, total: chatbotData.turnos.length })
+      if (await tryPendingFlowInterjectionFallback(userPhoneNumber, userMessage, config, value, flags)) {
+        return true
+      }
       const retryMsg = buildTurnoSelectionMessage(
         chatbotData,
         pendingAction as
@@ -676,8 +704,12 @@ async function handlePendingFlowResponse(
     }
 
     if (!isConfirmCancelResponse(userMessage)) {
-      // Respuesta no reconocida: re-mostrar la doble confirmación
+      // Respuesta no reconocida: antes de re-mostrar la doble confirmación, probar
+      // con el AI Dispatcher (Paso 5a).
       logger.warn("Respuesta no reconocida en awaiting_cancel_all_confirmation", { userMessage })
+      if (await tryPendingFlowInterjectionFallback(userPhoneNumber, userMessage, config, value, flags)) {
+        return true
+      }
       const retryMsg = buildCancelAllDoubleConfirmMessage(chatbotData)
       await sendDirectResponse(ctx, retryMsg, "cancel_all_flow")
       return true
@@ -1163,17 +1195,24 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
           return true  // Flujo manejado, NO pasar a OpenAI
         }
         
-        // action === "abandon_flow" o NLU sin resultado concluyente → re-promptear,
-        // nunca abandonar el flujo (evita que el farewell handler u otros capturen el mensaje)
-        logger.info("NLU: sin resultado concluyente, re-mostrando prompt de cancelación")
+        // action === "abandon_flow" o NLU sin resultado concluyente → antes de
+        // re-promptear, darle una pasada al AI Dispatcher (Paso 5a). Nunca abandonar
+        // el flujo sin más (evita que el farewell handler u otros capturen el mensaje).
+        logger.info("NLU: sin resultado concluyente, probando AI Dispatcher antes de re-mostrar prompt")
+        if (await tryPendingFlowInterjectionFallback(userPhoneNumber, userMessage, config, value, flags)) {
+          return true
+        }
         const retryNluMsg = buildCancelDoubleConfirmMessage(chatbotData, flowState.turnoIndex || 0)
         await sendDirectResponse(ctx, retryNluMsg, "awaiting_cancel_confirmation_retry")
         return true
       }
 
-      // Sin NLU contextual: re-promptear en lugar de pasar a otros handlers.
-      // Mantener el flow state para que el próximo mensaje vuelva aquí.
-      logger.info("Respuesta no reconocida en awaiting_cancel_confirmation, re-mostrando prompt", { userMessage })
+      // Sin NLU contextual: probar AI Dispatcher antes de re-promptear (Paso 5a).
+      // Mantener el flow state para que el próximo mensaje vuelva aquí si tampoco resuelve.
+      logger.info("Respuesta no reconocida en awaiting_cancel_confirmation, probando AI Dispatcher", { userMessage })
+      if (await tryPendingFlowInterjectionFallback(userPhoneNumber, userMessage, config, value, flags)) {
+        return true
+      }
       const retryMsg = buildCancelDoubleConfirmMessage(chatbotData, flowState.turnoIndex || 0)
       await sendDirectResponse(ctx, retryMsg, "awaiting_cancel_confirmation_retry")
       return true
@@ -3476,18 +3515,22 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           dispatcherAlreadyAttempted = true
           const handled = await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value, detActive)
           if (handled) return
+        } else if (!hasInterjectionFlow && hasClinicaContext && !hasRealFlow && !isObviousStepInput(userMessage)) {
+          // Paso 5c (18/8/2026): cierra parcialmente el hueco de la rama de abajo.
+          // Caso "solo contexto de clínica" (sin ningún flujo real activo) — acá SÍ es
+          // seguro consultar al AI Dispatcher, no hay una selección numérica de paso con
+          // la que pueda chocar. El reagendamiento en solitario sigue excluido a
+          // propósito (ver comentario de la rama siguiente).
+          dispatcherAlreadyAttempted = true
+          const handled = await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value, detActive)
+          if (handled) return
         } else {
-          // Hueco detectado 18/8/2026 (caso tel. 1164160904): si hasActiveFlow es true
-          // pero hasInterjectionFlow es false (solo puede pasar por reagendamiento activo
-          // en solitario, o por hasClinicaContext sin ningún flujo real), NINGUNA rama de
-          // arriba corre — el mensaje cae directo a la cascada de regex/NLU-fallback vieja
-          // sin que el AI Dispatcher llegue siquiera a evaluarlo, sin dejar rastro claro en
-          // los logs de por qué. Se loguea explícitamente para poder confirmarlo con
-          // certeza la próxima vez, antes de decidir si conviene ampliar la cobertura acá
-          // (Refactor Paso 5) — no se toca el comportamiento todavía porque el caso del
-          // reagendamiento en solitario está excluido a propósito (ver comentario arriba)
-          // y no queremos arriesgar esa exclusión sin evidencia de que el otro caso
-          // (solo hasClinicaContext) es el que realmente está ocurriendo.
+          // Hueco remanente (18/8/2026, caso tel. 1164160904): a esta rama solo puede
+          // llegar el reagendamiento activo en solitario (hasRealFlow vía reschedule,
+          // sin ningún otro sub-flujo). Se excluye a propósito: el asistente de
+          // reagendamiento tiene su PROPIA selección de turno por texto libre, y el
+          // router de intercalada podría chocar con ella. Se sigue logueando para
+          // confirmar con evidencia real si conviene ampliar la cobertura acá también.
           createConversationLogger(userPhoneNumber, config.id, "router-primary-gap").warn(
             "[Router primario] Ninguna rama ejecutada — mensaje cae a la cascada vieja sin pasar por el AI Dispatcher",
             { hasActiveFlow, hasInterjectionFlow, hasClinicaContext, isObvio: isObviousStepInput(userMessage) }

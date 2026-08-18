@@ -194,17 +194,23 @@ export async function resetGlobalFeatureFlags(): Promise<void> {
  * Overrides de flags fijados por código, para activar funcionalidades ya validadas
  * mientras no se dispone de acceso directo a Redis de producción para setearlas
  * vía `setClientFeatureFlags`/`setGlobalFeatureFlags` (el camino normal: script
- * `scripts/activate-sprint9.ts` como referencia, o `/dashboard/feature-flags`).
+ * `scripts/activate-sprint9.ts` como referencia, o el panel `/api/dashboard/
+ * feature-flags`, agregado 18/8/2026 — ver GET/POST en app/api/dashboard/
+ * feature-flags/route.ts).
  *
- * GLOBAL_CODE_FEATURE_FLAG_OVERRIDES se aplica a TODOS los clientes, SIEMPRE, por
- * encima de cualquier valor guardado en Redis (client-specific o global) — es el
- * mecanismo de mayor prioridad. Pedido explícito de Nicolás (9/7/2026): que las
- * mejoras que vayamos validando se activen para todos los clientes, no solo el que
- * originó el caso.
+ * GLOBAL_CODE_FEATURE_FLAG_OVERRIDES se aplica a TODOS los clientes SIEMPRE QUE Redis
+ * todavía no tenga un valor explícito guardado para ese flag (ver hasExplicitData en
+ * applyCodeOverrides, más abajo) — es el comportamiento por defecto hasta que alguien
+ * lo guarda desde el panel. Pedido explícito de Nicolás (9/7/2026): que las mejoras
+ * que vayamos validando se activen para todos los clientes, no solo el que originó
+ * el caso. Pedido explícito de Nicolás (18/8/2026): poder desactivar estos flags
+ * desde el panel sin depender de un deploy — por eso un valor guardado en Redis
+ * ahora SÍ le gana a esta lista.
  *
- * Para revertir un flag alcanza con sacar la entrada de acá (no hace falta Redis).
- * Cuando en algún momento se recupere acceso a Redis de producción, lo prolijo es
- * migrar estas entradas a `setGlobalFeatureFlags` y vaciar este objeto.
+ * Para revertir un flag sin usar el panel, alcanza con sacar la entrada de acá
+ * (no hace falta Redis) — pero si el panel ya guardó un valor explícito para ese
+ * flag en Redis, hay que resetearlo desde ahí (o vía resetGlobalFeatureFlags) para
+ * que vuelva a depender de esta lista.
  */
 const GLOBAL_CODE_FEATURE_FLAG_OVERRIDES: Partial<FeatureFlags> = {
   // Activado el 9/7/2026 tras confirmar que "Siiii gracias" y respuestas similares
@@ -276,8 +282,29 @@ const GLOBAL_CODE_FEATURE_FLAG_OVERRIDES: Partial<FeatureFlags> = {
   intentRouterFull: true,
 }
 
-function applyCodeOverrides(_configId: string, flags: FeatureFlags): FeatureFlags {
+/**
+ * hasExplicitData=true significa que YA hay un valor guardado explícitamente en Redis
+ * (client-specific o global, vía setClientFeatureFlags/setGlobalFeatureFlags — típicamente
+ * desde el panel /api/dashboard/feature-flags). En ese caso Redis es la fuente de verdad
+ * y NO se pisa con GLOBAL_CODE_FEATURE_FLAG_OVERRIDES, aunque el flag esté en ese objeto.
+ * Si Redis todavía no tiene nada explícito, los code overrides siguen actuando como
+ * comportamiento por defecto (mismo mecanismo de siempre, sin cambios).
+ * Nicolás pidió (18/8/2026) poder desactivar estos flags desde el dashboard sin pasar
+ * por un deploy — antes GLOBAL_CODE_FEATURE_FLAG_OVERRIDES ganaba SIEMPRE, así que un
+ * toggle guardado en Redis quedaba sin efecto para los flags listados ahí.
+ */
+function applyCodeOverrides(_configId: string, flags: FeatureFlags, hasExplicitData: boolean): FeatureFlags {
+  if (hasExplicitData) return flags
   return { ...flags, ...GLOBAL_CODE_FEATURE_FLAG_OVERRIDES }
+}
+
+/**
+ * Invalida la caché en memoria de flags efectivos. Se llama después de guardar
+ * cambios desde el panel de feature flags para que tomen efecto de inmediato,
+ * en vez de esperar hasta 5s (FLAGS_CACHE_TTL_MS) a que expire sola.
+ */
+export function clearFeatureFlagsCache(): void {
+  flagsCache.clear()
 }
 
 /**
@@ -294,28 +321,63 @@ export async function getEffectiveFeatureFlags(configId: string): Promise<Featur
 
   try {
     const redis = getRedisClient()
-    if (!redis) return applyCodeOverrides(configId, DEFAULT_FEATURE_FLAGS)
+    if (!redis) return applyCodeOverrides(configId, DEFAULT_FEATURE_FLAGS, false)
 
     const clientKey = `${FEATURE_FLAGS_PREFIX}${configId}`
     const clientData = await redis.get(clientKey)
 
     // Si tiene flags específicos, úsalos
     let flags: FeatureFlags
+    let hasExplicitData: boolean
     if (clientData) {
       flags = (typeof clientData === "string" ? JSON.parse(clientData) : clientData) as FeatureFlags
+      hasExplicitData = true
     } else {
       // Si no, usar flags globales
-      flags = await getGlobalFeatureFlags()
+      const globalKey = `${FEATURE_FLAGS_PREFIX}__global__`
+      const globalCached = await redis.get(globalKey)
+      if (globalCached) {
+        flags = (typeof globalCached === "string" ? JSON.parse(globalCached) : globalCached) as FeatureFlags
+        hasExplicitData = true
+      } else {
+        flags = DEFAULT_FEATURE_FLAGS
+        hasExplicitData = false
+      }
     }
 
-    flags = applyCodeOverrides(configId, flags)
+    flags = applyCodeOverrides(configId, flags, hasExplicitData)
 
     flagsCache.set(configId, { flags, expiresAt: now + FLAGS_CACHE_TTL_MS })
     return flags
   } catch (err) {
     console.error(`[FEATURE-FLAGS] Error obteniendo flags efectivos para ${configId}:`, err)
-    return applyCodeOverrides(configId, DEFAULT_FEATURE_FLAGS)
+    return applyCodeOverrides(configId, DEFAULT_FEATURE_FLAGS, false)
   }
+}
+
+/**
+ * Estado efectivo de los flags GLOBALES (sin considerar overrides client-specific),
+ * pensado para el panel de administración: qué valor está realmente activo hoy y si
+ * ese valor viene de Redis (editable desde el panel) o de GLOBAL_CODE_FEATURE_FLAG_OVERRIDES
+ * (todavía no migrado a Redis — el panel puede "adoptarlo" guardándolo tal cual).
+ */
+export async function getEffectiveGlobalFeatureFlags(): Promise<{
+  flags: FeatureFlags
+  hasExplicitData: boolean
+  codeOverriddenKeys: Array<keyof FeatureFlags>
+}> {
+  const globalStored = await getGlobalFeatureFlags()
+  const redis = getRedisClient()
+  let hasExplicitData = false
+  if (redis) {
+    const raw = await redis.get(GLOBAL_FLAGS_KEY)
+    hasExplicitData = !!raw
+  }
+  const flags = applyCodeOverrides("__global__", globalStored, hasExplicitData)
+  const codeOverriddenKeys = hasExplicitData
+    ? []
+    : (Object.keys(GLOBAL_CODE_FEATURE_FLAG_OVERRIDES) as Array<keyof FeatureFlags>)
+  return { flags, hasExplicitData, codeOverriddenKeys }
 }
 
 /**

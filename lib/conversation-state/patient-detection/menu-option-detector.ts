@@ -169,8 +169,16 @@ export async function detectMenuOption(
 
   // Keyword matching simple (< 1ms latencia)
   const keywordMatch = detectByKeywords(userMessage, menuOptions)
-  
-  if (keywordMatch.detected && keywordMatch.confidence >= 0.60) {
+
+  // Paso 5b (Refactor, 18/8/2026): umbral subido de 0.60 a 0.90 — con la fórmula de
+  // abajo (0.60 base + 0.15 por keyword), 0.60 aceptaba CUALQUIER match de 1 sola
+  // keyword (0.75), lo cual en la práctica anulaba el umbral. Caso Felipe, tel.
+  // 1161995183, 18/8/2026: "Y el otro ta. Bien" matcheó la keyword "otro" (1 sola
+  // coincidencia) y se interpretó como elegir "cancelar y solicitar turno nuevo",
+  // sin que el AI Dispatcher llegara a evaluar el mensaje. Ahora se exige 2+
+  // keywords (0.90) para aceptar la detección rápida; con 1 sola coincidencia el
+  // mensaje pasa a NLU/AI Dispatcher. Ver PLAN-DE-TRABAJO.md.
+  if (keywordMatch.detected && keywordMatch.confidence >= 0.90) {
     logger.info('Menu option detected by keywords', {
       selectedOption: keywordMatch.selectedOption,
       confidence: keywordMatch.confidence,
