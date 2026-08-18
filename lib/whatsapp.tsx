@@ -2575,7 +2575,8 @@ export async function handleMessage(value: any) {
       const buttonText = (message.button.text || "").toLowerCase()
       const buttonPayload = (message.button.payload || "").toLowerCase()
       const isCancellationButton = buttonText.includes("cancelar") || buttonPayload.includes("cancel")
-      
+      const isConfirmButton = !isCancellationButton && (buttonText.includes("confirmar") || buttonPayload.includes("confirmar"))
+
       // IMPORTANTE: Limpiar el assistantId del thread para volver al asistente principal
       // Esto es necesario porque las respuestas de botón vienen de templates externos (recordatorios)
       // y no deben ser procesadas por asistentes especializados (ej: agendamiento)
@@ -2627,8 +2628,69 @@ Timestamp: ${new Date().toISOString()}
 IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la conversación la información del turno que fue enviada previamente en un bloque [SISTEMA_PLANTILLA] para proporcionar los detalles específicos del turno. Pregunta al paciente si está seguro de querer cancelar, mostrando los detalles del turno.`
         
         // Continuar con el flujo normal del chatbot (no hacer nada más aquí)
+      } else if (isConfirmButton) {
+        // Confirmación de turno vía botón de template: usar el mismo contrato
+        // probado (confirmarTurnoEnProxy: Cliente_Id + Action="confirmar_turno"
+        // + fecha + paciente_datos.dni) que ya funciona en el flujo de menú,
+        // en vez del payload genérico "template_response" que varios proxies
+        // externos no reconocen (diagnosticado 2026-08-13 y 2026-08-18:
+        // "Faltan parámetros obligatorios." / "Acción no reconocida." — el
+        // proxy nunca llegaba a confirmar nada, y el paciente siempre recibía
+        // el mensaje de error genérico).
+        //
+        // Nota: cuando el recordatorio agrupa varios turnos del mismo día
+        // (ej: "confirmacion_4_turno"), confirmar con fecha+dni del turno[0]
+        // alcanza — el proxy ya confirma todos los turnos de esa fecha juntos
+        // (mismo comportamiento que usa el flujo de menú, ver línea ~628).
+        const ctxConfirmBtn: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+        }
+
+        const chatbotDataConfirmBtn = await getAppointmentContext(userPhoneNumber, config.id)
+
+        if (chatbotDataConfirmBtn) {
+          const proxySuccessBtn = await confirmarTurnoEnProxy(config, chatbotDataConfirmBtn, 0, userPhoneNumber)
+
+          if (proxySuccessBtn) {
+            const confirmMsgBtn = buildConfirmationMessage(chatbotDataConfirmBtn, 0)
+            const sentConfirmBtn = await sendDirectResponse(ctxConfirmBtn, confirmMsgBtn, "button_confirm_direct")
+
+            if (sentConfirmBtn) {
+              // Marcar como confirmados el turno[0] y todos los de la misma fecha
+              // (igual que en el flujo de menú — el backend ya los confirmó juntos)
+              const fechaConfirmadaBtn = chatbotDataConfirmBtn.turnos?.[0]?.fecha || (chatbotDataConfirmBtn.turnos?.[0] as any)?.Fecha
+              const updatedTurnosBtn = (chatbotDataConfirmBtn.turnos || []).map((t: any, i: number) => {
+                const tFecha = t.fecha || t.Fecha
+                return (i === 0 || (fechaConfirmadaBtn && tFecha === fechaConfirmadaBtn))
+                  ? { ...t, Estado: 'Confirmado', estado: 'Confirmado' }
+                  : t
+              })
+              const menuAfterConfirmBtn = await returnPatientToMenu(userPhoneNumber, updatedTurnosBtn, 'just_confirmed')
+              if (menuAfterConfirmBtn) await sendDirectResponse(ctxConfirmBtn, menuAfterConfirmBtn, "return_to_menu")
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return // Salir, no pasar a OpenAI
+            }
+          }
+        }
+
+        // No había contexto guardado o el proxy falló: avisar al paciente en vez
+        // de dejar la solicitud colgada o pasarla a OpenAI (que no tiene forma
+        // de confirmar nada realmente).
+        await sendDirectResponse(
+          ctxConfirmBtn,
+          "No pudimos procesar tu confirmación en este momento. Por favor, intentá de nuevo en unos minutos.",
+          "button_confirm_proxy_default_error"
+        )
+        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+        return
       } else {
-        // Para confirmación y reprogramación, mantener el flujo actual al proxy
+        // Para reprogramación (y cualquier otro botón no reconocido), mantener
+        // el flujo actual al proxy — no tenemos confirmado cuál es el contrato
+        // correcto para esa acción en los proxies externos.
         let proxyResponse = null
       try {
         const proxyPayload = {
