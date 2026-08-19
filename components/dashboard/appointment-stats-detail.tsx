@@ -135,69 +135,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </Button>
       </div>
 
-      {/* Total de Interacciones - base de facturación */}
-      <Card className="border-purple-200 bg-purple-50/30">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-purple-600" />
-            Total de Interacciones (Facturación)
-          </CardTitle>
-          <CardDescription>
-            Recordatorios enviados + conversaciones iniciadas por pacientes. Se cobra por interacción atendida,
-            aunque el paciente no logre agendar (ej: no tiene la obra social habilitada).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center p-6 bg-white rounded-lg border border-purple-100">
-            <div className="text-5xl font-bold text-purple-600">
-              {mensajesPagados + (stats?.totalUserInitiated || 0)}
-            </div>
-            <div className="text-sm text-muted-foreground mt-2">Total de interacciones facturables</div>
-            <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
-              <div className="text-center p-2 bg-muted/50 rounded">
-                <div className="font-semibold">{mensajesPagados}</div>
-                <div className="text-muted-foreground">Recordatorios enviados</div>
-              </div>
-              <div className="text-center p-2 bg-muted/50 rounded">
-                <div className="font-semibold">{stats?.totalUserInitiated || 0}</div>
-                <div className="text-muted-foreground">Conversaciones iniciadas por pacientes</div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Conversaciones Iniciadas por Pacientes - priorizado */}
-      <Card className="border-blue-300 bg-blue-50/40">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MessageCircle className="h-5 w-5 text-blue-600" />
-            Conversaciones Iniciadas por Pacientes
-          </CardTitle>
-          <CardDescription>
-            Pacientes que escriben sin un recordatorio previo. Se atienden y facturan igual, aunque no logren
-            agendar un turno.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="text-center p-4 bg-white rounded-lg border border-blue-100">
-              <MessageCircle className="h-6 w-6 text-blue-500 mx-auto mb-2" />
-              <div className="text-3xl font-bold text-blue-600">{stats?.totalUserInitiated || 0}</div>
-              <div className="text-sm text-muted-foreground mt-1">Conversaciones iniciadas</div>
-              <div className="text-xs text-blue-600 mt-1">Por pacientes</div>
-            </div>
-
-            <div className="text-center p-4 bg-white rounded-lg border border-blue-100">
-              <div className="text-3xl font-bold text-blue-600">{stats?.userInitiatedRate?.toFixed(1) || 0}%</div>
-              <div className="text-sm text-muted-foreground mt-1">Tasa de conversaciones iniciadas por pacientes</div>
-              <div className="text-xs text-blue-600 mt-1">Del total de conversaciones</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Recordatorios - detalle */}
+      {/* Fila 1: Recordatorios - Enviados, Confirmados, Cancelados, Sin respuesta */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -262,16 +200,44 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </Card>
       </div>
 
-      {/* Resultados: Turnos Reagendados y Nuevos Turnos */}
+      {/* Fila 2: Conversaciones Iniciadas por Pacientes */}
+      <Card className="border-blue-300 bg-blue-50/40">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageCircle className="h-5 w-5 text-blue-600" />
+            Conversaciones Iniciadas por Pacientes
+          </CardTitle>
+          <CardDescription>
+            Pacientes que escriben por su cuenta, sin un recordatorio previo.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="text-center p-4 bg-white rounded-lg border border-blue-100">
+              <MessageCircle className="h-6 w-6 text-blue-500 mx-auto mb-2" />
+              <div className="text-3xl font-bold text-blue-600">{stats?.totalUserInitiated || 0}</div>
+              <div className="text-sm text-muted-foreground mt-1">Conversaciones iniciadas</div>
+              <div className="text-xs text-blue-600 mt-1">Por pacientes</div>
+            </div>
+
+            <div className="text-center p-4 bg-white rounded-lg border border-blue-100">
+              <div className="text-3xl font-bold text-blue-600">{stats?.userInitiatedRate?.toFixed(1) || 0}%</div>
+              <div className="text-sm text-muted-foreground mt-1">Tasa de conversaciones iniciadas por pacientes</div>
+              <div className="text-xs text-blue-600 mt-1">Del total de conversaciones</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Fila 3: Turnos Reagendados y Nuevos Turnos */}
       <Card className="border-green-200 bg-green-50/30">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CheckCircle className="h-5 w-5 text-green-600" />
-            Resultados: Turnos Reagendados y Nuevos Turnos
+            Turnos Reagendados y Nuevos Turnos
           </CardTitle>
           <CardDescription>
-            Resultado operativo del proceso de reagendamiento y de las conversaciones iniciadas por pacientes. No
-            determinan la facturación — esa se calcula con el total de interacciones de arriba.
+            Resultado del proceso de reagendamiento y de las conversaciones iniciadas por pacientes.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -291,6 +257,38 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
               <div className="text-sm text-muted-foreground mt-1">Nuevos turnos agendados exitosamente</div>
               <div className="text-xs text-green-600 mt-1">
                 De {stats?.totalUserInitiated || 0} conversaciones iniciadas ({newAppointmentConversionRate.toFixed(1)}%)
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Fila 4: Total de Interacciones */}
+      <Card className="border-purple-200 bg-purple-50/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-purple-600" />
+            Total de Interacciones
+          </CardTitle>
+          <CardDescription>
+            Recordatorios enviados más conversaciones que iniciaron los pacientes por su cuenta: son pacientes
+            atendidos igual, aunque el turno no se haya podido concretar.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center p-6 bg-white rounded-lg border border-purple-100">
+            <div className="text-5xl font-bold text-purple-600">
+              {mensajesPagados + (stats?.totalUserInitiated || 0)}
+            </div>
+            <div className="text-sm text-muted-foreground mt-2">Total de interacciones</div>
+            <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
+              <div className="text-center p-2 bg-muted/50 rounded">
+                <div className="font-semibold">{mensajesPagados}</div>
+                <div className="text-muted-foreground">Recordatorios enviados</div>
+              </div>
+              <div className="text-center p-2 bg-muted/50 rounded">
+                <div className="font-semibold">{stats?.totalUserInitiated || 0}</div>
+                <div className="text-muted-foreground">Conversaciones iniciadas por pacientes</div>
               </div>
             </div>
           </div>
