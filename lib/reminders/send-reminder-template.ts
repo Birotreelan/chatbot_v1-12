@@ -206,6 +206,25 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
   })
   console.log("[REMINDERS] ✅ Mensaje de plantilla guardado en Redis")
 
+  // 19/8/2026 (caso Vicente, tel. 1139200357): el recordatorio nunca se agregaba al
+  // historial corto que lee el AI Dispatcher (conversation-history.ts, distinto del
+  // saveConversationMessage de arriba, que es para el visor del dashboard, y distinto
+  // también del thread de OpenAI que se notifica más abajo). Sin esto, la primera
+  // respuesta del paciente al recordatorio ("Si mucha gracias") se clasificaba sin
+  // saber que se le acababa de preguntar explícitamente "confirme o cancele su
+  // asistencia" — el dispatcher solo veía el dato crudo "Estado: No confirmado" del
+  // turno. Ver también context-builder.ts (templatePendingConfirmation).
+  try {
+    const { appendToHistory } = await import("../conversation-state/conversation-history")
+    await appendToHistory(cleanPhoneNumber, {
+      role: "bot",
+      text: templateContent,
+      timestamp: Date.now(),
+    })
+  } catch (e) {
+    console.error("[REMINDERS] ⚠️ Error guardando plantilla en conversation-history (continuando):", e)
+  }
+
   const appointmentInfo = extractAppointmentInfo(Body)
   console.log(`[REMINDERS] 📊 config.id: ${config.id}`)
   console.log(`[REMINDERS] 📊 config.cliente_id: ${config.cliente_id || "NO DISPONIBLE"}`)

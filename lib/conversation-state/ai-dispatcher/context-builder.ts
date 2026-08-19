@@ -16,6 +16,7 @@ import { isPatientDetectionFlowActive, getIdentifiedPatient } from '../patient-d
 import { getBookingFlowState } from '../booking-flow-handler'
 import { getClinicInfo } from '@/lib/db'
 import { formatClinicInfoForLLM } from '@/lib/clinic-info/context'
+import { isWithinTemplateWindow } from '@/lib/appointment-stats'
 import type { ClinicInfo } from '@/lib/types'
 
 // ============================================================================
@@ -55,6 +56,12 @@ export interface DispatcherContext {
   conversationHistory: string       // últimos N mensajes formateados
   rawAppointmentContext: any        // ChatbotData completo (para handlers que lo necesiten)
   clinicInfo: ClinicInfo | null     // base de conocimiento institucional cargada por la clínica (10/7/2026)
+  // 19/8/2026 (caso Vicente, tel. 1139200357): true si se le envió recientemente (ventana
+  // 24h) un template de recordatorio pidiéndole confirmar/cancelar y todavía no hay flujo
+  // determinístico activo. Sin esta señal, formatContextForLLM decía "no hay flujo activo"
+  // justo cuando el paciente SÍ tenía una pregunta explícita pendiente de responder — el
+  // dispatcher clasificaba "Si mucha gracias" como simple cortesía en vez de confirmación.
+  templatePendingConfirmation: boolean
 }
 
 // ============================================================================
@@ -125,6 +132,7 @@ export async function buildDispatcherContext(
     detectionActive,
     bookingState,
     clinicInfo,
+    withinTemplateWindow,
   ] = await Promise.all([
     getIdentifiedPatient(phoneNumber),
     isExistingPatientFlowActive(phoneNumber),
@@ -132,6 +140,7 @@ export async function buildDispatcherContext(
     isPatientDetectionFlowActive(phoneNumber),
     getBookingFlowState(phoneNumber, configId),
     clienteId ? getClinicInfo(clienteId) : Promise.resolve(null),
+    clienteId ? isWithinTemplateWindow(clienteId, phoneNumber).catch(() => false) : Promise.resolve(false),
   ])
 
   // ── Paciente identificado ──────────────────────────────────────────────────
@@ -211,6 +220,7 @@ export async function buildDispatcherContext(
     conversationHistory: historyLines,
     rawAppointmentContext: appointmentCtx,
     clinicInfo,
+    templatePendingConfirmation: withinTemplateWindow && turnos.length > 0,
   }
 }
 
@@ -241,9 +251,19 @@ export function formatContextForLLM(ctx: DispatcherContext): string {
   }
 
   // Flujo activo
-  lines.push(`ESTADO DEL FLUJO: ${ctx.activeFlow.description}`)
   if (ctx.hasActiveFlow) {
+    lines.push(`ESTADO DEL FLUJO: ${ctx.activeFlow.description}`)
     lines.push(`ACCIÓN PENDIENTE: El paciente está en medio de un proceso — continuarlo si el mensaje encaja, o iniciar uno nuevo si cambió de intención.`)
+  } else if (ctx.templatePendingConfirmation) {
+    // 19/8/2026 (caso Vicente, tel. 1139200357): sin esto, acá se mostraba "no hay
+    // flujo activo" justo cuando el paciente SÍ tenía una pregunta explícita
+    // pendiente de responder (el recordatorio de turno le pidió confirmar o
+    // cancelar). "Si mucha gracias" se clasificaba como cortesía suelta
+    // (respuesta_empatica) en vez de confirmar_asistencia_turno.
+    lines.push(`ESTADO DEL FLUJO: Se le envió recientemente un recordatorio de turno pidiéndole que confirme o cancele su asistencia. Todavía no respondió eso explícitamente.`)
+    lines.push(`ACCIÓN PENDIENTE: Cualquier respuesta afirmativa, aunque sea breve o venga mezclada con cortesía ("sí, gracias", "dale, gracias", "ok, muchas gracias"), es MUY probablemente la respuesta a esa pregunta → confirmar_asistencia_turno. Una respuesta negativa ("no puedo", "no voy a poder ir") → cancelar_turno. Usá respuesta_empatica para el agradecimiento SOLO si el mensaje claramente no responde la pregunta (agradece por otra cosa, hace una pregunta nueva, etc.).`)
+  } else {
+    lines.push(`ESTADO DEL FLUJO: ${ctx.activeFlow.description}`)
   }
 
   // Historial

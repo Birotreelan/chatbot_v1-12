@@ -9,7 +9,7 @@ import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
-import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData } from "./appointment-stats"
+import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData, isWithinTemplateWindow } from "./appointment-stats"
 import { cancelPendingReminders } from "@/lib/reminders/reminder-queue"
 import {
   getActiveSessionByPhone,
@@ -3483,7 +3483,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     // el "retiro controlado del fallback libre" (más abajo) sigue cubriendo la respuesta.
     let dispatcherAlreadyAttempted = false
     if (message.type === "text" && config.cliente_id) {
-      const fullRouterOn = (await getEffectiveFeatureFlags(config.id)).intentRouterFull === true
+      const routerFlags = await getEffectiveFeatureFlags(config.id)
+      const fullRouterOn = routerFlags.intentRouterFull === true
       if (fullRouterOn) {
         // Refactor Paso 2: cálculo centralizado (antes: Promise.all copiado a mano
         // acá y en otros puntos del archivo — ver lib/conversation-state/active-flow.ts
@@ -3504,10 +3505,26 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         const hasActiveFlow = hasRealFlow || hasClinicaContext
 
         if (!hasActiveFlow) {
-          // Incremento 1: sin flujo activo → dispatcher primario decide la intención.
-          dispatcherAlreadyAttempted = true
-          const handled = await runPrimaryDispatcherNoFlow(userPhoneNumber, userMessage, config, value)
-          if (handled) return
+          // Paso 5e (19/8/2026, caso Vicente, tel. 1139200357): "Si mucha gracias"
+          // (respuesta a un template de recordatorio de turno) fue clasificado por el
+          // AI Dispatcher genérico como respuesta_empatica (por el "gracias"), en vez
+          // de confirmar la asistencia — un caso que SPRINT 14 (detectDirectConfirmationPreFlow,
+          // más abajo en la cascada) ya sabía resolver desde el 9/7/2026 (fix de
+          // "Siiii gracias"), con un clasificador propio afinado para el escenario
+          // "dentro de ventana de template". Al activar intentRouterFull, el dispatcher
+          // primario empezó a interceptar ACÁ primero y nunca le daba la oportunidad a
+          // SPRINT 14 de correr. Mientras estemos dentro de esa ventana, dejamos pasar
+          // el mensaje a la cascada de abajo (SPRINT 14 primero); si tampoco resuelve
+          // nada ahí, el fallback de Sprint 60 más abajo sigue cubriendo la respuesta.
+          const inTemplateWindow = routerFlags.directConfirmCancelDetection
+            ? await isWithinTemplateWindow(config.cliente_id, userPhoneNumber)
+            : false
+          if (!inTemplateWindow) {
+            // Incremento 1: sin flujo activo → dispatcher primario decide la intención.
+            dispatcherAlreadyAttempted = true
+            const handled = await runPrimaryDispatcherNoFlow(userPhoneNumber, userMessage, config, value)
+            if (handled) return
+          }
         } else if (hasInterjectionFlow && !hasClinicaContext && !isObviousStepInput(userMessage)) {
           // Incremento 2 (universal): cualquier texto que NO sea un input obvio del paso
           // pasa por el router → decide input válido vs consulta intercalada, y nunca deja
