@@ -7,6 +7,7 @@ import { reservarTurno } from '../../api-tools/api-functions'
 import { getFirstName } from '../../utils/name-utils'
 import type { TurnoOption, HandlerResult, SharedFlowState } from './types'
 import { parseOptionNumber } from '../selection-extractor'
+import { trackAppointmentEvent, checkAndClearPendingReschedule } from '../../appointment-stats'
 
 /**
  * Formatea fecha para mostrar al usuario (formato argentino)
@@ -163,6 +164,33 @@ export async function executeReservation(
       const confirmacionHumana = (result.datos as { confirmacion_humana?: boolean } | undefined)?.confirmacion_humana ?? true
 
       logger.info('Reserva exitosa', { agendaId: turno.id, confirmacionHumana })
+
+      // 19/8/2026: esta reserva (paciente existente/nuevo, flujo por defecto vía
+      // directPacienteExistente/directPacienteNuevo) nunca trackeaba estadísticas —
+      // usa una implementación de reservarTurno (lib/api-tools/api-functions.ts)
+      // distinta de la que usa el flujo de reagendamiento dedicado
+      // (lib/openai-tools.tsx), que sí trackea. Resultado: "Nuevos turnos" y buena
+      // parte de "Turnos reagendados" (cuando el paciente cancela y pide uno nuevo
+      // por acá en vez del flujo de reagendamiento dedicado) quedaban invisibles en
+      // /dashboard/estadisticas. Mismo criterio que ya usa openai-tools.tsx:
+      // checkAndClearPendingReschedule distingue si hay una cancelación reciente (12h)
+      // pendiente de reagendar, para no confundir un reagendamiento con un turno
+      // nuevo genuino. Best-effort: un error acá nunca debe bloquear la respuesta
+      // de reserva exitosa al paciente.
+      try {
+        const isPendingReschedule = await checkAndClearPendingReschedule(clientId, phoneNumber)
+        await trackAppointmentEvent({
+          clienteId: clientId,
+          phoneNumber,
+          eventType: isPendingReschedule ? 'rescheduled' : 'new_appointment',
+          timestamp: new Date().toISOString(),
+        })
+      } catch (statsError) {
+        logger.error(
+          'Error al registrar estadística de reserva',
+          statsError instanceof Error ? statsError : new Error(String(statsError))
+        )
+      }
 
       const message = confirmacionHumana
         ? `¡Tu solicitud de turno fue enviada exitosamente!

@@ -440,15 +440,12 @@ export async function processRescheduleMessage(
     const successMsg = buildRescheduleSuccessMessage(st, turno)
     await sendRescheduleResponse(ctx, successMsg)
 
-    // Trackear éxito
-    if (clienteId) {
-      await trackAppointmentEvent({
-        clienteId,
-        phoneNumber: userPhoneNumber,
-        eventType: "rescheduled",
-        timestamp: new Date().toISOString(),
-      })
-    }
+    // 19/8/2026: se sacó el trackAppointmentEvent("rescheduled") que estaba acá —
+    // reservarTurno() (lib/openai-tools.tsx, llamado un poco más arriba) YA trackea
+    // este mismo evento internamente vía checkAndClearPendingReschedule. Tenerlo acá
+    // TAMBIÉN duplicaba el conteo: cada reagendamiento exitoso por este flujo sumaba
+    // 2 a totalRescheduled mientras totalRescheduleStarted sumaba 1, inflando
+    // rescheduleConversionRate en /dashboard/estadisticas.
 
     // Sincronizar contexto persistente (Redis + thread OpenAI + post-action) para que
     // el turno cancelado deje de figurar como vigente en mensajes posteriores.
