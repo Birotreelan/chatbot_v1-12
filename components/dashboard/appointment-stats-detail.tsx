@@ -271,24 +271,23 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
             Total de Interacciones
           </CardTitle>
           <CardDescription>
-            Recordatorios enviados más conversaciones que iniciaron los pacientes por su cuenta: son pacientes
-            atendidos igual, aunque el turno no se haya podido concretar.
+            Sumatoria de recordatorios enviados y conversaciones iniciadas por pacientes.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-center p-6 bg-white rounded-lg border border-purple-100">
-            <div className="text-5xl font-bold text-purple-600">
+          <div className="max-w-sm mx-auto text-center p-4 bg-white rounded-lg border border-purple-100">
+            <div className="text-4xl font-bold text-purple-600">
               {mensajesPagados + (stats?.totalUserInitiated || 0)}
             </div>
             <div className="text-sm text-muted-foreground mt-2">Total de interacciones</div>
-            <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
+            <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
               <div className="text-center p-2 bg-muted/50 rounded">
                 <div className="font-semibold">{mensajesPagados}</div>
                 <div className="text-muted-foreground">Recordatorios enviados</div>
               </div>
               <div className="text-center p-2 bg-muted/50 rounded">
                 <div className="font-semibold">{stats?.totalUserInitiated || 0}</div>
-                <div className="text-muted-foreground">Conversaciones iniciadas por pacientes</div>
+                <div className="text-muted-foreground">Conversaciones iniciadas</div>
               </div>
             </div>
           </div>
