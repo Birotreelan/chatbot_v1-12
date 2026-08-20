@@ -72,35 +72,39 @@ export function AppointmentStatsView() {
   return (
     <div className="h-full flex flex-col">
       <div className="border-b bg-background p-4">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold">Estadísticas de Citas</h1>
-            <p className="text-muted-foreground text-sm">
-              Monitoreo de recordatorios, confirmaciones, cancelaciones y reagendamientos
-            </p>
+        <div className="max-w-6xl mx-auto w-full">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-2xl font-bold">Estadísticas de Citas</h1>
+              <p className="text-muted-foreground text-sm">
+                Monitoreo de recordatorios, confirmaciones, cancelaciones y reagendamientos
+              </p>
+            </div>
           </div>
+          <Tabs
+            value={selectedClient?.clienteId}
+            onValueChange={(value) => {
+              const client = clients.find((c) => c.clienteId === value)
+              setSelectedClient(client || null)
+            }}
+          >
+            <TabsList className="w-full justify-start overflow-x-auto">
+              {clients.map((client) => (
+                <TabsTrigger key={client.clienteId} value={client.clienteId} className="flex-shrink-0">
+                  {client.displayName}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         </div>
-        <Tabs
-          value={selectedClient?.clienteId}
-          onValueChange={(value) => {
-            const client = clients.find((c) => c.clienteId === value)
-            setSelectedClient(client || null)
-          }}
-        >
-          <TabsList className="w-full justify-start overflow-x-auto">
-            {clients.map((client) => (
-              <TabsTrigger key={client.clienteId} value={client.clienteId} className="flex-shrink-0">
-                {client.displayName}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
       </div>
 
       <div className="flex-1 overflow-auto p-4">
-        {selectedClient && (
-          <AppointmentStatsDetail clienteId={selectedClient.clienteId} displayName={selectedClient.displayName} />
-        )}
+        <div className="max-w-6xl mx-auto w-full">
+          {selectedClient && (
+            <AppointmentStatsDetail clienteId={selectedClient.clienteId} displayName={selectedClient.displayName} />
+          )}
+        </div>
       </div>
     </div>
   )

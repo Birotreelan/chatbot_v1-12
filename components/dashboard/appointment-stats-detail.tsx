@@ -275,20 +275,25 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="max-w-sm mx-auto text-center p-4 bg-white rounded-lg border border-purple-100">
-            <div className="text-4xl font-bold text-purple-600">
-              {mensajesPagados + (stats?.totalUserInitiated || 0)}
+          <div className="grid gap-6 md:grid-cols-3">
+            <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
+              <TrendingUp className="h-6 w-6 text-purple-500 mx-auto mb-2" />
+              <div className="text-3xl font-bold text-purple-600">
+                {mensajesPagados + (stats?.totalUserInitiated || 0)}
+              </div>
+              <div className="text-sm text-muted-foreground mt-1">Total de interacciones</div>
             </div>
-            <div className="text-sm text-muted-foreground mt-2">Total de interacciones</div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-              <div className="text-center p-2 bg-muted/50 rounded">
-                <div className="font-semibold">{mensajesPagados}</div>
-                <div className="text-muted-foreground">Recordatorios enviados</div>
-              </div>
-              <div className="text-center p-2 bg-muted/50 rounded">
-                <div className="font-semibold">{stats?.totalUserInitiated || 0}</div>
-                <div className="text-muted-foreground">Conversaciones iniciadas</div>
-              </div>
+
+            <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
+              <Send className="h-6 w-6 text-purple-400 mx-auto mb-2" />
+              <div className="text-3xl font-bold text-purple-600">{mensajesPagados}</div>
+              <div className="text-sm text-muted-foreground mt-1">Recordatorios enviados</div>
+            </div>
+
+            <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
+              <MessageCircle className="h-6 w-6 text-purple-400 mx-auto mb-2" />
+              <div className="text-3xl font-bold text-purple-600">{stats?.totalUserInitiated || 0}</div>
+              <div className="text-sm text-muted-foreground mt-1">Conversaciones iniciadas</div>
             </div>
           </div>
         </CardContent>
