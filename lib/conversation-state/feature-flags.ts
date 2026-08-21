@@ -50,6 +50,20 @@ export async function getClientFeatureFlags(configId: string): Promise<FeatureFl
 }
 
 /**
+ * Lee lo que hay guardado LITERALMENTE en la clave Redis del cliente, sin
+ * fallback a global/DEFAULT_FEATURE_FLAGS. Devuelve `null` si el cliente
+ * todavía no tiene ninguna clave propia.
+ */
+async function getRawClientFlags(configId: string): Promise<Partial<FeatureFlags> | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+  const key = `${FEATURE_FLAGS_PREFIX}${configId}`
+  const cached = await redis.get(key)
+  if (!cached) return null
+  return (typeof cached === "string" ? JSON.parse(cached) : cached) as Partial<FeatureFlags>
+}
+
+/**
  * Establecer feature flags para un cliente
  * Se usa desde el dashboard/API para activar/desactivar features
  */
@@ -64,9 +78,25 @@ export async function setClientFeatureFlags(
       return
     }
 
-    // Obtener flags actuales y mergear con nuevos
-    const current = await getClientFeatureFlags(configId)
-    const updated = { ...current, ...flags }
+    // 21/8/2026 (caso Instituto Privado de Ojos Dres. Filomena, configId
+    // pJ49swKTv_QZIG_7MBcKP): antes esto mezclaba con getClientFeatureFlags,
+    // que resuelve con fallback a global/DEFAULT_FEATURE_FLAGS pero SIN
+    // aplicar GLOBAL_CODE_FEATURE_FLAG_OVERRIDES — y grababa ese resultado
+    // COMPLETO como snapshot fijo del cliente. Resultado: la primera vez que
+    // alguien activaba "Atención Humana" desde su propio panel
+    // (app/api/support/settings/route.ts), el cliente quedaba congelado con
+    // directPatientDetection/directConfirmation/directBookingFlow/etc. TODOS
+    // en false (los defaults), excluido para siempre de los overrides que se
+    // activan por código para todos los demás clientes. El síntoma: el bot
+    // dejaba de mostrar el menú determinístico y derivaba todo a OpenAI.
+    // Ahora el merge es solo contra lo que YA estaba guardado explícitamente
+    // para este cliente (getRawClientFlags, sin resolver fallback) — el
+    // resultado queda como una capa PARCIAL de overrides sobre los flags
+    // globales/código, no como un reemplazo total. Ver getEffectiveFeatureFlags
+    // más abajo, que aplica primero global+código y recién después superpone
+    // esto.
+    const existing = (await getRawClientFlags(configId)) ?? {}
+    const updated = { ...existing, ...flags }
 
     const key = `${FEATURE_FLAGS_PREFIX}${configId}`
     // Sin TTL a propósito (6/8/2026): antes tenía setex de 7 días y el flag se
@@ -308,8 +338,16 @@ export function clearFeatureFlagsCache(): void {
 }
 
 /**
- * Obtener flags para un cliente: primero busca flags específicos,
- * si no tiene, usa los flags globales (que pueden diferir de los defaults)
+ * Obtener flags para un cliente: parte de los flags globales (con los overrides
+ * de código aplicados, salvo que ya haya un valor global explícito guardado) y
+ * les superpone, si existen, los overrides PARCIALES propios del cliente (ej.
+ * "Atención Humana" activada desde su panel). El override de cliente solo pisa
+ * las claves que tiene explícitamente guardadas — no reemplaza el resto.
+ *
+ * 21/8/2026: antes, si el cliente tenía CUALQUIER dato propio en Redis, se
+ * usaba ese objeto completo y se saltaban los overrides de código enteros
+ * (no solo para las claves que el cliente había tocado). Ver nota extensa en
+ * setClientFeatureFlags sobre el caso real que esto rompió.
  */
 export async function getEffectiveFeatureFlags(configId: string): Promise<FeatureFlags> {
   // Devolver de caché si aún es válido
@@ -323,29 +361,29 @@ export async function getEffectiveFeatureFlags(configId: string): Promise<Featur
     const redis = getRedisClient()
     if (!redis) return applyCodeOverrides(configId, DEFAULT_FEATURE_FLAGS, false)
 
-    const clientKey = `${FEATURE_FLAGS_PREFIX}${configId}`
-    const clientData = await redis.get(clientKey)
-
-    // Si tiene flags específicos, úsalos
-    let flags: FeatureFlags
-    let hasExplicitData: boolean
-    if (clientData) {
-      flags = (typeof clientData === "string" ? JSON.parse(clientData) : clientData) as FeatureFlags
-      hasExplicitData = true
+    // Base: flags globales (explícitos si existen, si no defaults), con los
+    // overrides de código aplicados salvo que el global ya tenga un valor
+    // explícito guardado — mismo criterio de siempre, pero ahora evaluado
+    // SOLO contra el global, no contra el cliente.
+    const globalCached = await redis.get(GLOBAL_FLAGS_KEY)
+    let base: FeatureFlags
+    let hasExplicitGlobalData: boolean
+    if (globalCached) {
+      base = (typeof globalCached === "string" ? JSON.parse(globalCached) : globalCached) as FeatureFlags
+      hasExplicitGlobalData = true
     } else {
-      // Si no, usar flags globales
-      const globalKey = `${FEATURE_FLAGS_PREFIX}__global__`
-      const globalCached = await redis.get(globalKey)
-      if (globalCached) {
-        flags = (typeof globalCached === "string" ? JSON.parse(globalCached) : globalCached) as FeatureFlags
-        hasExplicitData = true
-      } else {
-        flags = DEFAULT_FEATURE_FLAGS
-        hasExplicitData = false
-      }
+      base = DEFAULT_FEATURE_FLAGS
+      hasExplicitGlobalData = false
     }
+    base = applyCodeOverrides(configId, base, hasExplicitGlobalData)
 
-    flags = applyCodeOverrides(configId, flags, hasExplicitData)
+    // Encima: override parcial del cliente, si existe — solo pisa sus propias claves.
+    const clientCached = await redis.get(`${FEATURE_FLAGS_PREFIX}${configId}`)
+    let flags = base
+    if (clientCached) {
+      const clientOverrides = (typeof clientCached === "string" ? JSON.parse(clientCached) : clientCached) as Partial<FeatureFlags>
+      flags = { ...base, ...clientOverrides }
+    }
 
     flagsCache.set(configId, { flags, expiresAt: now + FLAGS_CACHE_TTL_MS })
     return flags
@@ -408,4 +446,69 @@ export async function listClientsWithCustomFlags(): Promise<
     console.error(`[FEATURE-FLAGS] Error listando clientes:`, error)
     return []
   }
+}
+
+/**
+ * Listar clientes que tienen una clave propia en Redis (excluye __global__),
+ * con lo que hay guardado LITERALMENTE ahí (sin resolver fallback). Pensado
+ * para auditar, desde el panel, qué clientes tienen overrides propios y
+ * detectar snapshots viejos "congelados" con muchas claves de más (ver nota
+ * en setClientFeatureFlags) — a diferencia de listClientsWithCustomFlags,
+ * que devuelve el resultado ya resuelto y no distingue cuántas claves son
+ * realmente overrides propios del cliente.
+ */
+export async function listClientsWithRawFlags(): Promise<
+  Array<{ configId: string; rawFlags: Partial<FeatureFlags> }>
+> {
+  try {
+    const redis = getRedisClient()
+    if (!redis) return []
+
+    const keys = await redis.keys(`${FEATURE_FLAGS_PREFIX}*`)
+    const results: Array<{ configId: string; rawFlags: Partial<FeatureFlags> }> = []
+
+    for (const key of keys) {
+      const configId = key.replace(FEATURE_FLAGS_PREFIX, "")
+      if (configId === "__global__") continue
+      const raw = await getRawClientFlags(configId)
+      if (raw) results.push({ configId, rawFlags: raw })
+    }
+
+    return results
+  } catch (error) {
+    console.error(`[FEATURE-FLAGS] Error listando flags crudos de clientes:`, error)
+    return []
+  }
+}
+
+/**
+ * Recorta el override guardado de un cliente a solo las claves indicadas,
+ * eliminando el resto (si no queda ninguna, borra la clave directamente).
+ * Pensado para limpiar snapshots viejos "congelados" sin perder los toggles
+ * que el cliente sí controla activamente hoy (ej. humanSupport desde su
+ * propio panel de Atención). Caso real: Instituto Privado de Ojos Dres.
+ * Filomena (configId pJ49swKTv_QZIG_7MBcKP), ver nota en setClientFeatureFlags.
+ */
+export async function pruneClientFeatureFlags(
+  configId: string,
+  keysToKeep: Array<keyof FeatureFlags>
+): Promise<Partial<FeatureFlags>> {
+  const redis = getRedisClient()
+  if (!redis) throw new Error("Redis no disponible")
+
+  const raw = (await getRawClientFlags(configId)) ?? {}
+  const pruned: Partial<FeatureFlags> = {}
+  for (const k of keysToKeep) {
+    if (k in raw) pruned[k] = raw[k]
+  }
+
+  const key = `${FEATURE_FLAGS_PREFIX}${configId}`
+  if (Object.keys(pruned).length === 0) {
+    await redis.del(key)
+  } else {
+    await redis.set(key, pruned as unknown as string)
+  }
+
+  console.warn(`[FEATURE-FLAGS] ✂️ Flags de ${configId} recortados`, { pruned })
+  return pruned
 }
