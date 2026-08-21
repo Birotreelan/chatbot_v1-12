@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { CalendarIcon } from "lucide-react"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
@@ -12,57 +12,67 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 interface DateRangeFilterProps {
   onFilterChange: (startDate: string | null, endDate: string | null) => void
+  /** Preset seleccionado al montar el componente. Default "today" (comportamiento de siempre). */
+  defaultPreset?: PresetRange
+  /** Contenido opcional a mostrar a la derecha del select de Periodo (ej. "Consumo en curso"). */
+  extraContent?: ReactNode
 }
 
 type PresetRange = "today" | "yesterday" | "last7days" | "last30days" | "thisMonth" | "lastMonth" | "custom"
 
-export function DateRangeFilter({ onFilterChange }: DateRangeFilterProps) {
-  const [startDate, setStartDate] = useState<Date | undefined>(new Date())
-  const [endDate, setEndDate] = useState<Date | undefined>(new Date())
-  const [preset, setPreset] = useState<PresetRange>("today")
+/** Calcula el rango de fechas para un preset dado. `null` para "custom" (no se tocan las fechas). */
+function computeRangeForPreset(value: PresetRange): { start: Date; end: Date } | null {
+  const today = new Date()
+  let start: Date
+  let end: Date = new Date()
+
+  switch (value) {
+    case "today":
+      start = new Date()
+      break
+    case "yesterday":
+      start = new Date()
+      start.setDate(start.getDate() - 1)
+      end = new Date(start)
+      break
+    case "last7days":
+      start = new Date()
+      start.setDate(start.getDate() - 6)
+      break
+    case "last30days":
+      start = new Date()
+      start.setDate(start.getDate() - 29)
+      break
+    case "thisMonth":
+      start = new Date(today.getFullYear(), today.getMonth(), 1)
+      break
+    case "lastMonth":
+      start = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+      end = new Date(today.getFullYear(), today.getMonth(), 0)
+      break
+    case "custom":
+      return null
+    default:
+      start = new Date()
+  }
+
+  return { start, end }
+}
+
+export function DateRangeFilter({ onFilterChange, defaultPreset = "today", extraContent }: DateRangeFilterProps) {
+  const defaultRange = computeRangeForPreset(defaultPreset) ?? { start: new Date(), end: new Date() }
+  const [startDate, setStartDate] = useState<Date | undefined>(defaultRange.start)
+  const [endDate, setEndDate] = useState<Date | undefined>(defaultRange.end)
+  const [preset, setPreset] = useState<PresetRange>(defaultPreset)
 
   const applyPreset = (value: PresetRange) => {
     setPreset(value)
-    const today = new Date()
-    let start: Date
-    let end: Date = new Date()
+    const range = computeRangeForPreset(value)
+    if (!range) return // "custom": no cambiar fechas
 
-    switch (value) {
-      case "today":
-        start = new Date()
-        break
-      case "yesterday":
-        start = new Date()
-        start.setDate(start.getDate() - 1)
-        end = new Date(start)
-        break
-      case "last7days":
-        start = new Date()
-        start.setDate(start.getDate() - 6)
-        break
-      case "last30days":
-        start = new Date()
-        start.setDate(start.getDate() - 29)
-        break
-      case "thisMonth":
-        start = new Date(today.getFullYear(), today.getMonth(), 1)
-        break
-      case "lastMonth":
-        start = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-        end = new Date(today.getFullYear(), today.getMonth(), 0)
-        break
-      case "custom":
-        return // No cambiar fechas para custom
-      default:
-        start = new Date()
-    }
-
-    setStartDate(start)
-    setEndDate(end)
-
-    if (value !== "custom") {
-      onFilterChange(format(start, "yyyy-MM-dd"), format(end, "yyyy-MM-dd"))
-    }
+    setStartDate(range.start)
+    setEndDate(range.end)
+    onFilterChange(format(range.start, "yyyy-MM-dd"), format(range.end, "yyyy-MM-dd"))
   }
 
   const handleCustomDateChange = () => {
@@ -90,6 +100,8 @@ export function DateRangeFilter({ onFilterChange }: DateRangeFilterProps) {
           </SelectContent>
         </Select>
       </div>
+
+      {extraContent}
 
       {preset === "custom" && (
         <>

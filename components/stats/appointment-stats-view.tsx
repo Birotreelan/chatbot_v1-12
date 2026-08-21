@@ -26,8 +26,18 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
   const today = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), todayUTC.getUTCDate()))
     .toISOString()
     .split("T")[0]
-  const [startDate, setStartDate] = useState<string | null>(today)
+  // Por defecto "Este mes" (pedido de Nicolás, 21/8/2026): así cada cliente ve el
+  // totalizado del mes en curso apenas abre la ventana, sin tener que cambiar el
+  // filtro manualmente — puede seguir eligiendo cualquier otro período.
+  const firstDayOfMonth = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), 1))
+    .toISOString()
+    .split("T")[0]
+  const [startDate, setStartDate] = useState<string | null>(firstDayOfMonth)
   const [endDate, setEndDate] = useState<string | null>(today)
+
+  // "Consumo en curso": el período seleccionado es el mes calendario actual
+  // (mismo criterio visual que /dashboard/facturacion).
+  const esConsumoEnCurso = startDate === firstDayOfMonth && endDate === today
 
   const loadMensajesPagados = useCallback(async () => {
     if (!clienteId || !startDate || !endDate) {
@@ -131,7 +141,15 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
       </div>
 
       {/* Filtro de fechas */}
-      <DateRangeFilter onFilterChange={handleFilterChange} />
+      <DateRangeFilter
+        onFilterChange={handleFilterChange}
+        defaultPreset="thisMonth"
+        extraContent={
+          esConsumoEnCurso ? (
+            <span className="text-sm font-semibold text-red-600">Consumo en curso</span>
+          ) : undefined
+        }
+      />
 
       {/* Controles */}
       <div className="flex items-center justify-between">
