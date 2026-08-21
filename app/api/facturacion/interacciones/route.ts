@@ -67,8 +67,12 @@ export async function GET(request: Request) {
           stats = await getAppointmentStatsByClienteIdFiltered(config.id, fechaInicio, fechaFin)
         }
 
-        const totalInteracciones =
-          mensajesPagados + (stats?.totalRescheduleStarted || 0) + (stats?.totalUserInitiated || 0)
+        // 21/8/2026: alineado con /dashboard/estadisticas y /stats/[cliente_id] —
+        // el total de interacciones es recordatorios enviados + conversaciones
+        // iniciadas por pacientes. Antes también sumaba totalRescheduleStarted,
+        // lo que hacía que este número (usado para facturar) no coincidiera con
+        // el que ven el equipo interno y los clientes.
+        const totalInteracciones = mensajesPagados + (stats?.totalUserInitiated || 0)
 
         // Si el cliente tiene múltiples sedes, desglosar el total según los
         // porcentajes que devuelve el servicio externo de esa clínica.

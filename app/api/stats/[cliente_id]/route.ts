@@ -97,8 +97,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
       ? Math.round((stats.totalRescheduleStarted / stats.totalCancelled) * 10000) / 100
       : 0
 
-    // Total de interacciones usando mensajes_pagados
-    const totalInteracciones = mensajesPagados + (stats?.totalRescheduleStarted || 0) + (stats?.totalUserInitiated || 0)
+    // Total de interacciones usando mensajes_pagados — 21/8/2026: alineado con
+    // /dashboard/estadisticas, /stats/[cliente_id] (página) y facturación:
+    // recordatorios enviados + conversaciones iniciadas por pacientes. Antes
+    // también sumaba totalRescheduleStarted, dando un número distinto al que
+    // ve el equipo interno y los clientes en las otras pantallas.
+    const totalInteracciones = mensajesPagados + (stats?.totalUserInitiated || 0)
 
     // Respuesta en español con los mismos nombres del panel
     const respuestaEnEspanol = {
