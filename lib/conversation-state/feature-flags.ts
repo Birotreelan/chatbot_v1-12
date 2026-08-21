@@ -14,6 +14,25 @@ const flagsCache = new Map<string, { flags: FeatureFlags; expiresAt: number }>()
 const FLAGS_CACHE_TTL_MS = 5000
 
 /**
+ * Enumera claves por patrón vía SCAN en vez de KEYS (21/8/2026: se detectó que
+ * redis.keys("feature_flags:*") no devolvía la clave de un cliente que SÍ
+ * existía y se leía bien con redis.get() directo — caso Instituto Privado de
+ * Ojos Dres. Filomena, configId pJ49swKTv_QZIG_7MBcKP. lib/db.tsx ya evita
+ * .keys() por el mismo motivo para listar configs; se replica ese patrón acá
+ * en vez de depender de una importación cruzada).
+ */
+async function scanKeysByPattern(redisClient: NonNullable<ReturnType<typeof getRedisClient>>, pattern: string): Promise<string[]> {
+  const allKeys: string[] = []
+  let cursor = "0"
+  do {
+    const result = await redisClient.scan(cursor, { match: pattern, count: 100 })
+    cursor = typeof result[0] === "number" ? result[0].toString() : result[0]
+    allKeys.push(...result[1])
+  } while (cursor !== "0")
+  return allKeys
+}
+
+/**
  * Obtener feature flags para un cliente específico
  * Si no existen flags específicos, busca flags GLOBALES
  * Si tampoco hay globales, usa los defaults (todos OFF para máxima seguridad)
@@ -432,7 +451,7 @@ export async function listClientsWithCustomFlags(): Promise<
       return []
     }
 
-    const keys = await redis.keys(`${FEATURE_FLAGS_PREFIX}*`)
+    const keys = await scanKeysByPattern(redis, `${FEATURE_FLAGS_PREFIX}*`)
     const results: Array<{ configId: string; flags: FeatureFlags }> = []
 
     for (const key of keys) {
@@ -464,7 +483,7 @@ export async function listClientsWithRawFlags(): Promise<
     const redis = getRedisClient()
     if (!redis) return []
 
-    const keys = await redis.keys(`${FEATURE_FLAGS_PREFIX}*`)
+    const keys = await scanKeysByPattern(redis, `${FEATURE_FLAGS_PREFIX}*`)
     const results: Array<{ configId: string; rawFlags: Partial<FeatureFlags> }> = []
 
     for (const key of keys) {
