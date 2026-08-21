@@ -5,7 +5,7 @@ import type { ClientAppointmentStats } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, MessageCircle, PlusCircle, ArrowRight, Clock, TrendingUp } from "lucide-react"
+import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, MessageCircle, PlusCircle, Clock, TrendingUp } from "lucide-react"
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 
 interface AppointmentStatsViewProps {
@@ -158,7 +158,43 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
         </Alert>
       ) : (
         <>
-          {/* Fila 1: Recordatorios - Enviados, Confirmados, Cancelados, Sin respuesta */}
+          {/* Fila 1: Total de Interacciones */}
+          <Card className="border-purple-200 bg-purple-50/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-purple-600" />
+                Total de Interacciones
+              </CardTitle>
+              <CardDescription>
+                Sumatoria de recordatorios enviados y conversaciones iniciadas por pacientes.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-6 md:grid-cols-3">
+                <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
+                  <TrendingUp className="h-6 w-6 text-purple-500 mx-auto mb-2" />
+                  <div className="text-3xl font-bold text-purple-600">
+                    {mensajesPagados + (stats?.totalUserInitiated || 0)}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">Total de interacciones</div>
+                </div>
+
+                <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
+                  <Send className="h-6 w-6 text-purple-400 mx-auto mb-2" />
+                  <div className="text-3xl font-bold text-purple-600">{mensajesPagados}</div>
+                  <div className="text-sm text-muted-foreground mt-1">Recordatorios enviados</div>
+                </div>
+
+                <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
+                  <MessageCircle className="h-6 w-6 text-purple-400 mx-auto mb-2" />
+                  <div className="text-3xl font-bold text-purple-600">{stats?.totalUserInitiated || 0}</div>
+                  <div className="text-sm text-muted-foreground mt-1">Conversaciones iniciadas</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Fila 2: Recordatorios - Enviados, Confirmados, Cancelados, Sin respuesta */}
           <div className="grid gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -222,157 +258,6 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
               </CardContent>
             </Card>
           </div>
-
-          {/* Fila 2: Proceso de Reagendamiento */}
-          <Card className="border-amber-200 bg-amber-50/30">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarClock className="h-5 w-5 text-amber-500" />
-                Proceso de Reagendamiento
-              </CardTitle>
-              <CardDescription>
-                Seguimiento del proceso de reagendamiento desde el inicio hasta la confirmación del nuevo turno
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-6 md:grid-cols-4">
-                {/* Inicio de proceso */}
-                <div className="text-center p-4 bg-white rounded-lg border border-amber-100">
-                  <CalendarClock className="h-6 w-6 text-amber-500 mx-auto mb-2" />
-                  <div className="text-3xl font-bold text-amber-600">{stats?.totalRescheduleStarted || 0}</div>
-                  <div className="text-sm text-muted-foreground mt-1">Inicio de proceso</div>
-                  <div className="text-xs text-amber-600 mt-1">
-                    Pacientes que iniciaron reagendamiento
-                  </div>
-                </div>
-
-                {/* Tasa de intento de reagendamiento */}
-                <div className="text-center p-4 bg-white rounded-lg border border-amber-100">
-                  <div className="text-3xl font-bold text-amber-600">
-                    {stats?.totalCancelled && stats.totalCancelled > 0
-                      ? ((stats?.totalRescheduleStarted || 0) / stats.totalCancelled * 100).toFixed(1)
-                      : 0}%
-                  </div>
-                  <div className="text-sm text-muted-foreground mt-1">Tasa de intento de reagendamiento</div>
-                  <div className="text-xs text-amber-600 mt-1">
-                    Respecto al total de cancelados
-                  </div>
-                </div>
-
-                {/* Flecha de conversión */}
-                <div className="flex flex-col items-center justify-center">
-                  <ArrowRight className="h-8 w-8 text-amber-500 hidden md:block" />
-                  <div className="text-center mt-2">
-                    <div className="text-2xl font-bold text-amber-600">
-                      {stats?.rescheduleConversionRate?.toFixed(1) || 0}%
-                    </div>
-                    <div className="text-xs text-muted-foreground">Tasa de conversión</div>
-                  </div>
-                </div>
-
-                {/* Turnos reagendados */}
-                <div className="text-center p-4 bg-white rounded-lg border border-green-100">
-                  <CheckCircle className="h-6 w-6 text-green-500 mx-auto mb-2" />
-                  <div className="text-3xl font-bold text-green-600">{stats?.totalRescheduled || 0}</div>
-                  <div className="text-sm text-muted-foreground mt-1">Turnos reagendados</div>
-                  <div className="text-xs text-green-600 mt-1">
-                    Reagendamientos completados
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Fila 3: Solicitud de Nuevos Turnos */}
-          <Card className="border-blue-200 bg-blue-50/30">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MessageCircle className="h-5 w-5 text-blue-600" />
-                Solicitud de Nuevos Turnos
-              </CardTitle>
-              <CardDescription>
-                Conversaciones iniciadas por pacientes y su conversión a nuevos turnos agendados
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-6 md:grid-cols-4">
-                {/* Conversaciones iniciadas */}
-                <div className="text-center p-4 bg-white rounded-lg border border-blue-100">
-                  <MessageCircle className="h-6 w-6 text-blue-500 mx-auto mb-2" />
-                  <div className="text-3xl font-bold text-blue-600">{stats?.totalUserInitiated || 0}</div>
-                  <div className="text-sm text-muted-foreground mt-1">Conversaciones iniciadas</div>
-                  <div className="text-xs text-blue-600 mt-1">
-                    Por pacientes
-                  </div>
-                </div>
-
-            {/* Tasa de conversaciones iniciadas por pacientes */}
-            <div className="text-center p-4 bg-white rounded-lg border border-blue-100">
-              <div className="text-3xl font-bold text-blue-600">{stats?.userInitiatedRate?.toFixed(1) || 0}%</div>
-              <div className="text-sm text-muted-foreground mt-1">Tasa de conversaciones iniciadas por pacientes</div>
-              <div className="text-xs text-blue-600 mt-1">
-                Del total de conversaciones
-              </div>
-            </div>
-
-                {/* Flecha de conversión */}
-                <div className="flex flex-col items-center justify-center">
-                  <ArrowRight className="h-8 w-8 text-blue-500 hidden md:block" />
-                  <div className="text-center mt-2">
-                    <div className="text-2xl font-bold text-blue-600">
-                      {newAppointmentConversionRate.toFixed(1)}%
-                    </div>
-                    <div className="text-xs text-muted-foreground">Tasa de conversión</div>
-                  </div>
-                </div>
-
-                {/* Nuevos turnos */}
-                <div className="text-center p-4 bg-white rounded-lg border border-green-100">
-                  <PlusCircle className="h-6 w-6 text-green-500 mx-auto mb-2" />
-                  <div className="text-3xl font-bold text-green-600">{stats?.totalNewAppointments || 0}</div>
-                  <div className="text-sm text-muted-foreground mt-1">Nuevos turnos</div>
-                  <div className="text-xs text-green-600 mt-1">
-                    Agendados exitosamente
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Fila 4: Consumo totalizado */}
-          <Card className="border-purple-200 bg-purple-50/30">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-purple-600" />
-                Consumo totalizado
-              </CardTitle>
-              <CardDescription>
-                Sumatoria de todas las interacciones con pacientes
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center p-6 bg-white rounded-lg border border-purple-100">
-                <div className="text-5xl font-bold text-purple-600">
-                  {mensajesPagados + (stats?.totalRescheduleStarted || 0) + (stats?.totalUserInitiated || 0)}
-                </div>
-                <div className="text-sm text-muted-foreground mt-2">Total de interacciones</div>
-                <div className="mt-4 grid grid-cols-3 gap-4 text-xs">
-                  <div className="text-center p-2 bg-muted/50 rounded">
-                    <div className="font-semibold">{mensajesPagados}</div>
-                    <div className="text-muted-foreground">Recordatorios enviados</div>
-                  </div>
-                  <div className="text-center p-2 bg-muted/50 rounded">
-                    <div className="font-semibold">{stats?.totalRescheduleStarted || 0}</div>
-                    <div className="text-muted-foreground">Inicios de reagendamiento</div>
-                  </div>
-                  <div className="text-center p-2 bg-muted/50 rounded">
-                    <div className="font-semibold">{stats?.totalUserInitiated || 0}</div>
-                    <div className="text-muted-foreground">Conversaciones por pacientes</div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
 
           {/* Tiempos de respuesta */}
           <div className="grid gap-4 md:grid-cols-3">
@@ -451,6 +336,69 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
                     {(100 - (stats?.responseRate || 0)).toFixed(1)}%
                   </div>
                   <div className="text-muted-foreground">Sin respuesta</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Fila 3: Conversaciones Iniciadas por Pacientes */}
+          <Card className="border-blue-300 bg-blue-50/40">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MessageCircle className="h-5 w-5 text-blue-600" />
+                Conversaciones Iniciadas por Pacientes
+              </CardTitle>
+              <CardDescription>
+                Pacientes que escriben por su cuenta, sin un recordatorio previo.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="text-center p-4 bg-white rounded-lg border border-blue-100">
+                  <MessageCircle className="h-6 w-6 text-blue-500 mx-auto mb-2" />
+                  <div className="text-3xl font-bold text-blue-600">{stats?.totalUserInitiated || 0}</div>
+                  <div className="text-sm text-muted-foreground mt-1">Conversaciones iniciadas</div>
+                  <div className="text-xs text-blue-600 mt-1">Por pacientes</div>
+                </div>
+
+                <div className="text-center p-4 bg-white rounded-lg border border-blue-100">
+                  <div className="text-3xl font-bold text-blue-600">{stats?.userInitiatedRate?.toFixed(1) || 0}%</div>
+                  <div className="text-sm text-muted-foreground mt-1">Tasa de conversaciones iniciadas por pacientes</div>
+                  <div className="text-xs text-blue-600 mt-1">Del total de conversaciones</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Fila 4: Turnos Reagendados y Nuevos Turnos */}
+          <Card className="border-green-200 bg-green-50/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+                Turnos Reagendados y Nuevos Turnos
+              </CardTitle>
+              <CardDescription>
+                Resultado del proceso de reagendamiento y de las conversaciones iniciadas por pacientes.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="text-center p-4 bg-white rounded-lg border border-green-100">
+                  <CalendarClock className="h-6 w-6 text-amber-500 mx-auto mb-2" />
+                  <div className="text-3xl font-bold text-green-600">{stats?.totalRescheduled || 0}</div>
+                  <div className="text-sm text-muted-foreground mt-1">Turnos reagendados</div>
+                  <div className="text-xs text-green-600 mt-1">
+                    De {stats?.totalRescheduleStarted || 0} procesos iniciados ({stats?.rescheduleConversionRate?.toFixed(1) || 0}%)
+                  </div>
+                </div>
+
+                <div className="text-center p-4 bg-white rounded-lg border border-green-100">
+                  <PlusCircle className="h-6 w-6 text-green-500 mx-auto mb-2" />
+                  <div className="text-3xl font-bold text-green-600">{stats?.totalNewAppointments || 0}</div>
+                  <div className="text-sm text-muted-foreground mt-1">Nuevos turnos agendados exitosamente</div>
+                  <div className="text-xs text-green-600 mt-1">
+                    De {stats?.totalUserInitiated || 0} conversaciones iniciadas ({newAppointmentConversionRate.toFixed(1)}%)
+                  </div>
                 </div>
               </div>
             </CardContent>
