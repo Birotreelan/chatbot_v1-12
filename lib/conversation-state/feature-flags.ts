@@ -54,7 +54,7 @@ export async function getClientFeatureFlags(configId: string): Promise<FeatureFl
  * fallback a global/DEFAULT_FEATURE_FLAGS. Devuelve `null` si el cliente
  * todavía no tiene ninguna clave propia.
  */
-async function getRawClientFlags(configId: string): Promise<Partial<FeatureFlags> | null> {
+export async function getRawClientFlags(configId: string): Promise<Partial<FeatureFlags> | null> {
   const redis = getRedisClient()
   if (!redis) return null
   const key = `${FEATURE_FLAGS_PREFIX}${configId}`

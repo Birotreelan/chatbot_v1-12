@@ -4,6 +4,8 @@ import {
   pruneClientFeatureFlags,
   resetClientFeatureFlags,
   clearFeatureFlagsCache,
+  getRawClientFlags,
+  getEffectiveFeatureFlags,
 } from "@/lib/conversation-state/feature-flags"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import { DEFAULT_FEATURE_FLAGS, type FeatureFlags } from "@/lib/conversation-state/types"
@@ -35,8 +37,20 @@ import { DEFAULT_FEATURE_FLAGS, type FeatureFlags } from "@/lib/conversation-sta
 
 const ALL_FLAG_KEYS = Object.keys(DEFAULT_FEATURE_FLAGS) as Array<keyof FeatureFlags>
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const configIdParam = request.nextUrl.searchParams.get("configId")
+    if (configIdParam) {
+      // Diagnóstico puntual para un solo cliente: lee la clave exacta (sin depender
+      // de redis.keys(), que puede no enumerar todo en algunos backends) y devuelve
+      // tanto lo guardado literal como el resultado efectivo ya resuelto.
+      const [raw, effective] = await Promise.all([
+        getRawClientFlags(configIdParam),
+        getEffectiveFeatureFlags(configIdParam),
+      ])
+      return NextResponse.json({ configId: configIdParam, rawFlags: raw, effectiveFlags: effective })
+    }
+
     const [rawList, configs] = await Promise.all([listClientsWithRawFlags(), getAllWhatsAppConfigs()])
 
     const nameById = new Map(configs.map((c) => [c.id, c.displayName || c.alias || c.id]))
