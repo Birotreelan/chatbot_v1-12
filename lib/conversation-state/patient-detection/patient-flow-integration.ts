@@ -10,6 +10,7 @@ import {
   getPatientDetectionState,
   updatePatientDetectionPhase,
   updatePatientDetectionHasReminder,
+  clearIdentifiedPatient,
 } from './patient-flow-handler'
 import {
   buildExistingPatientGreeting,
@@ -121,6 +122,17 @@ export async function initializePatientDetection(
 
     if (detectionResult.isNewPatient) {
       logger.info('New patient detected', { phone: phoneNumber })
+      // 21/8/2026 (caso Instituto Privado de Ojos Dres. Filomena): identified_patient
+      // (patient-flow-handler.ts) persiste la identidad de un paciente ya identificado
+      // por 1h para no re-validar dentro de la misma sesión — pero nada la invalidaba
+      // cuando una consulta FRESCA a get_paciente decía "no encontrado" para ese mismo
+      // teléfono (ej. de prueba: se borró el paciente de la base para simular uno
+      // nuevo). Resultado: el saludo de "paciente nuevo" se mostraba bien, pero el
+      // siguiente mensaje (ej. "1") caía en restoreDetectionStateFromCache, que leía
+      // esa caché vieja y resucitaba la identidad anterior (nombre, DNI, obra social)
+      // para armar la reserva, ignorando que la detección recién dijo que no existía.
+      // Se limpia acá para que un "no encontrado" fresco siempre gane sobre la caché.
+      await clearIdentifiedPatient(phoneNumber)
       return {
         handled: true,
         message: buildNewPatientGreeting(clinicName, permitirNuevoTurno, escalationPhoneNumber),
