@@ -25,6 +25,8 @@ export interface ChatbotDataPaciente {
   obra_social_nombre?: string
   /** Instrucciones de la obra social/deudor (qué traer, coseguros, etc.), en HTML básico */
   indicaciones_deudor?: string
+  /** Instrucciones propias de la clínica para el turno (motivo de consulta, etc.), en HTML básico */
+  indicaciones_motivo?: string
 }
 
 export interface ChatbotDataTurno {

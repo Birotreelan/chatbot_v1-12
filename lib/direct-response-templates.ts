@@ -69,18 +69,25 @@ function formatTime(hora: string): string {
 }
 
 /**
- * Arma el bloque de "Indicaciones de Obra Social" a partir de
- * chatbotData.paciente.indicaciones_deudor (HTML básico), convertido a
- * formato WhatsApp. Devuelve "" si no hay indicaciones cargadas.
+ * Arma el bloque "Atención" con las indicaciones de obra social
+ * (chatbotData.paciente.indicaciones_deudor) y de la clínica
+ * (chatbotData.paciente.indicaciones_motivo), ambas en HTML básico,
+ * convertidas a formato WhatsApp. Pedido de Nicolás (25/8/2026): todo el
+ * texto del bloque va en negrita.
+ * Si ambas vienen vacías, no se agrega nada. Si solo una tiene contenido,
+ * se muestra únicamente esa línea.
  */
 function buildIndicacionesDeudorBlock(chatbotData: ChatbotData): string {
-  const indicaciones = chatbotData.paciente?.indicaciones_deudor
-  if (!indicaciones) return ""
+  const textoObraSocial = htmlToWhatsAppText(chatbotData.paciente?.indicaciones_deudor || "")
+  const textoClinica = htmlToWhatsAppText(chatbotData.paciente?.indicaciones_motivo || "")
 
-  const texto = htmlToWhatsAppText(indicaciones)
-  if (!texto) return ""
+  const lineas: string[] = []
+  if (textoObraSocial) lineas.push(`*-Indicaciones de la obra social: ${textoObraSocial}*`)
+  if (textoClinica) lineas.push(`*-Indicaciones de la clínica: ${textoClinica}*`)
 
-  return `\n\n*Indicaciones de Obra Social:*\n${texto}`
+  if (lineas.length === 0) return ""
+
+  return `\n\n*Atención:*\n${lineas.join("\n")}`
 }
 
 // ============================================================================
@@ -110,10 +117,11 @@ export function buildConfirmationMessage(
   const profesional = formatProfessionalName(turno)
   const sede = turno.sede
   const direccion = turno.direccion
+  const indicacionesBlock = buildIndicacionesDeudorBlock(chatbotData)
 
-  return `${nombre}, tu confirmación de asistencia fue recibida correctamente. Te esperamos el ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede} (${direccion}).
+  return `${nombre}, tu confirmación de asistencia fue recibida correctamente. Te esperamos el ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede} (${direccion}).${indicacionesBlock}
 
-Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}${buildIndicacionesDeudorBlock(chatbotData)}`
+Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}`
 }
 
 /**
@@ -420,12 +428,13 @@ export function buildKeepAppointmentMessage(
   const profesional = formatProfessionalName(turno)
   const sede = turno.sede
   const direccion = turno.direccion
+  const indicacionesBlock = buildIndicacionesDeudorBlock(chatbotData)
 
   return `Perfecto, ${nombre}. ${intro}
 
-Te esperamos el ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede} (${direccion}).
+Te esperamos el ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede} (${direccion}).${indicacionesBlock}
 
-Si necesitás algo más, no dudes en escribirme.${buildIndicacionesDeudorBlock(chatbotData)}`
+Si necesitás algo más, no dudes en escribirme.`
 }
 
 /**
