@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getSessionFromRequest } from "@/lib/auth"
 import { getWhatsAppConfigsByTenant } from "@/lib/db"
 import { getClientFeatureFlags, setClientFeatureFlags } from "@/lib/conversation-state/feature-flags"
+import { closeAllActiveSessionsForConfig } from "@/lib/human-support"
 import {
   getHumanSupportSchedule,
   setHumanSupportSchedule,
@@ -89,6 +90,24 @@ export async function POST(request: Request) {
 
       await setClientFeatureFlags(configId, { [flag]: value })
       const updated = await getClientFeatureFlags(configId)
+
+      // 25/8/2026 (pedido de Nicolás): el Panel de Atención Treelan Iris es el
+      // control maestro. Si la clínica apaga "Atención Humana" acá, cualquier
+      // sesión individual que haya quedado abierta (pending o in_progress) se
+      // cierra automáticamente y vuelve a la IA — sin intervención manual de
+      // los administradores de Treelan.
+      if (flag === "humanSupport" && value === false) {
+        try {
+          const { closedCount } = await closeAllActiveSessionsForConfig(configId)
+          if (closedCount > 0) {
+            console.log(
+              `[API Support Settings] Atención humana desactivada para ${configId}: ${closedCount} sesión(es) cerrada(s) automáticamente`,
+            )
+          }
+        } catch (error) {
+          console.error("[API Support Settings] Error en cierre automático de sesiones:", error)
+        }
+      }
 
       return NextResponse.json({
         success: true,

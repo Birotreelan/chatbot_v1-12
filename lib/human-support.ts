@@ -2,6 +2,8 @@ import { getRedisClient } from "./redis"
 import { nanoid } from "nanoid"
 import type { HumanSupportSession, HumanSupportMessage, ConversationMessage } from "./types"
 import { setConversationPaused } from "./conversations"
+import { getWhatsAppConfigById } from "./db"
+import { sendWhatsAppMessage } from "./whatsapp-api"
 
 // Prefijos Redis
 const SUPPORT_SESSION_PREFIX = "human_support:session:"
@@ -361,6 +363,91 @@ export async function getSupportMessages(sessionId: string): Promise<HumanSuppor
 export async function hasActiveSession(configId: string, phoneNumber: string): Promise<boolean> {
   const session = await getActiveSessionByPhone(configId, phoneNumber)
   return session !== null && (session.status === "pending" || session.status === "in_progress")
+}
+
+// ─── Cierre masivo de sesiones (toggle del flag maestro "humanSupport") ────
+// Cuando la clínica apaga "Atención Humana" desde su propio Panel de Atención
+// Treelan Iris, las sesiones individuales que sigan abiertas (pending o
+// in_progress) deben cerrarse automáticamente y devolverse a la IA. Los
+// administradores de Treelan no deben tener que cerrarlas a mano una por una.
+async function scanSupportSessionKeys(redisClient: NonNullable<ReturnType<typeof getRedisClient>>): Promise<string[]> {
+  const allKeys: string[] = []
+  let cursor = "0"
+  do {
+    const result = await redisClient.scan(cursor, { match: `${SUPPORT_SESSION_PREFIX}*`, count: 100 })
+    cursor = typeof result[0] === "number" ? result[0].toString() : result[0]
+    allKeys.push(...result[1])
+  } while (cursor !== "0")
+  return allKeys
+}
+
+export async function closeAllActiveSessionsForConfig(
+  configId: string,
+  note: string = "Cerrada automáticamente: atención humana desactivada desde el panel",
+): Promise<{ closedCount: number }> {
+  const redis = getRedisClient()
+  if (!redis) return { closedCount: 0 }
+
+  const keys = await scanSupportSessionKeys(redis)
+  if (keys.length === 0) return { closedCount: 0 }
+
+  // Traer todas las sesiones en pipeline para filtrar por configId + estado activo
+  const pipeline = redis.pipeline()
+  for (const key of keys) {
+    pipeline.get(key)
+  }
+  const results = await pipeline.exec()
+
+  const activeSessionIds: string[] = []
+  for (const raw of results) {
+    if (!raw) continue
+    try {
+      const session = (typeof raw === "string" ? JSON.parse(raw) : raw) as HumanSupportSession
+      if (
+        session &&
+        session.configId === configId &&
+        (session.status === "pending" || session.status === "in_progress")
+      ) {
+        activeSessionIds.push(session.id)
+      }
+    } catch {
+      // skip malformed session
+    }
+  }
+
+  if (activeSessionIds.length === 0) return { closedCount: 0 }
+
+  let config: Awaited<ReturnType<typeof getWhatsAppConfigById>> = null
+  try {
+    config = await getWhatsAppConfigById(configId)
+  } catch (error) {
+    console.error(`[HUMAN_SUPPORT] Error obteniendo config ${configId} para notificar cierre masivo:`, error)
+  }
+
+  let closedCount = 0
+  for (const sessionId of activeSessionIds) {
+    // Leemos la sesión (para el teléfono) ANTES de cerrarla, ya que closeSession no lo devuelve
+    const session = await getSupportSession(sessionId)
+    const closed = await closeSession(sessionId, note)
+    if (!closed) continue
+    closedCount++
+
+    if (config && session) {
+      try {
+        const message = `Has sido reconectado con el asistente virtual. ¡Gracias por tu paciencia! 🤖`
+        await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, session.phoneNumber, message)
+      } catch (error) {
+        console.error(
+          `[HUMAN_SUPPORT] Error enviando mensaje de reconexión (cierre masivo) a ${session.phoneNumber}:`,
+          error,
+        )
+      }
+    }
+  }
+
+  console.log(`[HUMAN_SUPPORT] 🔒 Cierre masivo para config ${configId}: ${closedCount} sesión(es) cerrada(s)`)
+
+  return { closedCount }
 }
 
 // ─── Pending Human Support Offer ────────────────────────────────────────────
