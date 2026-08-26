@@ -16,6 +16,7 @@ import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
 import { isWithinTemplateWindow } from "@/lib/appointment-stats"
 import { isAppointmentConfirmed, getAppointmentRef } from "@/lib/appointment-flow-state"
+import { isMarkedAsWrongPerson } from "./wrong-number-handler"
 
 // ============================================================================
 // PATRONES DE CONFIRMACIÓN
@@ -469,6 +470,20 @@ export async function detectDirectConfirmationPreFlow(
   const withinWindow = await isWithinTemplateWindow(clienteId, userPhone)
   if (!withinWindow) {
     logger.info("Fuera de ventana de template, no aplica detección directa")
+    return { detected: false }
+  }
+
+  // Paso 0b (26/8/2026): si el usuario ya fue marcado como "persona equivocada"
+  // (indicó que el recordatorio no era para él/ella — ver wrong-number-handler.ts),
+  // el appointmentContext de Redis sigue siendo el turno de OTRA persona (no se
+  // limpia al marcarlo). Antes este chequeo no existía: el siguiente mensaje del
+  // usuario se seguía evaluando contra ese turno ajeno, generando confirmaciones,
+  // cancelaciones o respuestas de "número equivocado" sin relación con lo que el
+  // usuario realmente escribió (caso GUERRA MOLINA KAREN, tel. 1167166468, donde
+  // el paciente confundía el nombre del profesional con nombres de pacientes).
+  const wrongPersonMarked = await isMarkedAsWrongPerson(userPhone, configId)
+  if (wrongPersonMarked) {
+    logger.info("Usuario marcado como persona equivocada — no aplica detección directa sobre turno ajeno")
     return { detected: false }
   }
 

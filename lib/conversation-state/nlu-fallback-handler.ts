@@ -18,6 +18,7 @@ import { createConversationLogger } from "./logger"
 import { openai } from "@/lib/openai"
 import { getTurnoTemporalStatus } from "@/lib/utils/date-utils"
 import { getRedisClient } from "@/lib/redis"
+import { isMarkedAsWrongPerson } from "./wrong-number-handler"
 
 const logger = createConversationLogger("nlu-fallback-handler")
 
@@ -93,6 +94,19 @@ export async function detectNLUFallbackPreFlow(
     }
 
     if (userMessage.length < 5 || /^\d+$/.test(userMessage.trim())) {
+      return { shouldHandle: false }
+    }
+
+    // 26/8/2026: si el usuario ya fue marcado como "persona equivocada" (ver
+    // wrong-number-handler.ts), el appointmentContext sigue siendo el turno de
+    // OTRA persona — Redis no lo limpia al marcarlo. No debemos (re)clasificar
+    // sus mensajes siguientes contra ese turno ajeno: eso producía respuestas
+    // como "Parece que te has confundido de número..." generadas por GPT sin
+    // relación con lo que el usuario realmente escribió. Dejamos pasar al flujo
+    // normal, que no depende de ese turno.
+    const wrongPersonMarked = await isMarkedAsWrongPerson(userPhoneNumber, configId)
+    if (wrongPersonMarked) {
+      logger.info(`[Sprint 18] Usuario marcado como persona equivocada — no interceptar con turno ajeno`)
       return { shouldHandle: false }
     }
 

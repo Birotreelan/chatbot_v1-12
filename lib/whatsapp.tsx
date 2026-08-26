@@ -5761,11 +5761,18 @@ export async function processIndividualMessage(
             const formatDate = (date: Date) => date.toISOString().split("T")[0]
             const primerNombre = pacienteData.nombres.split(" ")[0]
 
-            // Helper: buscar turnos con el mismo profesional, sede y DNI del paciente
+            // Helper: buscar turnos con el mismo profesional y sede
             const buscarConRango = async (dias: number) => {
               const hasta = new Date(today)
               hasta.setDate(today.getDate() + dias)
               const rango = `${formatDate(today)} a ${formatDate(hasta)}`
+              // 26/8/2026 (caso Andrea/Carmen): antes se mandaba pacienteData.dni acá
+              // pensando que filtraba por obra social. La request real de get_turnos
+              // NO lleva Paciente_DNI — mandarlo hacía que el proxy devolviera 0 turnos
+              // aunque el profesional SÍ tuviera agenda libre en esa sede (incluso el
+              // horario recién liberado por la propia cancelación). La elegibilidad por
+              // obra social se resuelve aparte (existing-patient-flow, get_obras_sociales)
+              // y cada turno ya viene con su propio flag admite_reagendamiento.
               const resp = await buscarTurnosDisponibles(
                 rango,
                 undefined,
@@ -5773,7 +5780,6 @@ export async function processIndividualMessage(
                 turnoData.profesional_id,
                 config.cliente_id,
                 turnoData.sede_id,
-                pacienteData.dni,  // Filtra por obra social del paciente
               )
               if (!resp.exito) return []
 
@@ -5798,25 +5804,30 @@ export async function processIndividualMessage(
                 return y && m && d ? `${d}/${m}/${y}` : fechaStr
               }
 
-              return planos.map((t: any) => {
-                const fecha = t.Fecha || t.fecha || ""
-                const horaRaw = (t.Hora || t.hora || t.hora_formateada || "").toString()
-                const horaCorta = horaRaw.trim().substring(0, 5)
-                return {
-                  id: t.Id || t.id || t.Agenda_Id || t.agenda_id || "",
-                  fecha,
-                  fecha_formateada: t.fecha_formateada || formatFechaAr(fecha),
-                  hora: horaRaw,
-                  hora_formateada: t.hora_formateada || horaCorta,
-                  profesional:
-                    t.Profesional_Nombre || t.profesional || t.profesional_nombre || turnoData.profesional || "",
-                  profesional_id: t.Profesional_Id || t.profesional_id || turnoData.profesional_id || "",
-                  sede: t.Sede_Nombre || t.sede || t.sede_nombre || turnoData.sede || "",
-                  direccion: t.Direccion || t.direccion || "",
-                  agenda_id: t.Id || t.id || t.Agenda_Id || t.agenda_id || "",
-                  disponibilidad: 1,
-                }
-              })
+              return planos
+                // Solo ofrecer turnos que el propio sistema marca como reagendables online
+                // (admite_reagendamiento). Si el campo no viene en la respuesta, no filtramos
+                // por él (compatibilidad con proxies que no lo envían).
+                .filter((t: any) => t.admite_reagendamiento !== false)
+                .map((t: any) => {
+                  const fecha = t.Fecha || t.fecha || ""
+                  const horaRaw = (t.Hora || t.hora || t.hora_formateada || "").toString()
+                  const horaCorta = horaRaw.trim().substring(0, 5)
+                  return {
+                    id: t.Id || t.id || t.Agenda_Id || t.agenda_id || "",
+                    fecha,
+                    fecha_formateada: t.fecha_formateada || formatFechaAr(fecha),
+                    hora: horaRaw,
+                    hora_formateada: t.hora_formateada || horaCorta,
+                    profesional:
+                      t.Profesional_Nombre || t.profesional || t.profesional_nombre || turnoData.profesional || "",
+                    profesional_id: t.Profesional_Id || t.profesional_id || turnoData.profesional_id || "",
+                    sede: t.Sede_Nombre || t.sede || t.sede_nombre || turnoData.sede || "",
+                    direccion: t.Direccion || t.direccion || "",
+                    agenda_id: t.Id || t.id || t.Agenda_Id || t.agenda_id || "",
+                    disponibilidad: 1,
+                  }
+                })
             }
 
             // Buscar en los próximos 60 días (mismo profesional y sede), igual que la reserva
