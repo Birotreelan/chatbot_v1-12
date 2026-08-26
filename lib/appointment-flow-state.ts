@@ -688,6 +688,31 @@ export async function getStepPrompt(
   }
 }
 
+/**
+ * Limpia el paso guardado (prompt + botones). Se usa cuando un mensaje es
+ * TERMINAL (ej: "tu solicitud fue enviada exitosamente", cupo alcanzado, obra
+ * social no habilitada) — no hay un próximo paso pendiente que retomar. Sin
+ * esto, una pregunta intercalada posterior (ej: "qué hay que llevar") hacía
+ * que el router de consultas intercaladas re-mostrara ese mensaje terminal
+ * como si fuera "el paso actual", produciendo respuestas incoherentes tipo
+ * "...Ahora, volviendo a tu solicitud de turno: ¡Tu solicitud fue enviada
+ * exitosamente!..." repetidas. Caso 26/8/2026, tel. 2215029948: ver
+ * PLAN-DE-TRABAJO.md.
+ */
+export async function clearStepState(
+  phone: string,
+  configId: string,
+): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  try {
+    await redis.del(`${STEP_PROMPT_PREFIX}:${configId}:${phone}`)
+    await redis.del(`${STEP_BUTTONS_PREFIX}:${configId}:${phone}`)
+  } catch {
+    /* noop */
+  }
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================

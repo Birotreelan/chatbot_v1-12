@@ -50,6 +50,7 @@ import {
   getStepButtons,
   saveStepPrompt,
   getStepPrompt,
+  clearStepState,
   type ChatbotData,
   type ChatbotDataTurno,
   type ChatbotDataTurnoCancelado,
@@ -323,10 +324,27 @@ async function sendExistingPatientResult(
     }
   }
 
-  // Recordar los botones y el texto de reply del paso (para re-mostrarlos ante una
-  // consulta intercalada o un "no te entendí" — Refactor Paso 3, 18/8/2026).
-  await saveStepButtons(ctx.userPhoneNumber, ctx.configId, result.searchTypeButtons || result.turnosButtons || [])
-  await saveStepPrompt(ctx.userPhoneNumber, ctx.configId, result.message)
+  // Acciones TERMINALES: el flujo termina acá, no hay un próximo paso pendiente
+  // que retomar (ej: reserva ya enviada, cupo alcanzado, obra social no habilitada).
+  // Si guardáramos este mensaje como "paso actual", una consulta intercalada
+  // posterior lo re-mostraría como si fuera un paso vigente (bug 26/8/2026, tel.
+  // 2215029948: "qué hay que llevar" → reenvío incoherente de "tu solicitud fue
+  // enviada exitosamente"). Limpiamos en vez de guardar.
+  const TERMINAL_ACTIONS = new Set([
+    'turno_reservado',
+    'nuevo_turno_no_permitido',
+    'obra_social_no_permite_turnos_online',
+    'limite_turnos_alcanzado',
+  ])
+
+  if (result.action && TERMINAL_ACTIONS.has(result.action)) {
+    await clearStepState(ctx.userPhoneNumber, ctx.configId)
+  } else {
+    // Recordar los botones y el texto de reply del paso (para re-mostrarlos ante una
+    // consulta intercalada o un "no te entendí" — Refactor Paso 3, 18/8/2026).
+    await saveStepButtons(ctx.userPhoneNumber, ctx.configId, result.searchTypeButtons || result.turnosButtons || [])
+    await saveStepPrompt(ctx.userPhoneNumber, ctx.configId, result.message)
+  }
 
   const _saveHistory = async (msg: string) => {
     await saveConversationMessage({ id: nanoid(), role: "assistant", content: msg, timestamp: new Date().toISOString(), phoneNumber: ctx.userPhoneNumber, configId: ctx.configId })
