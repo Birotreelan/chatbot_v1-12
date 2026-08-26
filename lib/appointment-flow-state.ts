@@ -10,6 +10,7 @@
  */
 
 import { getRedisClient } from "./redis"
+import { classifyOptionWithAI } from "./conversation-state/shared/ai-option-classifier"
 
 // ============================================================================
 // TYPES
@@ -100,6 +101,16 @@ export interface FlowState {
   // Acción que el paciente eligió y que se ejecutará tras seleccionar el turno
   // (estado 'awaiting_turno_selection', cuando hay múltiples turnos)
   pendingAction?: PendingTurnoAction
+  // Variante del menú realmente mostrado para 'awaiting_cancel_confirmation'.
+  // Por defecto (undefined) es el menú clásico de 2 opciones ("1- Sí, cancelar" /
+  // "2- No, mantener"). 'confirmar_cancelar_otro' es el menú de 3 opciones que
+  // arma nlu-fallback-handler.ts (MENU_OPCIONES: "1- Confirmar asistencia" /
+  // "2- Cancelar el turno" / "3- Solicitar otro turno") — ahí "2" significa
+  // CANCELAR, al revés que en el menú clásico. Sin distinguir la variante, un
+  // "2" se interpretaba siempre con el mapeo clásico (mantener), invirtiendo
+  // la decisión del paciente cuando en realidad se le había mostrado el menú
+  // de 3 opciones. Caso 26/8/2026, tel. 1139310751: ver PLAN-DE-TRABAJO.md.
+  menuVariant?: 'confirmar_cancelar_otro'
 }
 
 // ============================================================================
@@ -862,15 +873,51 @@ export function isCancelAndRescheduleChoice(message: string): 'confirm_attendanc
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
 
+  // GUARDA: negación de asistencia ("no voy asistir", "no voy a poder asistir", "no
+  // puedo ir") anula la señal de "confirm_attendance" — sin esto, "asistir" hacía
+  // match igual dentro de la frase negada e invertía la decisión del paciente (caso
+  // 26/8/2026, tel. 1139310751: "Aviso no voy asistir..." se procesó como
+  // confirmación). Mismo criterio que isAttendanceAffirmation/isConfirmCancelResponse.
+  const esNegacionDeAsistencia = /\bno\b[\s\S]{0,20}\b(voy|ire|asist\w*|puedo)\b/.test(normalized)
+
   // Opción 1: confirmar asistencia
-  if (/^1\.?$/.test(normalized) || /confirm|asistir|asistire|ahi voy|ahi estare|voy a ir/.test(normalized)) {
+  if (!esNegacionDeAsistencia && (/^1\.?$/.test(normalized) || /confirm|asistir|asistire|ahi voy|ahi estare|voy a ir/.test(normalized))) {
     return 'confirm_attendance'
   }
 
   // Opción 2: cancelar y sacar nuevo turno
-  if (/^2\.?$/.test(normalized) || /cancel|nuevo turno|otro turno|cambiar|cambio|reagendar/.test(normalized)) {
+  if (esNegacionDeAsistencia || /^2\.?$/.test(normalized) || /cancel|nuevo turno|otro turno|cambiar|cambio|reagendar/.test(normalized)) {
     return 'cancel_and_reschedule'
   }
 
   return null
+}
+
+/**
+ * Igual que isCancelAndRescheduleChoice, pero con fallback a la IA compartida
+ * (classifyOptionWithAI) cuando el matching determinístico no reconoce la
+ * respuesta. Antes, un mensaje no reconocido acá directamente cedía al
+ * pipeline general sin pasar por ninguna capa de IA — a diferencia del resto
+ * del proyecto, donde toda selección de opciones ya tiene esta red de
+ * seguridad (menú de bienvenida, sede, profesional, especialidad, etc. — ver
+ * lib/conversation-state/shared/ai-option-classifier.ts). Caso 26/8/2026,
+ * tel. 1139310751: ver PLAN-DE-TRABAJO.md.
+ */
+export async function resolveCancelAndRescheduleChoice(
+  message: string
+): Promise<'confirm_attendance' | 'cancel_and_reschedule' | null> {
+  const deterministic = isCancelAndRescheduleChoice(message)
+  if (deterministic) return deterministic
+
+  const aiResult = await classifyOptionWithAI(
+    message,
+    [
+      { index: 1, label: 'Confirmar asistencia al turno médico' },
+      { index: 2, label: 'Cancelar el turno médico y solicitar uno nuevo' },
+    ],
+    'El paciente tiene un turno médico vigente y se le preguntó si quiere confirmar su asistencia o cancelarlo para pedir uno nuevo. Interpretá su respuesta libre — incluso si contiene negaciones como "no voy a poder ir/asistir" o menciona un motivo (eso significa que quiere cancelar).'
+  )
+
+  if (!aiResult.detected || aiResult.selectedOption === undefined) return null
+  return aiResult.selectedOption === 1 ? 'confirm_attendance' : 'cancel_and_reschedule'
 }

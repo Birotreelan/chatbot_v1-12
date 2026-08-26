@@ -39,7 +39,7 @@ import {
   isKeepAppointmentResponse,
   isAttendanceAffirmation,
   isRescheduleChoice,
-  isCancelAndRescheduleChoice,
+  resolveCancelAndRescheduleChoice,
   markAppointmentConfirmed,
   isAppointmentConfirmed,
   getAppointmentRef,
@@ -825,8 +825,22 @@ async function handlePendingFlowResponse(
       await clearFlowState(userPhoneNumber, config.id)
       return false
     }
-    // Usuario responde a "1- Si, cancelar" / "2- No, mantener"
-    if (isConfirmCancelResponse(userMessage)) {
+    // Usuario responde a "1- Si, cancelar" / "2- No, mantener" (menú clásico) — SALVO
+    // que el menú realmente mostrado haya sido el de 3 opciones (menuVariant
+    // 'confirmar_cancelar_otro': "1- Confirmar asistencia"/"2- Cancelar"/"3- Otro
+    // turno"), donde "2" significa CANCELAR. Sin esta distinción, un "2" al menú de
+    // 3 opciones se interpretaba con el mapeo clásico y mantenía el turno por error
+    // (caso 26/8/2026, tel. 1139310751).
+    const rawDigitCancelConf = userMessage.trim().match(/^([123])\.?$/)?.[1]
+    const esVarianteTresOpciones = flowState.menuVariant === 'confirmar_cancelar_otro'
+    const respuestaEsCancelar = esVarianteTresOpciones && rawDigitCancelConf
+      ? rawDigitCancelConf === '2'
+      : isConfirmCancelResponse(userMessage)
+    const respuestaEsMantener = esVarianteTresOpciones && rawDigitCancelConf
+      ? rawDigitCancelConf === '1'
+      : (isKeepAppointmentResponse(userMessage) || isAttendanceAffirmation(userMessage))
+
+    if (respuestaEsCancelar) {
       
       // Llamar al proxy para ejecutar la cancelacion
       try {
@@ -1076,12 +1090,12 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         await clearFlowState(userPhoneNumber, config.id)
         return false
       }
-    } else if (isKeepAppointmentResponse(userMessage) || isAttendanceAffirmation(userMessage)) {
+    } else if (respuestaEsMantener) {
       // isAttendanceAffirmation: "si si voy!!", "confirmo asisencia", "Confirmar" (botón del
       // template) expresan asistencia → mantener el turno, NUNCA interpretar como cancelación
       // (incidentes 2026-07-05: cancelaciones accidentales que borraron turnos de la base).
       logger.info("Usuario decide mantener turno", {
-        via: isKeepAppointmentResponse(userMessage) ? "keep_response" : "attendance_affirmation",
+        via: esVarianteTresOpciones && rawDigitCancelConf ? "menu_3_opciones_digito" : (isKeepAppointmentResponse(userMessage) ? "keep_response" : "attendance_affirmation"),
       })
       await clearFlowState(userPhoneNumber, config.id)
 
@@ -1245,7 +1259,11 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
       return false
     }
 
-    const choice = isCancelAndRescheduleChoice(userMessage)
+    // Determinístico primero (dígito exacto, "cancelar"/"asistir" sin negación); si no
+    // reconoce la respuesta, cae en la IA compartida en vez de ceder directo al
+    // pipeline general — misma red de seguridad que el resto de las selecciones de
+    // opciones del proyecto (ver ai-option-classifier.ts).
+    const choice = await resolveCancelAndRescheduleChoice(userMessage)
 
     if (choice === 'confirm_attendance') {
       // El paciente decidió confirmar asistencia al turno existente.
@@ -4263,10 +4281,16 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           if (appointmentData) {
             // Buscar el turnoIndex (0 por defecto si hay turnos)
             const turnoIdx = (appointmentData.turnos && appointmentData.turnos.length > 0) ? 0 : undefined
+            // El mensaje enviado (nluFallbackResult.response) es el menú de 3 opciones
+            // de nlu-fallback-handler.ts (MENU_OPCIONES: 1-Confirmar/2-Cancelar/3-Otro
+            // turno) — marcar la variante para que el handler de
+            // 'awaiting_cancel_confirmation' interprete "2" como CANCELAR y no como
+            // "mantener" (mapeo del menú clásico de 2 opciones).
             await setFlowState(userPhoneNumber, config.id, {
               type: "awaiting_cancel_confirmation",
               createdAt: new Date().toISOString(),
               turnoIndex: turnoIdx,
+              menuVariant: "confirmar_cancelar_otro",
             })
           }
         }
