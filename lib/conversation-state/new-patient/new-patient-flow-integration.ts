@@ -81,7 +81,7 @@ import {
   handleConfirmationResponse,
   executeReservation,
   buildModifyDataMenu,
-  detectModifyDataOption,
+  detectModifyDataOptionWithAIFallback,
 } from '../shared/confirmation-handler'
 import type {
   SedeOption,
@@ -2153,7 +2153,7 @@ async function handleModifySelectionPhase(
 ): Promise<NewPatientResult> {
   const logger = createConversationLogger(phone, clientId, 'modify_selection_phase')
 
-  const option = detectModifyDataOption(userMessage)
+  const option = await detectModifyDataOptionWithAIFallback(userMessage)
 
   if (!option) {
     return {

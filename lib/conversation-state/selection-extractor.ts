@@ -7,7 +7,12 @@
  * - Posicionales (primero, último, anterior)
  * - Coincidencia de texto con las opciones
  * - Coincidencia parcial/fuzzy
+ * - (extractSelectionAsync) Clasificador con IA como último recurso — ver
+ *   shared/ai-option-classifier.ts. 26/8/2026, pedido de Nicolás: capa global
+ *   de IA para cualquier selección de opciones numeradas del sistema.
  */
+
+import { classifyOptionWithAI } from './shared/ai-option-classifier'
 
 export interface SelectionOption {
   index: number
@@ -21,7 +26,7 @@ export interface SelectionResult {
   selectedIndex?: number
   selectedOption?: SelectionOption
   confidence: "high" | "medium" | "low"
-  matchType: "direct_number" | "word_number" | "ordinal" | "positional" | "text_match" | "partial_match" | "fuzzy_match" | "none"
+  matchType: "direct_number" | "word_number" | "ordinal" | "positional" | "text_match" | "partial_match" | "fuzzy_match" | "ai_classified" | "none"
   reason?: string
 }
 
@@ -346,6 +351,66 @@ export function extractSelection(
     matchType: "none",
     reason: "No se detectó selección en el mensaje",
   };
+}
+
+/**
+ * Igual que `extractSelection`, pero si ninguna capa determinística resuelve la
+ * selección, consulta como último recurso al clasificador de IA compartido
+ * (`shared/ai-option-classifier.ts`) antes de rendirse.
+ *
+ * Solo hace la llamada a IA cuando de verdad hace falta (todas las capas
+ * gratuitas de `extractSelection` ya fallaron) — no agrega costo ni latencia
+ * al camino feliz.
+ *
+ * @param message Mensaje del paciente
+ * @param options Opciones disponibles (mismo formato que extractSelection)
+ * @param currentIndex Índice actual, para resolver "siguiente"/"anterior"
+ * @param useAIFallback Default true. Poner en false para omitir la llamada a IA.
+ * @param contextHint Frase corta opcional que ayuda a la IA a desambiguar
+ *   (ej. "Está eligiendo una sede para agendar su turno.")
+ */
+export async function extractSelectionAsync(
+  message: string,
+  options: SelectionOption[],
+  currentIndex?: number,
+  useAIFallback: boolean = true,
+  contextHint?: string
+): Promise<SelectionResult> {
+  const deterministic = extractSelection(message, options, currentIndex)
+  if (deterministic.selected || !useAIFallback) {
+    return deterministic
+  }
+
+  // Presentamos a la IA los números 1-based (como los ve el paciente en el
+  // chat), y después mapeamos la respuesta de vuelta a la posición 0-based
+  // que espera el resto del sistema — sin asumir nada sobre opt.index.
+  const candidates = options.map((opt, i) => ({
+    index: i + 1,
+    label: opt.label,
+    details: opt.details,
+  }))
+
+  const aiResult = await classifyOptionWithAI(message, candidates, contextHint)
+  if (!aiResult.detected || aiResult.selectedOption === undefined) {
+    // Conserva el resultado determinístico original (con su "reason") para no
+    // perder contexto de por qué no se detectó nada.
+    return deterministic
+  }
+
+  const selectedIndex = aiResult.selectedOption - 1
+  const selectedOption = options[selectedIndex]
+  if (!selectedOption) {
+    return deterministic
+  }
+
+  return {
+    selected: true,
+    selectedIndex,
+    selectedOption,
+    confidence: aiResult.confidence >= 0.85 ? 'high' : 'medium',
+    matchType: 'ai_classified',
+    reason: aiResult.reasoning,
+  }
 }
 
 /**

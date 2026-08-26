@@ -5,7 +5,7 @@
 
 import { createConversationLogger } from '../logger'
 import { obtenerTodasLasSedes } from '../../api-tools/api-functions'
-import { extractSelection } from '../selection-extractor'
+import { extractSelectionAsync } from '../selection-extractor'
 import { detectFlowInterruption } from './flow-interruption-handler'
 import type { SedeOption, HandlerResult, SharedFlowState } from './types'
 
@@ -149,7 +149,13 @@ export async function handleSedeSelection(
     label: s.nombre,
   }))
 
-  const result = extractSelection(userInput, selectionOptions)
+  const result = await extractSelectionAsync(
+    userInput,
+    selectionOptions,
+    undefined,
+    true,
+    'El paciente está eligiendo una sede/sucursal para agendar su turno.'
+  )
 
   if (result.selected && result.selectedIndex !== undefined) {
     const sedeSeleccionada = sedesOpciones[result.selectedIndex]

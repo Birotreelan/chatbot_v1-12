@@ -7,6 +7,7 @@ import { reservarTurno } from '../../api-tools/api-functions'
 import { getFirstName } from '../../utils/name-utils'
 import type { TurnoOption, HandlerResult, SharedFlowState } from './types'
 import { parseOptionNumber } from '../selection-extractor'
+import { classifyOptionWithAI } from './ai-option-classifier'
 import { trackAppointmentEvent, checkAndClearPendingReschedule } from '../../appointment-stats'
 
 /**
@@ -103,7 +104,33 @@ export async function handleConfirmationResponse(
     }
   }
 
-  // Input no claro
+  // Input no claro por reglas — último recurso: clasificador de IA compartido
+  // (26/8/2026, pedido de Nicolás: capa global de IA para cualquier selección
+  // de opciones numeradas del sistema).
+  const aiResult = await classifyOptionWithAI(
+    userInput,
+    [
+      { index: 1, label: 'Sí, confirmar' },
+      { index: 2, label: 'No, modificar' },
+    ],
+    'El paciente está confirmando si los datos de su turno son correctos, o si quiere modificar algo antes de reservar.'
+  )
+
+  if (aiResult.detected && aiResult.selectedOption === 1) {
+    logger.info('Confirmacion positiva recibida (IA)', { reasoning: aiResult.reasoning })
+    return { handled: true, confirmed: true }
+  }
+
+  if (aiResult.detected && aiResult.selectedOption === 2) {
+    logger.info('Confirmacion negativa recibida (IA)', { reasoning: aiResult.reasoning })
+    return {
+      handled: true,
+      confirmed: false,
+      message: buildModifyDataMenu(),
+      nextPhase: 'awaiting_modify_selection',
+    }
+  }
+
   logger.info('Respuesta de confirmacion no clara', { input: userInput })
 
   return {
@@ -252,8 +279,17 @@ export function buildModifyDataMenu(): string {
  */
 export type ModifyDataOption = 'nombre' | 'dni' | 'obra_social' | 'turno' | null
 
+const MODIFY_DATA_OPTIONS: { index: number; option: ModifyDataOption; label: string }[] = [
+  { index: 1, option: 'nombre', label: 'Modificar Nombre y Apellido' },
+  { index: 2, option: 'dni', label: 'Modificar DNI' },
+  { index: 3, option: 'obra_social', label: 'Modificar Obra Social' },
+  { index: 4, option: 'turno', label: 'Modificar turno' },
+]
+
 /**
- * Detecta cual opcion del menu de modificacion eligio el usuario
+ * Detecta cual opcion del menu de modificacion eligio el usuario, por reglas
+ * determinísticas (rápido, gratis). Devuelve null si no hay match claro —
+ * usar `detectModifyDataOptionWithAIFallback` para el intento final con IA.
  */
 export function detectModifyDataOption(userInput: string): ModifyDataOption {
   const input = userInput.trim().toLowerCase()
@@ -284,4 +320,26 @@ export function detectModifyDataOption(userInput: string): ModifyDataOption {
   }
 
   return null
+}
+
+/**
+ * Igual que `detectModifyDataOption`, pero si las reglas no resuelven, consulta
+ * como último recurso al clasificador de IA compartido antes de rendirse.
+ * (26/8/2026, pedido de Nicolás: capa global de IA para cualquier selección de
+ * opciones numeradas del sistema.)
+ */
+export async function detectModifyDataOptionWithAIFallback(userInput: string): Promise<ModifyDataOption> {
+  const byRules = detectModifyDataOption(userInput)
+  if (byRules) return byRules
+
+  const aiResult = await classifyOptionWithAI(
+    userInput,
+    MODIFY_DATA_OPTIONS.map(({ index, label }) => ({ index, label })),
+    'El paciente está eligiendo qué dato de su reserva de turno quiere modificar.'
+  )
+
+  if (!aiResult.detected || aiResult.selectedOption === undefined) return null
+
+  const match = MODIFY_DATA_OPTIONS.find((o) => o.index === aiResult.selectedOption)
+  return match ? match.option : null
 }

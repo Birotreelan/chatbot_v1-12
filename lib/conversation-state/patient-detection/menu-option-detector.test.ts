@@ -1,7 +1,38 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock del cliente de OpenAI: evita llamadas reales a la API en los tests.
+// Cada test que necesite ejercitar la capa de IA configura el valor de retorno
+// con createMock.mockResolvedValueOnce(...).
+const createMock = vi.fn();
+vi.mock('@/lib/openai', () => ({
+  openai: {
+    chat: {
+      completions: {
+        create: (...args: unknown[]) => createMock(...args),
+      },
+    },
+  },
+}));
+
 import { detectMenuOption, NEW_PATIENT_MENU } from './menu-option-detector';
 
+function mockAIResponse(selectedOption: number | null, confidence = 0.9) {
+  createMock.mockResolvedValueOnce({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({ selectedOption, confidence, reasoning: 'mock' }),
+        },
+      },
+    ],
+  });
+}
+
 describe('Menu Option Detector', () => {
+  beforeEach(() => {
+    createMock.mockReset();
+  });
+
   it('should detect "solicitar turno" as option 1 for new patient menu', async () => {
     const result = await detectMenuOption('solicitar turno', NEW_PATIENT_MENU, '1234567890');
     expect(result.detected).toBe(true);
@@ -21,16 +52,25 @@ describe('Menu Option Detector', () => {
     expect(result.selectedOption).toBe(1);
   });
 
-  it('should detect "consulta" as option 2', async () => {
+  it('should resolve "consulta" as option 3 via AI fallback (1 sola keyword, bajo el umbral determinístico)', async () => {
+    // Corregido 26/8/2026: 'consulta' es keyword de la opción 3 ("Realizar otra
+    // consulta"), no de la 2 ("Solicitar turno para un familiar") — el test
+    // original esperaba 2 y ya fallaba antes de este cambio, sin relación con el
+    // fallback de IA agregado hoy. Además, 1 sola keyword da 0.75 de confianza
+    // (bajo el umbral de 0.90), y el label completo no es suficientemente
+    // parecido para la capa 1.5 — por eso este caso depende de la IA.
+    mockAIResponse(3, 0.9);
     const result = await detectMenuOption('consulta', NEW_PATIENT_MENU, '1234567890');
     expect(result.detected).toBe(true);
-    expect(result.selectedOption).toBe(2);
+    expect(result.selectedOption).toBe(3);
+    expect(createMock).toHaveBeenCalledTimes(1);
   });
 
-  it('should detect "información" as option 2', async () => {
+  it('should resolve "información" as option 3 via AI fallback', async () => {
+    mockAIResponse(3, 0.85);
     const result = await detectMenuOption('información', NEW_PATIENT_MENU, '1234567890');
     expect(result.detected).toBe(true);
-    expect(result.selectedOption).toBe(2);
+    expect(result.selectedOption).toBe(3);
   });
 
   it('should handle case-insensitive input', async () => {
@@ -46,7 +86,31 @@ describe('Menu Option Detector', () => {
   });
 
   it('should not detect unrelated message', async () => {
+    // useAIFallback: false — evita una llamada real a OpenAI en el test; las capas
+    // gratis (keywords + label exacto/aproximado) alcanzan para probar este caso.
+    const result = await detectMenuOption('hola cómo estás?', NEW_PATIENT_MENU, '1234567890', false);
+    expect(result.detected).toBeFalsy();
+  });
+
+  it('should not detect unrelated message even when AI fallback runs and returns null', async () => {
+    mockAIResponse(null, 0);
     const result = await detectMenuOption('hola cómo estás?', NEW_PATIENT_MENU, '1234567890');
     expect(result.detected).toBeFalsy();
+  });
+
+  it('should detect exact button label text even without matching keywords (sin IA)', async () => {
+    // Caso Rebeca (tel. 1123127066, 26/8/2026): escribir el texto exacto del botón
+    // debe reconocerse por la capa de label exacto/aproximado, sin necesidad de IA.
+    const result = await detectMenuOption('Realizar otra consulta', NEW_PATIENT_MENU, '1234567890', false);
+    expect(result.detected).toBe(true);
+    expect(result.selectedOption).toBe(3);
+    expect(result.confidence).toBe(1);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('should fall back gracefully if the AI call throws (ej. sin API key / error de red)', async () => {
+    createMock.mockRejectedValueOnce(new Error('network error'));
+    const result = await detectMenuOption('mensaje ambiguo sin relación', NEW_PATIENT_MENU, '1234567890');
+    expect(result.detected).toBe(false);
   });
 });

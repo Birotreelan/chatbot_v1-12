@@ -6,6 +6,7 @@
 import { createConversationLogger } from '../logger'
 import type { SearchType, HandlerResult } from './types'
 import { parseOptionNumber } from '../selection-extractor'
+import { classifyOptionWithAI } from './ai-option-classifier'
 
 export interface SearchOptionsConfig {
   enableSearchByProfessional?: boolean
@@ -208,6 +209,47 @@ export async function handleSearchTypeSelection(
       handled: true,
       nextPhase: 'awaiting_sede',
       searchType: 'cambiar_sede',
+    }
+  }
+
+  // Capa de fallback con IA: si nada deterministico coincidio, le pedimos a la IA
+  // que interprete el mensaje contra las opciones vigentes (incluyendo "cambiar sede").
+  const aiCandidates = [
+    ...availableOptions.map((opt) => ({ index: opt.number, label: opt.label, details: opt.description })),
+    { index: cambiarSedeNumber, label: 'Buscar en otra sede', details: 'Cambiar la sede/sucursal elegida' },
+  ]
+
+  const aiResult = await classifyOptionWithAI(
+    userInput,
+    aiCandidates,
+    'El paciente esta eligiendo como quiere buscar su turno: por medico particular, por especialidad, cualquier medico disponible, o cambiar de sede.'
+  )
+
+  if (aiResult.detected && aiResult.selectedOption !== undefined) {
+    if (aiResult.selectedOption === cambiarSedeNumber) {
+      logger.info('Tipo de busqueda: cambiar_sede (IA)', { reasoning: aiResult.reasoning })
+      return {
+        handled: true,
+        nextPhase: 'awaiting_sede',
+        searchType: 'cambiar_sede',
+      }
+    }
+
+    const optionByAI = availableOptions.find((opt) => opt.number === aiResult.selectedOption)
+    if (optionByAI) {
+      logger.info(`Tipo de busqueda: ${optionByAI.key} (IA)`, { reasoning: aiResult.reasoning })
+
+      const nextPhases: Record<string, string> = {
+        'medico_particular': 'awaiting_professional_name',
+        'especialidad': 'awaiting_specialty_selection',
+        'cualquier_medico': 'awaiting_turno_selection',
+      }
+
+      return {
+        handled: true,
+        nextPhase: nextPhases[optionByAI.key] || 'awaiting_turno_selection',
+        searchType: optionByAI.key as SearchType,
+      }
     }
   }
 

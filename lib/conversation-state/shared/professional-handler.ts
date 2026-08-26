@@ -4,7 +4,7 @@
 
 import { createConversationLogger } from '../logger'
 import { buscarProfesionales, obtenerTodosLosProfesionales } from '../../api-tools/api-functions'
-import { extractSelection } from '../selection-extractor'
+import { extractSelectionAsync } from '../selection-extractor'
 import { detectFlowInterruption } from './flow-interruption-handler'
 import type { ProfessionalOption, HandlerResult } from './types'
 
@@ -153,7 +153,13 @@ export async function handleProfessionalSelection(
     label: p.nombre,
   }))
 
-  const result = extractSelection(userInput, selectionOptions)
+  const result = await extractSelectionAsync(
+    userInput,
+    selectionOptions,
+    undefined,
+    true,
+    'El paciente está eligiendo un profesional/médico de una lista para agendar su turno.'
+  )
 
   if (result.selected && result.selectedIndex !== undefined) {
     const profesionalSeleccionado = profesionalesOpciones[result.selectedIndex]
