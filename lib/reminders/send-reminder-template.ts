@@ -237,6 +237,50 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
     console.warn(`[REMINDERS] ⚠️ No hay cliente_id para config ${config.id}, no se puede trackear template`)
   }
 
+  // Parsear Chatbot_Data (lo necesita tanto el guardado de contexto de abajo
+  // como la notificación a OpenAI más abajo).
+  let chatbotDataParsed: any = null
+  if (Chatbot_Data) {
+    try {
+      chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
+    } catch (e) {
+      console.error("[REMINDERS] ❌ Error al parsear Chatbot_Data:", e)
+    }
+  }
+
+  // CRÍTICO (fix 27/8/2026): guardar el contexto del turno en Redis para que
+  // el flujo de respuestas DIRECTAS (botones "Confirmar"/"Cancelar", que no
+  // pasan por OpenAI) funcione. Antes esto vivía DENTRO del try/catch de
+  // notificación a OpenAI de abajo — desde que OpenAI dio de baja la
+  // Assistants API (sunset 26/8/2026, /v1/threads ahora devuelve 404 siempre),
+  // ese try/catch falla en la primera línea y el contexto nunca se guardaba.
+  // Resultado real observado: paciente responde "Confirmar" → "[APPOINTMENT-FLOW]
+  // No hay contexto" → bot responde "No pudimos procesar tu confirmación...".
+  // Se saca este guardado del bloque de OpenAI para que corra SIEMPRE,
+  // sin depender de que esa notificación tenga éxito.
+  if (chatbotDataParsed && config && cleanPhoneNumber) {
+    try {
+      const firstTurno = Array.isArray(chatbotDataParsed.turnos) && chatbotDataParsed.turnos[0]
+      if (firstTurno && firstTurno.agenda_id && !chatbotDataParsed.appointment_id) {
+        chatbotDataParsed.appointment_id = firstTurno.agenda_id
+      }
+      if (!chatbotDataParsed.proxyUrl) {
+        // Proxy dinámico por clínica primero (config.proxy, ya en scope), con
+        // fallback a las env vars globales — ver lib/proxy-url-resolver.ts
+        chatbotDataParsed.proxyUrl = config.proxy || process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL || null
+      }
+      await saveAppointmentContext(cleanPhoneNumber, config.id, chatbotDataParsed)
+      console.log("[REMINDERS] ✅ Contexto de turno guardado en Redis para respuestas directas", {
+        appointment_id: chatbotDataParsed.appointment_id,
+        tieneProxyUrl: !!chatbotDataParsed.proxyUrl,
+      })
+    } catch (e) {
+      console.error("[REMINDERS] ⚠️ Error guardando contexto en Redis (continuando):", e)
+    }
+  } else if (!chatbotDataParsed) {
+    console.warn("[REMINDERS] ⚠️ ADVERTENCIA: No se recibió Chatbot_Data en la solicitud")
+  }
+
   // Notificar a OpenAI sobre la plantilla enviada
   try {
     console.log("[REMINDERS] Notificando a OpenAI sobre plantilla enviada...")
@@ -286,36 +330,8 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
       console.log("[REMINDERS] Error al parsear template data:", e)
     }
 
-    let chatbotDataParsed = null
-    if (Chatbot_Data) {
-      try {
-        chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
-      } catch (e) {
-        console.error("[REMINDERS] ❌ Error al parsear Chatbot_Data:", e)
-      }
-    }
-
-    // Guardar el Chatbot_Data en Redis para respuestas directas (sin OpenAI)
-    if (chatbotDataParsed && config && cleanPhoneNumber) {
-      try {
-        const firstTurno = Array.isArray(chatbotDataParsed.turnos) && chatbotDataParsed.turnos[0]
-        if (firstTurno && firstTurno.agenda_id && !chatbotDataParsed.appointment_id) {
-          chatbotDataParsed.appointment_id = firstTurno.agenda_id
-        }
-        if (!chatbotDataParsed.proxyUrl) {
-          // Proxy dinámico por clínica primero (config.proxy, ya en scope), con
-          // fallback a las env vars globales — ver lib/proxy-url-resolver.ts
-          chatbotDataParsed.proxyUrl = config.proxy || process.env.PROXY_API_URL || process.env.CLINIC_PROXY_URL || null
-        }
-        await saveAppointmentContext(cleanPhoneNumber, config.id, chatbotDataParsed)
-        console.log("[REMINDERS] ✅ Contexto de turno guardado en Redis para respuestas directas", {
-          appointment_id: chatbotDataParsed.appointment_id,
-          tieneProxyUrl: !!chatbotDataParsed.proxyUrl,
-        })
-      } catch (e) {
-        console.error("[REMINDERS] ⚠️ Error guardando contexto en Redis (continuando):", e)
-      }
-    }
+    // chatbotDataParsed ya se calculó y se usó para guardar el contexto ANTES
+    // de este try/catch (ver más arriba) — se reutiliza acá, no se vuelve a parsear.
 
     let notificationMessage = `[SISTEMA_PLANTILLA]
 Plantilla_Nombre: ${templateAnalysis.name}
