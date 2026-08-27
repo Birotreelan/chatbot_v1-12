@@ -172,6 +172,10 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     }
   }
 
+  // Config nueva: invalidar la caché en memoria de getWhatsAppConfigByPhoneId
+  // para que no quede un "no encontrado" memoizado de una consulta anterior.
+  configByPhoneIdMemo.clear()
+
   // Actualizar estadísticas
   await updateSystemStats()
 
@@ -217,18 +221,37 @@ export async function getWhatsAppConfigByPhoneIdFresh(phoneNumberId: string): Pr
   // sin memoización — así que el índice (phone_to_config:*) da exactamente el mismo
   // dato actualizado, con una sola lectura en vez de un escaneo completo.
   try {
-    return await getWhatsAppConfigByPhoneId(phoneNumberId)
+    return await getWhatsAppConfigByPhoneId(phoneNumberId, { skipMemo: true })
   } catch (error) {
     console.error(`[DB] Error al obtener configuración fresca para ${phoneNumberId}:`, error)
     return null
   }
 }
 
+// Memo en memoria (optimización comandos 2026-08-27): dentro de un mismo mensaje,
+// el AI Dispatcher puede re-consultar la config por phoneNumberId varias veces
+// (una por cada tool que la necesita). TTL corto (5s): cualquier cambio real de
+// config (activar/desactivar, token, etc.) tarda como mucho eso en reflejarse acá,
+// y las escrituras (updateWhatsAppConfig/createWhatsAppConfig/deleteWhatsAppConfig)
+// invalidan el mapa entero de todos modos. Mismo patrón que getTemplateSentTime.
+const configByPhoneIdMemo = new Map<string, { value: WhatsAppConfig | null; expiresAt: number }>()
+const CONFIG_BY_PHONE_ID_MEMO_TTL_MS = 5000
+
 // Obtener una configuración por ID de número de teléfono
-export async function getWhatsAppConfigByPhoneId(phoneNumberId: string): Promise<WhatsAppConfig | null> {
+export async function getWhatsAppConfigByPhoneId(
+  phoneNumberId: string,
+  options?: { skipMemo?: boolean },
+): Promise<WhatsAppConfig | null> {
   const redisClient = getRedisClient()
 
   if (redisClient) {
+    if (!options?.skipMemo) {
+      const memoized = configByPhoneIdMemo.get(phoneNumberId)
+      if (memoized && memoized.expiresAt > Date.now()) {
+        return memoized.value
+      }
+    }
+
     // Intentar obtener el ID de configuración directamente
     const key = `${PHONE_TO_CONFIG_PREFIX}${phoneNumberId}`
     const configId = await redisClient.get(key)
@@ -241,13 +264,19 @@ export async function getWhatsAppConfigByPhoneId(phoneNumberId: string): Promise
       if (manualMatch) {
         // Corregir el mapeo en Redis
         await redisClient.set(key, manualMatch.id)
+        configByPhoneIdMemo.set(phoneNumberId, {
+          value: manualMatch,
+          expiresAt: Date.now() + CONFIG_BY_PHONE_ID_MEMO_TTL_MS,
+        })
         return manualMatch
       }
 
+      configByPhoneIdMemo.set(phoneNumberId, { value: null, expiresAt: Date.now() + CONFIG_BY_PHONE_ID_MEMO_TTL_MS })
       return null
     }
 
     const config = await getWhatsAppConfig(configId as string)
+    configByPhoneIdMemo.set(phoneNumberId, { value: config, expiresAt: Date.now() + CONFIG_BY_PHONE_ID_MEMO_TTL_MS })
     return config
   } else {
     // Fallback a memoria
@@ -380,6 +409,10 @@ export async function updateWhatsAppConfig(
   } catch (error) {
     console.error(`[DB] Error al actualizar configuración ${id}:`, error)
     throw error
+  } finally {
+    // Invalidar la caché en memoria de getWhatsAppConfigByPhoneId — cualquier
+    // campo (token, active, etc.) pudo haber cambiado.
+    configByPhoneIdMemo.clear()
   }
 }
 
@@ -405,6 +438,9 @@ export async function deleteWhatsAppConfig(id: string): Promise<boolean> {
     }
     memoryStorage.configs.delete(id)
   }
+
+  // Invalidar la caché en memoria de getWhatsAppConfigByPhoneId
+  configByPhoneIdMemo.clear()
 
   // Actualizar estadísticas
   await updateSystemStats()

@@ -4,8 +4,12 @@ import { getRedisClient } from "@/lib/redis"
 
 // Cache TTL para los conteos SSE (segundos).
 // Las reconexiones SSE son frecuentes (cada cierre/apertura de pestaña); con este cache
-// no se re-lee Redis si los conteos ya se calcularon en los últimos 20 segundos.
-const SSE_COUNTS_CACHE_TTL = 20
+// no se re-lee Redis si los conteos ya se calcularon recientemente.
+// IMPORTANTE (fix 27/8/2026): debe ser MAYOR al intervalo de envío (30s, ver
+// setInterval más abajo). Antes era 20s < 30s, así que la entrada siempre expiraba
+// antes del siguiente tick y la caché nunca se usaba dentro de una misma conexión
+// — cada tick recomputaba getPendingSessions/getAgentActiveSessions desde cero.
+const SSE_COUNTS_CACHE_TTL = 35
 const SSE_COUNTS_CACHE_PREFIX = "sse_counts:"
 
 /**
