@@ -1,7 +1,6 @@
 import { getWhatsAppConfigByPhoneId, getWhatsAppConfigById, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId, clearAllConversationStates } from "@/lib/db"
 import { sendWhatsAppMessage, sendWhatsAppInteractive, sendWhatsAppList } from "@/lib/whatsapp-api"
 import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
-import { getAssistantResponse } from "@/lib/openai-tools"
 import { getArgentinaDateTime } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
@@ -5933,34 +5932,20 @@ export async function processIndividualMessage(
       // ========================================================================
 
       try {
-        const openai = new (await import("openai")).default({
-          apiKey: process.env.OPENAI_API_KEY,
-        })
-
-        // Obtener el thread actual (puede no existir si el usuario llegó por template)
-        const threadInfo = await getThreadForUser(userPhoneNumber, config.id)
-
-
-        const newThread = await openai.beta.threads.create({
-          metadata: {
-            name: `whatsapp-${userPhoneNumber}-${config.id}`,
-            previousThread: threadInfo?.threadId || "none",
-            reason: "assistant_switch_reagendamiento",
-          },
-        })
-
-
-        // Actualizar en base de datos
-        const { updateThreadId } = await import("./db")
-        const reAgendAssistantId = config.whatsappReagendamientoAssistantId
-        
-        if (reAgendAssistantId) {
-          await updateThreadId(userPhoneNumber, config.id, newThread.id, reAgendAssistantId)
-        }
-
-        // Crear mensaje de sistema con los datos del turno cancelado
+        // MIGRADO (27/8/2026): antes este bloque creaba un thread nuevo y lo
+        // "switcheaba" a un Assistant especializado en reagendamiento
+        // (config.whatsappReagendamientoAssistantId), vía la Assistants API
+        // (beta.threads), dada de baja por OpenAI el 26/8/2026 sin período de
+        // gracia. Ya no existe ese mecanismo de switch: ese Assistant
+        // específico no tenía sus instructions respaldadas antes del sunset
+        // (solo se pudo rescatar el Assistant principal, "New_Treelan_Responses",
+        // en docs/assistant-backups/assistant-config-2026-07-13.json — ver
+        // PLAN-DE-TRABAJO.md), así que este camino ahora usa el mismo motor y las
+        // mismas instrucciones que el resto del flujo (lib/openai-responses.ts),
+        // con el detalle del turno cancelado incluido en el mensaje de arranque.
         const { formatScheduleForSystemBlock: formatSchedule } = await import("./utils/schedule-formatter")
         const { getArgentinaDateTime: getArgentinaDT } = await import("./utils/date-utils")
+        const { getResponsesReply } = await import("./openai-responses")
         const fechaHora = getArgentinaDT()
         const scheduleInfo = formatSchedule(config)
 
@@ -5973,13 +5958,9 @@ PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDer
 FuncionOrigen: route_to_reagendamiento${scheduleInfo}
 [/SISTEMA]
 
-${JSON.stringify(functionArgs, null, 2)}`
+${JSON.stringify(functionArgs, null, 2)}
 
-        await openai.beta.threads.messages.create(newThread.id, {
-          role: "user",
-          content: systemBlock,
-        })
-
+Hola, quisiera reagendar mi turno.`
 
         // Trackear inicio de reagendamiento
         if (config.cliente_id) {
@@ -5987,24 +5968,14 @@ ${JSON.stringify(functionArgs, null, 2)}`
           await trackRescheduleStarted(config.cliente_id, userPhoneNumber)
         }
 
-        // Llamar a getAssistantResponse con el nuevo thread y assistantId
-        if (reAgendAssistantId) {
-          await getAssistantResponse(
-            newThread.id,
-            "Hola, quisiera reagendar mi turno.",
-            phoneNumberId,
-            reAgendAssistantId,
-            userPhoneNumber,
-          )
-        } else {
-          console.error(`[WHATSAPP] No se encontró whatsappReagendamientoAssistantId en config`)
-          await sendWhatsAppMessage(
-            phoneNumberId,
-            config.accessToken,
-            userPhoneNumber,
-            "Lo siento, el asistente de reagendamiento no está configurado. Por favor, contacta con soporte."
-          )
-        }
+        await getResponsesReply({
+          phoneNumberId,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id || "",
+          accessToken: config.accessToken,
+          messageToSend: systemBlock,
+        })
 
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
         return
@@ -6267,115 +6238,33 @@ ${userMessage}`
     }
 
 
-    const assistantToUse = threadResult.assistantId || config.whatsappAssistantId
-    if (threadResult.assistantId) {
-    } else {
-    }
-
     // Obtener respuesta del asistente
+    // MIGRADO (27/8/2026): antes usaba getAssistantResponse (Assistants API,
+    // beta.threads/beta.runs, dada de baja por OpenAI el 26/8/2026 sin período
+    // de gracia) con un mecanismo de recovery que creaba un thread nuevo si
+    // OpenAI devolvía 404 — ese recovery también llamaba a beta.threads.create()
+    // y por lo tanto estaba igual de roto. Se reemplaza por lib/openai-responses.ts
+    // (Responses API + historial propio en Redis), que maneja sus propios
+    // reintentos y su propio mensaje de error al paciente si algo falla, así
+    // que no hace falta duplicar esa lógica acá.
     try {
-      await getAssistantResponse(threadResult.threadId, messageToSend, phoneNumberId, assistantToUse, userPhoneNumber)
+      const { getResponsesReply } = await import("./openai-responses")
+      const result = await getResponsesReply({
+        phoneNumberId,
+        userPhoneNumber,
+        configId: config.id,
+        clienteId: config.cliente_id || "",
+        accessToken: config.accessToken,
+        messageToSend,
+      })
 
-
-      // Actualizar estadísticas - mensaje procesado
-      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      await updateWhatsAppStats(config.id, result.success ? { messagesProcessed: 1 } : { errors: 1 })
     } catch (error) {
+      // getResponsesReply ya intenta enviar su propio mensaje de error al
+      // paciente antes de propagar — este catch es sólo para no perder el
+      // conteo de stats si ni siquiera eso se pudo completar.
       console.error("[WHATSAPP] Error al obtener respuesta del asistente:", (error as Error).message)
-
-      // Actualizar estadísticas - error
       await updateWhatsAppStats(config.id, { errors: 1 })
-
-      // Si el error es 404 (thread no encontrado), intentar crear uno nuevo
-      if ((error as any).status === 404 && (error as any).error?.type === "invalid_request_error") {
-        try {
-          // Crear un nuevo thread directamente con OpenAI
-          const openai = new (await import("openai")).default({
-            apiKey: process.env.OPENAI_API_KEY,
-          })
-
-          const newThread = await openai.beta.threads.create()
-
-          // Actualizar en la base de datos
-          const key = `thread:${userPhoneNumber}:${config.id}`
-          const redisClient = getRedisClient()
-
-          // Guardar el nuevo thread
-          const threadInfo = {
-            threadId: newThread.id,
-            phoneNumber: userPhoneNumber,
-            whatsappConfigId: config.id,
-            lastMessageAt: new Date().toISOString(),
-            messageCount: 1,
-            isResetThread: true, // Añadir este flag para identificar que es un thread recién creado
-          }
-
-          if (redisClient) {
-            await redisClient.set(key, JSON.stringify(threadInfo))
-          }
-
-          await getAssistantResponse(
-            newThread.id,
-            messageToSend,
-            phoneNumberId,
-            config.whatsappAssistantId,
-            userPhoneNumber,
-          )
-
-
-          // Actualizar estadísticas - mensaje procesado
-          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-        } catch (retryError) {
-          console.error("[WHATSAPP] Error al reintentar con nuevo thread:", retryError)
-
-          const errorMessage =
-            "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
-
-          try {
-            await saveConversationMessage({
-              id: nanoid(),
-              role: "assistant",
-              content: errorMessage,
-              timestamp: new Date().toISOString(),
-              phoneNumber: userPhoneNumber,
-              configId: config.id,
-              messageType: "error",
-            })
-          } catch (saveError) {
-            console.error(`[WHATSAPP] ❌ Error guardando mensaje de error:`, (saveError as Error).message)
-          }
-
-          // Enviar mensaje de error al usuario
-          try {
-            await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
-          } catch (sendError) {
-            console.error("[WHATSAPP] Error al enviar mensaje de error:", sendError)
-          }
-        }
-      } else {
-        const errorMessage =
-          "Lo siento, ha ocurrido un error al procesar tu mensaje. Por favor, intenta de nuevo más tarde."
-
-        try {
-            await saveConversationMessage({
-              id: nanoid(),
-              role: "assistant",
-              content: errorMessage,
-              timestamp: new Date().toISOString(),
-              phoneNumber: userPhoneNumber,
-              configId: config.id,
-              messageType: "error",
-            })
-        } catch (saveError) {
-          console.error(`[WHATSAPP] �� Error guardando mensaje de error:`, saveError)
-        }
-
-        // Enviar mensaje de error al usuario
-        try {
-          await sendWhatsAppMessage(phoneNumberId, config.accessToken, userPhoneNumber, errorMessage)
-        } catch (sendError) {
-          console.error("[WHATSAPP] Error al enviar mensaje de error:", sendError)
-        }
-      }
     }
 
   } catch (error) {

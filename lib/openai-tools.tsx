@@ -303,7 +303,7 @@ export const openaiTools = {
   // </CHANGE>
 }
 
-function generateDynamicWaitingMessage(functionName: string, functionArgs: any): string | null {
+export function generateDynamicWaitingMessage(functionName: string, functionArgs: any): string | null {
   switch (functionName) {
     case "buscar_turnos_disponibles":
       if (functionArgs?.rango_fechas) {
