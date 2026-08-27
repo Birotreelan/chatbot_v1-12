@@ -102,6 +102,11 @@ import {
 // Constantes
 const NEW_PATIENT_FLOW_KEY = 'new_patient_flow'
 const NEW_PATIENT_FLOW_TTL = 86400 // 24 horas
+// Ver EXISTING_PATIENT_TURNOS_KEY en existing-patient-flow-integration.ts — mismo
+// motivo: turnosOpciones puede ser un array grande (búsqueda de hasta 60 días) que
+// no debe reescribirse en cada paso intermedio del flujo. Bug de bandwidth
+// confirmado 27/8/2026 (ver PLAN-DE-TRABAJO.md).
+const NEW_PATIENT_TURNOS_KEY = 'new_patient_turnos'
 
 // Estado del flujo de paciente nuevo
 export interface NewPatientFlowState {
@@ -219,7 +224,16 @@ async function getFlowState(phone: string): Promise<NewPatientFlowState | null> 
   const stateStr = await redis.get(stateKey)
   if (!stateStr) return null
 
-  return typeof stateStr === 'object' ? stateStr as NewPatientFlowState : JSON.parse(stateStr as string)
+  const state: NewPatientFlowState =
+    typeof stateStr === 'object' ? stateStr as NewPatientFlowState : JSON.parse(stateStr as string)
+
+  // Re-adjuntar turnosOpciones desde su key aparte (ver NEW_PATIENT_TURNOS_KEY)
+  const turnosStr = await redis.get(`${NEW_PATIENT_TURNOS_KEY}:${phone}`)
+  if (turnosStr) {
+    state.turnosOpciones = typeof turnosStr === 'object' ? turnosStr as TurnoOption[] : JSON.parse(turnosStr as string)
+  }
+
+  return state
 }
 
 /**
@@ -242,7 +256,21 @@ async function saveFlowState(phone: string, state: NewPatientFlowState): Promise
 
   state.lastUpdated = Date.now()
   const stateKey = `${NEW_PATIENT_FLOW_KEY}:${phone}`
-  await redis.setex(stateKey, NEW_PATIENT_FLOW_TTL, JSON.stringify(state))
+  const turnosKey = `${NEW_PATIENT_TURNOS_KEY}:${phone}`
+
+  // turnosOpciones va en su propia key — ver NEW_PATIENT_TURNOS_KEY.
+  const { turnosOpciones, ...stateWithoutTurnos } = state
+
+  const pipeline = redis.pipeline()
+  pipeline.setex(stateKey, NEW_PATIENT_FLOW_TTL, JSON.stringify(stateWithoutTurnos))
+  if (turnosOpciones && turnosOpciones.length > 0) {
+    pipeline.setex(turnosKey, NEW_PATIENT_FLOW_TTL, JSON.stringify(turnosOpciones))
+  } else {
+    pipeline.del(turnosKey)
+  }
+  await pipeline.exec()
+
+  state.turnosOpciones = turnosOpciones
 }
 
 /**
@@ -2254,7 +2282,7 @@ export async function clearNewPatientFlow(phone: string, clientId: string): Prom
   if (!redis) return
 
   const logger = createConversationLogger(phone, clientId, 'new_patient_clear')
-  await redis.del(`${NEW_PATIENT_FLOW_KEY}:${phone}`)
+  await redis.del(`${NEW_PATIENT_FLOW_KEY}:${phone}`, `${NEW_PATIENT_TURNOS_KEY}:${phone}`)
   logger.info('Flow cleared', {})
 }
 

@@ -80,91 +80,92 @@ async function updateAggregatedStats(clienteId: string, event: AppointmentEvent)
     console.log(`[APPOINTMENT_STATS] 📈 Tipo de evento: ${event.eventType}`)
     console.log(`[APPOINTMENT_STATS] 📈 Fecha UTC: ${date}`)
 
+    // Agrupar todos los comandos en un pipeline: hasta 8 requests separadas por
+    // evento pasan a 1 solo round-trip HTTP. Optimización documentada y pendiente
+    // desde BANDWIDTH_OPTIMIZATION_PLAN_FUTURO.md (~20-25% del bandwidth total),
+    // implementada 27/8/2026 (ver PLAN-DE-TRABAJO.md).
+    const pipeline = redis.pipeline()
+
     // Incrementar contadores según el tipo de evento
     switch (event.eventType) {
       case "template_sent":
-        await redis.hincrby(statsKey, "totalTemplatesSent", 1)
-        await redis.hincrby(`${statsKey}:daily:templates`, date, 1)
-        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalTemplatesSent`)
+        pipeline.hincrby(statsKey, "totalTemplatesSent", 1)
+        pipeline.hincrby(`${statsKey}:daily:templates`, date, 1)
         break
 
       case "confirmed":
-        await redis.hincrby(statsKey, "totalConfirmed", 1)
-        await redis.hincrby(`${statsKey}:daily:confirmed`, date, 1)
-        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalConfirmed`)
+        pipeline.hincrby(statsKey, "totalConfirmed", 1)
+        pipeline.hincrby(`${statsKey}:daily:confirmed`, date, 1)
 
         // Calcular tiempo de respuesta si tenemos templateSentAt
         if (event.templateSentAt) {
           const responseTime = new Date(event.timestamp).getTime() - new Date(event.templateSentAt).getTime()
           const responseTimeMinutes = Math.round(responseTime / 1000 / 60)
 
-          await redis.lpush(`${statsKey}:response_times:confirmed`, responseTimeMinutes)
-          await redis.ltrim(`${statsKey}:response_times:confirmed`, 0, 999) // Mantener últimos 1000
+          pipeline.lpush(`${statsKey}:response_times:confirmed`, responseTimeMinutes)
+          pipeline.ltrim(`${statsKey}:response_times:confirmed`, 0, 999) // Mantener últimos 1000
 
-          await redis.lpush(`${statsKey}:response_times:confirmed:${date}`, responseTimeMinutes)
-          await redis.ltrim(`${statsKey}:response_times:confirmed:${date}`, 0, 999)
+          pipeline.lpush(`${statsKey}:response_times:confirmed:${date}`, responseTimeMinutes)
+          pipeline.ltrim(`${statsKey}:response_times:confirmed:${date}`, 0, 999)
           // Registrar que existe data para esta fecha
-          await redis.sadd(`${statsKey}:response_times:confirmed:dates`, date)
+          pipeline.sadd(`${statsKey}:response_times:confirmed:dates`, date)
 
           console.log(
-            `[APPOINTMENT_STATS] ✅ Tiempo de respuesta registrado: ${responseTimeMinutes} minutos para fecha ${date}`,
+            `[APPOINTMENT_STATS] 📈 Tiempo de respuesta a registrar: ${responseTimeMinutes} minutos para fecha ${date}`,
           )
         }
         break
 
       case "cancelled":
-        await redis.hincrby(statsKey, "totalCancelled", 1)
-        await redis.hincrby(`${statsKey}:daily:cancelled`, date, 1)
-        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalCancelled`)
+        pipeline.hincrby(statsKey, "totalCancelled", 1)
+        pipeline.hincrby(`${statsKey}:daily:cancelled`, date, 1)
 
         // Calcular tiempo de respuesta
         if (event.templateSentAt) {
           const responseTime = new Date(event.timestamp).getTime() - new Date(event.templateSentAt).getTime()
           const responseTimeMinutes = Math.round(responseTime / 1000 / 60)
 
-          await redis.lpush(`${statsKey}:response_times:cancelled`, responseTimeMinutes)
-          await redis.ltrim(`${statsKey}:response_times:cancelled`, 0, 999)
+          pipeline.lpush(`${statsKey}:response_times:cancelled`, responseTimeMinutes)
+          pipeline.ltrim(`${statsKey}:response_times:cancelled`, 0, 999)
 
-          await redis.lpush(`${statsKey}:response_times:cancelled:${date}`, responseTimeMinutes)
-          await redis.ltrim(`${statsKey}:response_times:cancelled:${date}`, 0, 999)
+          pipeline.lpush(`${statsKey}:response_times:cancelled:${date}`, responseTimeMinutes)
+          pipeline.ltrim(`${statsKey}:response_times:cancelled:${date}`, 0, 999)
           // Registrar que existe data para esta fecha
-          await redis.sadd(`${statsKey}:response_times:cancelled:dates`, date)
+          pipeline.sadd(`${statsKey}:response_times:cancelled:dates`, date)
 
           console.log(
-            `[APPOINTMENT_STATS] ✅ Tiempo de respuesta registrado: ${responseTimeMinutes} minutos para fecha ${date}`,
+            `[APPOINTMENT_STATS] 📈 Tiempo de respuesta a registrar: ${responseTimeMinutes} minutos para fecha ${date}`,
           )
         }
         break
 
       case "rescheduled":
-        await redis.hincrby(statsKey, "totalRescheduled", 1)
-        await redis.hincrby(`${statsKey}:daily:rescheduled`, date, 1)
-        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalRescheduled`)
+        pipeline.hincrby(statsKey, "totalRescheduled", 1)
+        pipeline.hincrby(`${statsKey}:daily:rescheduled`, date, 1)
         break
 
       case "user_initiated":
-        await redis.hincrby(statsKey, "totalUserInitiated", 1)
-        await redis.hincrby(`${statsKey}:daily:user_initiated`, date, 1)
-        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalUserInitiated - conversación iniciada por usuario`)
+        pipeline.hincrby(statsKey, "totalUserInitiated", 1)
+        pipeline.hincrby(`${statsKey}:daily:user_initiated`, date, 1)
         break
 
       case "new_appointment":
-        await redis.hincrby(statsKey, "totalNewAppointments", 1)
-        await redis.hincrby(`${statsKey}:daily:new_appointments`, date, 1)
-        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalNewAppointments - turno nuevo sin cancelación previa`)
+        pipeline.hincrby(statsKey, "totalNewAppointments", 1)
+        pipeline.hincrby(`${statsKey}:daily:new_appointments`, date, 1)
         break
 
       case "reschedule_started":
-        await redis.hincrby(statsKey, "totalRescheduleStarted", 1)
-        await redis.hincrby(`${statsKey}:daily:reschedule_started`, date, 1)
-        console.log(`[APPOINTMENT_STATS] ✅ Incrementado totalRescheduleStarted - inicio de proceso de reagendamiento`)
+        pipeline.hincrby(statsKey, "totalRescheduleStarted", 1)
+        pipeline.hincrby(`${statsKey}:daily:reschedule_started`, date, 1)
         break
     }
 
-    // Actualizar timestamp de última actualización
-    await redis.hset(statsKey, "lastUpdated", new Date().toISOString())
+    // Actualizar timestamp de última actualización (mismo pipeline)
+    pipeline.hset(statsKey, "lastUpdated", new Date().toISOString())
 
-    console.log(`[APPOINTMENT_STATS] ✅ Estadísticas actualizadas para cliente ${clienteId}`)
+    await pipeline.exec()
+
+    console.log(`[APPOINTMENT_STATS] ✅ Estadísticas actualizadas para cliente ${clienteId} (evento: ${event.eventType})`)
   } catch (error) {
     console.error("[APPOINTMENT_STATS] ❌ Error al actualizar estadísticas agregadas:", error)
   }

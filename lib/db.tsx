@@ -34,6 +34,13 @@ const CONFIG_PREFIX = "whatsapp_config:"
 const THREAD_PREFIX = "thread:"
 const PHONE_TO_CONFIG_PREFIX = "phone_to_config:"
 const STATS_KEY = "system_stats"
+// Contadores de mensajes por cliente en un hash chico y aparte del config completo.
+// Antes (updateWhatsAppStats) se leía y reescribía el objeto WhatsAppConfig ENTERO
+// (varios KB: accessToken, config del widget, horarios, feature flags, etc.) en cada
+// mensaje procesado solo para incrementar un contador — bug de bandwidth confirmado
+// 27/8/2026 (ver PLAN-DE-TRABAJO.md). Con HINCRBY sobre este hash el costo por mensaje
+// es de unos pocos bytes en vez de reescribir el config completo dos veces.
+const WHATSAPP_STATS_PREFIX = "whatsapp_stats:"
 
 const THREAD_EXPIRY_HOURS = Number.parseInt(process.env.THREAD_EXPIRY_HOURS || "24", 10)
 
@@ -202,9 +209,15 @@ export async function getWhatsAppConfig(id: string): Promise<WhatsAppConfig | nu
 
 // Obtener una configuración por ID de número de teléfono - SIEMPRE FRESCA (sin cachear)
 export async function getWhatsAppConfigByPhoneIdFresh(phoneNumberId: string): Promise<WhatsAppConfig | null> {
+  // Antes hacía SCAN de whatsapp_config:* + un GET completo por cada config del
+  // sistema (para terminar buscando UNO por phoneNumberId) en cada envío de
+  // recordatorio/template — bug de bandwidth confirmado 27/8/2026 (ver
+  // PLAN-DE-TRABAJO.md). "Fresh" pretendía evitar una caché que en realidad no
+  // existe: getWhatsAppConfig/getWhatsAppConfigByPhoneId siempre leen Redis en vivo,
+  // sin memoización — así que el índice (phone_to_config:*) da exactamente el mismo
+  // dato actualizado, con una sola lectura en vez de un escaneo completo.
   try {
-    const allConfigs = await getAllWhatsAppConfigs()
-    return allConfigs.find((c) => c.phoneNumberId === phoneNumberId) || null
+    return await getWhatsAppConfigByPhoneId(phoneNumberId)
   } catch (error) {
     console.error(`[DB] Error al obtener configuración fresca para ${phoneNumberId}:`, error)
     return null
@@ -274,7 +287,34 @@ export async function getAllWhatsAppConfigs(): Promise<WhatsAppConfig[]> {
         }),
       )
 
-      return configs.filter(Boolean) as WhatsAppConfig[]
+      const validConfigs = configs.filter(Boolean) as WhatsAppConfig[]
+
+      // Mergear contadores en vivo del hash liviano (ver updateWhatsAppStats) — sin
+      // esto, tras mover los contadores fuera del objeto config, quedarían siempre en
+      // el valor congelado de cuando se creó cada config. Pipeline: 1 solo round-trip
+      // para todos los configs en vez de N llamadas sueltas.
+      if (validConfigs.length > 0) {
+        try {
+          const statsPipeline = redisClient.pipeline()
+          validConfigs.forEach((c) => statsPipeline.hgetall(`${WHATSAPP_STATS_PREFIX}${c.id}`))
+          const statsResults = (await statsPipeline.exec()) as Array<Record<string, string> | null>
+          validConfigs.forEach((c, i) => {
+            const hash = statsResults[i]
+            if (hash && Object.keys(hash).length > 0) {
+              c.stats = {
+                messagesReceived: Number(hash.messagesReceived) || 0,
+                messagesProcessed: Number(hash.messagesProcessed) || 0,
+                errors: Number(hash.errors) || 0,
+                lastMessageAt: hash.lastMessageAt || undefined,
+              }
+            }
+          })
+        } catch (error) {
+          console.error(`[DB] Error al mergear stats livianas:`, error)
+        }
+      }
+
+      return validConfigs
     } else {
       // Fallback a memoria
       return Array.from(memoryStorage.configs.values())
@@ -549,8 +589,13 @@ export async function getThreadForUser(
         memoryStorage.threads.set(key, newThreadInfo)
       }
 
-      // Actualizar estadísticas
-      await updateSystemStats()
+      // NO llamar updateSystemStats() acá: se ejecuta en CADA thread nuevo (primer
+      // mensaje de cualquier conversación, o thread expirado tras 24h) y hace un SCAN
+      // completo de TODOS los threads + TODOS los configs del sistema (objetos
+      // grandes) — bug de bandwidth confirmado 27/8/2026 (ver PLAN-DE-TRABAJO.md).
+      // getSystemStats() ya recalcula sola si el valor cacheado está vencido, así que
+      // el dashboard sigue viendo datos frescos (dentro de SYSTEM_STATS_STALE_MS) sin
+      // pagar este costo en cada conversación nueva de cada cliente.
 
       return { threadId: thread.id, isNewThread: true }
     },
@@ -785,6 +830,12 @@ export async function updateSystemStats(): Promise<SystemStats> {
   return stats
 }
 
+// Recalcular updateSystemStats() (SCAN completo de configs + threads) como máximo
+// una vez cada 15 minutos, sin importar cuántas veces se pida el stat. Antes se
+// recalculaba en cada thread nuevo (ver getThreadForUser) — con esto el costo pasa a
+// ser, en el peor caso, 1 recálculo cada 15 min en todo el sistema.
+const SYSTEM_STATS_STALE_MS = 15 * 60 * 1000
+
 // Obtener estadísticas del sistema
 export async function getSystemStats(): Promise<SystemStats> {
   const redisClient = getRedisClient()
@@ -795,6 +846,11 @@ export async function getSystemStats(): Promise<SystemStats> {
     const stats = safeJsonParse(statsData)
 
     if (!stats) {
+      return updateSystemStats()
+    }
+
+    const lastUpdatedMs = stats.lastUpdated ? new Date(stats.lastUpdated).getTime() : 0
+    if (!lastUpdatedMs || Date.now() - lastUpdatedMs > SYSTEM_STATS_STALE_MS) {
       return updateSystemStats()
     }
 
@@ -810,22 +866,49 @@ export async function getSystemStats(): Promise<SystemStats> {
 }
 
 // Actualizar estadísticas de un número de WhatsApp
+// Se llama ~1-4 veces POR MENSAJE (97 call sites en whatsapp.tsx) — por eso escribe
+// solo en el hash liviano WHATSAPP_STATS_PREFIX (HINCRBY, unos pocos bytes) en vez de
+// leer+reescribir el objeto WhatsAppConfig completo. Los contadores se mergean de
+// vuelta al leer (getWhatsAppConfig/getAllWhatsAppConfigs) para que el dashboard siga
+// mostrando el total actualizado sin pagar ese costo en el hot path de mensajes.
 export async function updateWhatsAppStats(
   configId: string,
   updates: { messagesReceived?: number; messagesProcessed?: number; errors?: number },
 ): Promise<void> {
-  const config = await getWhatsAppConfig(configId)
-  if (!config) return
+  const redisClient = getRedisClient()
 
-  const updatedStats = {
-    ...config.stats,
-    messagesReceived: (config.stats?.messagesReceived || 0) + (updates.messagesReceived || 0),
-    messagesProcessed: (config.stats?.messagesProcessed || 0) + (updates.messagesProcessed || 0),
-    errors: (config.stats?.errors || 0) + (updates.errors || 0),
-    lastMessageAt: updates.messagesReceived ? new Date().toISOString() : config.stats?.lastMessageAt,
+  if (!redisClient) {
+    // Fallback en memoria (sin Redis): mismo comportamiento que antes
+    const config = memoryStorage.configs.get(configId)
+    if (!config) return
+    config.stats = {
+      messagesReceived: (config.stats?.messagesReceived || 0) + (updates.messagesReceived || 0),
+      messagesProcessed: (config.stats?.messagesProcessed || 0) + (updates.messagesProcessed || 0),
+      errors: (config.stats?.errors || 0) + (updates.errors || 0),
+      lastMessageAt: updates.messagesReceived ? new Date().toISOString() : config.stats?.lastMessageAt,
+    }
+    return
   }
 
-  await updateWhatsAppConfig(configId, { stats: updatedStats })
+  if (!updates.messagesReceived && !updates.messagesProcessed && !updates.errors) return
+
+  try {
+    const key = `${WHATSAPP_STATS_PREFIX}${configId}`
+    const pipeline = redisClient.pipeline()
+    if (updates.messagesReceived) {
+      pipeline.hincrby(key, "messagesReceived", updates.messagesReceived)
+      pipeline.hset(key, "lastMessageAt", new Date().toISOString())
+    }
+    if (updates.messagesProcessed) {
+      pipeline.hincrby(key, "messagesProcessed", updates.messagesProcessed)
+    }
+    if (updates.errors) {
+      pipeline.hincrby(key, "errors", updates.errors)
+    }
+    await pipeline.exec()
+  } catch (error) {
+    console.error(`[DB] Error al actualizar stats livianas de ${configId}:`, error)
+  }
 }
 
 // Función adicional para obtener configuración por ID (alias para compatibilidad)

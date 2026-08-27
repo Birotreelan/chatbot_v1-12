@@ -90,6 +90,13 @@ import {
 // Constantes
 const EXISTING_PATIENT_FLOW_KEY = 'existing_patient_flow'
 const EXISTING_PATIENT_FLOW_TTL = 7200 // 2 horas
+// state.turnosOpciones puede traer el array COMPLETO de turnos de una búsqueda de
+// hasta 60 días (decenas/cientos de entradas) — se guarda en una key aparte para que
+// los pasos intermedios del flujo (elegir sede, paginar "ver más", confirmar, etc.)
+// no reescriban ese blob grande en Redis en cada mensaje solo por cambiar un campo
+// chico del resto del estado. Bug de bandwidth confirmado 27/8/2026 (ver
+// PLAN-DE-TRABAJO.md). Mismo TTL que el estado principal.
+const EXISTING_PATIENT_TURNOS_KEY = 'existing_patient_turnos'
 
 // Estado del flujo
 export interface ExistingPatientFlowState {
@@ -192,7 +199,16 @@ async function getFlowState(phoneNumber: string): Promise<ExistingPatientFlowSta
   const stateStr = await redis.get(stateKey)
   if (!stateStr) return null
 
-  return typeof stateStr === 'object' ? stateStr as ExistingPatientFlowState : JSON.parse(stateStr as string)
+  const state: ExistingPatientFlowState =
+    typeof stateStr === 'object' ? stateStr as ExistingPatientFlowState : JSON.parse(stateStr as string)
+
+  // Re-adjuntar turnosOpciones desde su key aparte (ver EXISTING_PATIENT_TURNOS_KEY)
+  const turnosStr = await redis.get(`${EXISTING_PATIENT_TURNOS_KEY}:${phoneNumber}`)
+  if (turnosStr) {
+    state.turnosOpciones = typeof turnosStr === 'object' ? turnosStr as TurnoOption[] : JSON.parse(turnosStr as string)
+  }
+
+  return state
 }
 
 /**
@@ -214,7 +230,25 @@ async function saveFlowState(phoneNumber: string, state: ExistingPatientFlowStat
 
   state.lastUpdated = Date.now()
   const stateKey = `${EXISTING_PATIENT_FLOW_KEY}:${phoneNumber}`
-  await redis.setex(stateKey, EXISTING_PATIENT_FLOW_TTL, JSON.stringify(state))
+  const turnosKey = `${EXISTING_PATIENT_TURNOS_KEY}:${phoneNumber}`
+
+  // turnosOpciones va en su propia key (ver EXISTING_PATIENT_TURNOS_KEY) — se separa
+  // del resto del estado ANTES de serializar para no reescribir el array completo de
+  // turnos en cada paso intermedio del flujo (sede, paginación, confirmación, etc.).
+  const { turnosOpciones, ...stateWithoutTurnos } = state
+
+  const pipeline = redis.pipeline()
+  pipeline.setex(stateKey, EXISTING_PATIENT_FLOW_TTL, JSON.stringify(stateWithoutTurnos))
+  if (turnosOpciones && turnosOpciones.length > 0) {
+    pipeline.setex(turnosKey, EXISTING_PATIENT_FLOW_TTL, JSON.stringify(turnosOpciones))
+  } else {
+    pipeline.del(turnosKey)
+  }
+  await pipeline.exec()
+
+  // Restaurar el campo en el objeto en memoria (por si el caller lo sigue usando
+  // después de guardar) — sólo se omitió de lo que se serializó a Redis.
+  state.turnosOpciones = turnosOpciones
 }
 
 /**
@@ -2349,7 +2383,7 @@ export async function getExistingPatientFlowPhase(phoneNumber: string): Promise<
 export async function clearExistingPatientFlow(phoneNumber: string): Promise<void> {
   const redis = getRedisClient()
   if (!redis) return
-  await redis.del(`${EXISTING_PATIENT_FLOW_KEY}:${phoneNumber}`)
+  await redis.del(`${EXISTING_PATIENT_FLOW_KEY}:${phoneNumber}`, `${EXISTING_PATIENT_TURNOS_KEY}:${phoneNumber}`)
 }
 
 /**

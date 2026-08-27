@@ -26,14 +26,17 @@ export async function incrementMetric(name: string, value = 1): Promise<void> {
   const hour = new Date().getHours().toString().padStart(2, "0") // HH
 
   try {
+    // Pipeline: 3 requests separadas → 1 solo round-trip HTTP. Optimización
+    // documentada y pendiente desde BANDWIDTH_OPTIMIZATION_PLAN_FUTURO.md
+    // (~15-20% del bandwidth de métricas), implementada 27/8/2026.
+    const pipeline = redis.pipeline()
     // Incrementar contador por hora (para análisis detallado)
-    await redis.hincrby(`${key}:hourly`, `${date}:${hour}`, value)
-
+    pipeline.hincrby(`${key}:hourly`, `${date}:${hour}`, value)
     // Incrementar contador diario
-    await redis.hincrby(key, date, value)
-
+    pipeline.hincrby(key, date, value)
     // Incrementar contador total
-    await redis.hincrby(key, "total", value)
+    pipeline.hincrby(key, "total", value)
+    await pipeline.exec()
   } catch (error) {
     console.error(`Error al incrementar métrica ${name}:`, error)
   }
