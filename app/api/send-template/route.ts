@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server"
 import { getWhatsAppConfigByPhoneId, getAllWhatsAppConfigs } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
-import { getRedisClient } from "@/lib/redis"
-import OpenAI from "openai"
 import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "@/lib/utils"
@@ -161,27 +159,7 @@ async function notifyOpenAIAboutTemplate({
   buttonOptions: string[]
 }) {
   try {
-    console.log(`[TEMPLATE-NOTIFY] Notificando a OpenAI sobre plantilla enviada a ${userPhoneNumber}`)
-
-    // Obtener el thread ID para este usuario
-    const redisClient = getRedisClient()
-    if (!redisClient) {
-      console.warn("[TEMPLATE-NOTIFY] Redis no disponible, no se puede notificar a OpenAI")
-      return
-    }
-
-    const threadKey = `thread:${userPhoneNumber}:${configId}`
-    const threadData = await redisClient.get(threadKey)
-
-    if (!threadData) {
-      console.warn(`[TEMPLATE-NOTIFY] No se encontró thread para usuario ${userPhoneNumber}`)
-      return
-    }
-
-    const threadInfo = JSON.parse(threadData)
-    const threadId = threadInfo.threadId
-
-    console.log(`[TEMPLATE-NOTIFY] Thread encontrado: ${threadId}`)
+    console.log(`[TEMPLATE-NOTIFY] Guardando contexto de plantilla enviada a ${userPhoneNumber}`)
 
     // Crear el mensaje de sistema para OpenAI
     let systemMessage = `[SISTEMA_PLANTILLA]
@@ -212,18 +190,17 @@ El usuario puede responder normalmente con texto libre. Responde de manera conte
     console.log(`[TEMPLATE-NOTIFY] Mensaje de sistema preparado:`)
     console.log(systemMessage)
 
-    // Enviar el mensaje al thread de OpenAI
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    })
+    // MIGRADO (27/8/2026): antes esto buscaba el thread de OpenAI del usuario
+    // en Redis y le inyectaba este bloque vía beta.threads.messages.create —
+    // la Assistants API fue dada de baja el 26/8/2026 y esa llamada quedaba
+    // silenciosamente ignorada por el catch de abajo. Ahora se guarda como
+    // nota de contexto en el historial propio (lib/openai-responses.ts), que
+    // sí lo va a tener en cuenta la próxima vez que el paciente escriba.
+    const { appendResponsesContextNote } = await import("@/lib/openai-responses")
+    await appendResponsesContextNote(configId, userPhoneNumber, systemMessage)
 
-    await openai.beta.threads.messages.create(threadId, {
-      role: "user",
-      content: systemMessage,
-    })
-
-    console.log(`[TEMPLATE-NOTIFY] Notificación enviada exitosamente al thread ${threadId}`)
+    console.log(`[TEMPLATE-NOTIFY] Contexto guardado para ${userPhoneNumber}`)
   } catch (error) {
-    console.error("[TEMPLATE-NOTIFY] Error al notificar a OpenAI sobre la plantilla:", error)
+    console.error("[TEMPLATE-NOTIFY] Error al guardar contexto de la plantilla:", error)
   }
 }

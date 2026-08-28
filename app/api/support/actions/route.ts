@@ -14,7 +14,6 @@ import {
 import { getConversationMessages, getAllConversationMessages, saveConversationMessage, getConversationLastActivity } from "@/lib/conversations"
 import { getWhatsAppConfigById, getThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
-import { openai } from "@/lib/openai"
 import { nanoid } from "nanoid"
 import type { HumanSupportMessage } from "@/lib/types"
 
@@ -379,11 +378,14 @@ ${allLines}
 El agente cerró la sesión. Retomá la conversación teniendo en cuenta lo que se habló.
 [/ATENCION_HUMANA]`
 
-        await openai.beta.threads.messages.create(supportSession.threadId, {
-          role: "user",
-          content: contextBlock,
-        })
-        console.log("[CLOSE] Contexto de sesión humana inyectado en thread:", supportSession.threadId)
+        // MIGRADO (27/8/2026): antes se inyectaba este bloque directo en el
+        // thread de OpenAI (beta.threads.messages.create) — la Assistants API
+        // fue dada de baja el 26/8/2026 y esa llamada ya no funciona. Se
+        // guarda como nota de contexto en el historial propio de
+        // lib/openai-responses.ts en su lugar.
+        const { appendResponsesContextNote } = await import("@/lib/openai-responses")
+        await appendResponsesContextNote(supportSession.configId, supportSession.phoneNumber, contextBlock)
+        console.log("[CLOSE] Contexto de sesión humana guardado para:", supportSession.phoneNumber)
       } catch (err) {
         console.error("[CLOSE] Error inyectando contexto:", err)
       }

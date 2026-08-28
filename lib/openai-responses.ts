@@ -98,6 +98,26 @@ async function saveHistory(configId: string, phoneNumber: string, history: Histo
   }
 }
 
+/**
+ * Agrega una nota de contexto (rol "user", mismo criterio que usaba el sistema
+ * viejo al inyectar bloques [SISTEMA_*] directo en el thread de OpenAI) al
+ * historial guardado en Redis, sin generar una respuesta. Reemplaza los
+ * antiguos `openai.beta.threads.messages.create(threadId, {...})` "fire and
+ * forget" que notificaban al thread sobre eventos externos (plantilla
+ * enviada, cierre de atención humana, etc.) — esos ya no funcionan (Assistants
+ * API dada de baja 26/8/2026) y quedaban silenciosamente ignorados por sus
+ * propios try/catch. Con esto, la próxima vez que getResponsesReply arme el
+ * `input` para este usuario, el modelo va a tener esta nota en el contexto.
+ */
+export async function appendResponsesContextNote(configId: string, phoneNumber: string, note: string): Promise<void> {
+  try {
+    const history = await getHistory(configId, phoneNumber)
+    await saveHistory(configId, phoneNumber, [...history, { role: "user", content: note }])
+  } catch (error) {
+    console.error("[OPENAI-RESPONSES] Error agregando nota de contexto:", error)
+  }
+}
+
 /** Borra el historial — equivalente a "resetear el thread" del sistema viejo. */
 export async function resetResponsesHistory(configId: string, phoneNumber: string): Promise<void> {
   const redis = getRedisClient()

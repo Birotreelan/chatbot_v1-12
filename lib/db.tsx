@@ -520,16 +520,6 @@ export async function getThreadForUser(
 
         if (threadInfo) {
           if (isThreadExpired(threadInfo)) {
-            // Eliminar el thread antiguo de OpenAI
-            try {
-              const openai = new (await import("openai")).default({
-                apiKey: process.env.OPENAI_API_KEY,
-              })
-              await openai.beta.threads.delete(threadInfo.threadId)
-            } catch (deleteError: any) {
-              console.warn(`[DB] No se pudo eliminar thread expirado de OpenAI: ${deleteError.message}`)
-            }
-
             // Eliminar de Redis
             await redisClient.del(key)
 
@@ -564,16 +554,6 @@ export async function getThreadForUser(
 
         if (threadInfo) {
           if (isThreadExpired(threadInfo)) {
-            // Eliminar el thread antiguo de OpenAI
-            try {
-              const openai = new (await import("openai")).default({
-                apiKey: process.env.OPENAI_API_KEY,
-              })
-              await openai.beta.threads.delete(threadInfo.threadId)
-            } catch (deleteError: any) {
-              console.warn(`[DB] No se pudo eliminar thread expirado de OpenAI: ${deleteError.message}`)
-            }
-
             // Eliminar de memoria
             memoryStorage.threads.delete(key)
 
@@ -600,13 +580,20 @@ export async function getThreadForUser(
         }
       }
 
-      // Crear un nuevo thread
-      const openai = new (await import("openai")).default({
-        apiKey: process.env.OPENAI_API_KEY,
-      })
-
-      const thread = await openai.beta.threads.create()
-      console.info(`[DB] Nuevo thread creado: ${thread.id}`)
+      // Crear un "thread" — MIGRADO (27/8/2026): antes esto creaba un thread
+      // real en OpenAI (openai.beta.threads.create()), Assistants API dada de
+      // baja el 26/8/2026 sin período de gracia. Esta llamada NO tenía
+      // try/catch propio, así que cuando empezó a fallar (404) rompía
+      // CUALQUIER mensaje nuevo — primer mensaje de un paciente, o cualquier
+      // conversación con más de 24hs de inactividad — sin siquiera llegar al
+      // AI Dispatcher (que no depende de Assistants API y sigue funcionando
+      // bien). threadId pasa a ser un ID local: lib/openai-responses.ts ya no
+      // usa threads de OpenAI, mantiene su propio historial en Redis indexado
+      // por phoneNumber+configId (no por este ID). Se mantiene el campo/shape
+      // para no romper los demás consumidores de getThreadForUser (algunos
+      // solo lo usan como bandera de "hay o no hay conversación en curso").
+      const thread = { id: `local_${nanoid()}` }
+      console.info(`[DB] Nuevo thread (local) creado: ${thread.id}`)
 
       const newThreadInfo: ThreadInfo = {
         threadId: thread.id,
@@ -659,11 +646,21 @@ export async function resetThreadForUser(
       const redisClient = getRedisClient()
 
       try {
-        const openai = new (await import("openai")).default({
-          apiKey: process.env.OPENAI_API_KEY,
-        })
+        // MIGRADO (27/8/2026): antes esto borraba el thread anterior en OpenAI
+        // y creaba uno nuevo (beta.threads.delete/create) — Assistants API
+        // dada de baja el 26/8/2026. Ya no hay threads reales de OpenAI que
+        // gestionar acá (ver getThreadForUser más arriba); "resetear" pasa a
+        // ser simplemente generar un nuevo ID local. lib/openai-responses.ts
+        // mantiene su propio historial en Redis por phoneNumber+configId, así
+        // que también conviene limpiarlo para que el reset sea completo.
+        try {
+          const { resetResponsesHistory } = await import("./openai-responses")
+          await resetResponsesHistory(whatsappConfigId, normalizedPhone)
+        } catch (historyResetError) {
+          console.warn(`[DB] No se pudo limpiar el historial de openai-responses en el reset:`, historyResetError)
+        }
 
-        // 1. OBTENER EL THREAD ANTERIOR (si existe)
+        // 1. OBTENER EL THREAD ANTERIOR (si existe, solo para el log)
         let oldThreadId: string | null = null
         if (redisClient) {
           const oldThreadData = await redisClient.get(key)
@@ -678,23 +675,8 @@ export async function resetThreadForUser(
           }
         }
 
-        if (oldThreadId) {
-          try {
-            await openai.beta.threads.delete(oldThreadId)
-          } catch (deleteError) {
-            console.warn(`[DB] No se pudo eliminar el thread anterior de OpenAI: ${deleteError.message}`)
-          }
-        }
-
-        // 2. CREAR UN THREAD COMPLETAMENTE NUEVO EN OPENAI
-        const newThread = await openai.beta.threads.create({
-          metadata: {
-            phoneNumber: normalizedPhone,
-            whatsappConfigId,
-            createdAt: new Date().toISOString(),
-            isReset: "true",
-          },
-        })
+        // 2. CREAR UN THREAD (ID LOCAL — ya no hay Assistants API real)
+        const newThread = { id: `local_${nanoid()}` }
 
         // 3. ELIMINAR COMPLETAMENTE EL THREAD ANTERIOR DE REDIS/MEMORIA
         if (redisClient) {

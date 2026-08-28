@@ -187,7 +187,12 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
       configId: message.configId,
     }
 
-    // Pipeline: 6 comandos en 1 request HTTP (rpush, expire, set, expire, sadd, expire)
+    // Pipeline: 5 comandos en 1 request HTTP (rpush, expire, set-con-ex, sadd, expire).
+    // OPTIMIZACIÓN COMANDOS (2026-08-27): contactKey usa SET con {ex: TTL} en vez de
+    // SET + EXPIRE por separado (Redis limpia el TTL anterior en cada SET de todos
+    // modos, así que no hace falta el EXPIRE aparte) — 1 comando menos, en una función
+    // que corre en el 100% de los mensajes guardados. rpush y sadd sí necesitan su
+    // EXPIRE separado porque esos comandos no tienen variante con TTL atómico.
     // OPTIMIZACIÓN BANDWIDTH (2026-07-06): ya NO se invalida contacts_cache en cada
     // mensaje. Con tráfico activo el cache (TTL 60s) nunca llegaba a servir un hit y
     // cada poll del dashboard hacía SMEMBERS + MGET de TODOS los contactos + re-escritura
@@ -196,8 +201,7 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     const pipeline = redisClient.pipeline()
     pipeline.rpush(conversationKey, JSON.stringify(validatedMessage))
     pipeline.expire(conversationKey, CONVERSATION_TTL)
-    pipeline.set(contactKey, JSON.stringify(contactInfo))
-    pipeline.expire(contactKey, CONVERSATION_TTL)
+    pipeline.set(contactKey, JSON.stringify(contactInfo), { ex: CONVERSATION_TTL })
     pipeline.sadd(contactsSetKey, message.phoneNumber)
     pipeline.expire(contactsSetKey, CONVERSATION_TTL)
     await pipeline.exec()
