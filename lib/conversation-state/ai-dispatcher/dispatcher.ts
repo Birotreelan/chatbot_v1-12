@@ -15,6 +15,7 @@ import { openai } from '@/lib/openai'
 import { createConversationLogger } from '../logger'
 import { DISPATCHER_TOOLS, TOOL_NAMES, type ToolName } from './tool-manifest'
 import { type DispatcherContext, formatContextForLLM } from './context-builder'
+import { recordDiag, recordDiagSample, DIAG } from '@/lib/diagnostics'
 
 // ============================================================================
 // TIPOS
@@ -124,6 +125,18 @@ export async function runAIDispatcher(
 
     if (!toolCall) {
       logger.warn('[Dispatcher] GPT no seleccionó ningún tool — pasando al flujo normal')
+      void recordDiag(configId, [DIAG.MENSAJE_RECIBIDO, DIAG.DISPATCHER_FALLBACK])
+      void recordDiagSample({
+        tipo: DIAG.DISPATCHER_FALLBACK,
+        mensaje: userMessage,
+        configId,
+        detalle: {
+          motivo: 'sin_tool',
+          flujoActivo: ctx.activeFlow.type,
+          fase: ctx.activeFlow.phase,
+          turnos: ctx.turnos.length,
+        },
+      })
       return { handled: false }
     }
 
@@ -142,6 +155,10 @@ export async function runAIDispatcher(
       finishReason: choice.finish_reason,
     })
 
+    // Distribución de decisiones del dispatcher: es la base para detectar
+    // desvíos cuando se cambie el prompt o el modelo.
+    void recordDiag(configId, [DIAG.MENSAJE_RECIBIDO, `${DIAG.DISPATCHER_TOOL_PREFIX}${toolName}`])
+
     return {
       handled: true,
       tool: toolName,
@@ -150,6 +167,13 @@ export async function runAIDispatcher(
 
   } catch (error) {
     logger.error('[Dispatcher] Error en GPT — pasando al flujo normal', error as Error)
+    void recordDiag(configId, [DIAG.MENSAJE_RECIBIDO, DIAG.DISPATCHER_ERROR])
+    void recordDiagSample({
+      tipo: DIAG.DISPATCHER_ERROR,
+      mensaje: userMessage,
+      configId,
+      detalle: { error: String(error) },
+    })
     return { handled: false }
   }
 }

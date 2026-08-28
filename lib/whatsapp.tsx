@@ -104,6 +104,8 @@ import {
   fetchSedes,
   buildSedesMessage,
 } from "./conversation-state/shared/sede-handler"
+import { saveInitialTurnoPreference } from "./conversation-state/shared/initial-preference"
+import { recordDiag, recordDiagSample, DIAG } from "./diagnostics"
 import {
   startRescheduleFlow,
   processRescheduleMessage,
@@ -337,6 +339,12 @@ async function sendExistingPatientResult(
   ])
 
   if (result.action && TERMINAL_ACTIONS.has(result.action)) {
+    // Cierre del embudo de reserva (Fase 0): 'turno_reservado' es el único
+    // desenlace exitoso; los otros tres son bloqueos de negocio.
+    void recordDiag(
+      ctx.configId,
+      result.action === 'turno_reservado' ? DIAG.RESERVA_EXITOSA : `bloqueo:${result.action}`,
+    )
     await clearStepState(ctx.userPhoneNumber, ctx.configId)
   } else {
     // Recordar los botones y el texto de reply del paso (para re-mostrarlos ante una
@@ -1966,7 +1974,15 @@ async function runPrimaryDispatcherNoFlow(
     }
 
     if (action.type === 'init_patient_detection' || action.type === 'init_new_patient_flow' || action.type === 'init_familiar_flow') {
-      const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber)
+      // Guardar la preferencia de día/horario del primer mensaje para aplicarla
+      // cuando lleguemos a mostrar los turnos (ver shared/initial-preference.ts).
+      if (action.type === 'init_new_patient_flow' && action.slots?.preferenciaHoraria) {
+        await saveInitialTurnoPreference(userPhoneNumber, action.slots.preferenciaHoraria)
+      }
+      // Se pasa el mensaje del paciente como `firstMessage`: permite resolver
+      // la desambiguación cuando el DNI ya venía en ese primer mensaje, sin
+      // volver a pedírselo (ver patient-flow-integration.ts, caso Luis 28/8/2026).
+      const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber)
       // Antes devolvía `true` (mensaje "manejado") incondicionalmente, aunque
       // detResult.handled fuera false (flag directPatientDetection OFF) — el
       // caller cortaba con `if (handled) return` sin haber enviado nada al
@@ -1985,6 +2001,9 @@ async function runPrimaryDispatcherNoFlow(
 
     if (action.type === 'init_existing_patient_flow') {
       const patient = dispatcherCtx.patient
+      // Preferencia de día/horario del primer mensaje → se aplica al mostrar
+      // la lista de turnos (ver shared/initial-preference.ts).
+      await saveInitialTurnoPreference(userPhoneNumber, action.slots?.preferenciaHoraria)
       const initialMsg = action.slots?.profesional
         ? `Necesito turno con ${action.slots.profesional}`
         : action.slots?.especialidad
@@ -4810,6 +4829,18 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
                 m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
               )
+              // Métrica clave (Fase 0): el paciente pidió explícitamente "otra
+              // consulta" y este canal no tiene nada que ofrecerle más allá de
+              // un teléfono. Es la mayor demanda insatisfecha detectada en el
+              // análisis de conversaciones — se mide para dimensionar el valor
+              // de conectar la base de conocimiento institucional acá.
+              void recordDiag(config.id, DIAG.OTRA_CONSULTA_SIN_RESPUESTA)
+              void recordDiagSample({
+                tipo: DIAG.OTRA_CONSULTA_SIN_RESPUESTA,
+                mensaje: userMessage,
+                configId: config.id,
+                detalle: { origen: 'menu_opcion_otra_consulta' },
+              })
               await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "other_inquiry_existing_patient")
               await completePatientDetectionFlow(userPhoneNumber, config.id)
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -5458,6 +5489,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
             if (action.type === 'init_existing_patient_flow') {
               const patient = dispatcherCtx.patient
+              // Preferencia de día/horario del primer mensaje (ver
+              // shared/initial-preference.ts) — se aplica al listar turnos.
+              await saveInitialTurnoPreference(userPhoneNumber, action.slots?.preferenciaHoraria)
               const initialMsg = action.slots?.profesional
                 ? `Necesito turno con ${action.slots.profesional}`
                 : action.slots?.especialidad
@@ -5520,11 +5554,14 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             }
 
             if (action.type === 'init_new_patient_flow') {
+              // Preferencia de día/horario del primer mensaje (ver
+              // shared/initial-preference.ts) — se aplica al listar turnos.
+              await saveInitialTurnoPreference(userPhoneNumber, action.slots?.preferenciaHoraria)
               // Para pacientes nuevos sin DNI previo, iniciar flujo de detección.
               // Si el DNI ingresado no existe en el sistema, patient-detection
               // derivará automáticamente al flujo de paciente nuevo.
               const detResult = await initializePatientDetection(
-                userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
+                userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
               )
               if (detResult?.handled) {
                 if (detResult.message) {

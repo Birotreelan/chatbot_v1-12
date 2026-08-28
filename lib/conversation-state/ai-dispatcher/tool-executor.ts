@@ -14,6 +14,7 @@
  */
 
 import { createConversationLogger } from '../logger'
+import { recordDiag, DIAG } from '@/lib/diagnostics'
 import { TOOL_NAMES } from './tool-manifest'
 import type { DispatcherDecision } from './dispatcher'
 import type { DispatcherContext } from './context-builder'
@@ -23,13 +24,27 @@ import type { DispatcherContext } from './context-builder'
 // ============================================================================
 
 /**
+ * Datos que el paciente ya dio en su primer mensaje y que no hay que volver a
+ * preguntarle. `preferenciaHoraria` y `sede` se agregaron el 27/8/2026 tras
+ * detectar en conversaciones reales que el bot descartaba frases como
+ * "turno con el Dr. Scalise, un lunes por la mañana" y arrancaba de cero.
+ */
+export interface InitBookingSlots {
+  profesional?: string
+  especialidad?: string
+  /** Texto crudo de la preferencia de día/horario, tal como lo dijo el paciente. */
+  preferenciaHoraria?: string
+  sede?: string
+}
+
+/**
  * Qué debe hacer whatsapp.tsx después de que el executor termine.
  */
 export type ExecutorAction =
   | { type: 'send_and_return'; message: string }              // enviar mensaje y terminar
   | { type: 'init_patient_detection' }                        // iniciar detección de paciente
-  | { type: 'init_existing_patient_flow'; slots?: { profesional?: string; especialidad?: string } }
-  | { type: 'init_new_patient_flow'; slots?: { profesional?: string; especialidad?: string } }
+  | { type: 'init_existing_patient_flow'; slots?: InitBookingSlots }
+  | { type: 'init_new_patient_flow'; slots?: InitBookingSlots }
   | { type: 'init_familiar_flow' }                            // reserva para un familiar → pedir DNI del familiar
   | { type: 'trigger_confirm_appointment' }                   // confirmar asistencia directa
   | { type: 'trigger_cancel_menu' }                          // mostrar menú de cancelación
@@ -93,10 +108,13 @@ export async function executeDispatcherDecision(
       if (decision.args.para_familiar === true) {
         return { action: { type: 'init_familiar_flow' }, logNote: 'Dispatcher → reserva para familiar' }
       }
-      const slots = {
+      const slots: InitBookingSlots = {
         profesional: decision.args.profesional_mencionado || undefined,
         especialidad: decision.args.especialidad_mencionada || undefined,
+        preferenciaHoraria: decision.args.preferencia_horaria || undefined,
+        sede: decision.args.sede_mencionada || undefined,
       }
+      void recordDiag(deps.configId, DIAG.RESERVA_INICIADA)
       // Si el paciente está identificado, usar flujo de paciente existente
       // Si no, usar flujo de nuevo paciente (pedirá DNI)
       if (ctx.patient.identified) {
@@ -143,6 +161,7 @@ export async function executeDispatcherDecision(
     // ofrece atención humana (si la clínica la tiene activa y en horario) o manda el teléfono.
     case TOOL_NAMES.DERIVAR_CONSULTA: {
       const tipo = decision.args.tipo ?? 'otro'
+      void recordDiag(deps.configId, DIAG.DERIVACION_EXTERNA)
       const message = buildDerivacionMessage(tipo, deps.escalationPhone)
       return { action: { type: 'derive_external', message }, logNote: `Dispatcher → derivación (${tipo})` }
     }
@@ -156,6 +175,7 @@ export async function executeDispatcherDecision(
 
     // ── Solicitar atención humana ────────────────────────────────────────────
     case TOOL_NAMES.SOLICITAR_HUMANO:
+      void recordDiag(deps.configId, DIAG.DERIVACION_HUMANA)
       return {
         action: { type: 'derive_to_human', motivo: (decision.args.motivo as string) || undefined },
         logNote: 'Dispatcher → derivar a atención humana',

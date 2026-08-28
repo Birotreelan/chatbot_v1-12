@@ -53,6 +53,8 @@ import {
   buildNoTurnosMessage,
   buildTurnosListMessage,
 } from '../shared/turnos-handler'
+import { applyInitialTurnoPreference } from '../shared/initial-preference'
+import { recordDiag, DIAG } from '@/lib/diagnostics'
 import {
   handleTurnoSelection,
   buildTurnoSelectedMessage,
@@ -1613,6 +1615,7 @@ async function searchAndShowTurnos(
       messagePreview: noTurnosMessage.substring(0, 100) + '...',
     })
 
+    void recordDiag(undefined, DIAG.SIN_TURNOS_DISPONIBLES)
     return {
       handled: true,
       message: noTurnosMessage,
@@ -1620,24 +1623,36 @@ async function searchAndShowTurnos(
     }
   }
 
+  // Preferencia de día/horario que el paciente dio en su PRIMER mensaje
+  // (ej: "turno con el Dr. Lucas, un lunes por la mañana"). Si no hay
+  // preferencia guardada, o si filtrar dejaría muy pocas opciones, devuelve
+  // la lista completa sin cambios — ver shared/initial-preference.ts.
+  const conPreferencia = await applyInitialTurnoPreference(phoneNumber, result.turnos)
+  const turnosAMostrar = conPreferencia.turnos
+
   // Guardar todos los turnos con numeración permanente
-  state.turnosOpciones = result.turnos
+  state.turnosOpciones = turnosAMostrar
   state.turnosMostrados = 0
   state.phase = 'awaiting_turno_selection'
   await saveFlowState(phoneNumber, state)
 
   // Mostrar primera ventana de 15 días
-  const window = getNextWindow(result.turnos, 0)
+  const window = getNextWindow(turnosAMostrar, 0)
   state.turnosMostrados = window.newShownCount
   await saveFlowState(phoneNumber, state)
 
-  logger.info('Turnos found', { total: result.turnos.length, firstWindow: window.turnos.length })
+  logger.info('Turnos found', {
+    total: turnosAMostrar.length,
+    firstWindow: window.turnos.length,
+    preferenciaAplicada: conPreferencia.aplicada ? conPreferencia.descripcion : null,
+  })
+  void recordDiag(undefined, DIAG.TURNOS_MOSTRADOS)
 
   return {
     handled: true,
     message: buildTurnosWindowMessage(
       window.turnos,
-      result.turnos.length,
+      turnosAMostrar.length,
       window.hasMore,
       state.patientName,
       state.sedeNombre,

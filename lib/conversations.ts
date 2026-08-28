@@ -198,6 +198,15 @@ export async function saveConversationMessage(message: ConversationMessage): Pro
     // cada poll del dashboard hacía SMEMBERS + MGET de TODOS los contactos + re-escritura
     // del cache completo. Ahora manda el TTL: la lista de contactos puede estar hasta
     // 60 segundos desactualizada, aceptable para una vista de monitoreo.
+    // Instrumentación (Fase 0): todo mensaje de error que efectivamente ve el
+    // paciente pasa por acá, sea cual sea la rama que lo generó. Es el punto
+    // más confiable para medir la tasa real de errores percibidos.
+    if (message.messageType === "error") {
+      import("./diagnostics")
+        .then(({ recordDiag, DIAG }) => recordDiag(message.configId, DIAG.ERROR_AL_PACIENTE))
+        .catch(() => {})
+    }
+
     const pipeline = redisClient.pipeline()
     pipeline.rpush(conversationKey, JSON.stringify(validatedMessage))
     pipeline.expire(conversationKey, CONVERSATION_TTL)

@@ -123,6 +123,15 @@ Iniciará el flujo de reserva completo (sede → especialidad/médico → turno 
             type: 'boolean',
             description: 'true si el turno es para un FAMILIAR u otra persona (ej: "un turno para mi hijo/madre", "para un familiar"). false si es para sí mismo.',
           },
+          preferencia_horaria: {
+            type: 'string',
+            description:
+              'Preferencia de DÍA y/o HORARIO mencionada por el paciente, copiada tal cual de su mensaje. Ejemplos: "un lunes por la mañana", "mañana a la tarde o el viernes", "a las 15:30", "después del 11/9", "cualquier día temprano". Dejar vacío si no mencionó ninguna preferencia de día ni de horario. NO inventar ni completar: solo lo que el paciente dijo explícitamente.',
+          },
+          sede_mencionada: {
+            type: 'string',
+            description: 'Sede o sucursal mencionada por el paciente, si la hay (ej: "la sede de 56", "en Canning"). Dejar vacío si no mencionó ninguna.',
+          },
         },
         required: [],
       },

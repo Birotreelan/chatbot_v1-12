@@ -1,7 +1,7 @@
 import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse, SedeResponse } from "./types"
 import { getClinicApiConfig } from "./types"
 import { getRedisClient } from "../redis"
-import { TIMEOUTS, fetchWithTimeout, fetchWithRetry } from "../config/timeouts"
+import { TIMEOUTS, fetchWithRetry, RETRY_PRESETS } from "../config/timeouts"
 import { resolveProxyUrl } from "../proxy-url-resolver"
 
 // Obtener la URL del proxy: por clínica (config.proxy) con fallback a las
@@ -24,6 +24,12 @@ const NO_CACHE_ACTIONS = [
   "confirmar_turno",
   "reservar_turno",
 ]
+
+// Acciones que MODIFICAN datos del lado de la clínica. No son idempotentes:
+// reintentar a ciegas podría duplicar una reserva o cancelar dos veces. Se
+// reintentan solo ante errores de conexión (la request nunca llegó al servidor)
+// — ver RETRY_PRESETS.MUTATION en lib/config/timeouts.ts.
+const MUTATION_ACTIONS = ["cancelar_turno", "confirmar_turno", "reservar_turno", "set_turno"]
 
 // Función para generar clave de caché
 function getCacheKey(action: string, params: Record<string, any>): string {
@@ -104,7 +110,18 @@ async function fetchProxyApi<T>(
 
     console.log(`[API] 📤 ${action}`)
 
-    const response = await fetchWithTimeout(
+    // REINTENTOS (27/8/2026): antes esto usaba fetchWithTimeout, sin ningún
+    // reintento — cualquier hipo transitorio del proxy de la clínica se
+    // convertía directamente en un mensaje de error al paciente. El análisis de
+    // conversaciones reales mostró que el 28% terminaba viendo un error técnico,
+    // y que las fallas son intermitentes (con varias conversaciones en paralelo,
+    // unas fallan y otras funcionan en el mismo momento).
+    //
+    // Las acciones que MODIFICAN datos usan un preset conservador: solo
+    // reintentan si la request nunca llegó al servidor, para no arriesgar una
+    // reserva o cancelación duplicada.
+    const esMutacion = MUTATION_ACTIONS.includes(action)
+    const response = await fetchWithRetry(
       proxyUrl,
       {
         method: "POST",
@@ -114,6 +131,7 @@ async function fetchProxyApi<T>(
         body: JSON.stringify(requestBody),
       },
       TIMEOUTS.PROXY_TIMEOUT,
+      esMutacion ? RETRY_PRESETS.MUTATION : RETRY_PRESETS.INTERACTIVE_READ,
     )
 
     // Obtener el texto de la respuesta
@@ -550,12 +568,18 @@ export async function obtenerDatosSede(clienteId: string, sedeId: string): Promi
       sede_id: sedeId,
     }
 
-    const response = await fetch(config.baseUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(config.timeout),
-    })
+    // Reintentos ante fallas transitorias (27/8/2026) — igual que fetchProxyApi.
+    // Lectura idempotente: se puede reintentar sin riesgo.
+    const response = await fetchWithRetry(
+      config.baseUrl,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      },
+      config.timeout,
+      RETRY_PRESETS.INTERACTIVE_READ,
+    )
 
     if (!response.ok) {
       console.error(`[API] ❌ Error HTTP sede: ${response.status}`)
@@ -623,12 +647,17 @@ export async function obtenerTodasLasSedes(clienteId: string): Promise<SedesList
       Action: "get_data_sedes",
     }
 
-    const response = await fetch(config.baseUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(config.timeout),
-    })
+    // Reintentos ante fallas transitorias (27/8/2026) — lectura idempotente.
+    const response = await fetchWithRetry(
+      config.baseUrl,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      },
+      config.timeout,
+      RETRY_PRESETS.INTERACTIVE_READ,
+    )
 
     if (!response.ok) {
       console.error(`[API] ❌ Error HTTP sedes: ${response.status}`)
@@ -686,14 +715,22 @@ export async function obtenerTurnosDisponibles(
       ...(profesionalId && { profesional_id: profesionalId }),
     }
 
-    const response = await fetch(config.baseUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...config.headers,
+    // Reintentos ante fallas transitorias (27/8/2026). Además, antes esta
+    // llamada no tenía NINGÚN timeout — podía quedar colgada hasta que Vercel
+    // matara la función.
+    const response = await fetchWithRetry(
+      config.baseUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...config.headers,
+        },
+        body: JSON.stringify(requestBody),
       },
-      body: JSON.stringify(requestBody),
-    })
+      config.timeout || TIMEOUTS.PROXY_TIMEOUT,
+      RETRY_PRESETS.INTERACTIVE_READ,
+    )
 
     if (!response.ok) {
       console.error(`[API] ❌ Error HTTP get_turnos_disponibles: ${response.status}`)

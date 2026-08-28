@@ -98,6 +98,17 @@ const RETRYABLE_ERROR_CODES = [
 
 const RETRYABLE_ERROR_MESSAGES = ["fetch failed", "network error", "socket hang up", "connection refused", "not valid json", "unexpected token"]
 
+// Errores de NIVEL DE CONEXIÓN: la request muy probablemente nunca llegó al
+// servidor. Son los únicos seguros para reintentar en acciones que MODIFICAN
+// datos (reservar/confirmar/cancelar un turno), donde un reintento a ciegas
+// podría duplicar la operación si el servidor sí la había recibido.
+const CONNECTION_LEVEL_ERROR_CODES = ["UND_ERR_CONNECT_TIMEOUT", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]
+
+function isConnectionLevelError(error: any): boolean {
+  const errorCode = error?.cause?.code || error?.code
+  return !!errorCode && CONNECTION_LEVEL_ERROR_CODES.includes(errorCode)
+}
+
 function isRetryableError(error: any): boolean {
   // Verificar código de error
   const errorCode = error.cause?.code || error.code
@@ -124,6 +135,24 @@ export interface RetryOptions {
   initialDelayMs?: number
   maxDelayMs?: number
   backoffMultiplier?: number
+  /**
+   * Reintentar también cuando el servidor responde 5xx / 429. Por defecto false
+   * para no cambiar el comportamiento de los callers existentes. Un 5xx no lanza
+   * excepción (fetch resuelve normalmente), así que sin esto una caída transitoria
+   * del proxy de la clínica se propaga como error definitivo al paciente.
+   */
+  retryOn5xx?: boolean
+  /**
+   * Solo reintentar errores de nivel de conexión (la request no llegó al
+   * servidor). Para acciones NO idempotentes: reservar/confirmar/cancelar turno.
+   */
+  connectionErrorsOnly?: boolean
+  /**
+   * Agrega una variación aleatoria (±30%) a la espera entre intentos. Evita que
+   * varias conversaciones concurrentes que fallaron juntas reintenten todas en
+   * el mismo instante y vuelvan a tumbar el endpoint (thundering herd).
+   */
+  jitter?: boolean
 }
 
 const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
@@ -131,11 +160,77 @@ const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
   initialDelayMs: 8000, // 8 segundos inicial (antes 2s)
   maxDelayMs: 45000, // 45 segundos máximo (antes 10s)
   backoffMultiplier: 2,
+  retryOn5xx: false,
+  connectionErrorsOnly: false,
+  jitter: false,
+}
+
+/**
+ * Presets de reintento (27/8/2026).
+ *
+ * Motivo: el análisis de 349 conversaciones reales mostró que el 28% terminaba
+ * mostrándole al paciente un error técnico, y que las fallas del proxy de la
+ * clínica son mayormente TRANSITORIAS — con conversaciones concurrentes, unas
+ * fallan y otras funcionan en el mismo instante. Hasta ahora `fetchProxyApi`
+ * usaba `fetchWithTimeout` (sin ningún reintento), así que cualquier hipo de
+ * red se convertía directamente en "Hubo un problema, intentá de nuevo".
+ *
+ * Las esperas son cortas a propósito: del otro lado hay una persona esperando
+ * en WhatsApp. Los valores por defecto de arriba (8s → 45s) son para procesos
+ * de fondo, no para una conversación en vivo.
+ */
+export const RETRY_PRESETS = {
+  /** Lecturas idempotentes (consultar paciente, turnos, profesionales, sedes). */
+  INTERACTIVE_READ: {
+    maxRetries: 2,
+    initialDelayMs: 600,
+    maxDelayMs: 3000,
+    backoffMultiplier: 2.5,
+    retryOn5xx: true,
+    jitter: true,
+  } as RetryOptions,
+
+  /** Acciones que modifican datos: solo si la request nunca llegó al servidor. */
+  MUTATION: {
+    maxRetries: 1,
+    initialDelayMs: 800,
+    maxDelayMs: 800,
+    backoffMultiplier: 1,
+    retryOn5xx: false,
+    connectionErrorsOnly: true,
+    jitter: true,
+  } as RetryOptions,
 }
 
 // Función de espera
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Registra métricas de reintento (Fase 0 de instrumentación).
+ *
+ * Import dinámico a propósito: este módulo es configuración de bajo nivel y no
+ * debe arrastrar dependencias en tiempo de carga. Si el registro falla, se
+ * ignora — la instrumentación nunca puede afectar una llamada real.
+ *
+ * No se pasa configId porque a esta altura no lo conocemos: las métricas van
+ * al bucket "global", que alcanza para saber cuántas llamadas salva el
+ * mecanismo de reintentos en total.
+ */
+async function recordRetryDiag(evento: "reintento" | "salvado" | "definitiva"): Promise<void> {
+  try {
+    const { recordDiag, DIAG } = await import("../diagnostics")
+    const metrica =
+      evento === "salvado"
+        ? DIAG.PROXY_REINTENTO_SALVADO
+        : evento === "definitiva"
+          ? DIAG.PROXY_FALLA_DEFINITIVA
+          : DIAG.PROXY_REINTENTO
+    await recordDiag(undefined, metrica)
+  } catch {
+    // Instrumentación best-effort.
+  }
 }
 
 // Fetch con reintentos automáticos para errores de red
@@ -149,37 +244,65 @@ export async function fetchWithRetry(
   let lastError: Error | null = null
   let currentDelay = opts.initialDelayMs
 
+  const esperar = async () => {
+    const base = currentDelay
+    const espera = opts.jitter ? Math.round(base * (0.7 + Math.random() * 0.6)) : base
+    await sleep(espera)
+    currentDelay = Math.min(currentDelay * opts.backoffMultiplier, opts.maxDelayMs)
+    return espera
+  }
+
   for (let attempt = 1; attempt <= opts.maxRetries + 1; attempt++) {
     try {
       console.log(`[FETCH-RETRY] Intento ${attempt}/${opts.maxRetries + 1} para ${url}`)
       const response = await fetchWithTimeout(url, options, timeoutMs)
 
+      // 5xx / 429: el servidor respondió, pero con una falla que suele ser
+      // transitoria. fetch NO lanza excepción acá, así que sin este bloque el
+      // error se propagaba tal cual al paciente.
+      const esTransitorioHttp = response.status >= 500 || response.status === 429
+      if (opts.retryOn5xx && esTransitorioHttp && attempt <= opts.maxRetries) {
+        const espera = await esperar()
+        console.warn(
+          `[FETCH-RETRY] Intento ${attempt} devolvió HTTP ${response.status}, reintentando (esperó ${espera}ms)...`,
+        )
+        void recordRetryDiag("reintento")
+        continue
+      }
+
       if (attempt > 1) {
         console.log(`[FETCH-RETRY] Éxito en intento ${attempt} para ${url}`)
+        // Métrica clave: cuántas llamadas se habrían convertido en un error al
+        // paciente si no reintentáramos. Es la forma de saber si este mecanismo
+        // vale lo que cuesta en latencia.
+        void recordRetryDiag("salvado")
       }
 
       return response
     } catch (error: any) {
       lastError = error
 
-      // Verificar si el error es reinentable
-      if (!isRetryableError(error)) {
-        console.log(`[FETCH-RETRY] Error no reinentable: ${error.message}`)
+      // Acciones no idempotentes: solo se reintenta si la request nunca llegó
+      // al servidor (evita duplicar una reserva/cancelación ya procesada).
+      const reintentable = opts.connectionErrorsOnly ? isConnectionLevelError(error) : isRetryableError(error)
+
+      if (!reintentable) {
+        console.log(`[FETCH-RETRY] Error no reintentable: ${error.message}`)
         throw error
       }
 
       // Si es el último intento, no reintentar
       if (attempt > opts.maxRetries) {
         console.error(`[FETCH-RETRY] Todos los ${opts.maxRetries + 1} intentos fallaron para ${url}`)
+        void recordRetryDiag("definitiva")
         throw error
       }
 
+      const espera = await esperar()
       console.warn(
-        `[FETCH-RETRY] Intento ${attempt} falló (${error.cause?.code || error.message}), reintentando en ${currentDelay}ms...`,
+        `[FETCH-RETRY] Intento ${attempt} falló (${error.cause?.code || error.message}), reintentó tras ${espera}ms`,
       )
-
-      await sleep(currentDelay)
-      currentDelay = Math.min(currentDelay * opts.backoffMultiplier, opts.maxDelayMs)
+      void recordRetryDiag("reintento")
     }
   }
 

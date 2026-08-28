@@ -11,6 +11,8 @@ import {
   updatePatientDetectionPhase,
   updatePatientDetectionHasReminder,
   clearIdentifiedPatient,
+  getIdentifiedPatient,
+  returnPatientToMenu,
 } from './patient-flow-handler'
 import {
   buildExistingPatientGreeting,
@@ -26,6 +28,9 @@ import {
 } from './patient-templates'
 import { detectFamiliarIntent } from './familiar-intent-detector'
 import { classifyTurnoEstado } from './turno-estado'
+import { extractDNI } from '../dni-handler'
+import { validarObraSocial } from '@/lib/api-tools/api-functions'
+import { recordDiag, DIAG } from '@/lib/diagnostics'
 
 /**
  * Patient Detection Flow Integration
@@ -105,6 +110,50 @@ export async function initializePatientDetection(
   }
 
   try {
+    // ── Menú corto si el paciente YA está identificado ─────────────────────
+    //
+    // 28/8/2026: el saludo completo de bienvenida se repetía en el 6,6% de las
+    // conversaciones, y en 17 de 29 casos ocurría dentro de la misma hora — o
+    // sea, con la identidad del paciente todavía viva en Redis. El paciente
+    // escribía algo genérico ("Hola, te hago una pregunta"), el dispatcher
+    // pedía "mostrar menú principal", y eso disparaba la detección COMPLETA de
+    // nuevo: se lo volvía a saludar como si recién llegara y, en teléfonos con
+    // varios pacientes, se le volvía a pedir el DNI que ya había dado.
+    //
+    // Si ya sabemos quién es y hay un flujo de detección vivo, alcanza con
+    // recordarle las opciones. Se excluye el caso de recordatorio pendiente
+    // (hasReminder), donde el saludo completo sí aporta el contexto del turno.
+    if (!hasReminder) {
+      try {
+        const [identificado, detectionActiva] = await Promise.all([
+          getIdentifiedPatient(phoneNumber),
+          isPatientDetectionFlowActive(phoneNumber),
+        ])
+
+        if (identificado?.patientName && detectionActiva) {
+          const menuCorto = await returnPatientToMenu(phoneNumber)
+          if (menuCorto) {
+            logger.info('Paciente ya identificado — menú corto en vez de saludo completo', {
+              patientName: identificado.patientName,
+            })
+            void recordDiag(configId, DIAG.MENU_CORTO)
+            return {
+              handled: true,
+              message: menuCorto,
+              patientInfo: {
+                isNewPatient: false,
+                patientId: identificado.patientId,
+                patientName: identificado.patientName,
+              },
+            }
+          }
+        }
+      } catch (error) {
+        // Ante cualquier problema se sigue por el camino normal (saludo completo).
+        logger.warn('No se pudo resolver el menú corto, se usa detección completa', { error: String(error) })
+      }
+    }
+
     const detectionResult = await startPatientDetectionFlow(phoneNumber, configId, clienteId, permitirNuevoTurno, permitirCancelacion, escalationPhoneNumber)
     console.log(`[v0] [INIT_DETECTION] startPatientDetectionFlow result: isNewPatient=${detectionResult.isNewPatient} error=${detectionResult.error} multiplePatients=${detectionResult.multiplePatients?.length}`)
 
@@ -149,18 +198,61 @@ export async function initializePatientDetection(
       }
     }
 
-    // Si hay múltiples pacientes, solicitar DNI
+    // Si hay múltiples pacientes, solicitar DNI para desambiguar...
     if (detectionResult.multiplePatients && detectionResult.multiplePatients.length > 1) {
-      logger.info('Multiple patients detected, requesting DNI', {
-        count: detectionResult.multiplePatients.length,
-        phone: phoneNumber,
-      })
-      return {
-        handled: true,
-        message: buildMultiplePatientGreeting(detectionResult.multiplePatients, clinicName),
-        patientInfo: {
-          isNewPatient: false,
-        },
+      // ...salvo que el paciente YA lo haya dado en su primer mensaje.
+      //
+      // 28/8/2026 (caso Luis, Salud Ocular): el paciente escribió "Buen día
+      // necesito un turno. LUIS COLOMBO dni 4531271 Pami" y el bot igual le
+      // respondió "indicame tu DNI"; el paciente tuvo que repetir el mismo
+      // número que acababa de escribir. Dos mensajes de fricción evitables en
+      // el primer contacto, justo donde peor impresión deja.
+      const dniEnPrimerMensaje = firstMessage ? extractDNI(firstMessage) : null
+
+      if (dniEnPrimerMensaje?.valid) {
+        logger.info('DNI encontrado en el primer mensaje — desambiguando sin volver a preguntar', {
+          count: detectionResult.multiplePatients.length,
+        })
+
+        const resolucion = await processDNIForDisambiguation(
+          phoneNumber,
+          dniEnPrimerMensaje.dni,
+          configId,
+          clienteId,
+        )
+
+        if (resolucion.found) {
+          // Identidad resuelta: se continúa como paciente existente (el saludo
+          // con sus turnos se arma más abajo, igual que en el camino normal).
+          detectionResult.patientId = resolucion.patientId
+          detectionResult.patientName = resolucion.patientName
+          detectionResult.turnos = resolucion.turnos || []
+          detectionResult.multiplePatients = undefined
+          void recordDiag(configId, DIAG.DNI_DESDE_PRIMER_MENSAJE)
+        } else {
+          // El DNI del mensaje no coincide con ninguno de los pacientes del
+          // teléfono (o falló la validación) → pedirlo como siempre.
+          logger.info('El DNI del primer mensaje no resolvió la desambiguación — se pide igual', {
+            error: resolucion.error,
+          })
+          return {
+            handled: true,
+            message: buildMultiplePatientGreeting(detectionResult.multiplePatients, clinicName),
+            patientInfo: { isNewPatient: false },
+          }
+        }
+      } else {
+        logger.info('Multiple patients detected, requesting DNI', {
+          count: detectionResult.multiplePatients.length,
+          phone: phoneNumber,
+        })
+        return {
+          handled: true,
+          message: buildMultiplePatientGreeting(detectionResult.multiplePatients, clinicName),
+          patientInfo: {
+            isNewPatient: false,
+          },
+        }
       }
     }
 
@@ -189,11 +281,12 @@ export async function initializePatientDetection(
     // Persistir hasReminder en el estado para que processPatientDetectionMessage
     // use el mismo valor al construir el action map.
     await updatePatientDetectionHasReminder(phoneNumber, hasReminder)
+    void recordDiag(configId, DIAG.SALUDO_COMPLETO)
 
     const hasTurnos = detectionResult.turnos && detectionResult.turnos.length > 0
     const hasTurnosQx = detectionResult.turnosQx && detectionResult.turnosQx.length > 0
 
-    const greeting = buildExistingPatientGreeting(
+    let greeting = buildExistingPatientGreeting(
       detectionResult.patientName || 'Paciente',
       detectionResult.turnos || [],
       clinicName,
@@ -203,6 +296,43 @@ export async function initializePatientDetection(
       permitirCancelacion,
       escalationPhoneNumber
     )
+
+    // ── Aviso temprano: obra social no habilitada para turnos online ────────
+    //
+    // 28/8/2026 (caso Luis, Salud Ocular): el paciente escribió "necesito un
+    // turno", se lo identificó, se le mostró el menú, eligió "1" y RECIÉN AHÍ
+    // se le dijo que su obra social (PAMI SO) no estaba habilitada. Cuatro
+    // mensajes para una respuesta que ya se podía dar en el primero.
+    //
+    // La validación ya existía, pero corría dentro del flujo de reserva
+    // (existing-patient-flow-integration.ts). Acá se adelanta al saludo.
+    // Se agrega como nota al saludo en vez de reemplazarlo: el paciente puede
+    // seguir queriendo cancelar un turno o hacer una consulta, así que las
+    // demás opciones del menú siguen siendo válidas.
+    if (permitirNuevoTurno !== false) {
+      try {
+        const identificado = await getIdentifiedPatient(phoneNumber)
+        const obraSocialNombre = identificado?.obraSocialNombre?.trim()
+
+        if (obraSocialNombre) {
+          const validacion = await validarObraSocial(clienteId, obraSocialNombre)
+          const obraSocial = validacion?.exito ? validacion.datos?.obras_sociales?.[0] : null
+
+          if (obraSocial && obraSocial.permite_turnos_online === false) {
+            const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+            logger.info('Obra social no habilitada — se avisa en el saludo', { obraSocialNombre })
+            void recordDiag(configId, DIAG.OBRA_SOCIAL_BLOQUEADA_EN_SALUDO)
+            greeting +=
+              `\n\n⚠️ Tené en cuenta que tu obra social (*${obraSocialNombre}*) no está habilitada ` +
+              `para agendar turnos por este medio. Para sacar un turno, comunicate al *${numeroDerivacion}*.`
+          }
+        }
+      } catch (error) {
+        // No bloquea el saludo: si la validación falla, el flujo de reserva
+        // vuelve a chequearlo más adelante como siempre.
+        logger.warn('No se pudo validar la obra social para el aviso temprano', { error: String(error) })
+      }
+    }
 
     // Único turno, sin posibilidad de confirmar (no hubo recordatorio) ni de
     // cancelar-y-agendar-nuevo (permitirNuevoTurno=false): el saludo ofrece

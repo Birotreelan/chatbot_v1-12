@@ -12,6 +12,7 @@
 import { openai } from '@/lib/openai'
 import { createConversationLogger } from '../logger'
 import type { StateContract, StateContext } from './contract'
+import { recordDiag, recordDiagSample, DIAG } from '@/lib/diagnostics'
 
 export interface ClassifyResult {
   actionId: string | null
@@ -104,12 +105,40 @@ export async function classifyIntent(
     // Validar que la acción pertenezca al conjunto cerrado del estado.
     if (!actionId || !allowedIds.has(actionId)) {
       logger.warn('[Router] Acción fuera del conjunto permitido', { actionId, allowed: [...allowedIds] })
+      void recordDiag(ctx.configId, DIAG.CLASSIFY_FUERA_DE_SET)
+      void recordDiagSample({
+        tipo: DIAG.CLASSIFY_FUERA_DE_SET,
+        mensaje: message,
+        configId: ctx.configId,
+        detalle: { actionId, permitidas: [...allowedIds], askedPrompt: contract.askedPrompt?.slice(0, 120) },
+      })
       return { actionId: null, slots: {}, confidence: 0, reasoning: 'acción no permitida' }
+    }
+
+    // La confianza baja es la señal más útil para saber DÓNDE el bot está
+    // adivinando: son los estados donde conviene repreguntar en vez de asumir.
+    const bajaConfianza = confidence < 0.6
+    void recordDiag(ctx.configId, bajaConfianza ? [DIAG.CLASSIFY_OK, DIAG.CLASSIFY_BAJA_CONFIANZA] : DIAG.CLASSIFY_OK)
+    if (bajaConfianza) {
+      void recordDiagSample({
+        tipo: DIAG.CLASSIFY_BAJA_CONFIANZA,
+        mensaje: message,
+        configId: ctx.configId,
+        detalle: { actionId, confidence, motivo: parsed.motivo, askedPrompt: contract.askedPrompt?.slice(0, 120) },
+      })
     }
 
     return { actionId, slots, confidence, reasoning: parsed.motivo }
   } catch (error) {
     logger.warn('[Router] Error/timeout en clasificación — se usará fallback', { error: String(error) })
+    const esTimeout = String(error).includes('classify_timeout')
+    void recordDiag(ctx.configId, esTimeout ? DIAG.CLASSIFY_TIMEOUT : DIAG.CLASSIFY_FUERA_DE_SET)
+    void recordDiagSample({
+      tipo: esTimeout ? DIAG.CLASSIFY_TIMEOUT : 'classify_error',
+      mensaje: message,
+      configId: ctx.configId,
+      detalle: { error: String(error), askedPrompt: contract.askedPrompt?.slice(0, 120) },
+    })
     return { actionId: null, slots: {}, confidence: 0, reasoning: `error: ${String(error)}` }
   }
 }

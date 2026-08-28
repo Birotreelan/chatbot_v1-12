@@ -65,6 +65,8 @@ import {
   buildNoTurnosMessage,
   buildTurnosListMessage,
 } from '../shared/turnos-handler'
+import { applyInitialTurnoPreference } from '../shared/initial-preference'
+import { recordDiag, DIAG } from '@/lib/diagnostics'
 import {
   handleTurnoSelection,
   buildTurnoSelectedMessage,
@@ -1580,6 +1582,7 @@ async function searchAndShowTurnos(
       messagePreview: noTurnosMessage.substring(0, 100) + '...',
     })
     
+    void recordDiag(undefined, DIAG.SIN_TURNOS_DISPONIBLES)
     return {
       handled: true,
       message: noTurnosMessage,
@@ -1587,15 +1590,26 @@ async function searchAndShowTurnos(
     }
   }
 
+  // Preferencia de día/horario que el paciente dio en su PRIMER mensaje
+  // (ej: "un turno para las 15:30"). Si no hay preferencia guardada, o si
+  // filtrar dejaría muy pocas opciones, devuelve la lista completa sin
+  // cambios — ver shared/initial-preference.ts.
+  const conPreferencia = await applyInitialTurnoPreference(phone, result.turnos)
+  const turnosAMostrar = conPreferencia.turnos
+
   // Guardar array completo de 60 días y mostrar primera ventana de 15 días
-  state.turnosOpciones = result.turnos
+  state.turnosOpciones = turnosAMostrar
   state.turnosMostrados = 0
   state.phase = 'awaiting_turno_selection'
   await saveFlowState(phone, state)
 
-  logger.info('[TURNOS] Turnos encontrados', { total: result.turnos.length })
+  logger.info('[TURNOS] Turnos encontrados', {
+    total: turnosAMostrar.length,
+    preferenciaAplicada: conPreferencia.aplicada ? conPreferencia.descripcion : null,
+  })
+  void recordDiag(undefined, DIAG.TURNOS_MOSTRADOS)
 
-  const window = getNextWindow(result.turnos, 0)
+  const window = getNextWindow(turnosAMostrar, 0)
   state.turnosMostrados = window.newShownCount
   await saveFlowState(phone, state)
 
@@ -1604,7 +1618,7 @@ async function searchAndShowTurnos(
     handled: true,
     message: buildTurnosWindowMessage(
       window.turnos,
-      result.turnos.length,
+      turnosAMostrar.length,
       window.hasMore,
       nombreCompleto || undefined,
       state.sedeNombre,
