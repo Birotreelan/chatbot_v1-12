@@ -13,6 +13,7 @@ import {
   clearIdentifiedPatient,
   getIdentifiedPatient,
   returnPatientToMenu,
+  identifyPatientByDNI,
 } from './patient-flow-handler'
 import {
   buildExistingPatientGreeting,
@@ -166,6 +167,35 @@ export async function initializePatientDetection(
         message: buildDetectionErrorMessage(),
         shouldCallOpenAI: true,
         openAIContext: 'Patient detection error, request DNI',
+      }
+    }
+
+    if (detectionResult.isNewPatient) {
+      // Antes de darlo por paciente nuevo: si trajo el DNI en su primer mensaje,
+      // buscarlo por DNI. El teléfono desde el que escribe puede no estar
+      // registrado (número nuevo, teléfono de un familiar) aunque el paciente sí
+      // exista en el sistema de la clínica.
+      //
+      // 28/8/2026 — caso real: "hola, quiero un turno dni 36100432" desde un
+      // teléfono no registrado. La detección por teléfono devolvía "no
+      // encontrado", se lo trataba como nuevo y se le volvía a pedir el DNI que
+      // acababa de escribir.
+      const dniDelMensaje = firstMessage ? extractDNI(firstMessage) : null
+
+      if (dniDelMensaje?.valid) {
+        const encontrado = await identifyPatientByDNI(phoneNumber, dniDelMensaje.dni, configId, clienteId)
+
+        if (encontrado) {
+          logger.info('Paciente hallado por DNI pese a teléfono no registrado', {
+            patientName: encontrado.patientName,
+          })
+          void recordDiag(configId, DIAG.DNI_DESDE_PRIMER_MENSAJE)
+          // Se continúa por el camino de paciente existente (saludo con turnos).
+          detectionResult.isNewPatient = false
+          detectionResult.patientId = encontrado.patientId
+          detectionResult.patientName = encontrado.patientName
+          detectionResult.turnos = encontrado.turnos
+        }
       }
     }
 

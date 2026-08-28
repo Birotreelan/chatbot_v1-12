@@ -351,6 +351,153 @@ export async function startPatientDetectionFlow(
  * Procesa el DNI cuando hay múltiples pacientes
  * Identifica al paciente correcto y obtiene sus turnos
  */
+/**
+ * Identifica a un paciente directamente por DNI, sin depender de que su
+ * teléfono esté registrado ni de que exista un estado de desambiguación previo.
+ *
+ * 28/8/2026 — motivo: un paciente escribió "hola, quiero un turno dni 36100432"
+ * desde un teléfono que NO figura en el sistema de la clínica. La detección por
+ * teléfono devolvió "Paciente no encontrado", el flujo lo trató como paciente
+ * nuevo y le volvió a pedir el DNI que acababa de escribir. Pero el DNI puede
+ * perfectamente corresponder a un paciente ya registrado con OTRO teléfono
+ * (número viejo, teléfono de un familiar, etc.), que es un caso muy común.
+ *
+ * A diferencia de processDNIForDisambiguation, esta función no requiere que el
+ * teléfono tenga varios pacientes asociados: consulta la API por DNI y, si
+ * existe, deja al paciente identificado y con su estado listo.
+ *
+ * @returns null si el DNI no corresponde a ningún paciente (o si falla la
+ *          consulta) — el caller debe seguir tratándolo como paciente nuevo.
+ */
+export async function identifyPatientByDNI(
+  phoneNumber: string,
+  dni: string,
+  configId: string,
+  clienteId: string,
+): Promise<{
+  patientId: string
+  patientName: string
+  patientFirstName: string
+  patientLastName: string
+  patientDNI: string
+  obraSocialId: string
+  obraSocialNombre: string
+  turnos: any[]
+} | null> {
+  const logger = createConversationLogger(phoneNumber, configId, 'dni_direct_lookup')
+
+  try {
+    const redis = getRedisClient()
+    if (!redis) return null
+
+    const clinicAPI = await ClinicAPI.create(clienteId)
+    const respuesta = await clinicAPI.paciente_dni(dni)
+
+    if (!respuesta.exito || !respuesta.datos) {
+      logger.info('DNI del primer mensaje no corresponde a un paciente registrado', {
+        dni: dni.substring(0, 3) + '****',
+      })
+      return null
+    }
+
+    // La API devuelve el paciente en varios formatos posibles (mismo criterio
+    // que processDNIForDisambiguation).
+    const data: any = respuesta.datos
+    let paciente: any = null
+    let turnosDeRespuesta: any[] = []
+
+    if (data.paciente) {
+      paciente = data.paciente
+      turnosDeRespuesta = data.turnos_proximos || []
+    } else if (data.warning === 'pacientes_multiples' && Array.isArray(data.pacientes)) {
+      const soloDigitos = dni.replace(/[^0-9]/g, '')
+      paciente =
+        data.pacientes.find((p: any) => (p.Nrodoc || p.dni || '').toString().replace(/[^0-9]/g, '') === soloDigitos) ||
+        data.pacientes[0]
+      turnosDeRespuesta = data.turnos_proximos || []
+    } else if (Array.isArray(data) && data.length > 0) {
+      paciente = data[0]
+    } else {
+      paciente = data
+    }
+
+    const patientId = paciente?.paciente_id || paciente?.Id || paciente?.id
+    if (!patientId) {
+      logger.info('Respuesta sin paciente utilizable para el DNI dado', {})
+      return null
+    }
+
+    const patientFirstName = (paciente.Nombres || paciente.nombres || paciente.nombre || '').trim()
+    const patientLastName = (paciente.Apellido || paciente.apellido || '').trim()
+    const patientName = paciente.nombre || `${patientFirstName} ${patientLastName}`.trim()
+    const patientDNI = (paciente.Nrodoc || paciente.dni || dni || '').toString()
+    const emailCrudo = paciente.Mail ? paciente.Mail.trim() : ''
+    const patientEmail = emailCrudo === '-' || emailCrudo === 'NO USA' ? '' : emailCrudo
+    const patientCelular = (paciente.Celular || paciente.celular || '').trim()
+    const obraSocialId = (paciente.Deudor_Id || paciente.deudor_id || '').toString().trim()
+    const obraSocialNombre = (paciente.Deudor_Nombre || paciente.deudor_nombre || '').toString().trim()
+
+    const turnos = (turnosDeRespuesta || []).filter(
+      (t: any) => t.estado !== 'cancelado' && t.status !== 'cancelado',
+    )
+
+    void savePatientSnapshot(configId, phoneNumber, {
+      hc: (paciente.HC || paciente.hc || '').toString().trim() || undefined,
+      nrodoc: patientDNI || undefined,
+      celular: patientCelular || undefined,
+      apellido: patientLastName || undefined,
+      nombre: patientFirstName || undefined,
+    })
+
+    const estado: PatientDetectionState = {
+      phase: 'awaiting_action_selection',
+      patientPhone: phoneNumber,
+      patientId,
+      patientName,
+      patientFirstName,
+      patientLastName,
+      patientDNI,
+      patientEmail,
+      patientCelular,
+      obraSocialId,
+      obraSocialNombre,
+      turnos,
+      detectedAt: Date.now(),
+      attempts: 0,
+    }
+
+    await redis.setex(`${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`, PATIENT_DETECTION_TTL, JSON.stringify(estado))
+
+    await saveIdentifiedPatient(phoneNumber, {
+      patientId,
+      patientDNI,
+      patientName,
+      obraSocialId,
+      obraSocialNombre,
+    })
+
+    logger.info('Paciente identificado por DNI del primer mensaje', {
+      patientId,
+      patientName,
+      turnos: turnos.length,
+    })
+
+    return {
+      patientId,
+      patientName,
+      patientFirstName,
+      patientLastName,
+      patientDNI,
+      obraSocialId,
+      obraSocialNombre,
+      turnos,
+    }
+  } catch (error) {
+    logger.warn('Error identificando paciente por DNI', { error: String(error) })
+    return null
+  }
+}
+
 export async function processDNIForDisambiguation(
   phoneNumber: string,
   dni: string,
