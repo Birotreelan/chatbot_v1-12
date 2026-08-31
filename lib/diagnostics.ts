@@ -102,6 +102,13 @@ export const DIAG = {
   RESERVA_EXITOSA: "reserva_exitosa",
   SIN_TURNOS_DISPONIBLES: "sin_turnos_disponibles",
 
+  // ── Templates informativos de la clínica ─────────────────────────────────
+  // La clínica avisa algo (aceptó / canceló el turno solicitado). Se mide para
+  // verificar que el handler determinístico los está atendiendo y no se los
+  // vuelve a comer el router de intercalada (bug del 31/8/2026).
+  CLINICA_TURNO_CONFIRMADO: "clinica_turno_confirmado",
+  CLINICA_TURNO_CANCELADO: "clinica_turno_cancelado",
+
   // ── Salidas de la conversación ───────────────────────────────────────────
   DERIVACION_EXTERNA: "derivacion_externa",
   DERIVACION_HUMANA: "derivacion_humana",

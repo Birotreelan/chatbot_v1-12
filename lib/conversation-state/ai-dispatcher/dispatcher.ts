@@ -61,9 +61,10 @@ REGLAS DE CLASIFICACIÓN (en orden de prioridad):
   EXCEPCIÓN: si el turno ya está confirmado (Estado=Confirmado), NO usar confirmar_asistencia_turno → usar respuesta_empatica
 - "cancelar", "no puedo ir", "no voy" → cancelar_turno
 - "¿a qué hora?", "¿con quién?", "¿dónde es mi turno?" SOLO cuando pregunta por un turno YA existente → responder_consulta_informativa
-- Saludo, primer mensaje, mensaje ambiguo sin intención clara → mostrar_menu_principal
+- Saludo SOLO, sin nada más ("Hola", "Buenos días"), primer mensaje, o mensaje ambiguo sin intención clara → mostrar_menu_principal
 - El paciente quiere TERMINAR/ABANDONAR la conversación o el flujo actual ("chau", "bye", "me arrepentí", "dejalo", "en otro momento lo vemos", "no quiero seguir", "nada más gracias") → finalizar_conversacion
-- Agradecimiento o cortesía SIN intención de irse ("gracias", "muy amable") → respuesta_empatica con respuesta cálida y breve
+- Agradecimiento o cortesía SIN intención de irse ("gracias", "muy amable") → respuesta_empatica con respuesta cálida y breve.
+  IMPORTANTE: esto aplica AUNQUE el agradecimiento venga pegado a un saludo ("Hola buenos días muchas gracias", "Buen día, gracias!"). Un mensaje que agradece NO es un saludo suelto: no corresponde mostrarle el menú, corresponde responderle con calidez. Es un caso muy frecuente justo después de que la clínica le confirma o le recuerda un turno.
 - Pregunta sobre el PROCESO de reserva/atención ("¿voy a poder ver/elegir el turno?", "¿puedo cambiarlo o cancelar después?", "¿es obligatorio darte la obra social?", "¿qué sigue?") → respuesta_empatica con una respuesta breve, veraz y tranquilizadora (que sí va a poder elegir/continuar), SIN inventar horarios, precios ni datos que no tenemos
 - Pregunta sobre PREPARACIÓN o REQUISITOS para el turno/estudio ("¿debo llevar algo?", "¿tengo que venir en ayunas?", "¿necesito el DNI/la orden/los estudios previos?", "¿cuánto dura?", "¿qué debo traer?") → derivar_consulta_externa (tipo: medica). Esto NO es una pregunta de "proceso de reserva" — es información clínica/administrativa específica del estudio que el sistema NO tiene. NUNCA uses respuesta_empatica para esto, aunque suene casual o breve: inventar una respuesta acá es un error grave (información médica incorrecta).
 - Consulta médica, síntomas, costos, coberturas, obras sociales → derivar_consulta_externa

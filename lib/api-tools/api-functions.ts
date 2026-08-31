@@ -108,7 +108,17 @@ async function fetchProxyApi<T>(
       ...params,
     }
 
-    console.log(`[API] 📤 ${action}`)
+    // Log de parámetros (31/8/2026): antes solo se logueaba el nombre de la
+    // acción, así que cuando la API devolvía 0 resultados era imposible saber
+    // con qué filtros se había consultado — y la diferencia entre "no hay
+    // turnos" y "consultamos mal" quedaba indistinguible sin reproducirlo a
+    // mano en Postman. El DNI se enmascara: no hace falta el número completo
+    // para diagnosticar y no conviene dejarlo entero en los logs.
+    const paramsParaLog = { ...params }
+    if (paramsParaLog.Paciente_DNI) {
+      paramsParaLog.Paciente_DNI = String(paramsParaLog.Paciente_DNI).slice(0, 3) + "****"
+    }
+    console.log(`[API] 📤 ${action}`, JSON.stringify(paramsParaLog))
 
     // REINTENTOS (27/8/2026): antes esto usaba fetchWithTimeout, sin ningún
     // reintento — cualquier hipo transitorio del proxy de la clínica se
@@ -431,6 +441,21 @@ export async function obtenerTurnos(
       totalCount: Array.isArray(turnos) ? turnos.length : 'not array',
       hasInfoSinTurnos: !!infoSinTurnos
     })
+
+    // Búsqueda sin resultados: volcar la respuesta cruda (31/8/2026). Es el
+    // único caso donde hace falta, y es justo el que hoy no se puede
+    // diagnosticar: permite distinguir "la clínica realmente no tiene agenda"
+    // de "consultamos con un filtro equivocado" (ej: un Subespecialidad_Id o un
+    // Deudor_Id que la API no reconoce). Las respuestas vacías son chicas
+    // (~700 chars), así que el costo de loguearlas es despreciable.
+    if (!Array.isArray(turnos) || turnos.length === 0) {
+      console.log(
+        '[API] ⚠️ get_turnos sin resultados — filtros enviados:',
+        JSON.stringify({ ...params, Paciente_DNI: params.Paciente_DNI ? String(params.Paciente_DNI).slice(0, 3) + '****' : undefined }),
+        '| respuesta:',
+        JSON.stringify(resultado.datos).substring(0, 900),
+      )
+    }
     return {
       exito: true,
       datos: turnos,

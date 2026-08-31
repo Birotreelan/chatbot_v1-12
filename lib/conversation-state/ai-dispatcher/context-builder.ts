@@ -62,6 +62,21 @@ export interface DispatcherContext {
   // justo cuando el paciente SÍ tenía una pregunta explícita pendiente de responder — el
   // dispatcher clasificaba "Si mucha gracias" como simple cortesía en vez de confirmación.
   templatePendingConfirmation: boolean
+  /**
+   * Tipo del último template que la clínica le mandó al paciente, cuando ese
+   * template es INFORMATIVO (la clínica le avisa algo) y no una pregunta:
+   *
+   *   - 'turno_confirmado_clinica': la clínica ACEPTÓ el turno que el paciente
+   *     había solicitado. No hay nada que el paciente deba confirmar.
+   *   - 'turno_cancelado_clinica': la clínica canceló el turno.
+   *
+   * 31/8/2026 — motivo: sin esto, el contexto le decía al modelo "se le envió un
+   * recordatorio pidiéndole que confirme o cancele su asistencia" también para
+   * estos templates, que no piden nada. Es información falsa en el prompt y
+   * empuja al modelo a leer un simple "gracias" como una confirmación de
+   * asistencia.
+   */
+  clinicTemplateType?: 'turno_confirmado_clinica' | 'turno_cancelado_clinica'
 }
 
 // ============================================================================
@@ -212,6 +227,13 @@ export async function buildDispatcherContext(
     }
   }
 
+  // Templates informativos de la clínica: avisan algo, no preguntan nada.
+  const tipoMensaje = appointmentCtx?.tipo_mensaje
+  const clinicTemplateType =
+    tipoMensaje === 'turno_confirmado_clinica' || tipoMensaje === 'turno_cancelado_clinica'
+      ? (tipoMensaje as 'turno_confirmado_clinica' | 'turno_cancelado_clinica')
+      : undefined
+
   return {
     patient,
     turnos,
@@ -220,7 +242,11 @@ export async function buildDispatcherContext(
     conversationHistory: historyLines,
     rawAppointmentContext: appointmentCtx,
     clinicInfo,
-    templatePendingConfirmation: withinTemplateWindow && turnos.length > 0,
+    // Un template informativo NO deja una confirmación pendiente: la clínica ya
+    // resolvió el turno. Sin esta exclusión, el contexto le pedía al modelo que
+    // interpretara cualquier respuesta afirmativa como "confirmar asistencia".
+    templatePendingConfirmation: withinTemplateWindow && turnos.length > 0 && !clinicTemplateType,
+    clinicTemplateType,
   }
 }
 
@@ -248,6 +274,25 @@ export function formatContextForLLM(ctx: DispatcherContext): string {
     ctx.turnos.forEach((t, i) => {
       lines.push(`TURNO ${i + 1}: ${t.fecha} a las ${t.hora} con ${t.profesional} en ${t.sede} — Estado: ${t.estado}`)
     })
+  }
+
+  // Template informativo de la clínica (no pide nada al paciente). Va antes del
+  // estado del flujo porque cambia por completo cómo hay que leer su respuesta:
+  // un "gracias" acá es cortesía, no una confirmación de asistencia.
+  if (ctx.clinicTemplateType === 'turno_confirmado_clinica') {
+    lines.push(
+      `ÚLTIMO MENSAJE DE LA CLÍNICA: se le confirmó que el turno que había solicitado FUE ACEPTADO. Es un aviso, no una pregunta: el paciente NO tiene nada que confirmar.`,
+    )
+    lines.push(
+      `CÓMO LEER SU RESPUESTA: un agradecimiento o cortesía ("gracias", "hola buen día muchas gracias", "perfecto") es solo eso → respuesta_empatica. NO uses confirmar_asistencia_turno (no hay nada pendiente de confirmar) ni mostrar_menu_principal (no es un saludo suelto).`,
+    )
+  } else if (ctx.clinicTemplateType === 'turno_cancelado_clinica') {
+    lines.push(
+      `ÚLTIMO MENSAJE DE LA CLÍNICA: se le avisó que la clínica CANCELÓ su turno. Es un aviso, no una pregunta.`,
+    )
+    lines.push(
+      `CÓMO LEER SU RESPUESTA: si pide otro turno → iniciar_reserva_turno. Si solo acusa recibo o agradece → respuesta_empatica. NO uses cancelar_turno (el turno ya está cancelado por la clínica).`,
+    )
   }
 
   // Flujo activo

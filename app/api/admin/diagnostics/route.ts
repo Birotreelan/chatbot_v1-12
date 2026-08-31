@@ -151,6 +151,14 @@ export async function GET(request: Request) {
         conversionPct: tasa(reservaExitosa, reservaIniciada),
       },
 
+      // Avisos de la clínica (aceptó / canceló el turno solicitado). Si estos
+      // quedan en 0 mientras la clínica sigue mandando esos templates, es señal
+      // de que algo volvió a interceptarlos antes del handler determinístico.
+      templatesInformativosClinica: {
+        turnoConfirmado: acumulado[DIAG.CLINICA_TURNO_CONFIRMADO] || 0,
+        turnoCancelado: acumulado[DIAG.CLINICA_TURNO_CANCELADO] || 0,
+      },
+
       salidas: {
         derivacionExterna: acumulado[DIAG.DERIVACION_EXTERNA] || 0,
         derivacionHumana: acumulado[DIAG.DERIVACION_HUMANA] || 0,

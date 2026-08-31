@@ -1,7 +1,7 @@
 import { getWhatsAppConfigByPhoneId, getWhatsAppConfigById, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId, clearAllConversationStates } from "@/lib/db"
 import { sendWhatsAppMessage, sendWhatsAppInteractive, sendWhatsAppList } from "@/lib/whatsapp-api"
 import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
-import { getArgentinaDateTime } from "@/lib/utils/date-utils"
+import { getArgentinaDateTime, formatDateWithDayOfWeek } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
@@ -2293,6 +2293,49 @@ async function runInterjectionInActiveFlow(
     // sendExistingPatientResult), exacto y sin depender del historial.
     const TRANSITION = 'Para continuar con tu turno:'
     const stepPrompt = await getStepPrompt(userPhoneNumber, config.id)
+
+    // El dispatcher pidió el MENÚ PRINCIPAL y no hay ningún paso pendiente que
+    // retomar → mostrar el menú. Sin esto se caía al bloque de abajo, que asume
+    // "el dispatcher no pudo clasificar" y responde "Perdón, no entendí tu
+    // mensaje." — pero mostrar_menu_principal es una decisión válida, no una
+    // falla de clasificación.
+    //
+    // 31/8/2026 — caso real: a un paciente que acababa de recibir el template
+    // "confirmar_turno_solicitado" y respondió "Hola buenos días muchas gracias"
+    // se le contestó "Perdón, no entendí tu mensaje.". Como el contexto del turno
+    // recién guardado hace que el mensaje entre por esta función (consulta
+    // intercalada) pero no había flujo activo ni paso guardado, quedaban answer
+    // vacío y stepPrompt vacío, y el fallback textual era lo único que salía.
+    const hayPasoPendiente = typeof stepPrompt === 'string' && !!stepPrompt.trim()
+    if (action.type === 'init_patient_detection' && !hayPasoPendiente) {
+      let menuMsg = await returnPatientToMenu(userPhoneNumber)
+      let menuButtons: Array<{ id: string; title: string }> | undefined
+      if (!menuMsg) {
+        const det = await initializePatientDetection(
+          userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined,
+          config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber,
+        )
+        menuMsg = det?.handled && det.message ? det.message : null
+        menuButtons = (det as any)?.buttons
+      }
+
+      if (menuMsg) {
+        const ctxMenu: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+        }
+        await sendDirectResponse(ctxMenu, menuMsg, "router-interjection-menu", menuButtons)
+        routerLogger.info('[Router intercalada] Menú principal mostrado (sin paso pendiente)')
+        return true
+      }
+      // Sin menú disponible → ceder al pipeline antes que responder "no entendí".
+      routerLogger.warn('[Router intercalada] No se pudo armar el menú — cede al pipeline')
+      return false
+    }
+
     // Si llegamos hasta acá con derive_external es porque shouldOfferHuman ya dio
     // false (clínica sin humanSupport activo o fuera de horario) — el bloque de más
     // arriba intercepta el caso "ofrecer atención humana" antes de este punto. Acá
@@ -3586,6 +3629,27 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           dispatcherAlreadyAttempted = true
           const handled = await runInterjectionInActiveFlow(userPhoneNumber, userMessage, config, value, detActive)
           if (handled) return
+        } else if (hasClinicaTemplate && !hasRealFlow && !hasInterjectionFlow) {
+          // 31/8/2026 — Template INFORMATIVO de la clínica recién recibido
+          // (turno_confirmado_clinica / turno_cancelado_clinica) que el paciente
+          // todavía no respondió: lo maneja el bloque determinístico dedicado que
+          // está más abajo en esta misma función, que arma la respuesta con los
+          // datos reales del turno ("¡Tu turno está confirmado con X para el Y!").
+          //
+          // Antes esto caía en la rama de abajo (hasClinicaContext) y se lo comía el
+          // router de intercalada, que devolvía true y cortaba la ejecución — el
+          // handler determinístico nunca llegaba a correr. Caso real: paciente que
+          // recibe "confirmar_turno_solicitado" y responde "Hola buenos días muchas
+          // gracias" → el bot le contestaba "Perdón, no entendí tu mensaje.".
+          //
+          // Ojo con la diferencia entre los dos estados de este flujo:
+          //   - hasClinicaTemplate  → template recién enviado, SIN responder aún  → handler determinístico
+          //   - clinicaFollowup     → ya se le respondió; lo que sigue (preguntas,
+          //                            "sí quiero otro turno") sí va por el router.
+          createConversationLogger(userPhoneNumber, config.id, "router-primary").info(
+            '[Router primario] Template informativo de la clínica sin responder — cede al handler determinístico',
+            { tipoClinica },
+          )
         } else if (!hasInterjectionFlow && hasClinicaContext && !hasRealFlow && !isObviousStepInput(userMessage)) {
           // Paso 5c (18/8/2026): cierra parcialmente el hueco de la rama de abajo.
           // Caso "solo contexto de clínica" (sin ningún flujo real activo) — acá SÍ es
@@ -3732,8 +3796,15 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
         // Extraer datos del contexto plano (viene del proxylistener, no tiene estructura ChatbotData estándar)
         const rawCtx = clinicaContext as any
-        const fecha: string = rawCtx.fecha_formateada || rawCtx.fecha
+        const fechaCruda: string = rawCtx.fecha_formateada || rawCtx.fecha
           || rawCtx.turnos?.[0]?.fecha_formateada || rawCtx.turnos?.[0]?.fecha || ''
+        // 31/8/2026: el sistema de la clínica manda fecha_formateada en ISO
+        // ("2026-08-31") para este template, así que el mensaje quedaba
+        // "para el 2026-08-31". Se formatea a algo legible ("lunes, 31 de agosto
+        // de 2026"); si no es una fecha reconocible, se deja tal cual.
+        const fecha: string = /^\d{4}-\d{2}-\d{2}$/.test(fechaCruda.trim())
+          ? formatDateWithDayOfWeek(fechaCruda.trim())
+          : fechaCruda
         const hora: string = rawCtx.hora_formateada || rawCtx.hora
           || rawCtx.turnos?.[0]?.hora_formateada || rawCtx.turnos?.[0]?.hora || ''
         const profesionalRaw: string = rawCtx.profesional || rawCtx.turnos?.[0]?.profesional || ''
@@ -3750,6 +3821,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         await clearAppointmentContext(userPhoneNumber, config.id)
 
         if (clinicaTipoMensaje === 'turno_cancelado_clinica') {
+          void recordDiag(config.id, DIAG.CLINICA_TURNO_CANCELADO)
           let responseMsg = 'Lamentamos que tu turno'
           if (profesional) responseMsg += ` con *${profesional}*`
           if (fecha) responseMsg += ` del *${fecha}*`
@@ -3803,6 +3875,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             kind: 'confirmed',
             telefonoContacto: config.escalationPhoneNumber || telefonoContacto || '',
           })
+          void recordDiag(config.id, DIAG.CLINICA_TURNO_CONFIRMADO)
           await sendDirectResponse(clinicaInfoCtx, responseMsg, "clinica_confirmation_info")
           return
         }

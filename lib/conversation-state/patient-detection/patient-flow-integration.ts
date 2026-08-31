@@ -30,7 +30,7 @@ import {
 import { detectFamiliarIntent } from './familiar-intent-detector'
 import { classifyTurnoEstado } from './turno-estado'
 import { extractDNI } from '../dni-handler'
-import { validarObraSocial } from '@/lib/api-tools/api-functions'
+import { resolverTurnosOnline } from '../shared/obra-social'
 import { recordDiag, DIAG } from '@/lib/diagnostics'
 
 /**
@@ -341,19 +341,34 @@ export async function initializePatientDetection(
     // demás opciones del menú siguen siendo válidas.
     if (permitirNuevoTurno !== false) {
       try {
-        const identificado = await getIdentifiedPatient(phoneNumber)
-        const obraSocialNombre = identificado?.obraSocialNombre?.trim()
+        // BUG CORREGIDO (31/8/2026): esto leía la obra social de
+        // getIdentifiedPatient, pero esa clave SOLO se escribe cuando se limpia
+        // el flujo de detección (clearPatientDetectionFlow) — en el momento del
+        // saludo siempre devuelve null, así que el aviso nunca se enviaba.
+        // La fuente correcta es el estado de detección, que startPatientDetectionFlow
+        // acaba de guardar con obraSocialId/obraSocialNombre. Se deja
+        // getIdentifiedPatient como respaldo para los casos en que el estado ya
+        // se limpió pero la identidad sigue viva.
+        const [estadoDeteccion, identificado] = await Promise.all([
+          getPatientDetectionState(phoneNumber),
+          getIdentifiedPatient(phoneNumber),
+        ])
+        const obraSocialNombre = (estadoDeteccion?.obraSocialNombre || identificado?.obraSocialNombre)?.trim()
+
+        const obraSocialId = estadoDeteccion?.obraSocialId || identificado?.obraSocialId
 
         if (obraSocialNombre) {
-          const validacion = await validarObraSocial(clienteId, obraSocialNombre)
-          const obraSocial = validacion?.exito ? validacion.datos?.obras_sociales?.[0] : null
+          // Resolución exacta por Deudor_Id (ver shared/obra-social.ts): buscar
+          // por nombre y quedarse con el primer resultado hacía que se evaluara
+          // la obra social equivocada cuando la búsqueda devolvía varias.
+          const resultadoOS = await resolverTurnosOnline(clienteId, obraSocialNombre, obraSocialId)
 
-          if (obraSocial && obraSocial.permite_turnos_online === false) {
+          if (resultadoOS.estado === 'bloqueada') {
             const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
             logger.info('Obra social no habilitada — se avisa en el saludo', { obraSocialNombre })
             void recordDiag(configId, DIAG.OBRA_SOCIAL_BLOQUEADA_EN_SALUDO)
             greeting +=
-              `\n\n⚠️ Tené en cuenta que tu obra social (*${obraSocialNombre}*) no está habilitada ` +
+              `\n\n⚠️ Tené en cuenta que tu obra social (*${resultadoOS.nombre || obraSocialNombre}*) no está habilitada ` +
               `para agendar turnos por este medio. Para sacar un turno, comunicate al *${numeroDerivacion}*.`
           }
         }

@@ -54,6 +54,7 @@ import {
   buildTurnosListMessage,
 } from '../shared/turnos-handler'
 import { applyInitialTurnoPreference } from '../shared/initial-preference'
+import { resolverTurnosOnlineConMetrica } from '../shared/obra-social'
 import { recordDiag, DIAG } from '@/lib/diagnostics'
 import {
   handleTurnoSelection,
@@ -432,34 +433,37 @@ export async function initializeExistingPatientFlow(
   })
 
   // 🆕 VALIDAR SI LA OBRA SOCIAL PERMITE TURNOS ONLINE
+  //
+  // 31/8/2026 (caso Zelmira, PAMI HAEDO): esta validación existía pero dejaba
+  // pasar a pacientes con la obra social NO habilitada. Buscaba por NOMBRE con
+  // get_obras_sociales y evaluaba `obras_sociales[0]` — el primer resultado de
+  // una búsqueda de texto. Con varias coincidencias ("PAMI", "PAMI HAEDO",
+  // "PAMI SO"...) terminaba mirando el flag de otra obra social. Ahora la
+  // resolución es exacta por Deudor_Id (ver shared/obra-social.ts).
   if (finalObraSocialNombre) {
-    try {
-      const obraSocialValidation = await validarObraSocial(clientId, finalObraSocialNombre)
-      
-      if (obraSocialValidation.exito && obraSocialValidation.datos.obras_sociales.length > 0) {
-        const obraSocial = obraSocialValidation.datos.obras_sociales[0]
-        
-        if (obraSocial.permite_turnos_online === false) {
-          const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
-          logger.warn('Obra social de paciente existente no permite turnos online', {
-            obraSocialId: finalObraSocialId,
-            obraSocialNombre: finalObraSocialNombre,
-          })
-          
-          const firstName = getFirstName(finalPatientFirstName || '')
-          const saludo = firstName ? `Hola ${firstName}. ` : ''
-          return {
-            handled: true,
-            message: `${saludo}Lamentablemente, tu obra social (${finalObraSocialNombre}) no está habilitada para agendar turnos por este medio.
+    const resultadoOS = await resolverTurnosOnlineConMetrica(
+      clientId,
+      undefined,
+      finalObraSocialNombre,
+      finalObraSocialId,
+    )
+
+    if (resultadoOS.estado === 'bloqueada') {
+      const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+      logger.warn('Obra social de paciente existente no permite turnos online', {
+        obraSocialId: finalObraSocialId,
+        obraSocialNombre: finalObraSocialNombre,
+      })
+
+      const firstName = getFirstName(finalPatientFirstName || '')
+      const saludo = firstName ? `Hola ${firstName}. ` : ''
+      return {
+        handled: true,
+        message: `${saludo}Lamentablemente, tu obra social (${resultadoOS.nombre || finalObraSocialNombre}) no está habilitada para agendar turnos por este medio.
 
 Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
-            action: 'obra_social_no_permite_turnos_online',
-          }
-        }
+        action: 'obra_social_no_permite_turnos_online',
       }
-    } catch (error) {
-      logger.warn('Error validating obra social for existing patient', error as Error)
-      // Continuar aunque falle la validación
     }
   }
 
@@ -913,7 +917,7 @@ export async function handleExistingPatientMessage(
       break
 
     case 'awaiting_modify_obra_social':
-      result = await handleModifyObraSocialPhase(phoneNumber, userMessage, clientId, state)
+      result = await handleModifyObraSocialPhase(phoneNumber, userMessage, clientId, state, escalationPhoneNumber)
       break
 
     default:
@@ -2218,7 +2222,8 @@ async function handleModifyObraSocialPhase(
   phoneNumber: string,
   userMessage: string,
   clientId: string,
-  state: ExistingPatientFlowState
+  state: ExistingPatientFlowState,
+  escalationPhoneNumber?: string
 ): Promise<ExistingPatientResult> {
   const logger = createConversationLogger(phoneNumber, clientId, 'modify_obra_social_phase')
 
@@ -2234,7 +2239,43 @@ async function handleModifyObraSocialPhase(
       }
     }
 
-    const obraSocial = result.datos.obras_sociales[0]
+    // 31/8/2026: antes esto tomaba `obras_sociales[0]` sin mirar cuántas había.
+    // La API busca por palabras sueltas: escribir "PAMI HAEDO" devuelve 13
+    // resultados y el primero es "OSPACA HAEDO" — al paciente le quedaba
+    // asignada una obra social que no es la suya, y encima sin validar si
+    // permite turnos online (ese chequeo directamente no existía acá).
+    const candidatas = result.datos.obras_sociales
+    const normalizar = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+    const exacta = candidatas.find((os: any) => normalizar(os.nombre) === normalizar(input))
+    const obraSocial = exacta || (candidatas.length === 1 ? candidatas[0] : null)
+
+    if (!obraSocial) {
+      // Varias coincidencias y ninguna exacta: que elija el paciente en vez de
+      // asignarle la primera de la lista.
+      const opciones = candidatas
+        .slice(0, 8)
+        .map((os: any) => `• ${os.nombre}`)
+        .join('\n')
+      logger.info('Obra social ambigua — se pide precisión', { input, total: candidatas.length })
+      return {
+        handled: true,
+        message: `Encontré varias coincidencias para "${input}". ¿Cuál es la tuya?\n\n${opciones}\n\nEscribí el nombre tal cual figura arriba.`,
+      }
+    }
+
+    if (obraSocial.permite_turnos_online === false) {
+      const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+      logger.warn('Obra social indicada por el paciente no permite turnos online', {
+        obraSocialId: obraSocial.id,
+        nombre: obraSocial.nombre,
+      })
+      return {
+        handled: true,
+        message: `Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+        action: 'obra_social_no_permite_turnos_online',
+      }
+    }
+
     state.obraSocialId = obraSocial.id
     state.obraSocialNombre = obraSocial.nombre
     state.phase = 'awaiting_confirmation'
