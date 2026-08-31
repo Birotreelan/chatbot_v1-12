@@ -69,6 +69,64 @@ export interface ExecutorDeps {
   configId: string
   clienteId: string
   escalationPhone?: string
+  /** Nombre visible de la clínica, para el saludo de la primera respuesta. */
+  clinicName?: string
+}
+
+// ============================================================================
+// SALUDO EN LA PRIMERA RESPUESTA DE LA CONVERSACIÓN
+// ============================================================================
+
+/**
+ * 31/8/2026 — Un paciente escribió como primer mensaje "Buenas tardes quisiera
+ * una receta... ¿tengo que ir a Caseros o se puede digital?" y el bot arrancó
+ * en seco con "Este canal es exclusivo para la gestión de turnos médicos".
+ * Correcto de contenido, pero descortés: nunca se presentó ni le devolvió el
+ * saludo.
+ *
+ * Estas respuestas del dispatcher (derivación, consulta informativa, info
+ * institucional, empática) son las únicas que pueden ser lo PRIMERO que el
+ * paciente lee, porque no pasan por el saludo del flujo de detección. Por eso
+ * el saludo se antepone acá y no en el envío: los demás caminos ya saludan.
+ */
+
+/** Detecta si el mensaje ya empieza saludando, para no saludar dos veces. */
+const YA_SALUDA_RE = /^[\s*_]*(¡?\s*)?(hola|buen(os|as)\s|bienvenid)/i
+
+/**
+ * true si el bot todavía no dijo nada en esta conversación.
+ *
+ * Se deduce del historial que el contexto ya trae (formato "Paciente: ..." /
+ * "Bot: ..."), así que no cuesta ninguna lectura extra a Redis. El historial
+ * vive 24h: si el paciente vuelve al otro día, se lo saluda de nuevo, que es
+ * exactamente lo que corresponde.
+ */
+function esPrimeraRespuestaDeLaConversacion(ctx: DispatcherContext): boolean {
+  const historial = (ctx.conversationHistory || '').trim()
+  if (!historial) return true
+  return !historial.split('\n').some((linea) => linea.trimStart().startsWith('Bot:'))
+}
+
+function primerNombre(nombreCompleto?: string): string {
+  if (!nombreCompleto) return ''
+  const primero = nombreCompleto.trim().split(/\s+/)[0] || ''
+  if (!primero) return ''
+  return primero.charAt(0).toUpperCase() + primero.slice(1).toLowerCase()
+}
+
+function construirSaludo(ctx: DispatcherContext, clinicName?: string): string {
+  const nombre = ctx.patient.identified ? primerNombre(ctx.patient.name) : ''
+  const deClinica = clinicName ? ` de ${clinicName}` : ''
+  return nombre
+    ? `*¡Hola, ${nombre}!* Soy Iris, la asistente virtual${deClinica}.`
+    : `*¡Hola!* Soy Iris, la asistente virtual${deClinica}.`
+}
+
+/** Antepone el saludo sólo si es la primera respuesta y el mensaje no saluda ya. */
+function conSaludoSiCorresponde(mensaje: string, ctx: DispatcherContext, deps: ExecutorDeps): string {
+  if (!esPrimeraRespuestaDeLaConversacion(ctx)) return mensaje
+  if (YA_SALUDA_RE.test(mensaje)) return mensaje
+  return `${construirSaludo(ctx, deps.clinicName)}\n\n${mensaje}`
 }
 
 // ============================================================================
@@ -134,13 +192,20 @@ export async function executeDispatcherDecision(
       const turno = ctx.turnos[0]
       if (!turno) {
         return {
-          action: { type: 'send_and_return', message: 'No encontré turnos próximos en tu cuenta. Si querés agendar uno, escribime y te ayudo.' },
+          action: {
+            type: 'send_and_return',
+            message: conSaludoSiCorresponde(
+              'No encontré turnos próximos en tu cuenta. Si querés agendar uno, escribime y te ayudo.',
+              ctx,
+              deps,
+            ),
+          },
           logNote: 'Dispatcher → consulta info sin turno',
         }
       }
 
       const aspecto = decision.args.aspecto ?? 'general'
-      const message = buildInfoResponse(turno, aspecto)
+      const message = conSaludoSiCorresponde(buildInfoResponse(turno, aspecto), ctx, deps)
       return { action: { type: 'send_and_return', message }, logNote: `Dispatcher → info turno (${aspecto})` }
     }
 
@@ -150,10 +215,13 @@ export async function executeDispatcherDecision(
       if (!respuesta) {
         // Salvaguarda: si por algún motivo el LLM llamó al tool sin texto,
         // mejor derivar que mandar un mensaje vacío.
-        const message = buildDerivacionMessage('otro', deps.escalationPhone)
+        const message = conSaludoSiCorresponde(buildDerivacionMessage('otro', deps.escalationPhone), ctx, deps)
         return { action: { type: 'derive_external', message }, logNote: 'Dispatcher → info clínica sin respuesta, derivando' }
       }
-      return { action: { type: 'send_and_return', message: respuesta }, logNote: 'Dispatcher → info institucional de la clínica' }
+      return {
+        action: { type: 'send_and_return', message: conSaludoSiCorresponde(respuesta, ctx, deps) },
+        logNote: 'Dispatcher → info institucional de la clínica',
+      }
     }
 
     // ── Derivar consulta ─────────────────────────────────────────────────────
@@ -162,15 +230,18 @@ export async function executeDispatcherDecision(
     case TOOL_NAMES.DERIVAR_CONSULTA: {
       const tipo = decision.args.tipo ?? 'otro'
       void recordDiag(deps.configId, DIAG.DERIVACION_EXTERNA)
-      const message = buildDerivacionMessage(tipo, deps.escalationPhone)
+      const message = conSaludoSiCorresponde(buildDerivacionMessage(tipo, deps.escalationPhone), ctx, deps)
       return { action: { type: 'derive_external', message }, logNote: `Dispatcher → derivación (${tipo})` }
     }
 
     // ── Respuesta empática ───────────────────────────────────────────────────
     case TOOL_NAMES.RESPUESTA_EMPATICA: {
       const respuesta = decision.args.respuesta as string | undefined
-      const message = respuesta || '¡Gracias por escribirnos! Si necesitás algo más, estoy acá para ayudarte.'
-      return { action: { type: 'send_and_return', message }, logNote: 'Dispatcher → respuesta empática' }
+      const base = respuesta || '¡Gracias por escribirnos! Si necesitás algo más, estoy acá para ayudarte.'
+      return {
+        action: { type: 'send_and_return', message: conSaludoSiCorresponde(base, ctx, deps) },
+        logNote: 'Dispatcher → respuesta empática',
+      }
     }
 
     // ── Solicitar atención humana ────────────────────────────────────────────

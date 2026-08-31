@@ -34,8 +34,15 @@ import {
   buildRescheduleOpenAIMessage,
 } from "./reschedule-templates"
 import type { ChatbotData } from "../appointment-flow-state"
-import { getAppointmentContext, saveAppointmentContext } from "../appointment-flow-state"
+import {
+  getAppointmentContext,
+  saveAppointmentContext,
+  saveStepButtons,
+  saveStepPrompt,
+  clearStepState,
+} from "../appointment-flow-state"
 import { clearPostActionContext } from "./post-action-context"
+import { appendToHistory } from "./conversation-history"
 
 // ============================================================================
 // CONSTANTES
@@ -63,7 +70,15 @@ interface RescheduleResponseContext {
 async function sendRescheduleResponse(
   ctx: RescheduleResponseContext,
   message: string,
-  buttons?: Array<{ id: string; title: string }>
+  buttons?: Array<{ id: string; title: string }>,
+  /**
+   * false para los mensajes TERMINALES del flujo (reagendamiento exitoso,
+   * abandono, error): no son un paso que el paciente deba responder, así que no
+   * deben quedar guardados como "paso pendiente" — si no, una consulta posterior
+   * los re-muestra como si el flujo siguiera abierto (mismo criterio que
+   * TERMINAL_ACTIONS en whatsapp.tsx).
+   */
+  esPasoPendiente: boolean = true,
 ): Promise<boolean> {
   try {
     if (buttons && buttons.length > 0) {
@@ -89,6 +104,29 @@ async function sendRescheduleResponse(
       phoneNumber: ctx.userPhoneNumber,
       configId: ctx.configId,
     })
+
+    // ── 31/8/2026, caso Ives ────────────────────────────────────────────────
+    // Estas dos líneas faltaban y hacían perder el flujo entero. sendDirectResponse
+    // (el equivalente en whatsapp.tsx) sí las hace; esta función, no. Consecuencia:
+    //
+    //  1. Sin appendToHistory, el historial que ve el AI Dispatcher no tenía
+    //     ninguno de los mensajes del reagendamiento — el contexto le decía que
+    //     no había nada en curso.
+    //  2. Sin saveStepPrompt, el router de consultas intercaladas concluía "no hay
+    //     paso pendiente que retomar" y, ante un mensaje que no supo clasificar
+    //     ("5/10 15 hs." para elegir turno), mostraba el saludo inicial completo
+    //     y descartaba la lista de turnos que el paciente estaba mirando.
+    //
+    // Con el paso guardado, ese mismo mensaje se responde y se vuelve a mostrar la
+    // lista, en vez de reiniciar la conversación.
+    appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: message, timestamp: Date.now() }).catch(() => {})
+
+    if (esPasoPendiente) {
+      await saveStepButtons(ctx.userPhoneNumber, ctx.configId, buttons || [])
+      await saveStepPrompt(ctx.userPhoneNumber, ctx.configId, message)
+    } else {
+      await clearStepState(ctx.userPhoneNumber, ctx.configId)
+    }
 
     return true
   } catch (error) {
@@ -439,9 +477,9 @@ export async function processRescheduleMessage(
       }
     }
 
-    // Reserva exitosa → enviar confirmación
+    // Reserva exitosa → enviar confirmación (terminal: no es un paso pendiente)
     const successMsg = buildRescheduleSuccessMessage(st, turno)
-    await sendRescheduleResponse(ctx, successMsg)
+    await sendRescheduleResponse(ctx, successMsg, undefined, false)
 
     // 19/8/2026: se sacó el trackAppointmentEvent("rescheduled") que estaba acá —
     // reservarTurno() (lib/openai-tools.tsx, llamado un poco más arriba) YA trackea
@@ -521,7 +559,7 @@ export async function processRescheduleMessage(
   // ========================================
   if (result.type === 'error' && result.message?.includes('abandona')) {
     const abandonMsg = buildRescheduleAbandonMessage(state)
-    await sendRescheduleResponse(ctx, abandonMsg)
+    await sendRescheduleResponse(ctx, abandonMsg, undefined, false)
     await clearRescheduleState(userPhoneNumber, configId)
 
     return {
@@ -535,7 +573,7 @@ export async function processRescheduleMessage(
   // ========================================
   if (result.type === 'error') {
     const errorMsg = result.message || buildRescheduleErrorMessage()
-    await sendRescheduleResponse(ctx, errorMsg)
+    await sendRescheduleResponse(ctx, errorMsg, undefined, false)
 
     return {
       handled: true,

@@ -477,6 +477,35 @@ export async function handleRescheduleMessage(
       }
     }
 
+    // El paciente pidió una fecha/horario concreto que no está en la lista
+    // (ej. "5/10 15 hs." cuando sólo hay turnos de septiembre). El resolver ya
+    // armó el mensaje explicando que no hay turnos para eso: se muestra ese, que
+    // responde lo que preguntó, en vez del genérico "no pude identificar el
+    // turno". No cuenta como intento fallido — el paciente se explicó bien, lo
+    // que no hay es disponibilidad (caso Ives, 31/8/2026).
+    if (sel.sinResultadosParaElFiltro && sel.message) {
+      console.log(`[RESCHEDULE-FLOW] Sin turnos para lo pedido, respondiendo sin contar intento fallido`)
+      return {
+        type: 'pending',
+        nextPhase: 'awaiting_selection',
+        state,
+        clarification: true,
+        message: `${sel.message}\n\n0. *Volver al paso anterior*`,
+      }
+    }
+
+    // Filtro con resultados (ej. "algo por la tarde") → mostrar la lista filtrada.
+    if (sel.filteredMessage) {
+      console.log(`[RESCHEDULE-FLOW] Filtro aplicado sobre los turnos disponibles`)
+      return {
+        type: 'pending',
+        nextPhase: 'awaiting_selection',
+        state,
+        clarification: true,
+        message: `${sel.filteredMessage}\n\n0. *Volver al paso anterior*`,
+      }
+    }
+
     // No se pudo resolver → pedir aclaración determinística SIN salir del flujo.
     // (Incidente 2026-07-06: el fallback a OpenAI para "7.11y10" desvió la conversación —
     // el asistente llamó a get_paciente, falló, y respondió "no tenés turnos agendados"

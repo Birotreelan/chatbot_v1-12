@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { format, isToday, isYesterday, isSameDay } from "date-fns"
 import { es } from "date-fns/locale"
-import { User, Bot, Pause, Play, Send, Loader2 } from "lucide-react"
+import { User, Bot, Pause, Play, Send, Loader2, Mic } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { MonitorPatientPanel } from "@/components/dashboard/monitor-patient-panel"
 
@@ -16,6 +16,12 @@ interface Message {
   role: "user" | "assistant" | "system"
   content: string
   timestamp: string
+  /**
+   * Presente cuando el paciente mandó una nota de voz (31/8/2026): `content` es
+   * la transcripción de Whisper y esto permite escuchar el audio original, para
+   * verificar qué dijo realmente cuando la transcripción no cierra.
+   */
+  audioMessageId?: string
 }
 
 interface ConversationChatProps {
@@ -284,6 +290,28 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
                       message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
                     )}
                   >
+                    {message.audioMessageId && (
+                      <div className="mb-2">
+                        <div
+                          className={cn(
+                            "flex items-center gap-1.5 text-xs mb-1",
+                            message.role === "user" ? "text-primary-foreground/80" : "text-muted-foreground",
+                          )}
+                        >
+                          <Mic className="h-3 w-3" />
+                          <span>Nota de voz — transcripción automática</span>
+                        </div>
+                        {/* Si el audio ya caducó (7 días), el endpoint responde 404
+                            y el navegador muestra el control deshabilitado; la
+                            transcripción de abajo sigue estando. */}
+                        <audio
+                          controls
+                          preload="none"
+                          className="w-full max-w-[260px] h-8"
+                          src={`/api/conversations/audio?configId=${encodeURIComponent(configId)}&phoneNumber=${encodeURIComponent(phoneNumber)}&audioId=${encodeURIComponent(message.audioMessageId)}`}
+                        />
+                      </div>
+                    )}
                     <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
                     <p
                       className={cn(

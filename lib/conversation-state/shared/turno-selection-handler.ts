@@ -514,6 +514,13 @@ export async function handleTurnoSelection(
   /** true si el turno se resolvió por texto/hora/NLU (no por número directo):
    *  el caller debe pedir confirmación explícita del turno antes de continuar. */
   needsConfirmation?: boolean
+  /**
+   * true cuando el paciente pidió algo concreto que NO está en la lista (ej.
+   * "5/10 15 hs." cuando sólo hay turnos de septiembre) y `message` ya explica
+   * eso. Sirve para que el caller muestre esa explicación en vez de un genérico
+   * "no pude identificar el turno" — caso Ives, 31/8/2026.
+   */
+  sinResultadosParaElFiltro?: boolean
 }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'turno_selection')
 
@@ -734,6 +741,7 @@ export async function handleTurnoSelection(
         handled: true,
         message: msg,
         nextPhase: 'awaiting_turno_selection',
+        sinResultadosParaElFiltro: true,
       }
     }
 

@@ -14,7 +14,9 @@ import {
   getIdentifiedPatient,
   returnPatientToMenu,
   identifyPatientByDNI,
+  updatePatientDetectionObraSocialBloqueada,
 } from './patient-flow-handler'
+import type { ObraSocialBloqueada } from './patient-templates'
 import {
   buildExistingPatientGreeting,
   buildNewPatientGreeting,
@@ -316,29 +318,26 @@ export async function initializePatientDetection(
     const hasTurnos = detectionResult.turnos && detectionResult.turnos.length > 0
     const hasTurnosQx = detectionResult.turnosQx && detectionResult.turnosQx.length > 0
 
-    let greeting = buildExistingPatientGreeting(
-      detectionResult.patientName || 'Paciente',
-      detectionResult.turnos || [],
-      clinicName,
-      detectionResult.turnosQx || [],
-      hasReminder,
-      permitirNuevoTurno,
-      permitirCancelacion,
-      escalationPhoneNumber
-    )
-
-    // ── Aviso temprano: obra social no habilitada para turnos online ────────
+    // ── Obra social no habilitada para turnos online ───────────────────────
     //
     // 28/8/2026 (caso Luis, Salud Ocular): el paciente escribió "necesito un
     // turno", se lo identificó, se le mostró el menú, eligió "1" y RECIÉN AHÍ
     // se le dijo que su obra social (PAMI SO) no estaba habilitada. Cuatro
     // mensajes para una respuesta que ya se podía dar en el primero.
     //
-    // La validación ya existía, pero corría dentro del flujo de reserva
-    // (existing-patient-flow-integration.ts). Acá se adelanta al saludo.
-    // Se agrega como nota al saludo en vez de reemplazarlo: el paciente puede
-    // seguir queriendo cancelar un turno o hacer una consulta, así que las
-    // demás opciones del menú siguen siendo válidas.
+    // 31/8/2026 (caso Ana, PAMI CANNING): la primera versión de este aviso se
+    // agregaba como nota al final del saludo, pero el menú se construía antes y
+    // seguía ofreciendo "Solicitar turno médico" — le ofrecíamos al paciente una
+    // opción que el sistema ya sabía que iba a rechazar (y que además lo metía
+    // en el flujo de reserva para frenarlo adentro). Ahora se resuelve ANTES de
+    // construir el saludo y se pasa a los builders, que quitan esa opción y
+    // renumeran. El flag se persiste en el estado para que el action map de
+    // patient-flow-handler.ts ofrezca exactamente lo mismo.
+    //
+    // Las demás gestiones (cancelar, confirmar, turno para un familiar, otra
+    // consulta) siguen disponibles: la restricción es solo sobre el turno propio.
+    let obraSocialBloqueada: ObraSocialBloqueada | undefined
+
     if (permitirNuevoTurno !== false) {
       try {
         // BUG CORREGIDO (31/8/2026): esto leía la obra social de
@@ -364,20 +363,42 @@ export async function initializePatientDetection(
           const resultadoOS = await resolverTurnosOnline(clienteId, obraSocialNombre, obraSocialId)
 
           if (resultadoOS.estado === 'bloqueada') {
-            const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
-            logger.info('Obra social no habilitada — se avisa en el saludo', { obraSocialNombre })
+            logger.info('Obra social no habilitada — se ajusta el menú del saludo', { obraSocialNombre })
             void recordDiag(configId, DIAG.OBRA_SOCIAL_BLOQUEADA_EN_SALUDO)
-            greeting +=
-              `\n\n⚠️ Tené en cuenta que tu obra social (*${resultadoOS.nombre || obraSocialNombre}*) no está habilitada ` +
-              `para agendar turnos por este medio. Para sacar un turno, comunicate al *${numeroDerivacion}*.`
+            obraSocialBloqueada = {
+              nombre: resultadoOS.nombre || obraSocialNombre,
+              telefonoDerivacion: escalationPhoneNumber,
+            }
+            // Persistir para que el action map ofrezca las mismas opciones que
+            // el texto. Si esto falla, el menú mostrado y el interpretado se
+            // desincronizan, así que se prefiere no ocultar la opción antes que
+            // mostrar un menú cuyos números hacen otra cosa.
+            const persistido = await updatePatientDetectionObraSocialBloqueada(phoneNumber, true)
+            if (!persistido) {
+              logger.warn('No se pudo persistir obraSocialBloqueada — se mantiene el menú completo')
+              obraSocialBloqueada = undefined
+            }
           }
         }
       } catch (error) {
         // No bloquea el saludo: si la validación falla, el flujo de reserva
         // vuelve a chequearlo más adelante como siempre.
         logger.warn('No se pudo validar la obra social para el aviso temprano', { error: String(error) })
+        obraSocialBloqueada = undefined
       }
     }
+
+    let greeting = buildExistingPatientGreeting(
+      detectionResult.patientName || 'Paciente',
+      detectionResult.turnos || [],
+      clinicName,
+      detectionResult.turnosQx || [],
+      hasReminder,
+      permitirNuevoTurno,
+      permitirCancelacion,
+      escalationPhoneNumber,
+      obraSocialBloqueada
+    )
 
     // Único turno, sin posibilidad de confirmar (no hubo recordatorio) ni de
     // cancelar-y-agendar-nuevo (permitirNuevoTurno=false): el saludo ofrece
@@ -393,20 +414,25 @@ export async function initializePatientDetection(
       permitirCancelacion !== false &&
       permitirNuevoTurno === false
 
-    // Incluir botones interactivos para los casos con exactamente 3 opciones:
-    // - Sin turnos (ni médicos ni quirúrgicos)
-    // - Solo cirugías (sin turnos médicos)
+    // Incluir botones interactivos para los casos sin turnos médicos.
+    // Los ids DEBEN coincidir con el texto del menú y con el action map: con la
+    // obra social bloqueada no se ofrece "Solicitar turno" y todo se corre uno.
     const greetingButtons: Array<{ id: string; title: string }> | undefined =
       singleTurnoSoloCancelar
         ? [{ id: "1", title: "Cancelar turno" }]
         : (!hasTurnos)
             ? (permitirNuevoTurno === false
                 ? undefined
-                : [
-                    { id: "1", title: "Solicitar turno" },
-                    { id: "2", title: "Turno para familiar" },
-                    { id: "3", title: "Otra consulta" },
-                  ])
+                : obraSocialBloqueada
+                  ? [
+                      { id: "1", title: "Turno para familiar" },
+                      { id: "2", title: "Otra consulta" },
+                    ]
+                  : [
+                      { id: "1", title: "Solicitar turno" },
+                      { id: "2", title: "Turno para familiar" },
+                      { id: "3", title: "Otra consulta" },
+                    ])
             : undefined
 
     return {

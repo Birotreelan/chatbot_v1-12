@@ -176,12 +176,29 @@ export function buildConfirmationMessageNoName(appointmentInfo: {
  */
 export function buildCancelDoubleConfirmMessage(
   chatbotData: ChatbotData,
-  turnoIndex: number = 0
+  turnoIndex: number = 0,
+  postCancelAction?: 'book_new' | 'reschedule'
 ): string {
   const nombre = formatPatientName(chatbotData)
   const turno = chatbotData.turnos[turnoIndex]
 
+  // 31/8/2026 (caso Ives): el paciente escribió "Puedo cambiar la fecha de
+  // turno." y el bot le contestó "recibimos tu pedido de CANCELAR el turno",
+  // sin decirle en ningún momento que después le iba a ofrecer otras fechas.
+  // Desde su lugar, parecía que le estábamos por borrar el turno y dejarlo sin
+  // nada. El sistema por debajo sí sabía que venía un reagendamiento
+  // (postCancelAction), pero el mensaje no lo usaba.
+  const vaAReagendar = postCancelAction === 'reschedule' || postCancelAction === 'book_new'
+
   if (!turno) {
+    if (vaAReagendar) {
+      return `${nombre}, para darte un turno nuevo primero necesito cancelar el que tenés agendado.
+
+Apenas lo cancele te muestro las fechas disponibles para que elijas la que mejor te venga.
+
+1- Sí, cancelar y ver otras fechas
+2- No, mantener el turno y confirmar asistencia.`
+    }
     return `${nombre}, recibimos tu pedido de cancelación.
 
 Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
@@ -204,6 +221,17 @@ Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
     const lineas = turnosDelMismoDia
       .map((t) => `  • ${formatTime(t.hora)} con ${t.profesional}`)
       .join('\n')
+    if (vaAReagendar) {
+      return `${nombre}, para cambiar la fecha primero necesito cancelar los ${turnosDelMismoDia.length} turnos que tenés el ${fechaCompleta} en la sede ${sede}:
+
+${lineas}
+
+Apenas los cancele te muestro las fechas disponibles para que elijas la que mejor te venga.
+
+1- Sí, cancelar y ver otras fechas
+2- No, mantener los turnos y confirmar asistencia.`
+    }
+
     return `${nombre}, recibimos tu pedido de cancelar los ${turnosDelMismoDia.length} turnos del ${fechaCompleta} en la sede ${sede}:
 
 ${lineas}
@@ -216,6 +244,15 @@ Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión.
 
   const hora = formatTime(turno.hora)
   const profesional = turno.profesional
+
+  if (vaAReagendar) {
+    return `${nombre}, para cambiar la fecha primero necesito cancelar el turno que tenés: ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede}.
+
+Apenas lo cancele te muestro las fechas disponibles para que elijas la que mejor te venga.
+
+1- Sí, cancelar y ver otras fechas
+2- No, mantener el turno y confirmar asistencia.`
+  }
 
   return `${nombre}, recibimos tu pedido de cancelar el turno del ${fechaCompleta} a las ${hora} con ${profesional} en la sede ${sede}.
 

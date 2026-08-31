@@ -73,6 +73,25 @@ export const EXISTING_PATIENT_NO_TURNOS_MENU: MenuOption[] = [
 ]
 
 /**
+ * Menú de paciente existente SIN turnos cuando su obra social no admite turnos
+ * online (31/8/2026). No se ofrece el turno propio y todo se corre un número —
+ * debe coincidir con buildExistingPatientNoTurnosGreeting (patient-templates.ts)
+ * y con el action map de patient-flow-handler.ts.
+ */
+export const EXISTING_PATIENT_NO_TURNOS_OS_BLOQUEADA_MENU: MenuOption[] = [
+  {
+    index: 1,
+    label: 'Solicitar turno para un familiar',
+    keywords: ['familiar', 'hijo', 'hija', 'esposa', 'esposo', 'madre', 'padre', 'mama', 'mamá', 'papa', 'papá', 'pareja', 'hermano', 'hermana'],
+  },
+  {
+    index: 2,
+    label: 'Realizar otra consulta',
+    keywords: ['consulta', 'pregunta', 'información', 'duda', 'ayuda'],
+  },
+]
+
+/**
  * Opciones del menú durante la solicitud de DNI del familiar
  * Solo para detección simple si el usuario escribe texto libre en vez de un DNI
  */

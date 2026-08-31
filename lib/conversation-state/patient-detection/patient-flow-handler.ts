@@ -6,6 +6,7 @@ import {
   detectMenuOption,
   NEW_PATIENT_MENU,
   EXISTING_PATIENT_NO_TURNOS_MENU,
+  EXISTING_PATIENT_NO_TURNOS_OS_BLOQUEADA_MENU,
   EXISTING_PATIENT_SINGLE_TURNO_MENU,
   EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU,
   EXISTING_PATIENT_MULTIPLE_TURNOS_MENU,
@@ -106,6 +107,15 @@ interface PatientDetectionState {
   hasReminder?: boolean      // true si se envió un recordatorio de turno (template WhatsApp) sin respuesta
   /** false si WhatsAppConfig.permitirNuevoTurno del cliente está desactivado. Default true (permitido). */
   permitirNuevoTurno?: boolean
+  /**
+   * true si la obra social del paciente NO admite turnos online (31/8/2026).
+   * A diferencia de permitirNuevoTurno (que es una restricción del cliente para
+   * TODOS sus pacientes), esto es específico de este paciente. Se resuelve en el
+   * saludo y se persiste acá para que el action map de abajo no ofrezca "solicitar
+   * turno" — si el menú y el action map se desincronizan, el número que el
+   * paciente responde ejecuta otra acción (bug del caso Liliana, 9/7/2026).
+   */
+  obraSocialBloqueada?: boolean
   /** false si WhatsAppConfig.permitirCancelacion del cliente está desactivado. Default true (permitido). */
   permitirCancelacion?: boolean
   /** WhatsAppConfig.escalationPhoneNumber del cliente, para mensajes de derivación cuando no queda ninguna gestión disponible. */
@@ -859,7 +869,10 @@ export async function processPatientDetectionMessage(
             state.hasReminder ?? false,
             state.permitirCancelacion,
             state.permitirNuevoTurno,
-            state.escalationPhoneNumber
+            state.escalationPhoneNumber,
+            state.obraSocialBloqueada && state.obraSocialNombre
+              ? { nombre: state.obraSocialNombre, telefonoDerivacion: state.escalationPhoneNumber }
+              : undefined
           )
           return {
             handled: true,
@@ -895,7 +908,11 @@ export async function processPatientDetectionMessage(
         const isSingleTurno = state.turnos!.length === 1
         const puedeConfirmar = isSingleTurno ? !singleTurnoSinConfirmacion : true
         const puedeCancelar = state.permitirCancelacion !== false
-        const puedeCancelarYNuevo = state.permitirCancelacion !== false && state.permitirNuevoTurno !== false
+        // La obra social bloqueada inhabilita solo la parte de "solicitar uno nuevo".
+        const puedeCancelarYNuevo =
+          state.permitirCancelacion !== false &&
+          state.permitirNuevoTurno !== false &&
+          state.obraSocialBloqueada !== true
 
         const acciones: string[] = []
         if (puedeConfirmar) acciones.push('confirm_appointment')
@@ -919,26 +936,28 @@ export async function processPatientDetectionMessage(
             actionMap[i + 1] = accion
           })
         }
-      } else if (soloQx) {
-        // Paciente SOLO con cirugías (no gestionables): 1-Solicitar turno, 2-Familiar, 3-Otra consulta
+      } else {
+        // Paciente SOLO con cirugías (no gestionables) o SIN turnos: mismo menú.
+        // Normal: 1-Solicitar turno, 2-Familiar, 3-Otra consulta.
         // Si el cliente tiene desactivado permitirNuevoTurno, el saludo es un mensaje
         // puro de derivación (sin menú ni botón) → ninguna opción numérica es válida.
-        actionMap = state.permitirNuevoTurno === false
-          ? {}
-          : {
-              1: 'book_new_appointment',
-              2: 'familiar_appointment_intent',
-              3: 'other_inquiry_intent',
-            }
-      } else {
-        // Paciente SIN turnos: 1-Solicitar turno, 2-Familiar, 3-Otra consulta
-        actionMap = state.permitirNuevoTurno === false
-          ? {}
-          : {
-              1: 'book_new_appointment',
-              2: 'familiar_appointment_intent',
-              3: 'other_inquiry_intent',
-            }
+        // Si la obra social del paciente no admite turnos online, se cae la opción de
+        // turno propio y el menú se renumera: 1-Familiar, 2-Otra consulta. Debe
+        // coincidir con buildExistingPatientNoTurnosGreeting / buildSoloCirugiaGreeting.
+        if (state.permitirNuevoTurno === false) {
+          actionMap = {}
+        } else if (state.obraSocialBloqueada === true) {
+          actionMap = {
+            1: 'familiar_appointment_intent',
+            2: 'other_inquiry_intent',
+          }
+        } else {
+          actionMap = {
+            1: 'book_new_appointment',
+            2: 'familiar_appointment_intent',
+            3: 'other_inquiry_intent',
+          }
+        }
       }
 
       logger.info('Action map selected', {
@@ -997,6 +1016,9 @@ export async function processPatientDetectionMessage(
           : EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU
       } else if (hasTurnos && state.turnos!.length > 1) {
         menuOptions = EXISTING_PATIENT_MULTIPLE_TURNOS_MENU
+      } else if (state.obraSocialBloqueada === true) {
+        // Menú sin la opción de turno propio (ver el action map más abajo).
+        menuOptions = EXISTING_PATIENT_NO_TURNOS_OS_BLOQUEADA_MENU
       } else {
         menuOptions = EXISTING_PATIENT_NO_TURNOS_MENU
       }
@@ -1048,8 +1070,6 @@ export async function processPatientDetectionMessage(
         }
       } else if (state.phase === 'awaiting_action_selection') {
         const hasTurnos = state.turnos && state.turnos.length > 0
-        const hasTurnosQx = state.turnosQx && state.turnosQx.length > 0
-        const soloQx = !hasTurnos && hasTurnosQx
 
         const singleTurno = hasTurnos && state.turnos!.length === 1 ? state.turnos![0] : null
         const singleTurnoSinConfirmacion =
@@ -1062,7 +1082,12 @@ export async function processPatientDetectionMessage(
           const isSingleTurno = state.turnos!.length === 1
           const puedeConfirmar = isSingleTurno ? !singleTurnoSinConfirmacion : true
           const puedeCancelar = state.permitirCancelacion !== false
-          const puedeCancelarYNuevo = state.permitirCancelacion !== false && state.permitirNuevoTurno !== false
+          // Ver comentario equivalente en el action map de arriba: la obra social
+          // bloqueada inhabilita solo la parte de "solicitar uno nuevo".
+          const puedeCancelarYNuevo =
+            state.permitirCancelacion !== false &&
+            state.permitirNuevoTurno !== false &&
+            state.obraSocialBloqueada !== true
 
           const acciones: string[] = []
           if (puedeConfirmar) acciones.push('confirm_appointment')
@@ -1080,22 +1105,23 @@ export async function processPatientDetectionMessage(
               actionMap[i + 1] = accion
             })
           }
-        } else if (soloQx) {
-          actionMap = state.permitirNuevoTurno === false
-            ? {}
-            : {
-                1: 'book_new_appointment',
-                2: 'familiar_appointment_intent',
-                3: 'other_inquiry_intent',
-              }
         } else {
-          actionMap = state.permitirNuevoTurno === false
-            ? {}
-            : {
-                1: 'book_new_appointment',
-                2: 'familiar_appointment_intent',
-                3: 'other_inquiry_intent',
-              }
+          // Sin turnos o sólo cirugías: mismo menú. Con obra social bloqueada se
+          // cae "Solicitar turno médico" y se renumera (ver action map de arriba).
+          if (state.permitirNuevoTurno === false) {
+            actionMap = {}
+          } else if (state.obraSocialBloqueada === true) {
+            actionMap = {
+              1: 'familiar_appointment_intent',
+              2: 'other_inquiry_intent',
+            }
+          } else {
+            actionMap = {
+              1: 'book_new_appointment',
+              2: 'familiar_appointment_intent',
+              3: 'other_inquiry_intent',
+            }
+          }
         }
 
         const action = actionMap[selectedOptionNumber || 0]
@@ -1326,6 +1352,28 @@ export async function updatePatientDetectionHasReminder(
 }
 
 /**
+ * Marca que la obra social del paciente no admite turnos online (31/8/2026).
+ * Se llama desde el saludo, una vez resuelta la obra social contra la API, para
+ * que el action map ofrezca exactamente las mismas opciones que el texto del menú.
+ */
+export async function updatePatientDetectionObraSocialBloqueada(
+  phoneNumber: string,
+  bloqueada: boolean
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) return false
+
+  const stateKey = `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`
+  const state = await getPatientDetectionState(phoneNumber)
+
+  if (!state) return false
+
+  state.obraSocialBloqueada = bloqueada
+  await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+  return true
+}
+
+/**
  * Actualiza los turnos del paciente en el estado de detección y
  * restablece la fase a 'awaiting_action_selection' para que el menú
  * de retorno sea procesado correctamente.
@@ -1371,7 +1419,10 @@ export async function returnPatientToMenu(
     state.hasReminder ?? false,
     state.permitirCancelacion,
     state.permitirNuevoTurno,
-    state.escalationPhoneNumber
+    state.escalationPhoneNumber,
+    state.obraSocialBloqueada && state.obraSocialNombre
+      ? { nombre: state.obraSocialNombre, telefonoDerivacion: state.escalationPhoneNumber }
+      : undefined
   )
 }
 

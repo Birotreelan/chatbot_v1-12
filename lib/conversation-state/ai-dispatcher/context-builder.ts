@@ -14,6 +14,7 @@ import { isExistingPatientFlowActive } from '../existing-patient/existing-patien
 import { isNewPatientFlowActive } from '../new-patient/new-patient-flow-integration'
 import { isPatientDetectionFlowActive, getIdentifiedPatient } from '../patient-detection/patient-flow-handler'
 import { getBookingFlowState } from '../booking-flow-handler'
+import { getRescheduleState } from '../reschedule-flow-handler'
 import { getClinicInfo } from '@/lib/db'
 import { formatClinicInfoForLLM } from '@/lib/clinic-info/context'
 import { isWithinTemplateWindow } from '@/lib/appointment-stats'
@@ -32,7 +33,7 @@ export interface TurnoSnapshot {
 }
 
 export interface ActiveFlowSnapshot {
-  type: 'patient_detection' | 'existing_patient' | 'new_patient' | 'booking' | 'none'
+  type: 'patient_detection' | 'existing_patient' | 'new_patient' | 'booking' | 'reschedule' | 'none'
   phase: string   // fase actual dentro del flujo, o "none"
   description: string  // texto legible para el LLM: "esperando selección de sede"
 }
@@ -107,6 +108,12 @@ const PHASE_DESCRIPTIONS: Record<string, string> = {
   awaiting_profesional_selection: 'Se le está pidiendo que elija un profesional (flujo legacy)',
   awaiting_turno_confirmation: 'Se le está mostrando el turno seleccionado para confirmar (flujo legacy)',
 
+  // Reagendamiento (lib/conversation-state/reschedule-flow-handler.ts).
+  // 'awaiting_search_type' y 'awaiting_confirmation' ya están descriptos arriba
+  // (el reagendamiento reutiliza esos nombres de fase) — no se repiten acá.
+  showing_turns: 'Se le está mostrando la lista de turnos disponibles para reagendar su turno',
+  awaiting_selection: 'Se le está pidiendo que elija uno de los turnos disponibles para reagendar',
+
   none: 'No hay flujo activo — el paciente no está en medio de ninguna acción',
 }
 
@@ -146,6 +153,7 @@ export async function buildDispatcherContext(
     newActive,
     detectionActive,
     bookingState,
+    rescheduleState,
     clinicInfo,
     withinTemplateWindow,
   ] = await Promise.all([
@@ -154,6 +162,12 @@ export async function buildDispatcherContext(
     isNewPatientFlowActive(phoneNumber, configId),
     isPatientDetectionFlowActive(phoneNumber),
     getBookingFlowState(phoneNumber, configId),
+    // 31/8/2026 (caso Ives): el reagendamiento faltaba en esta lista, así que
+    // mientras el paciente elegía turno para reagendar el contexto le decía al
+    // modelo "no hay flujo activo". Con esa premisa falsa, un mensaje ambiguo
+    // ("5/10 15 hs.") se clasificaba como "mostrar menú principal" y la
+    // conversación volvía al saludo inicial.
+    getRescheduleState(phoneNumber, configId).catch(() => null),
     clienteId ? getClinicInfo(clienteId) : Promise.resolve(null),
     clienteId ? isWithinTemplateWindow(clienteId, phoneNumber).catch(() => false) : Promise.resolve(false),
   ])
@@ -224,6 +238,14 @@ export async function buildDispatcherContext(
       type: 'booking',
       phase: bookingState.step,
       description: describePhase(bookingState.step),
+    }
+  } else if (rescheduleState?.phase && rescheduleState.phase !== 'completed') {
+    // 'completed' significa que la reserva ya se ejecutó: el estado sigue en Redis
+    // hasta que expire, pero el paciente no está en medio de nada.
+    activeFlow = {
+      type: 'reschedule',
+      phase: rescheduleState.phase,
+      description: describePhase(rescheduleState.phase),
     }
   }
 

@@ -1,6 +1,7 @@
 import { getWhatsAppConfigByPhoneId, getWhatsAppConfigById, updateWhatsAppStats, getThreadForUser, resetThreadForUser, clearThreadAssistantId, clearAllConversationStates } from "@/lib/db"
 import { sendWhatsAppMessage, sendWhatsAppInteractive, sendWhatsAppList } from "@/lib/whatsapp-api"
-import { transcribeWhatsAppAudio } from "@/lib/audio-transcription"
+import { downloadWhatsAppMedia, transcribeAudio } from "@/lib/audio-transcription"
+import { saveConversationAudio } from "@/lib/conversation-audio"
 import { getArgentinaDateTime, formatDateWithDayOfWeek } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
@@ -230,6 +231,15 @@ interface DirectResponseContext {
 // Botones para los prompts de decisión de cancelación / reagendamiento.
 const CANCEL_CONFIRM_BUTTONS = [
   { id: "1", title: "Sí, cancelar" },
+  { id: "2", title: "No, mantener" },
+]
+/**
+ * Botones cuando la cancelación es el paso previo a un reagendamiento
+ * (postCancelAction). "Sí, cancelar" a secas asustaba al paciente que sólo
+ * quería cambiar la fecha — caso Ives, 31/8/2026.
+ */
+const CANCEL_TO_REBOOK_BUTTONS = [
+  { id: "1", title: "Sí, ver fechas" },
   { id: "2", title: "No, mantener" },
 ]
 const RESCHEDULE_OFFER_BUTTONS = [
@@ -810,8 +820,17 @@ async function handlePendingFlowResponse(
       turnoIndex,
       ...(wantsBookNew ? { postCancelAction: 'book_new' as const } : {}),
     })
-    const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex)
-    await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_flow", CANCEL_CONFIRM_BUTTONS)
+    const doubleConfirmMsg = buildCancelDoubleConfirmMessage(
+      chatbotData,
+      turnoIndex,
+      wantsBookNew ? 'book_new' : undefined,
+    )
+    await sendDirectResponse(
+      ctx,
+      doubleConfirmMsg,
+      "cancel_flow",
+      wantsBookNew ? CANCEL_TO_REBOOK_BUTTONS : CANCEL_CONFIRM_BUTTONS,
+    )
     return true
   }
 
@@ -1345,7 +1364,7 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         if (await tryPendingFlowInterjectionFallback(userPhoneNumber, userMessage, config, value, flags)) {
           return true
         }
-        const retryNluMsg = buildCancelDoubleConfirmMessage(chatbotData, flowState.turnoIndex || 0)
+        const retryNluMsg = buildCancelDoubleConfirmMessage(chatbotData, flowState.turnoIndex || 0, flowState.postCancelAction)
         await sendDirectResponse(ctx, retryNluMsg, "awaiting_cancel_confirmation_retry")
         return true
       }
@@ -1356,7 +1375,7 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
       if (await tryPendingFlowInterjectionFallback(userPhoneNumber, userMessage, config, value, flags)) {
         return true
       }
-      const retryMsg = buildCancelDoubleConfirmMessage(chatbotData, flowState.turnoIndex || 0)
+      const retryMsg = buildCancelDoubleConfirmMessage(chatbotData, flowState.turnoIndex || 0, flowState.postCancelAction)
       await sendDirectResponse(ctx, retryMsg, "awaiting_cancel_confirmation_retry")
       return true
     }
@@ -1456,8 +1475,8 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         turnoIndex,
         postCancelAction: 'reschedule',
       })
-      const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex)
-      await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_and_reschedule", CANCEL_CONFIRM_BUTTONS)
+      const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex, 'reschedule')
+      await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_and_reschedule", CANCEL_TO_REBOOK_BUTTONS)
       return true
 
     } else {
@@ -1752,8 +1771,13 @@ async function startCancelDoubleConfirm(
     turnoIndex,
     ...(postCancelAction ? { postCancelAction } : {}),
   } as any)
-  const msg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex)
-  await sendDirectResponse(ctxDirect, msg, "router-cancel-confirm", CANCEL_CONFIRM_BUTTONS)
+  const msg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex, postCancelAction)
+  await sendDirectResponse(
+    ctxDirect,
+    msg,
+    "router-cancel-confirm",
+    postCancelAction ? CANCEL_TO_REBOOK_BUTTONS : CANCEL_CONFIRM_BUTTONS,
+  )
   await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
   return true
 }
@@ -2036,6 +2060,7 @@ async function runPrimaryDispatcherNoFlow(
       configId: config.id,
       clienteId: config.cliente_id,
       escalationPhone: config.escalationPhoneNumber,
+      clinicName: config.displayName,
     }
     const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
     routerLogger.info('[Router primario] Acción', { action: execResult.action.type, note: execResult.logNote })
@@ -2245,6 +2270,7 @@ async function runInterjectionInActiveFlow(
       configId: config.id,
       clienteId: config.cliente_id,
       escalationPhone: config.escalationPhoneNumber,
+      clinicName: config.displayName,
     }
     const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
     const action = execResult.action
@@ -2411,7 +2437,14 @@ async function runInterjectionInActiveFlow(
     // intercalada) pero no había flujo activo ni paso guardado, quedaban answer
     // vacío y stepPrompt vacío, y el fallback textual era lo único que salía.
     const hayPasoPendiente = typeof stepPrompt === 'string' && !!stepPrompt.trim()
-    if (action.type === 'init_patient_detection' && !hayPasoPendiente) {
+
+    // Segunda condición (31/8/2026, caso Ives): tampoco se muestra el menú si el
+    // paciente está EN MEDIO de un flujo. Volver al saludo inicial ahí le borra
+    // la lista de turnos que estaba mirando y lo manda al principio — que es
+    // exactamente lo que pasó cuando respondió "5/10 15 hs." para elegir turno.
+    // El paso guardado ya cubre el caso normal; esto es la red por si algún
+    // camino del flujo vuelve a olvidarse de guardarlo.
+    if (action.type === 'init_patient_detection' && !hayPasoPendiente && !dispatcherCtx.hasActiveFlow) {
       let menuMsg = await returnPatientToMenu(userPhoneNumber)
       let menuButtons: Array<{ id: string; title: string }> | undefined
       if (!menuMsg) {
@@ -2867,17 +2900,23 @@ export async function handleMessage(value: any) {
       return
     }
 
-    await saveConversationMessage({
-      id: nanoid(),
-      role: "user",
-      content: userMessage,
-      timestamp: new Date().toISOString(),
-      phoneNumber: userPhoneNumber,
-      configId: config.id,
-    })
+    // Los audios NO se guardan acá: en este punto todavía no están transcriptos
+    // (userMessage viene vacío de extractMessageContent) y se guardaba una burbuja
+    // en blanco por cada nota de voz. processIndividualMessage lo guarda después
+    // de transcribir, con el texto real y el id del audio para reproducirlo.
+    if (userMessage) {
+      await saveConversationMessage({
+        id: nanoid(),
+        role: "user",
+        content: userMessage,
+        timestamp: new Date().toISOString(),
+        phoneNumber: userPhoneNumber,
+        configId: config.id,
+      })
 
-    // Guardar en historial conversacional (fire-and-forget, no bloquea el flujo)
-    appendToHistory(userPhoneNumber, { role: 'user', text: userMessage, timestamp: Date.now() }).catch(() => {})
+      // Guardar en historial conversacional (fire-and-forget, no bloquea el flujo)
+      appendToHistory(userPhoneNumber, { role: 'user', text: userMessage, timestamp: Date.now() }).catch(() => {})
+    }
 
     if (message.type === "button" && message.button) {
       // Detectar si es un botón de cancelación
@@ -5227,8 +5266,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   })
 
                   // Construir y enviar mensaje de doble confirmación
-                  const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, 0)
-                  await sendDirectResponse(detectionCtx, doubleConfirmMsg, "cancel_flow", CANCEL_CONFIRM_BUTTONS)
+                  const doubleConfirmMsg = buildCancelDoubleConfirmMessage(
+                    chatbotData,
+                    0,
+                    wantsBookNew ? 'book_new' : undefined,
+                  )
+                  await sendDirectResponse(
+                    detectionCtx,
+                    doubleConfirmMsg,
+                    "cancel_flow",
+                    wantsBookNew ? CANCEL_TO_REBOOK_BUTTONS : CANCEL_CONFIRM_BUTTONS,
+                  )
                 }
               } else {
                 // Sin turnos - no debería pasar, pero por seguridad derivar a OpenAI
@@ -5639,6 +5687,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               configId: config.id,
               clienteId: config.cliente_id,
               escalationPhone: config.escalationPhoneNumber,
+              clinicName: config.displayName,
             }
 
             const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
@@ -5823,6 +5872,20 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 }
                 await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                 return
+              }
+              if (flowType === 'reschedule') {
+                // 31/8/2026: el reagendamiento ahora figura como flujo activo en el
+                // contexto del dispatcher. Sin esta rama, un 'continue_active_flow'
+                // durante un reagendamiento caía al bloque de abajo y mostraba el
+                // menú principal — el mismo reinicio de conversación que sufrió Ives.
+                const reschedRes = await processRescheduleMessage(
+                  userMessage, value.metadata.phone_number_id, config.accessToken,
+                  userPhoneNumber, config.id, config.cliente_id,
+                )
+                if (reschedRes?.handled) {
+                  await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                  return
+                }
               }
               // Sin flujo activo reconocido: mostrar menú principal. Si
               // directPatientDetection está OFF, initializePatientDetection
@@ -6374,11 +6437,39 @@ Hola, quisiera reagendar mi turno.`
     if (messageType === "audio" && audioId) {
 
       try {
-        const transcription = await transcribeWhatsAppAudio(audioId, config.accessToken, audioMimeType)
+        // 31/8/2026: se descarga UNA vez y se usa para dos cosas — transcribir y
+        // guardar el original, para poder escuchar en el panel qué dijo realmente
+        // el paciente cuando la transcripción no cierra. Antes se descargaba
+        // dentro de transcribeWhatsAppAudio y el audio se perdía.
+        const audioBuffer = await downloadWhatsAppMedia(audioId, config.accessToken)
+
+        // No se espera: guardar el audio nunca debe demorar la respuesta al paciente.
+        void saveConversationAudio(config.id, userPhoneNumber, audioId, audioBuffer, audioMimeType).catch(() => {})
+
+        const transcription = await transcribeAudio(audioBuffer, audioMimeType)
 
         if (transcription && transcription.trim()) {
           // Use the transcription as the user message
           userMessage = transcription
+
+          // El mensaje del paciente se guarda ACÁ y no en handleMessage: allá el
+          // audio todavía no estaba transcripto, así que el panel guardaba una
+          // burbuja vacía por cada nota de voz (bug detectado el 31/8/2026 al
+          // implementar la reproducción). Con audioMessageId el panel además
+          // ofrece el reproductor del audio original.
+          await saveConversationMessage({
+            id: nanoid(),
+            role: "user",
+            content: transcription,
+            timestamp: new Date().toISOString(),
+            phoneNumber: userPhoneNumber,
+            configId: config.id,
+            messageType: "audio",
+            audioMessageId: audioId,
+          })
+          // Historial conversacional (lo usa el dispatcher): también se hace acá
+          // por el mismo motivo, con el texto ya transcripto.
+          appendToHistory(userPhoneNumber, { role: 'user', text: transcription, timestamp: Date.now() }).catch(() => {})
           // Continue processing as a normal text message
         } else {
           const errorMessage =

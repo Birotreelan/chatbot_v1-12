@@ -73,6 +73,36 @@ function formatearProfesional(nombre: string): string {
 }
 
 /**
+ * Obra social del paciente que NO admite turnos online (31/8/2026).
+ *
+ * Antes esto se resolvía agregando una advertencia al final del saludo, pero el
+ * menú seguía ofreciendo "Solicitar turno médico": el paciente elegía una opción
+ * que el sistema ya sabía que iba a rechazar. Ahora se pasa a los builders para
+ * que la opción no se muestre y el motivo se explique arriba, junto al teléfono
+ * por el que sí puede sacar turno.
+ *
+ * IMPORTANTE: cualquier cambio en las opciones que se muestran acá tiene que
+ * reflejarse en los action maps de patient-flow-handler.ts, o el número que
+ * responde el paciente ejecuta otra acción (caso Liliana, 9/7/2026).
+ */
+export interface ObraSocialBloqueada {
+  nombre: string
+  telefonoDerivacion?: string
+}
+
+/**
+ * Frase que explica por qué no puede sacar turno por este medio y qué hacer.
+ * Sin "no está habilitada": el problema no es el paciente, es que esa cobertura
+ * se gestiona por otra vía.
+ */
+function textoObraSocialBloqueada(os: ObraSocialBloqueada): string {
+  const telefono = os.telefonoDerivacion
+  return telefono
+    ? `Los turnos de *${os.nombre}* se gestionan por teléfono: para sacar el tuyo, comunicate al *${telefono}*.`
+    : `Los turnos de *${os.nombre}* se gestionan por teléfono, comunicándote directamente con la clínica.`
+}
+
+/**
  * Saludo para PACIENTE EXISTENTE CON TURNOS
  * Formato exacto del asst_router
  */
@@ -84,7 +114,8 @@ export function buildExistingPatientGreeting(
   hasReminder: boolean = false,
   permitirNuevoTurno?: boolean,
   permitirCancelacion?: boolean,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  obraSocialBloqueada?: ObraSocialBloqueada
 ): string {
   const firstName = getFirstName(patientName)
   const hasTurnos = turnos && turnos.length > 0
@@ -92,21 +123,21 @@ export function buildExistingPatientGreeting(
 
   // CASO: Solo cirugías (sin turnos médicos gestionables)
   if (!hasTurnos && hasTurnosQx) {
-    return buildSoloCirugiaGreeting(firstName, turnosQx, clinicName, permitirNuevoTurno, escalationPhoneNumber)
+    return buildSoloCirugiaGreeting(firstName, turnosQx, clinicName, permitirNuevoTurno, escalationPhoneNumber, obraSocialBloqueada)
   }
 
   // CASO: Sin turnos agendados
   if (!hasTurnos) {
-    return buildExistingPatientNoTurnosGreeting(patientName, clinicName, permitirNuevoTurno, escalationPhoneNumber)
+    return buildExistingPatientNoTurnosGreeting(patientName, clinicName, permitirNuevoTurno, escalationPhoneNumber, obraSocialBloqueada)
   }
 
   // CASO: Turnos médicos (con o sin cirugías)
   // Construir el saludo médico base y agregar sección de cirugías si corresponde
   let mensaje: string
   if (turnos.length === 1) {
-    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName, hasReminder, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber)
+    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName, hasReminder, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber, obraSocialBloqueada)
   } else {
-    mensaje = buildMultipleTurnosGreeting(firstName, turnos, clinicName, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber)
+    mensaje = buildMultipleTurnosGreeting(firstName, turnos, clinicName, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber, obraSocialBloqueada)
   }
 
   // Si además hay cirugías, insertar bloque informativo antes del pie del menú
@@ -178,7 +209,8 @@ function buildSoloCirugiaGreeting(
   turnosQx: any[],
   clinicName: string,
   permitirNuevoTurno?: boolean,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  obraSocialBloqueada?: ObraSocialBloqueada
 ): string {
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás solicitar, consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
@@ -220,6 +252,17 @@ function buildSoloCirugiaGreeting(
     return mensaje
   }
 
+  // Obra social sin turnos online: se cae la opción de turno propio y se
+  // renumera (debe coincidir con el action map de patient-flow-handler.ts).
+  if (obraSocialBloqueada) {
+    mensaje += `${textoObraSocialBloqueada(obraSocialBloqueada)}\n\n`
+    mensaje += `¿Puedo ayudarte con algo más?\n\n`
+    mensaje += `1- Solicitar turno para un familiar\n`
+    mensaje += `2- Realizar otra consulta\n\n`
+    mensaje += `Respondé con el número o presioná el botón de tu preferencia.`
+    return mensaje
+  }
+
   mensaje += `¿En qué más te puedo ayudar?\n\n`
   mensaje += `1- Solicitar un turno médico\n`
   mensaje += `2- Solicitar turno para un familiar\n`
@@ -237,7 +280,8 @@ function buildExistingPatientNoTurnosGreeting(
   patientName: string,
   clinicName: string = DEFAULT_CLINIC_NAME,
   permitirNuevoTurno?: boolean,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  obraSocialBloqueada?: ObraSocialBloqueada
 ): string {
   const firstName = getFirstName(patientName)
 
@@ -248,6 +292,21 @@ function buildExistingPatientNoTurnosGreeting(
       `Gracias por comunicarte con ${clinicName}.\n\n` +
       `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
       `Para realizar otras consultas, comunicate con nosotros al *${numeroDerivacion}*.`
+    )
+  }
+
+  // Obra social sin turnos online: no se ofrece "Solicitar turno médico" (el
+  // sistema ya sabe que lo rechazaría) y el motivo se explica arriba, no como
+  // advertencia al pie. Menú renumerado — debe coincidir con el action map.
+  if (obraSocialBloqueada) {
+    return (
+      `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n` +
+      `Soy Iris, tu asistente virtual de inteligencia artificial.\n\n` +
+      `Veo que actualmente no tenés turnos agendados. ${textoObraSocialBloqueada(obraSocialBloqueada)}\n\n` +
+      `¿Puedo ayudarte con algo más?\n\n` +
+      `1- Solicitar turno para un familiar\n` +
+      `2- Realizar otra consulta\n\n` +
+      `Respondé con el número o presioná el botón de tu preferencia.`
     )
   }
 
@@ -299,7 +358,8 @@ function buildSingleTurnoGreeting(
   hasReminder: boolean = false,
   permitirCancelacion?: boolean,
   permitirNuevoTurno?: boolean,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  obraSocialBloqueada?: ObraSocialBloqueada
 ): string {
   const fecha = formatearFecha(turno.Fecha || turno.fecha)
   const hora = formatearHora(turno.Hora || turno.hora || '')
@@ -314,7 +374,9 @@ function buildSingleTurnoGreeting(
   // No depende de ningún toggle nuevo.
   const puedeConfirmar = categoria === 'no_confirmado' && hasReminder
   const puedeCancelar = permitirCancelacion !== false
-  const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false
+  // Con obra social sin turnos online se cae "cancelar y solicitar uno nuevo",
+  // pero confirmar y cancelar siguen siendo gestiones válidas para este paciente.
+  const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false && !obraSocialBloqueada
 
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
@@ -358,6 +420,9 @@ function buildSingleTurnoGreeting(
   }
 
   opciones.push('Realizar otra consulta')
+  if (obraSocialBloqueada) {
+    mensaje += `${textoObraSocialBloqueada(obraSocialBloqueada)}\n\n`
+  }
   mensaje += `¿En qué te podemos ayudar?\n\n`
   opciones.forEach((op, i) => {
     mensaje += `${i + 1}- ${op}\n`
@@ -376,7 +441,8 @@ function buildMultipleTurnosGreeting(
   clinicName: string,
   permitirCancelacion?: boolean,
   permitirNuevoTurno?: boolean,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  obraSocialBloqueada?: ObraSocialBloqueada
 ): string {
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
@@ -404,13 +470,18 @@ function buildMultipleTurnosGreeting(
   // ofrece (no depende de hasReminder, así era en producción). Cancelar/cancelar+nuevo
   // sí respetan las restricciones del cliente (toggles nuevos).
   const puedeCancelar = permitirCancelacion !== false
-  const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false
+  // Ver comentario en buildSingleTurnoGreeting: la obra social bloqueada solo
+  // inhabilita la parte de "solicitar uno nuevo".
+  const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false && !obraSocialBloqueada
 
   const opciones: string[] = ['Confirmar asistencia a un turno']
   if (puedeCancelar) opciones.push('Cancelar un turno')
   if (puedeCancelarYNuevo) opciones.push('Cancelar un turno y solicitar uno nuevo')
 
   opciones.push('Realizar otra consulta')
+  if (obraSocialBloqueada) {
+    mensaje += `${textoObraSocialBloqueada(obraSocialBloqueada)}\n\n`
+  }
   mensaje += `¿En qué te podemos ayudar?\n\n`
   opciones.forEach((op, i) => {
     mensaje += `${i + 1}- ${op}\n`
@@ -616,11 +687,13 @@ export function buildPostActionMenu(
   hasReminder: boolean = false,
   permitirCancelacion?: boolean,
   permitirNuevoTurno?: boolean,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  obraSocialBloqueada?: ObraSocialBloqueada
 ): string {
   const hasTurnos = turnos && turnos.length > 0
   const puedeCancelar = permitirCancelacion !== false
-  const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false
+  // Igual que en los saludos: la obra social bloqueada sólo saca "solicitar nuevo".
+  const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false && !obraSocialBloqueada
 
   if (!hasTurnos) {
     if (permitirNuevoTurno === false) {
@@ -630,6 +703,15 @@ export function buildPostActionMenu(
       return (
         `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
         `Para otras consultas, comunicate al *${numeroDerivacion}*.`
+      )
+    }
+    // Menú renumerado, en sincronía con el action map de patient-flow-handler.ts.
+    if (obraSocialBloqueada) {
+      return (
+        `¿En qué más puedo ayudarte?\n\n` +
+        `1- Solicitar turno para un familiar\n` +
+        `2- Realizar otra consulta\n\n` +
+        `Respondé con el número de opción que prefieras.`
       )
     }
     return (

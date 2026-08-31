@@ -23,6 +23,12 @@ export interface ConversationMessage {
   phoneNumber: string
   configId: string
   messageType?: string
+  /**
+   * Id del audio original que envió el paciente (31/8/2026). Cuando está
+   * presente, `content` es la transcripción de Whisper y el panel puede además
+   * reproducir la voz real — ver lib/conversation-audio.ts.
+   */
+  audioMessageId?: string
 }
 
 export interface ConversationContact {
