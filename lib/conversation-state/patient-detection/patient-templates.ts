@@ -470,6 +470,26 @@ export function buildOtherInquiryMessage(
 }
 
 /**
+ * Mensaje cuando "Realizar otra consulta" SÍ se pudo responder con la base de
+ * conocimiento institucional (Tarea #42, 31/8/2026). Siempre cierra ofreciendo
+ * el teléfono de la clínica, por si lo que preguntó no alcanza a cubrirse acá.
+ */
+export function buildClinicInfoAnswerMessage(
+  respuesta: string,
+  escalationPhoneNumber?: string
+): string {
+  let message = `${respuesta}\n\n`
+
+  if (escalationPhoneNumber) {
+    message += `Si necesitás algo más, podés comunicarte al *${escalationPhoneNumber}*.\n\n`
+  }
+
+  message += `Si en algún momento necesitás gestionar un turno, escribime y con gusto te ayudo.`
+
+  return message
+}
+
+/**
  * Mensaje cuando el usuario elige "Solicitar un turno médico" (opción 1)
  */
 export function buildTurnoIntentConfirmedMessage(): string {

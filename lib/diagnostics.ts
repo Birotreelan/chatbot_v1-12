@@ -119,6 +119,8 @@ export const DIAG = {
   DERIVACION_EXTERNA: "derivacion_externa",
   DERIVACION_HUMANA: "derivacion_humana",
   OTRA_CONSULTA_SIN_RESPUESTA: "otra_consulta_sin_respuesta", // opción 3 del menú
+  /** "Otra consulta" SÍ se pudo responder con la base de conocimiento institucional (Tarea #42, 31/8/2026). */
+  OTRA_CONSULTA_RESPONDIDA_CLINIC_INFO: "otra_consulta_respondida_clinic_info",
   ERROR_AL_PACIENTE: "error_al_paciente",
 } as const
 

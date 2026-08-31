@@ -451,8 +451,93 @@ async function sendExistingPatientResult(
 }
 
 /**
+ * Forma real de la respuesta de `Action: "confirmar_turno"` (verificada contra
+ * el proxy el 31/8/2026). Reconfirmar un turno ya confirmado NO es un error:
+ * devuelve success:true, cantidad_confirmados:0 y el turno listado en
+ * turnos_ya_confirmados. Los campos de cantidad son opcionales porque no todos
+ * los proxies de clientes los devuelven.
+ */
+interface ProxyConfirmBody {
+  success?: boolean
+  error?: string
+  cantidad_confirmados?: number
+  cantidad_ya_confirmados?: number
+  total_turnos_encontrados?: number
+  mensaje?: string
+  [key: string]: unknown
+}
+
+/**
+ * Por qué falló la confirmación. Importa porque el mensaje al paciente es
+ * distinto: ante una falla técnica tiene sentido pedirle que reintente; si el
+ * turno no existe más, reintentar no va a funcionar nunca y hay que derivarlo.
+ */
+type MotivoFalloConfirmacion = "turno_no_encontrado" | "falla_tecnica"
+
+interface ResultadoConfirmacion {
+  exito: boolean
+  motivo?: MotivoFalloConfirmacion
+}
+
+/**
+ * El proxy responde `{ error: "No se encontraron turnos para el paciente en la
+ * fecha especificada." }` (verificado el 31/8/2026) cuando el turno ya no está
+ * agendado para esa fecha — típicamente porque la clínica lo movió o canceló.
+ * Se matchea por subcadena (sin acentos en la frase buscada) para no depender
+ * de la redacción exacta del resto del mensaje.
+ */
+function esTurnoNoEncontrado(body: ProxyConfirmBody | null): boolean {
+  const texto = typeof body?.error === "string" ? body.error : ""
+  if (!texto) return false
+  return texto.toLowerCase().includes("no se encontraron turnos")
+}
+
+/**
+ * Mensaje al paciente cuando la confirmación no se pudo completar.
+ */
+function mensajeFalloConfirmacion(motivo: MotivoFalloConfirmacion, escalationPhoneNumber?: string): string {
+  if (motivo === "turno_no_encontrado") {
+    const contacto = escalationPhoneNumber
+      ? `Por favor comunicate con nosotros al *${escalationPhoneNumber}* para verificarlo.`
+      : `Por favor comunicate con la clínica para verificarlo.`
+    return `No encontramos un turno agendado a tu nombre para esa fecha. Es posible que haya sido modificado o cancelado.\n\n${contacto}`
+  }
+  return "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos."
+}
+
+/**
+ * ¿La confirmación realmente impactó en el sistema de la clínica?
+ *
+ * success:true por sí solo no alcanza como criterio: decirle "confirmamos tu
+ * asistencia" a alguien cuyo turno no se tocó sería peor que decirle que hubo
+ * un problema. Se exige que las cantidades muestren impacto real.
+ *
+ * Cuenta como éxito tanto confirmar ahora (cantidad_confirmados > 0) como que
+ * ya estuviera confirmado de antes (cantidad_ya_confirmados > 0) — para el
+ * paciente el resultado es el mismo, y es lo que hace idempotente al reintento
+ * ante un 500.
+ *
+ * Si el proxy del cliente no devuelve los campos de cantidad, se cae al criterio
+ * anterior (success === true) para no romper esas integraciones.
+ */
+function confirmacionImpacto(body: ProxyConfirmBody | null): boolean {
+  if (body?.success !== true) return false
+
+  const confirmados = body.cantidad_confirmados
+  const yaConfirmados = body.cantidad_ya_confirmados
+  const tieneCantidades = typeof confirmados === "number" || typeof yaConfirmados === "number"
+
+  if (!tieneCantidades) return true
+
+  return (confirmados ?? 0) > 0 || (yaConfirmados ?? 0) > 0
+}
+
+/**
  * Confirma un turno contra el sistema externo (proxy).
- * Devuelve true solo si el proxy respondió success === true.
+ * `exito` es true solo si la confirmación efectivamente impactó (ver
+ * confirmacionImpacto). Cuando falla, `motivo` distingue el turno inexistente
+ * de una falla técnica, para que el caller le diga al paciente lo que
+ * corresponde (ver mensajeFalloConfirmacion).
  * Centraliza el payload de "confirmar_turno" para que todos los caminos de
  * confirmación (turno único y selección múltiple) impacten en el sistema externo.
  */
@@ -461,7 +546,7 @@ async function confirmarTurnoEnProxy(
   chatbotData: ChatbotData,
   turnoIndex: number,
   userPhoneNumber: string
-): Promise<boolean> {
+): Promise<ResultadoConfirmacion> {
   const turno = chatbotData.turnos?.[turnoIndex]
   const dni = chatbotData.paciente?.dni
   const fecha = turno?.fecha
@@ -472,7 +557,7 @@ async function confirmarTurnoEnProxy(
       tieneFecha: !!fecha,
       tieneDni: !!dni,
     })
-    return false
+    return { exito: false, motivo: "falla_tecnica" }
   }
 
   try {
@@ -491,10 +576,16 @@ async function confirmarTurnoEnProxy(
         body: JSON.stringify(confirmPayload),
       },
       TIMEOUTS.PROXY_TIMEOUT,
-      { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
+      // retryOn5xx (31/8/2026): un 500 acá es seguro de reintentar aunque la
+      // primera request sí haya llegado a impactar la confirmación. Verificado
+      // contra el proxy real: reconfirmar un turno ya confirmado devuelve
+      // success:true con turnos_ya_confirmados[] y "Todos los turnos ya estaban
+      // confirmados" — nunca un error. Así que el reintento es idempotente
+      // desde el punto de vista del paciente.
+      { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2, retryOn5xx: true }
     )
 
-    let proxyBody: { success?: boolean; [key: string]: unknown } | null = null
+    let proxyBody: ProxyConfirmBody | null = null
     try {
       const bodyText = await response.text()
       proxyBody = bodyText ? JSON.parse(bodyText) : null
@@ -507,8 +598,19 @@ async function confirmarTurnoEnProxy(
       body: proxyBody,
     })
 
-    const proxySuccess = response.ok && proxyBody?.success === true
-    if (proxySuccess && config.cliente_id) {
+    const proxySuccess = response.ok && confirmacionImpacto(proxyBody)
+
+    if (!proxySuccess) {
+      const motivo: MotivoFalloConfirmacion = esTurnoNoEncontrado(proxyBody) ? "turno_no_encontrado" : "falla_tecnica"
+      console.error("[PROXY] El proxy no confirmó el turno", {
+        httpStatus: response.status,
+        motivo,
+        body: proxyBody,
+      })
+      return { exito: false, motivo }
+    }
+
+    if (config.cliente_id) {
       await trackAppointmentEvent({
         clienteId: config.cliente_id,
         phoneNumber: userPhoneNumber,
@@ -518,13 +620,13 @@ async function confirmarTurnoEnProxy(
       })
     }
     // Marcar el turno como confirmado para no volver a ofrecer "Confirmar asistencia"
-    if (proxySuccess && config.id) {
+    if (config.id) {
       await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(chatbotData))
     }
-    return proxySuccess
+    return { exito: true }
   } catch (error) {
     console.error("[PROXY] Error al confirmar turno", error)
-    return false
+    return { exito: false, motivo: "falla_tecnica" }
   }
 }
 
@@ -670,13 +772,13 @@ async function handlePendingFlowResponse(
 
     if (pendingAction === 'confirm_appointment') {
       // Confirmar asistencia al turno elegido — primero impactar en el sistema externo (proxy)
-      const proxySuccess = await confirmarTurnoEnProxy(config, chatbotData, turnoIndex, userPhoneNumber)
+      const resultadoConfirm = await confirmarTurnoEnProxy(config, chatbotData, turnoIndex, userPhoneNumber)
       await clearFlowState(userPhoneNumber, config.id)
 
-      if (!proxySuccess) {
+      if (!resultadoConfirm.exito) {
         await sendDirectResponse(
           ctx,
-          "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos.",
+          mensajeFalloConfirmacion(resultadoConfirm.motivo ?? "falla_tecnica", config.escalationPhoneNumber),
           "confirm_flow_error"
         )
         return true
@@ -2858,11 +2960,16 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
         }
 
         const chatbotDataConfirmBtn = await getAppointmentContext(userPhoneNumber, config.id)
+        // Motivo del fallo, para poder distinguir más abajo "el turno ya no está
+        // agendado" de una falla técnica. Si no hubo contexto guardado ni siquiera
+        // se llamó al proxy, así que queda como falla técnica.
+        let motivoFalloBtn: MotivoFalloConfirmacion = "falla_tecnica"
 
         if (chatbotDataConfirmBtn) {
-          const proxySuccessBtn = await confirmarTurnoEnProxy(config, chatbotDataConfirmBtn, 0, userPhoneNumber)
+          const resultadoConfirmBtn = await confirmarTurnoEnProxy(config, chatbotDataConfirmBtn, 0, userPhoneNumber)
+          motivoFalloBtn = resultadoConfirmBtn.motivo ?? "falla_tecnica"
 
-          if (proxySuccessBtn) {
+          if (resultadoConfirmBtn.exito) {
             const confirmMsgBtn = buildConfirmationMessage(chatbotDataConfirmBtn, 0)
             const sentConfirmBtn = await sendDirectResponse(ctxConfirmBtn, confirmMsgBtn, "button_confirm_direct")
 
@@ -2886,11 +2993,14 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
 
         // No había contexto guardado o el proxy falló: avisar al paciente en vez
         // de dejar la solicitud colgada o pasarla a OpenAI (que no tiene forma
-        // de confirmar nada realmente).
+        // de confirmar nada realmente). Si el turno ya no figura agendado, se le
+        // dice eso — pedirle que reintente sería mandarlo a un callejón sin salida.
         await sendDirectResponse(
           ctxConfirmBtn,
-          "No pudimos procesar tu confirmación en este momento. Por favor, intentá de nuevo en unos minutos.",
-          "button_confirm_proxy_default_error"
+          mensajeFalloConfirmacion(motivoFalloBtn, config.escalationPhoneNumber),
+          motivoFalloBtn === "turno_no_encontrado"
+            ? "button_confirm_turno_no_encontrado"
+            : "button_confirm_proxy_default_error"
         )
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
         return
@@ -3978,9 +4088,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   body: JSON.stringify(confirmPayload),
                 },
                 TIMEOUTS.PROXY_TIMEOUT,
-                { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2 }
+                // retryOn5xx (31/8/2026): ver comentario en confirmarTurnoEnProxy —
+                // reconfirmar es idempotente del lado del proxy, así que reintentar
+                // ante un 500 es seguro.
+                { maxRetries: 2, initialDelayMs: 2000, maxDelayMs: 10000, backoffMultiplier: 2, retryOn5xx: true }
               )
-              let confirmProxyBody: { success?: boolean; [key: string]: unknown } | null = null
+              let confirmProxyBody: ProxyConfirmBody | null = null
               let confirmProxyBodyText = ""
               try {
                 confirmProxyBodyText = await confirmProxyResponse.text()
@@ -3994,14 +4107,24 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 body: confirmProxyBody,
               })
 
-              const proxySuccess = confirmProxyResponse.ok && confirmProxyBody?.success === true
+              const proxySuccess = confirmProxyResponse.ok && confirmacionImpacto(confirmProxyBody)
 
               if (!proxySuccess) {
+                const motivoFalloTexto: MotivoFalloConfirmacion = esTurnoNoEncontrado(confirmProxyBody)
+                  ? "turno_no_encontrado"
+                  : "falla_tecnica"
                 console.error("[PROXY] El proxy no confirmó el turno", {
                   httpStatus: confirmProxyResponse.status,
+                  motivo: motivoFalloTexto,
                   body: confirmProxyBody,
                 })
-                await sendDirectResponse(confirmCtx, "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos.", "direct_confirm_proxy_error")
+                await sendDirectResponse(
+                  confirmCtx,
+                  mensajeFalloConfirmacion(motivoFalloTexto, config.escalationPhoneNumber),
+                  motivoFalloTexto === "turno_no_encontrado"
+                    ? "direct_confirm_turno_no_encontrado"
+                    : "direct_confirm_proxy_error"
+                )
                 await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                 return
               }
@@ -4632,11 +4755,23 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           } else if (selection === 3) {
-            // Opción 3: Consulta — derivar teléfono y terminar flujo
-            const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
-              m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
-            )
-            await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "contact_intent_consulta")
+            // Opción 3: Consulta — intentar responder con la base de conocimiento
+            // institucional antes de derivar (Tarea #42, 31/8/2026). Si no se puede
+            // responder con esos datos, comportamiento sin cambios: derivar a teléfono.
+            const { answerFromClinicInfo } = await import('./clinic-info/answer')
+            const respuestaClinicInfo = await answerFromClinicInfo(config.cliente_id, config.id, userMessage)
+
+            if (respuestaClinicInfo.respondida && respuestaClinicInfo.texto) {
+              const clinicInfoMessage = await import('./conversation-state/patient-detection/patient-templates').then(
+                m => m.buildClinicInfoAnswerMessage(respuestaClinicInfo.texto!, config.escalationPhoneNumber)
+              )
+              await sendDirectResponse(detectionCtx, clinicInfoMessage, "contact_intent_consulta_respondida")
+            } else {
+              const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
+                m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
+              )
+              await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "contact_intent_consulta")
+            }
             await completePatientDetectionFlow(userPhoneNumber, config.id)
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
@@ -4899,24 +5034,24 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             const patientInfo = detectionResult.patientInfo
 
             if (detectionResult.action === 'other_inquiry_intent') {
-              // Paciente existente sin turnos eligió "Realizar otra consulta" → derivar a tel����fono
-              const escalationPhone = config.escalationPhoneNumber || 'nuestro equipo'
-              const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
-                m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
-              )
-              // Métrica clave (Fase 0): el paciente pidió explícitamente "otra
-              // consulta" y este canal no tiene nada que ofrecerle más allá de
-              // un teléfono. Es la mayor demanda insatisfecha detectada en el
-              // análisis de conversaciones — se mide para dimensionar el valor
-              // de conectar la base de conocimiento institucional acá.
-              void recordDiag(config.id, DIAG.OTRA_CONSULTA_SIN_RESPUESTA)
-              void recordDiagSample({
-                tipo: DIAG.OTRA_CONSULTA_SIN_RESPUESTA,
-                mensaje: userMessage,
-                configId: config.id,
-                detalle: { origen: 'menu_opcion_otra_consulta' },
-              })
-              await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "other_inquiry_existing_patient")
+              // Paciente existente sin turnos eligió "Realizar otra consulta" → intentar
+              // responder con la base de conocimiento institucional antes de derivar
+              // (Tarea #42, 31/8/2026). answerFromClinicInfo ya registra las métricas
+              // (respondida / sin datos) — no duplicar el conteo acá.
+              const { answerFromClinicInfo } = await import('./clinic-info/answer')
+              const respuestaClinicInfo = await answerFromClinicInfo(config.cliente_id, config.id, userMessage)
+
+              if (respuestaClinicInfo.respondida && respuestaClinicInfo.texto) {
+                const clinicInfoMessage = await import('./conversation-state/patient-detection/patient-templates').then(
+                  m => m.buildClinicInfoAnswerMessage(respuestaClinicInfo.texto!, config.escalationPhoneNumber)
+                )
+                await sendDirectResponse(detectionCtx, clinicInfoMessage, "other_inquiry_respondida_clinic_info")
+              } else {
+                const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
+                  m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
+                )
+                await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "other_inquiry_existing_patient")
+              }
               await completePatientDetectionFlow(userPhoneNumber, config.id)
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
@@ -5058,9 +5193,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   await sendDirectResponse(detectionCtx, selectionMsg, "turno_selection")
                 } else if (detectionResult.action === 'confirm_appointment') {
                   // Un solo turno: confirmar asistencia. Primero impactar en el sistema externo (proxy).
-                  const proxySuccess = await confirmarTurnoEnProxy(config, chatbotData, 0, userPhoneNumber)
+                  const resultadoConfirmDetect = await confirmarTurnoEnProxy(config, chatbotData, 0, userPhoneNumber)
 
-                  if (proxySuccess) {
+                  if (resultadoConfirmDetect.exito) {
                     const confirmMsg = buildConfirmationMessage(chatbotData, 0)
                     await sendDirectResponse(detectionCtx, confirmMsg, "confirm_flow")
 
@@ -5073,7 +5208,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   } else {
                     await sendDirectResponse(
                       detectionCtx,
-                      "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos.",
+                      mensajeFalloConfirmacion(resultadoConfirmDetect.motivo ?? "falla_tecnica", config.escalationPhoneNumber),
                       "confirm_flow_error"
                     )
                   }
