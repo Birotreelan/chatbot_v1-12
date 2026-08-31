@@ -9,6 +9,8 @@ import { sendReminderTemplate } from "@/lib/reminders/send-reminder-template"
 import { calcularRecordatorios, type RecordatoriosConfig } from "@/lib/reminders/schedule-calculator"
 import { assignSegundoRecordatorioSlot, saveReminderQueue, type QueuedReminder } from "@/lib/reminders/reminder-queue"
 import { scheduleMessage } from "@/lib/queue"
+import { resolveDestinationPhone } from "@/lib/utils/destination-phone"
+import { recordDiag, recordDiagSample, DIAG } from "@/lib/diagnostics"
 
 export async function POST(request: Request) {
   try {
@@ -306,11 +308,62 @@ async function handleTemplateSend(data: any) {
     // NOTA: Se eliminó la verificación de health status antes de enviar mensajes
     // El mensaje se intenta enviar directamente y los errores se capturan en el proceso de envío
 
-    // NUNCA usar lastUserPhoneNumber como fallback
-    const destinationPhone = Phone.startsWith("+") ? Phone : `+${Phone}`
+    // ── Resolución del destinatario (31/8/2026) ──────────────────────────────
+    //
+    // Antes se usaba `Phone` tal cual. Los logs mostraron que era el error #1 de
+    // todo el sistema: 1262 templates rechazados por WhatsApp con "The phone
+    // number is malformed" desde el 16/6/2026 — recordatorios que el paciente
+    // nunca recibió y que la clínica dio por enviados.
+    //
+    // La causa: cuando la ficha del paciente tiene dos teléfonos
+    // ("4629-1581 / 1144178909"), el sistema de la clínica les saca los
+    // separadores y manda `Phone: "462915811144178909"`. El valor original SÍ
+    // llega intacto en Chatbot_Data.paciente.telefono, así que de ahí se
+    // recupera el celular sin adivinar dónde cortar.
+    // Ver lib/utils/destination-phone.ts.
+    let telefonoDeFicha: string | undefined
+    try {
+      const cd = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
+      const t = cd?.paciente?.telefono
+      if (t !== undefined && t !== null) telefonoDeFicha = String(t)
+    } catch {
+      // Chatbot_Data ilegible: se sigue con lo que haya en Phone.
+    }
+
+    const resolucion = resolveDestinationPhone(Phone, telefonoDeFicha)
+
+    if (!resolucion.telefono) {
+      // No mandarle basura a WhatsApp: cortar acá con un error explícito para
+      // que el sistema de la clínica pueda marcar la ficha a corregir.
+      console.error("[PROXYLISTENER] ❌ Teléfono de destino inválido:", resolucion.detalle)
+      void recordDiag(config.id, DIAG.TELEFONO_DESTINO_INVALIDO)
+      void recordDiagSample({
+        tipo: DIAG.TELEFONO_DESTINO_INVALIDO,
+        configId: config.id,
+        detalle: { phoneRecibido: String(Phone).slice(0, 30), telefonoFicha: telefonoDeFicha?.slice(0, 40), clienteId: Cliente_Id },
+      })
+      return NextResponse.json(
+        {
+          success: false,
+          error: "TELEFONO_INVALIDO",
+          message:
+            "El teléfono del paciente no es un celular válido para WhatsApp. Revisar la ficha: puede tener dos números cargados en el mismo campo.",
+          details: resolucion.detalle,
+          phone_recibido: Phone,
+        },
+        { status: 400 },
+      )
+    }
+
+    if (resolucion.origen === "recuperado_de_ficha") {
+      console.warn("[PROXYLISTENER] ⚠️ Teléfono recuperado de la ficha:", resolucion.detalle)
+      void recordDiag(config.id, DIAG.TELEFONO_DESTINO_RECUPERADO)
+    }
+
+    const destinationPhone = `+549${resolucion.telefono}`
 
     console.log("[PROXYLISTENER] ✅ Número de teléfono validado:", destinationPhone)
-    console.log("[PROXYLISTENER] ✅ Origen del número: Parámetro 'Phone' (explícito)")
+    console.log("[PROXYLISTENER] ✅ Origen del número:", resolucion.origen)
     console.log("[PROXYLISTENER] Enviando mensaje tipo:", messageType)
 
     const cleanPhoneNumber = normalizePhoneNumber(destinationPhone)

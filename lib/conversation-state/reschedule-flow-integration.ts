@@ -35,7 +35,6 @@ import {
 } from "./reschedule-templates"
 import type { ChatbotData } from "../appointment-flow-state"
 import { getAppointmentContext, saveAppointmentContext } from "../appointment-flow-state"
-import { getThreadForUser, safelyAddMessageToThread } from "../thread-manager"
 import { clearPostActionContext } from "./post-action-context"
 
 // ============================================================================
@@ -164,11 +163,14 @@ async function syncContextAfterReschedule(
     console.error("[RESCHEDULE-INTEGRATION] Error actualizando appointment_context tras reagendar:", err)
   }
 
-  // 2. Actualizar el thread de OpenAI para que ignore el turno cancelado
+  // 2. Actualizar el contexto de la conversación para que ignore el turno cancelado
+  //
+  // 31/8/2026: antes escribía en el thread de OpenAI (safelyAddMessageToThread).
+  // Con la Assistants API dada de baja el 26/8 eso devolvía 404 en cada
+  // reagendamiento — parte de las 774 llamadas muertas vistas en los logs de
+  // Vercel. Ahora la nota va al historial propio (lib/openai-responses.ts).
   try {
-    const threadData = await getThreadForUser(userPhoneNumber, configId)
-    const threadId = threadData?.thread_id
-    if (threadId) {
+    {
       const updateMessage = `[SISTEMA_ACTUALIZACION_TURNO]
 El turno mencionado anteriormente fue CANCELADO y REEMPLAZADO mediante un reagendamiento exitoso.
 IMPORTANTE: Ignorá por completo el turno cancelado del contexto previo. El único turno VIGENTE del paciente es el siguiente:
@@ -193,11 +195,12 @@ Tipo_Mensaje: turno_reagendado
 [/CONTEXTO_COMPLETO_TURNO]
 [/SISTEMA_ACTUALIZACION_TURNO]`
 
-      await safelyAddMessageToThread(threadId, { role: "user", content: updateMessage })
-      console.log(`[RESCHEDULE-INTEGRATION] Thread de OpenAI actualizado con el turno reagendado`)
+      const { appendResponsesContextNote } = await import("@/lib/openai-responses")
+      await appendResponsesContextNote(configId, userPhoneNumber, updateMessage)
+      console.log(`[RESCHEDULE-INTEGRATION] Contexto actualizado con el turno reagendado`)
     }
   } catch (err) {
-    console.error("[RESCHEDULE-INTEGRATION] Error actualizando thread de OpenAI tras reagendar:", err)
+    console.error("[RESCHEDULE-INTEGRATION] Error actualizando el contexto tras reagendar:", err)
   }
 
   // 3. Limpiar contexto post-acción (quedó como "cancellation")

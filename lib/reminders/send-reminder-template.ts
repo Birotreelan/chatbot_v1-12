@@ -16,8 +16,6 @@ import { sendWhatsAppTemplate } from "../whatsapp-api"
 import { saveConversationMessage } from "../conversations"
 import { nanoid } from "nanoid"
 import { trackTemplateSent } from "../appointment-stats"
-import { getThreadForUser } from "../db"
-import { safelyAddMessageToThread } from "../thread-manager"
 import { extractAndFormatDate } from "../utils/date-utils"
 import { saveAppointmentContext } from "../appointment-flow-state"
 
@@ -281,19 +279,17 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
     console.warn("[REMINDERS] ⚠️ ADVERTENCIA: No se recibió Chatbot_Data en la solicitud")
   }
 
-  // Notificar a OpenAI sobre la plantilla enviada
+  // Registrar en el contexto de la conversación que se envió esta plantilla.
+  //
+  // 31/8/2026: esto llamaba a getThreadForUser + safelyAddMessageToThread (la
+  // Assistants API de OpenAI). Desde el sunset del 26/8 devolvía 404 en CADA
+  // envío de plantilla — 774 llamadas fallidas registradas en los logs de
+  // Vercel, todas inútiles. Cuando migré este archivo saqué el guardado de
+  // contexto de este try/catch pero dejé la notificación intacta.
+  // Ahora la nota va al historial propio (lib/openai-responses.ts), que es lo
+  // que el motor actual lee.
   try {
-    console.log("[REMINDERS] Notificando a OpenAI sobre plantilla enviada...")
-
-    const threadResult = await getThreadForUser(cleanPhoneNumber, config.id)
-
-    if (!threadResult || !threadResult.threadId) {
-      console.error("[REMINDERS] ❌ No se pudo obtener threadId válido")
-      console.error("[REMINDERS] threadResult:", threadResult)
-      throw new Error("ThreadId no disponible")
-    }
-
-    console.log("[REMINDERS] Thread obtenido:", threadResult.threadId)
+    console.log("[REMINDERS] Registrando contexto de plantilla enviada...")
 
     // Analizar plantilla
     const templateAnalysis = {
@@ -422,18 +418,12 @@ Sede_ID: ${Sede_Id}`
     notificationMessage += `
 [/SISTEMA_PLANTILLA]`
 
-    if (!threadResult.threadId || typeof threadResult.threadId !== "string") {
-      throw new Error(`ThreadId inválido: ${threadResult.threadId} (tipo: ${typeof threadResult.threadId})`)
-    }
+    const { appendResponsesContextNote } = await import("../openai-responses")
+    await appendResponsesContextNote(config.id, cleanPhoneNumber, notificationMessage)
 
-    await safelyAddMessageToThread(threadResult.threadId, {
-      role: "user",
-      content: notificationMessage,
-    })
-
-    console.log("[REMINDERS] ✅ MENSAJE ENVIADO A OPENAI EXITOSAMENTE")
+    console.log("[REMINDERS] ✅ Contexto de plantilla registrado en el historial")
   } catch (error: any) {
-    console.error("[REMINDERS] Error al notificar a OpenAI:", error)
+    console.error("[REMINDERS] Error registrando el contexto de la plantilla:", error)
     console.error("[REMINDERS] Stack trace:", error.stack)
   }
 

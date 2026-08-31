@@ -102,6 +102,12 @@ export const DIAG = {
   RESERVA_EXITOSA: "reserva_exitosa",
   SIN_TURNOS_DISPONIBLES: "sin_turnos_disponibles",
 
+  // ── Envío de templates ───────────────────────────────────────────────────
+  /** El teléfono del paciente no sirve para WhatsApp: el recordatorio NO se envió. */
+  TELEFONO_DESTINO_INVALIDO: "telefono_destino_invalido",
+  /** El campo Phone venía roto y se recuperó el celular desde la ficha del paciente. */
+  TELEFONO_DESTINO_RECUPERADO: "telefono_destino_recuperado",
+
   // ── Templates informativos de la clínica ─────────────────────────────────
   // La clínica avisa algo (aceptó / canceló el turno solicitado). Se mide para
   // verificar que el handler determinístico los está atendiendo y no se los
