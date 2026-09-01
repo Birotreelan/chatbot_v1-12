@@ -118,6 +118,13 @@ export const DIAG = {
   // ── Salidas de la conversación ───────────────────────────────────────────
   DERIVACION_EXTERNA: "derivacion_externa",
   DERIVACION_HUMANA: "derivacion_humana",
+  /**
+   * Se llegó al final del flujo de reserva sin nombre/apellido/DNI del paciente
+   * (31/8/2026). Antes esto terminaba en un error del proxy que el paciente veía
+   * como falla técnica, después de haber elegido sede, profesional y horario.
+   * Si este contador sube, hay un camino que deja avanzar sin identidad.
+   */
+  RESERVA_SIN_DATOS_PACIENTE: "reserva_sin_datos_paciente",
   OTRA_CONSULTA_SIN_RESPUESTA: "otra_consulta_sin_respuesta", // opción 3 del menú
   /** "Otra consulta" SÍ se pudo responder con la base de conocimiento institucional (Tarea #42, 31/8/2026). */
   OTRA_CONSULTA_RESPONDIDA_CLINIC_INFO: "otra_consulta_respondida_clinic_info",

@@ -32,7 +32,7 @@ import {
 } from './patient-templates'
 import { detectFamiliarIntent } from './familiar-intent-detector'
 import { classifyTurnoEstado } from './turno-estado'
-import { extractDNI } from '../dni-handler'
+import { extractDNI, extractAllDNIs } from '../dni-handler'
 import { resolverTurnosOnline } from '../shared/obra-social'
 import { recordDiag, DIAG } from '@/lib/diagnostics'
 
@@ -183,7 +183,12 @@ export async function initializePatientDetection(
       // teléfono no registrado. La detección por teléfono devolvía "no
       // encontrado", se lo trataba como nuevo y se le volvía a pedir el DNI que
       // acababa de escribir.
-      const dniDelMensaje = firstMessage ? extractDNI(firstMessage) : null
+      // Si el primer mensaje trae VARIOS documentos (ej. "Eduardo DNI 4360569 y
+      // Lucía DNI 93874268"), no se auto-identifica: extractDNI elegiría uno por
+      // criterio interno y podríamos mostrarle a alguien los turnos de otro. En
+      // ese caso se sigue por el camino normal, que termina pidiendo el DNI.
+      const variosDNIsEnPrimerMensaje = firstMessage ? extractAllDNIs(firstMessage).length > 1 : false
+      const dniDelMensaje = firstMessage && !variosDNIsEnPrimerMensaje ? extractDNI(firstMessage) : null
 
       if (dniDelMensaje?.valid) {
         const encontrado = await identifyPatientByDNI(phoneNumber, dniDelMensaje.dni, configId, clienteId)
@@ -240,7 +245,11 @@ export async function initializePatientDetection(
       // respondió "indicame tu DNI"; el paciente tuvo que repetir el mismo
       // número que acababa de escribir. Dos mensajes de fricción evitables en
       // el primer contacto, justo donde peor impresión deja.
-      const dniEnPrimerMensaje = firstMessage ? extractDNI(firstMessage) : null
+      // Igual que arriba: con más de un documento en el mensaje no se
+      // auto-resuelve la identidad, porque elegir uno sería arbitrario y este
+      // teléfono justamente tiene varios pacientes asociados. Se pide el DNI.
+      const variosDNIs = firstMessage ? extractAllDNIs(firstMessage).length > 1 : false
+      const dniEnPrimerMensaje = firstMessage && !variosDNIs ? extractDNI(firstMessage) : null
 
       if (dniEnPrimerMensaje?.valid) {
         logger.info('DNI encontrado en el primer mensaje — desambiguando sin volver a preguntar', {
@@ -730,12 +739,43 @@ export async function handleDNIForMultiplePatients(
     }
   }
 
-  // Extraer DNI del mensaje
-  const dniMatch = dniMessage.trim().replace(/[^0-9]/g, '')
+  // ── Extracción del DNI ────────────────────────────────────────────────────
+  //
+  // BUG CORREGIDO (31/8/2026, caso Eduardo + Lucía): acá se hacía
+  // `dniMessage.replace(/[^0-9]/g, '')`, que borra TODO lo que no sea dígito y
+  // pega lo que quede. Con "Eduardo Carpentieri DNI 4360569 y Lucia Checchia
+  // DNI 93874268" el resultado era 436056993874268 (15 dígitos) → "no parece
+  // válido". El paciente repitió tres veces datos correctos y recibió tres
+  // veces el mismo rechazo.
+  //
+  // extractDNI (dni-handler.ts) ya resolvía esto bien — busca secuencias
+  // contiguas de 7-8 dígitos y tolera puntos, espacios y texto alrededor —
+  // pero este camino nunca la usaba.
+  const dnisEnMensaje = extractAllDNIs(dniMessage)
 
-  if (dniMatch.length < 7 || dniMatch.length > 9) {
-    logger.warn('Invalid DNI format', { length: dniMatch.length })
-    const invalidMsg = dniMatch.length === 0
+  // Más de un DNI: NO elegir uno por nuestra cuenta. Serían dos personas
+  // distintas y quedarnos con cualquiera significa mostrarle a alguien los
+  // turnos de otro. Se pregunta.
+  if (dnisEnMensaje.length > 1) {
+    logger.info('Varios DNI en un mismo mensaje — se pide desambiguar', { cantidad: dnisEnMensaje.length })
+    const lista = dnisEnMensaje.map((dni, i) => `${i + 1}. ${dni}`).join('\n')
+    return {
+      handled: true,
+      message:
+        `Veo que me pasaste más de un documento:\n\n${lista}\n\n` +
+        `Los turnos se gestionan de a un paciente por vez. ` +
+        `Indicame *el DNI de la persona con la que querés empezar* y después seguimos con la otra.`,
+      patientInfo: {
+        isNewPatient: false,
+      },
+    }
+  }
+
+  const extraccion = extractDNI(dniMessage)
+
+  if (!extraccion.valid) {
+    logger.warn('Invalid DNI format', { reason: extraccion.reason })
+    const invalidMsg = extraccion.reason === 'no_digits'
       ? 'Para continuar, necesito que me indiques tu DNI (7 u 8 dígitos, sin puntos ni espacios).'
       : 'El DNI ingresado no parece válido. Por favor indicame tu DNI (7 u 8 dígitos) sin puntos ni espacios.'
     return {
@@ -746,6 +786,8 @@ export async function handleDNIForMultiplePatients(
       },
     }
   }
+
+  const dniMatch = extraccion.dni
 
   // Procesar DNI
   const result = await processDNIForDisambiguation(

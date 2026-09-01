@@ -181,6 +181,32 @@ export function extractDNI(message: string): DNIExtractionResult {
 }
 
 /**
+ * Extrae TODOS los DNI válidos que aparecen en un mensaje, en el orden en que
+ * fueron escritos y sin repetidos.
+ *
+ * 31/8/2026 — motivo: un paciente escribió "Eduardo Carpentieri DNI 4360569 y
+ * Lucia Checchia DNI 93874268". `extractDNI` devuelve uno solo (prefiere el de
+ * 8 dígitos), así que quedarse con eso significaría identificar a Lucía cuando
+ * la persona nombró primero a Eduardo — una elección arbitraria entre dos
+ * identidades. Con esta función el caller puede detectar que hay más de una y
+ * preguntar en vez de adivinar.
+ */
+export function extractAllDNIs(message: string): string[] {
+  const encontrados: string[] = []
+  const patron = /\b(\d{1,3}[.\s]?\d{3}[.\s]?\d{3}|\d{7,8})\b/g
+
+  let match: RegExpExecArray | null
+  while ((match = patron.exec(message)) !== null) {
+    const digits = match[1].replace(/[\s.]/g, "")
+    if ((digits.length === 7 || digits.length === 8) && !encontrados.includes(digits)) {
+      encontrados.push(digits)
+    }
+  }
+
+  return encontrados
+}
+
+/**
  * Resultado del handler de DNI
  */
 export type DNIHandlerResult =

@@ -2045,6 +2045,46 @@ async function handleConfirmationPhase(
       }
     }
 
+    // ── Guard de datos incompletos (31/8/2026) ────────────────────────────
+    //
+    // Sin esto se llamaba a la API con nombre/apellido/DNI vacíos y el proxy
+    // devolvía "Debe proporcionar Nombre, Apellido, DNI y al menos un medio de
+    // contacto" — 48 veces en los últimos 7 días según los logs de Vercel. El
+    // paciente veía un error técnico después de haber elegido sede, profesional
+    // y horario, y perdía todo el trabajo.
+    //
+    // Caso que lo destapó (Eduardo + Lucía, 31/8/2026): la desambiguación por
+    // DNI falló, el paciente entró igual al flujo de reserva sin identidad y
+    // llegó a la pantalla de confirmación con "Apellido:", "Nombre:" y "DNI:"
+    // en blanco.
+    const faltantes: string[] = []
+    if (!nombreParaReserva?.trim()) faltantes.push('nombre')
+    if (!apellidoParaReserva?.trim()) faltantes.push('apellido')
+    if (!dniParaReserva?.trim()) faltantes.push('DNI')
+
+    if (faltantes.length > 0) {
+      logger.error('Reserva abortada: faltan datos del paciente', new Error(faltantes.join(', ')))
+      void recordDiag(clientId, DIAG.RESERVA_SIN_DATOS_PACIENTE)
+
+      // Se reencamina a la máquina de estados que YA existe para corregir datos
+      // (awaiting_modify_nombre / awaiting_modify_dni) en vez de inventar una
+      // fase nueva. El turno elegido queda guardado en el estado, así que el
+      // paciente no pierde lo que ya hizo.
+      const faltaNombre = !nombreParaReserva?.trim() || !apellidoParaReserva?.trim()
+      state.phase = faltaNombre ? 'awaiting_modify_nombre' : 'awaiting_modify_dni'
+      await saveFlowState(phoneNumber, state)
+
+      return {
+        handled: true,
+        message: faltaNombre
+          ? `Antes de reservar necesito tus datos, que no los tengo cargados.\n\n` +
+            `Por favor escribime tu *nombre y apellido completo*.`
+          : `Antes de reservar necesito tu *DNI*, que no lo tengo cargado.\n\n` +
+            `Escribilo con solo números, sin puntos ni espacios.`,
+        nextPhase: state.phase,
+      }
+    }
+
     // Ejecutar reserva
     const reservaResult = await executeReservation(
       clientId,

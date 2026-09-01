@@ -1935,6 +1935,38 @@ async function handleConfirmationPhase(
   const result = await handleConfirmationResponse(userMessage, phone, clientId)
 
   if (result.confirmed === true) {
+    // Guard de datos incompletos (31/8/2026) — mismo criterio que el flujo de
+    // paciente existente. Acá los datos se piden paso a paso, así que llegar sin
+    // ellos indica un hueco en el flujo; igual conviene no mandarle al proxy una
+    // reserva que va a rechazar con "Debe proporcionar Nombre, Apellido, DNI...".
+    if (!state.nombre?.trim() || !state.apellido?.trim() || !state.dni?.trim()) {
+      logger.error(
+        'Reserva abortada: faltan datos del paciente',
+        new Error(`nombre=${!!state.nombre} apellido=${!!state.apellido} dni=${!!state.dni}`),
+      )
+      void recordDiag(clientId, DIAG.RESERVA_SIN_DATOS_PACIENTE)
+
+      // Se vuelve al paso que pide el dato faltante — el turno elegido sigue
+      // guardado en el estado, así que no se pierde lo hecho.
+      state.phase = !state.apellido?.trim()
+        ? 'awaiting_apellido'
+        : !state.nombre?.trim()
+          ? 'awaiting_nombre'
+          : 'awaiting_dni'
+      await saveFlowState(phone, state)
+
+      return {
+        handled: true,
+        message:
+          `Antes de reservar me falta un dato tuyo.\n\n` +
+          (state.phase === 'awaiting_dni'
+            ? `Escribime tu *DNI* (solo números, sin puntos ni espacios).`
+            : state.phase === 'awaiting_nombre'
+              ? `Escribime tu *nombre*.`
+              : `Escribime tu *apellido*.`),
+      }
+    }
+
     // IMPORTANTE: en flujo de widget, `phone` es un sessionId anónimo (web_...),
     // no un teléfono real — usar el número que se pidió en awaiting_telefono.
     // En WhatsApp, `phone` ya ES el teléfono real del paciente (comportamiento sin cambios).
