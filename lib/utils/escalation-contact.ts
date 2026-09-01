@@ -26,15 +26,23 @@
 export const CONTACTO_DERIVACION_PLACEHOLDER = "[NÚMERO DE DERIVACIÓN]"
 
 /**
- * Separa el valor en líneas útiles: descarta líneas vacías y espacios sobrantes,
- * de modo que un textarea con saltos de más no genere huecos en el mensaje.
+ * Separa el valor en líneas, respetando el formato que escribió la clínica.
+ *
+ * Las líneas en blanco INTERMEDIAS se conservan: son separación de párrafos
+ * deliberada y forman parte del mensaje (corregido el 31/8/2026 — la primera
+ * versión las descartaba y el texto salía todo apelmazado). Sólo se recortan las
+ * líneas vacías del principio y del final, que son ruido de tipeo en el textarea
+ * y dejarían un hueco entre la frase y el bloque.
  */
 function lineasDeContacto(valor?: string | null): string[] {
   if (!valor) return []
-  return valor
-    .split(/\r?\n/)
-    .map((linea) => linea.trim())
-    .filter((linea) => linea.length > 0)
+
+  const lineas = valor.split(/\r?\n/).map((linea) => linea.trim())
+
+  while (lineas.length > 0 && lineas[0] === "") lineas.shift()
+  while (lineas.length > 0 && lineas[lineas.length - 1] === "") lineas.pop()
+
+  return lineas
 }
 
 /** true si la clínica cargó más de una línea (modo bloque). */
@@ -100,7 +108,9 @@ export function contactoDerivacion(valor?: string | null): string {
  * " | " para no romper el renglón.
  */
 export function contactoDerivacionEnLinea(valor?: string | null): string {
-  const lineas = lineasDeContacto(valor)
+  // Acá sí se descartan las líneas en blanco: el objetivo es que todo entre en
+  // un renglón, así que un separador vacío ("A |  | B") sólo agregaría ruido.
+  const lineas = lineasDeContacto(valor).filter((linea) => linea.length > 0)
   if (lineas.length === 0) return CONTACTO_DERIVACION_PLACEHOLDER
   return lineas.join(" | ")
 }
