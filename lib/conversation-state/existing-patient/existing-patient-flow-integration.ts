@@ -10,6 +10,7 @@ import { getEffectiveFeatureFlags } from '../feature-flags'
 import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handler'
 import { validarObraSocial, buscarPaciente } from '@/lib/api-tools/api-functions' // 🆕 IMPORT PARA VALIDAR OBRA SOCIAL / LIMITE DE TURNOS
 import { getFirstName } from '@/lib/utils/name-utils'
+import { fraseDerivacion } from '@/lib/utils/escalation-contact'
 import { extractEntities } from '../entity-extractor'
 import { getHistory } from '../conversation-history'
 
@@ -384,7 +385,8 @@ export async function initializeExistingPatientFlow(
     logger.info('Nuevo turno deshabilitado por configuración del cliente')
     return {
       handled: true,
-      message: `Actualmente no es posible solicitar turnos nuevos por este medio.\n\nPara agendar un turno, por favor contactanos al: *${numeroDerivacion}*`,
+      message: `Actualmente no es posible solicitar turnos nuevos por este medio.\n\n` +
+        fraseDerivacion('Para agendar un turno, por favor contactanos', numeroDerivacion),
       action: 'nuevo_turno_no_permitido',
     }
   }
@@ -459,9 +461,8 @@ export async function initializeExistingPatientFlow(
       const saludo = firstName ? `Hola ${firstName}. ` : ''
       return {
         handled: true,
-        message: `${saludo}Lamentablemente, tu obra social (${resultadoOS.nombre || finalObraSocialNombre}) no está habilitada para agendar turnos por este medio.
-
-Para agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+        message: `${saludo}Lamentablemente, tu obra social (${resultadoOS.nombre || finalObraSocialNombre}) no está habilitada para agendar turnos por este medio.\n\n` +
+          fraseDerivacion('Para agendar tu turno, por favor contactanos', numeroDerivacion),
         action: 'obra_social_no_permite_turnos_online',
       }
     }
@@ -2271,7 +2272,8 @@ async function handleModifyObraSocialPhase(
       })
       return {
         handled: true,
-        message: `Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+        message: `Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\n` +
+          fraseDerivacion('Para agendar tu turno, por favor contactanos', numeroDerivacion),
         action: 'obra_social_no_permite_turnos_online',
       }
     }

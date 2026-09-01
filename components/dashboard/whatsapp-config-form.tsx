@@ -323,15 +323,25 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="escalationPhoneNumber">Número de Derivación</Label>
-                <Input
+                <Label htmlFor="escalationPhoneNumber">Datos de Derivación</Label>
+                <Textarea
                   id="escalationPhoneNumber"
                   value={formData.escalationPhoneNumber || ""}
                   onChange={(e) => updateFormData("escalationPhoneNumber", e.target.value)}
-                  placeholder="+54 9 11 1234-5678"
+                  placeholder={"+54 9 11 1234-5678\nLunes a viernes de 8 a 20 hs\nUrgencias: 11 5555-5555"}
+                  rows={3}
+                  className="font-mono text-sm"
                 />
                 <p className="text-sm text-muted-foreground">
-                  Número de teléfono para derivar cuando el chatbot no pueda responder
+                  Datos de contacto para derivar cuando el chatbot no pueda resolver la consulta.
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Si escribís <strong>una sola línea</strong>, aparece dentro de la frase:{" "}
+                  <em>&ldquo;comunicate al *+54 9 11 1234-5678*&rdquo;</em>. Si escribís{" "}
+                  <strong>varias líneas</strong>, la frase termina en dos puntos y el texto se
+                  agrega debajo, tal cual lo escribas. Podés usar{" "}
+                  <code>*asteriscos*</code> para negrita y <code>_guiones bajos_</code> para
+                  cursiva (formato de WhatsApp).
                 </p>
               </div>
 

@@ -22,6 +22,7 @@ import { getEffectiveFeatureFlags } from '../feature-flags'
 import { validarObraSocial } from '@/lib/api-tools/api-functions'
 import { extractSelection } from '../selection-extractor'
 import { getFirstName } from '@/lib/utils/name-utils'
+import { fraseDerivacion } from '@/lib/utils/escalation-contact'
 import { extractEntities } from '../entity-extractor'
 import { getHistory, appendToHistory } from '../conversation-history'
 import { generateWelcomeMessage, generateObraSocialRequest } from '../response-generator'
@@ -305,7 +306,8 @@ export async function initializeNewPatientFlow(
     logger.info('Nuevo turno deshabilitado por configuración del cliente')
     return {
       handled: true,
-      message: `Actualmente no es posible solicitar turnos nuevos por este medio.\n\nPara agendar un turno, por favor contactanos al: *${numeroDerivacion}*`,
+      message: `Actualmente no es posible solicitar turnos nuevos por este medio.\n\n` +
+        fraseDerivacion('Para agendar un turno, por favor contactanos', numeroDerivacion),
       action: 'nuevo_turno_no_permitido',
     }
   }
@@ -949,9 +951,14 @@ async function handleObraSocialPhase(
         
         const firstName = getFirstName(state.nombre || '')
         const gracias = firstName ? `Gracias ${firstName}. ` : ''
-        const contactMsg = state.esFamiliar
-          ? `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar el turno del familiar, por favor contactanos al: *${numeroDerivacion}*`
-          : `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`
+        const contactMsg =
+          `${gracias}Lamentablemente, ${obraSocial.nombre} no está habilitada para agendar turnos por este medio.\n\n` +
+          fraseDerivacion(
+            state.esFamiliar
+              ? 'Para agendar el turno del familiar, por favor contactanos'
+              : 'Para agendar tu turno, por favor contactanos',
+            numeroDerivacion,
+          )
         return {
           handled: true,
           message: contactMsg,
@@ -1070,9 +1077,14 @@ async function handleObraSocialSelectionPhase(
         
         const firstName = getFirstName(state.nombre || '')
         const gracias = firstName ? `Gracias ${firstName}. ` : ''
-        const contactMsgSel = state.esFamiliar
-          ? `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar el turno del familiar, por favor contactanos al: *${numeroDerivacion}*`
-          : `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.\n\nPara agendar tu turno, por favor contactanos al: *${numeroDerivacion}*`
+        const contactMsgSel =
+          `${gracias}Lamentablemente, ${selectedOption.nombre} no está habilitada para agendar turnos por este medio.\n\n` +
+          fraseDerivacion(
+            state.esFamiliar
+              ? 'Para agendar el turno del familiar, por favor contactanos'
+              : 'Para agendar tu turno, por favor contactanos',
+            numeroDerivacion,
+          )
         return {
           handled: true,
           message: contactMsgSel,

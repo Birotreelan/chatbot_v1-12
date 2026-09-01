@@ -10,6 +10,10 @@
  */
 
 import { classifyTurnoEstado } from './turno-estado'
+// El campo de derivación puede tener varias líneas (31/8/2026). fraseDerivacion
+// arma la frase completa: una línea → "... al *0800*."; varias → dos puntos y el
+// bloque debajo. Ver lib/utils/escalation-contact.ts.
+import { fraseDerivacion } from '@/lib/utils/escalation-contact'
 
 // Nombre de la clinica por defecto (se puede parametrizar)
 const DEFAULT_CLINIC_NAME = 'Salud Ocular'
@@ -97,9 +101,13 @@ export interface ObraSocialBloqueada {
  */
 function textoObraSocialBloqueada(os: ObraSocialBloqueada): string {
   const telefono = os.telefonoDerivacion
-  return telefono
-    ? `Los turnos de *${os.nombre}* se gestionan por teléfono: para sacar el tuyo, comunicate al *${telefono}*.`
-    : `Los turnos de *${os.nombre}* se gestionan por teléfono, comunicándote directamente con la clínica.`
+  if (!telefono) {
+    return `Los turnos de *${os.nombre}* se gestionan por teléfono, comunicándote directamente con la clínica.`
+  }
+  return fraseDerivacion(
+    `Los turnos de *${os.nombre}* se gestionan por teléfono: para sacar el tuyo, comunicate`,
+    telefono,
+  )
 }
 
 /**
@@ -246,9 +254,8 @@ function buildSoloCirugiaGreeting(
   mensaje += `La gestión de turnos quirúrgicos (cancelación, modificación o confirmación) debe realizarse comunicándote directamente con la clínica.\n\n`
 
   if (permitirNuevoTurno === false) {
-    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
     mensaje += `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n`
-    mensaje += `Para otras consultas, comunicate al *${numeroDerivacion}*.`
+    mensaje += fraseDerivacion('Para otras consultas, comunicate', escalationPhoneNumber)
     return mensaje
   }
 
@@ -286,12 +293,11 @@ function buildExistingPatientNoTurnosGreeting(
   const firstName = getFirstName(patientName)
 
   if (permitirNuevoTurno === false) {
-    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
     return (
       `¡Hola, ${firstName}!\n\n` +
       `Gracias por comunicarte con ${clinicName}.\n\n` +
       `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
-      `Para realizar otras consultas, comunicate con nosotros al *${numeroDerivacion}*.`
+      fraseDerivacion('Para realizar otras consultas, comunicate con nosotros', escalationPhoneNumber)
     )
   }
 
@@ -401,8 +407,7 @@ function buildSingleTurnoGreeting(
   if (opciones.length === 0) {
     // Ninguna gestión disponible por este medio (todas las restricciones activas) →
     // informar el estado del turno y derivar directamente, sin menú numerado.
-    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
-    mensaje += `Para cualquier gestión sobre este turno, contactanos al: *${numeroDerivacion}*`
+    mensaje += fraseDerivacion('Para cualquier gestión sobre este turno, contactanos', escalationPhoneNumber)
     return mensaje
   }
 
@@ -410,12 +415,14 @@ function buildSingleTurnoGreeting(
     // Única gestión disponible: cancelar. En lugar de un menú numerado con
     // "Otra consulta", se ofrece directamente el botón de cancelar y se deriva
     // el resto de las consultas (incluido reagendar) al número de derivación.
-    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
     return (
       `*${firstName}, ¡bienvenido nuevamente a ${clinicName}!*\n\n` +
       `Tenés un turno médico programado para el ${fecha} a las ${hora} h, con ${profesional}, en la sede ${sede}.\n\n` +
       `Si necesitás cancelar el turno, podés hacerlo presionando el botón que aparece a continuación.\n\n` +
-      `Si necesitás realizar otras consultas o reprogramar tu turno, comunicate con nosotros al *${numeroDerivacion}*.`
+      fraseDerivacion(
+        'Si necesitás realizar otras consultas o reprogramar tu turno, comunicate con nosotros',
+        escalationPhoneNumber,
+      )
     )
   }
 
@@ -501,11 +508,10 @@ export function buildNewPatientGreeting(
   escalationPhoneNumber?: string
 ): string {
   if (permitirNuevoTurno === false) {
-    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
     return (
       `Gracias por comunicarte con ${clinicName}.\n\n` +
       `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
-      `Para otras consultas, comunicate al *${numeroDerivacion}*.`
+      fraseDerivacion('Para otras consultas, comunicate', escalationPhoneNumber)
     )
   }
 
@@ -528,13 +534,13 @@ export function buildOtherInquiryMessage(
   clinicName: string = DEFAULT_CLINIC_NAME
 ): string {
   let message = `Este canal de WhatsApp es exclusivo para la gestión de turnos médicos.\n\n`
-  
+
   if (escalationPhoneNumber) {
-    message += `Para otro tipo de consultas, por favor contactanos al *${escalationPhoneNumber}*.\n\n`
+    message += `${fraseDerivacion('Para otro tipo de consultas, por favor contactanos', escalationPhoneNumber)}\n\n`
   } else {
     message += `Para otro tipo de consultas, por favor comunicate con nosotros directamente.\n\n`
   }
-  
+
   message += `Si en algún momento necesitás gestionar un turno, escribime y con gusto te ayudo.`
   
   return message
@@ -552,7 +558,7 @@ export function buildClinicInfoAnswerMessage(
   let message = `${respuesta}\n\n`
 
   if (escalationPhoneNumber) {
-    message += `Si necesitás algo más, podés comunicarte al *${escalationPhoneNumber}*.\n\n`
+    message += `${fraseDerivacion('Si necesitás algo más, podés comunicarte', escalationPhoneNumber)}\n\n`
   }
 
   message += `Si en algún momento necesitás gestionar un turno, escribime y con gusto te ayudo.`
@@ -699,10 +705,9 @@ export function buildPostActionMenu(
     if (permitirNuevoTurno === false) {
       // Sin turnos y sin posibilidad de solicitar uno nuevo → nada gestionable
       // por este medio, derivar directamente sin ofrecer menú.
-      const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
       return (
         `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
-        `Para otras consultas, comunicate al *${numeroDerivacion}*.`
+        fraseDerivacion('Para otras consultas, comunicate', escalationPhoneNumber)
       )
     }
     // Menú renumerado, en sincronía con el action map de patient-flow-handler.ts.
@@ -794,8 +799,7 @@ export function buildPostActionMenu(
       if (opciones.length === 0) {
         // Ninguna gestión disponible por este medio (restricciones del cliente
         // activas y sin turno pendiente de confirmación) → derivar sin menú.
-        const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
-        msg += `Para cualquier gestión sobre este turno, contactanos al: *${numeroDerivacion}*`
+        msg += fraseDerivacion('Para cualquier gestión sobre este turno, contactanos', escalationPhoneNumber)
         return msg
       }
 
@@ -803,8 +807,10 @@ export function buildPostActionMenu(
         // Única gestión disponible: cancelar. Igual que en el saludo, no se ofrece
         // "Otra consulta" — el resto de las consultas se derivan al número de derivación.
         msg += `1- ${esNoConfirmado ? 'Cancelar turno médico' : 'Cancelar el turno'}\n\n`
-        const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
-        msg += `Si necesitás realizar otras consultas o reprogramar tu turno, comunicate con nosotros al *${numeroDerivacion}*.`
+        msg += fraseDerivacion(
+          'Si necesitás realizar otras consultas o reprogramar tu turno, comunicate con nosotros',
+          escalationPhoneNumber,
+        )
         return msg
       }
 

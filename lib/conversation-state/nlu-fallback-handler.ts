@@ -17,6 +17,7 @@
 import { createConversationLogger } from "./logger"
 import { openai } from "@/lib/openai"
 import { getTurnoTemporalStatus } from "@/lib/utils/date-utils"
+import { fraseDerivacion, contactoDerivacion, esContactoMultilinea } from "@/lib/utils/escalation-contact"
 import { getRedisClient } from "@/lib/redis"
 import { isMarkedAsWrongPerson } from "./wrong-number-handler"
 
@@ -869,7 +870,7 @@ function buildDerivationResponse(appointmentContext: any, gptResponse?: string, 
 
   const empaticResponse = gptResponse || "Esa información no la tengo disponible en este momento."
   const derivacionMsg = escalationPhoneNumber
-    ? `Para esa consulta te recomiendo comunicarte directamente con la clínica al *${escalationPhoneNumber}*.`
+    ? fraseDerivacion('Para esa consulta te recomiendo comunicarte directamente con la clínica', escalationPhoneNumber)
     : `Para esa consulta te recomiendo comunicarte directamente con la clínica.`
 
   // No mencionar el turno si ya pasó — no es relevante para la consulta
@@ -898,7 +899,9 @@ function buildMedicalDerivationResponse(appointmentContext: any, escalationPhone
   const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
 
   const derivacionMsg = escalationPhoneNumber
-    ? `Para consultas médicas, por favor comunicate directamente con la clínica al *${escalationPhoneNumber}* o consultalo con tu médico en tu próxima visita.`
+    ? (esContactoMultilinea(escalationPhoneNumber)
+        ? `Para consultas médicas, consultalo con tu médico en tu próxima visita o comunicate directamente con la clínica:\n\n${contactoDerivacion(escalationPhoneNumber)}`
+        : `Para consultas médicas, por favor comunicate directamente con la clínica al *${escalationPhoneNumber}* o consultalo con tu médico en tu próxima visita.`)
     : `Para consultas médicas, por favor consultalo directamente con tu médico en tu próxima visita o comunicate con la clínica.`
 
   // No mencionar el turno si ya pasó — no es relevante para la consulta médica
@@ -935,14 +938,16 @@ function buildLlegoTardeResponse(
   // Si el turno ya pasó hace rato, es posible que no puedan atenderlo
   if (turnoStatus === 'pasado_hoy' || turnoStatus === 'pasado') {
     const contactMsg = escalationPhoneNumber
-      ? `Te recomendamos llamar a la clínica al *${escalationPhoneNumber}* para consultar si aún pueden atenderte o coordinar un nuevo turno.`
+      ? (esContactoMultilinea(escalationPhoneNumber)
+          ? `Te recomendamos llamar a la clínica para consultar si aún pueden atenderte o coordinar un nuevo turno:\n\n${contactoDerivacion(escalationPhoneNumber)}`
+          : `Te recomendamos llamar a la clínica al *${escalationPhoneNumber}* para consultar si aún pueden atenderte o coordinar un nuevo turno.`)
       : `Te recomendamos comunicarte con la clínica para consultar si aún pueden atenderte.`
     return `${empaticResponse}\n\nEl turno era el ${fechaFormateada} a las ${hora || 'hora indicada'} con ${profesional || 'el profesional'} en ${sede || 'la sede'}.\n\n${contactMsg}`
   }
 
   // Turno en curso (puede que aún lleguen)
   const contactMsg = escalationPhoneNumber
-    ? `Si querés avisarle a la clínica, podés llamar al *${escalationPhoneNumber}*.`
+    ? fraseDerivacion('Si querés avisarle a la clínica, podés llamar', escalationPhoneNumber)
     : `Si podés, avisale a la clínica que estás en camino.`
 
   return `${empaticResponse} ¡Te esperamos!\n\nRecordá que tu turno es el ${fechaFormateada} a las *${hora || 'hora indicada'}* con ${profesional || 'el profesional'} en ${sede || 'la sede'}.\n\n${contactMsg}`
@@ -996,7 +1001,7 @@ Si querés solicitar un nuevo turno, puedo ayudarte a gestionarlo:
  */
 function buildOutOfScopeResponse(escalationPhoneNumber?: string): string {
   const phoneMsg = escalationPhoneNumber
-    ? `Para otro tipo de consultas, por favor contactanos al *${escalationPhoneNumber}*.`
+    ? fraseDerivacion('Para otro tipo de consultas, por favor contactanos', escalationPhoneNumber)
     : `Para otro tipo de consultas, por favor contactate directamente con la clínica.`
 
   return `Este canal de WhatsApp es exclusivo para la gestión de turnos médicos.\n\n${phoneMsg}\n\nSi en algún momento necesitás gestionar un turno, escribime y con gusto te ayudo.`

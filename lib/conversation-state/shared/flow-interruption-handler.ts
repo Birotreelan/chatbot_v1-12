@@ -20,6 +20,7 @@
 
 import { openai } from '@/lib/openai'
 import { createConversationLogger } from '../logger'
+import { fraseDerivacion, esContactoMultilinea } from '@/lib/utils/escalation-contact'
 
 // ---------------------------------------------------------------------------
 // Tipos públicos
@@ -168,8 +169,14 @@ function buildInterruptionResponse(
   escalationPhone?: string,
   resumePrompt?: string
 ): string {
+  // Ojo con el espacio inicial: phoneText se concatena al final de otra oración.
+  // Con datos de varias líneas, fraseDerivacion abre un bloque, así que el
+  // separador pasa a ser un salto de línea en vez de un espacio.
   const phoneText = escalationPhone
-    ? ` Para esa consulta te recomendamos comunicarte directamente con la clínica al *${escalationPhone}*.`
+    ? `${esContactoMultilinea(escalationPhone) ? '\n\n' : ' '}${fraseDerivacion(
+        'Para esa consulta te recomendamos comunicarte directamente con la clínica',
+        escalationPhone,
+      )}`
     : ' Para esa consulta te recomendamos comunicarte directamente con la clínica.'
 
   let responseBody: string
@@ -182,7 +189,12 @@ function buildInterruptionResponse(
     case 'location_inquiry':
       responseBody =
         `La dirección exacta de cada sede la podrás ver una vez que la selecciones en el listado.` +
-        (escalationPhone ? ` Para más detalles, comunicate con la clínica al *${escalationPhone}*.` : '')
+        (escalationPhone
+          ? `${esContactoMultilinea(escalationPhone) ? '\n\n' : ' '}${fraseDerivacion(
+              'Para más detalles, comunicate con la clínica',
+              escalationPhone,
+            )}`
+          : '')
       break
     case 'documentation_inquiry':
       responseBody =

@@ -15,6 +15,7 @@
 
 import { createConversationLogger } from '../logger'
 import { recordDiag, DIAG } from '@/lib/diagnostics'
+import { fraseDerivacion } from '@/lib/utils/escalation-contact'
 import { TOOL_NAMES } from './tool-manifest'
 import type { DispatcherDecision } from './dispatcher'
 import type { DispatcherContext } from './context-builder'
@@ -306,7 +307,7 @@ function buildInfoResponse(
 
 function buildDerivacionMessage(tipo: string, escalationPhone?: string): string {
   const phoneMsg = escalationPhone
-    ? `Para esa consulta comunicate directamente con la clínica al *${escalationPhone}*.`
+    ? fraseDerivacion('Para esa consulta comunicate directamente con la clínica', escalationPhone)
     : `Para esa consulta comunicate directamente con la clínica.`
 
   if (tipo === 'medica') {

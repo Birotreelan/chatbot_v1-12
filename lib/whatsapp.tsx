@@ -2,6 +2,7 @@ import { getWhatsAppConfigByPhoneId, getWhatsAppConfigById, updateWhatsAppStats,
 import { sendWhatsAppMessage, sendWhatsAppInteractive, sendWhatsAppList } from "@/lib/whatsapp-api"
 import { downloadWhatsAppMedia, transcribeAudio } from "@/lib/audio-transcription"
 import { saveConversationAudio } from "@/lib/conversation-audio"
+import { fraseDerivacion, esContactoMultilinea, contactoDerivacionEnLinea } from "@/lib/utils/escalation-contact"
 import { getArgentinaDateTime, formatDateWithDayOfWeek } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
@@ -508,7 +509,7 @@ function esTurnoNoEncontrado(body: ProxyConfirmBody | null): boolean {
 function mensajeFalloConfirmacion(motivo: MotivoFalloConfirmacion, escalationPhoneNumber?: string): string {
   if (motivo === "turno_no_encontrado") {
     const contacto = escalationPhoneNumber
-      ? `Por favor comunicate con nosotros al *${escalationPhoneNumber}* para verificarlo.`
+      ? fraseDerivacion('Para verificarlo, por favor comunicate con nosotros', escalationPhoneNumber)
       : `Por favor comunicate con la clínica para verificarlo.`
     return `No encontramos un turno agendado a tu nombre para esa fecha. Es posible que haya sido modificado o cancelado.\n\n${contacto}`
   }
@@ -1726,10 +1727,10 @@ async function startCancelDoubleConfirm(
   // cancelar+solicitar nuevo) empiezan cancelando el turno, así que se corta acá
   // antes de iniciar la doble confirmación.
   if (config.permitirCancelacion === false) {
-    const numeroDerivacion = config.escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
     await sendDirectResponse(
       ctxDirect,
-      `Actualmente no es posible cancelar turnos por este medio.\n\nPara cancelar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+      `Actualmente no es posible cancelar turnos por este medio.\n\n` +
+        fraseDerivacion('Para cancelar tu turno, por favor contactanos', config.escalationPhoneNumber),
       "cancelacion-no-permitida"
     )
     await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -1856,7 +1857,7 @@ async function sendHumanSupportReasonMenu(
 /** Mensaje cuando el paciente pide atención humana FUERA del horario de atención. */
 function buildHumanOffHoursMessage(escalationPhone: string | undefined, hoursLines: string[]): string {
   const phoneLine = escalationPhone
-    ? `Para hablar con alguien del equipo, comunicate directamente con la clínica al *${escalationPhone}*.`
+    ? fraseDerivacion('Para hablar con alguien del equipo, comunicate directamente con la clínica', escalationPhone)
     : `Para hablar con alguien del equipo, comunicate directamente con la clínica.`
   const hoursBlock = hoursLines.length
     ? `\n\nEstos son nuestros horarios de atención:\n\n${hoursLines.map((l) => `- ${l}.`).join("\n")}`
@@ -1871,7 +1872,7 @@ function buildHumanOffHoursMessage(escalationPhone: string | undefined, hoursLin
 /** Mensaje de fallback cuando no podemos derivar a un agente en este momento. */
 function buildHumanUnavailableMessage(escalationPhone?: string, hoursStr?: string): string {
   const phoneLine = escalationPhone
-    ? `Para hablar con alguien del equipo, comunicate directamente con la clínica al *${escalationPhone}*.`
+    ? fraseDerivacion('Para hablar con alguien del equipo, comunicate directamente con la clínica', escalationPhone)
     : `Para hablar con alguien del equipo, comunicate directamente con la clínica.`
   const hoursLine = hoursStr ? `\n\nEl horario de atención es ${hoursStr}.` : ""
   return `Por ahora no puedo conectarte con una persona desde acá.\n\n${phoneLine}${hoursLine}\n\nSi necesitás gestionar un turno, escribime y te ayudo.`
@@ -1941,12 +1942,20 @@ async function offerHumanOrSendPhone(
   if (await shouldOfferHuman(config)) {
     const clinicName = config.displayName || "la clínica"
     const escalationPhone = config.escalationPhoneNumber
-    const phoneRef = escalationPhone ? `*${escalationPhone}*` : "la clínica"
-    const offerMessage =
-      `Actualmente estás hablando con Iris, un asistente virtual de inteligencia artificial que solo está preparado para la gestión de turnos.\n\n` +
-      `Para otro tipo de consultas puedo derivarte a la atención humana de ${clinicName} y te atenderán en breve por este mismo canal o puedes contactarnos al ${phoneRef}.\n\n` +
+    const intro = `Actualmente estás hablando con Iris, un asistente virtual de inteligencia artificial que solo está preparado para la gestión de turnos.\n\n`
+    const cierre =
       `Por favor respondé presionando 1 o el botón aquí debajo si deseas hablar con el personal de ${clinicName}:\n\n` +
       `1. Requiero atención humana.`
+
+    // Con datos de contacto de varias líneas no se puede meter todo en el medio
+    // de la oración: se corta la frase y el bloque va aparte. Con una sola línea
+    // el texto queda EXACTAMENTE como antes.
+    const cuerpo = esContactoMultilinea(escalationPhone)
+      ? `Para otro tipo de consultas puedo derivarte a la atención humana de ${clinicName} y te atenderán en breve por este mismo canal.\n\n` +
+        `${fraseDerivacion('También podés contactarnos', escalationPhone)}\n\n`
+      : `Para otro tipo de consultas puedo derivarte a la atención humana de ${clinicName} y te atenderán en breve por este mismo canal o puedes contactarnos al ${escalationPhone ? `*${escalationPhone}*` : "la clínica"}.\n\n`
+
+    const offerMessage = intro + cuerpo + cierre
     await sendHumanOffer(ctx, config, offerMessage, phoneMessage, HUMAN_OFFER_BUTTONS)
     return
   }
@@ -5154,10 +5163,10 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             ) {
               // Restricción por configuración del cliente (WhatsAppConfig.permitirCancelacion,
               // default true). Ambas variantes empiezan cancelando el turno.
-              const numeroDerivacion = config.escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
               await sendDirectResponse(
                 detectionCtx,
-                `Actualmente no es posible cancelar turnos por este medio.\n\nPara cancelar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+                `Actualmente no es posible cancelar turnos por este medio.\n\n` +
+                  fraseDerivacion('Para cancelar tu turno, por favor contactanos', config.escalationPhoneNumber),
                 "cancelacion-no-permitida"
               )
             } else if (detectionResult.action === 'confirm_appointment' || detectionResult.action === 'cancel_appointment' || detectionResult.action === 'cancel_and_book_new_appointment') {
@@ -6076,10 +6085,10 @@ export async function processIndividualMessage(
       // Restricción por configuración del cliente (WhatsAppConfig.permitirReagendamiento,
       // default true). Corta antes de buscar turnos disponibles.
       if (config.permitirReagendamiento === false) {
-        const numeroDerivacion = config.escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
         await sendDirectResponse(
           { phoneNumberId, accessToken: config.accessToken, userPhoneNumber, configId: config.id, clienteId: config.cliente_id },
-          `Actualmente no es posible reagendar turnos por este medio.\n\nPara reagendar tu turno, por favor contactanos al: *${numeroDerivacion}*`,
+          `Actualmente no es posible reagendar turnos por este medio.\n\n` +
+            fraseDerivacion('Para reagendar tu turno, por favor contactanos', config.escalationPhoneNumber),
           "reagendamiento-no-permitido"
         )
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -6264,7 +6273,7 @@ Nombre: ${config.displayName}
 FechaHora: ${fechaHora}
 PrimerMensaje: true
 TipoMensaje: assistant_switch
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(config.escalationPhoneNumber)}` : ""}
 FuncionOrigen: route_to_reagendamiento${scheduleInfo}
 [/SISTEMA]
 
@@ -6417,13 +6426,13 @@ Hola, quisiera reagendar mi turno.`
           configId: config.id,
           clienteId: config.cliente_id,
         }
-        const phoneLine = config.escalationPhoneNumber ? ` al *${config.escalationPhoneNumber}*` : ""
         // Mensaje genérico a propósito: este catch envuelve TODO el interceptor
         // de reagendamiento (todas sus fases), no sólo el tramo posterior a una
         // cancelación — no podemos asumir que el turno ya fue cancelado acá.
         await sendDirectResponse(
           ctxRescheduleError,
-          `Tuvimos un problema procesando tu pedido de reagendar el turno. Por favor escribime "turno" para intentar de nuevo, o comunicate directamente con la clínica${phoneLine}.`,
+          `Tuvimos un problema procesando tu pedido de reagendar el turno. Por favor escribime "turno" para intentar de nuevo.\n\n` +
+            fraseDerivacion('También podés comunicarte directamente con la clínica', config.escalationPhoneNumber),
           "reschedule-flow-error",
         )
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -6556,7 +6565,7 @@ Nombre: ${config.displayName}
 FechaHora: ${getArgentinaDateTime()}
 PrimerMensaje: ${threadResult.isNewThread}
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${scheduleInfo}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(config.escalationPhoneNumber)}` : ""}${scheduleInfo}
 [/SISTEMA]
 
 ${userMessage}`
@@ -6569,7 +6578,7 @@ FechaHora: ${getArgentinaDateTime()}
 PrimerMensaje: true
 ThreadReseteado: true
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${config.escalationPhoneNumber}` : ""}${scheduleInfo}
+PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(config.escalationPhoneNumber)}` : ""}${scheduleInfo}
 [/SISTEMA]
 
 ${userMessage}`

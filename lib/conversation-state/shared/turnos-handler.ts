@@ -11,6 +11,7 @@
 import { createConversationLogger } from '../logger'
 import { obtenerTurnos } from '../../api-tools/api-functions'
 import type { TurnoOption, HandlerResult } from './types'
+import { fraseDerivacion } from '@/lib/utils/escalation-contact'
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -321,9 +322,7 @@ export function buildNoTurnosMessage(
   if (searchType === 'cualquier_medico' && infoSinTurnos?.profesionales_disponibles_solo_telefono?.length > 0) {
     message += `No encontré turnos disponibles para agendar online en *${sedeName || 'esta sede'}*.\n\n`
     message += `Sin embargo, hay profesionales con turnos disponibles para tu obra social que solo se pueden reservar por teléfono.\n\n`
-    message += `Para agendar tu turno, comunicate directamente con la clínica`
-    if (escalationPhoneNumber) message += ` al: *${escalationPhoneNumber}*`
-    message += `.`
+    message += fraseDerivacion('Para agendar tu turno, comunicate directamente con la clínica', escalationPhoneNumber)
     return message
   }
 
