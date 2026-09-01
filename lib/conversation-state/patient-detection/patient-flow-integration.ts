@@ -17,6 +17,7 @@ import {
   updatePatientDetectionObraSocialBloqueada,
 } from './patient-flow-handler'
 import type { ObraSocialBloqueada } from './patient-templates'
+import { fraseDerivacion } from '@/lib/utils/escalation-contact'
 import {
   buildExistingPatientGreeting,
   buildNewPatientGreeting,
@@ -711,7 +712,8 @@ export async function handleDNIForMultiplePatients(
   dniMessage: string,
   configId: string,
   clienteId: string,
-  clinicName?: string
+  clinicName?: string,
+  escalationPhoneNumber?: string
 ): Promise<PatientDetectionResult> {
   const logger = createConversationLogger(phoneNumber, configId, 'dni_disambiguation')
   logger.info('Processing DNI for multiple patients', {})
@@ -773,11 +775,15 @@ export async function handleDNIForMultiplePatients(
       }
     }
 
+    // "contactá al centro" a secas dejaba al paciente sin saber CÓMO hacerlo
+    // (31/8/2026). Se agregan los datos de derivación configurados: con un solo
+    // número queda en la misma frase; con varias líneas, como bloque debajo.
     return {
       handled: true,
       message:
-        `El DNI ${dniMatch} no está registrado con este número de teléfono. ` +
-        `Por favor, intenta de nuevo o contactá al centro.`,
+        `El DNI ${dniMatch} no está registrado con este número de teléfono.\n\n` +
+        `Por favor verificá el número e intentá de nuevo.\n\n` +
+        fraseDerivacion('Si el problema continúa, comunicate con nosotros', escalationPhoneNumber),
       patientInfo: {
         isNewPatient: false,
       },

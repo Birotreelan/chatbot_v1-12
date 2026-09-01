@@ -4745,7 +4745,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         if (detectionResult?.action === 'dni_disambiguation_pending') {
           // Paciente ingresó DNI para desambiguar múltiples pacientes
           const dniResult = await handleDNIForMultiplePatients(
-            userPhoneNumber, userMessage, config.id, config.cliente_id, config.displayName
+            userPhoneNumber, userMessage, config.id, config.cliente_id, config.displayName,
+            config.escalationPhoneNumber
           )
           if (dniResult.handled && dniResult.message) {
             await sendDirectResponse(detectionCtx, dniResult.message, "dni_disambiguation")
