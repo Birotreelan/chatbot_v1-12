@@ -18,6 +18,7 @@ import { createConversationLogger } from "./logger"
 import { openai } from "@/lib/openai"
 import { getTurnoTemporalStatus } from "@/lib/utils/date-utils"
 import { fraseDerivacion, contactoDerivacion, esContactoMultilinea } from "@/lib/utils/escalation-contact"
+import { recordDiag, recordDiagSample, DIAG } from "@/lib/diagnostics"
 import { getRedisClient } from "@/lib/redis"
 import { isMarkedAsWrongPerson } from "./wrong-number-handler"
 
@@ -460,17 +461,50 @@ function normalizeText(text: string): string {
 
 /**
  * PRIORIDAD MÁXIMA: consultas médicas que JAMÁS debemos responder.
- * Amplio vocabulario para minimizar falsos negativos.
+ *
+ * ── Reforma del 1/9/2026 (caso Guemes, tel. 2214001402) ────────────────────
+ *
+ * Un paciente escribió "voy a tener que cambiar los turnos con Guemes *que
+ * tengo* para mañana" y el sistema le respondió que no podemos dar información
+ * médica. El culpable era el patrón `que tengo`, puesto acá para cazar
+ * "¿qué tengo?" (el paciente preguntando su diagnóstico) — pero esa misma
+ * secuencia aparece en cualquier frase normal: "el turno que tengo", "los
+ * turnos que tengo para mañana".
+ *
+ * La prueba está en los logs de ese día: el mensaje siguiente decía casi lo
+ * mismo SIN esa expresión, las reglas no matchearon, escaló a la IA y se
+ * clasificó bien como reagendamiento. La única diferencia entre acertar y
+ * fallar eran dos palabras.
+ *
+ * El problema de fondo no es este patrón puntual: es que una expresión
+ * ambigua producía una decisión TERMINAL con confianza 0.95, y la IA nunca
+ * llegaba a ver el mensaje. Una regex mira palabras sueltas; distinguir
+ * "los turnos que tengo" de "¿qué tengo, doctor?" requiere leer la oración
+ * entera, y eso no se cubre con listas de palabras.
+ *
+ * Por eso ahora hay dos niveles:
+ *
+ *   - INEQUÍVOCO: vocabulario que no puede significar otra cosa dentro de una
+ *     conversación de turnos ("ibuprofeno", "hemograma", "vision borrosa").
+ *     Sigue decidiendo por regla: es instantáneo, gratis y no se equivoca.
+ *
+ *   - AMBIGUO: expresiones frecuentes en el habla común ("que tengo",
+ *     "puedo hacer", "me recomienda"). Ya NO deciden. Bajan la confianza para
+ *     que el mensaje escale al clasificador con IA, que lee la frase completa.
+ *
+ * Esto NO debilita la protección: la IA también trata la consulta médica como
+ * prioridad máxima en su prompt. Lo que cambia es quién decide en los casos
+ * dudosos — pasa de una lista de palabras a un modelo que entiende contexto.
  */
-function isMedicalQuery(msg: string): boolean {
+function esConsultaMedicaInequivoca(msg: string): boolean {
   // Medicamentos, dosis, administración
   if (/\b(medicamento|medicina|pastilla|comprimido|capsula|ibuprofeno|paracetamol|aspirina|antibiotico|antibioticos|vacuna|dosis|gotas (oculares|para|del)|pomada|crema|jarabe|inyeccion|suero|prescripcion|receta medica|me den una receta|necesito receta)\b/.test(msg)) return true
 
   // Síntomas físicos
   if (/\b(dolor|ardor|picazon|hinchazon|inflamacion|fiebre|temperatura (alta|elevada)|mareo|nausea|vomito|diarrea|constipacion|sangrado|herida|golpe|fractura|quemadura|alergia|sarpullido|erupcion|tos|gripe|covid|infeccion|bacteria|virus|hongo|vision borrosa|ojo (rojo|lastimado|hinchado)|oido|escucho mal|sordera|perdida de vision|perdida de audicion|sangre)\b/.test(msg)) return true
 
-  // Diagnóstico y consulta clínica
-  if (/\b(diagnostico|que tengo|que me pasa|que le pasa|enfermedad|condicion medica|es grave|es normal que|tengo que tomar|curable|cronico|agudo|benigno|maligno|cancer|tumor|quiste|calcul|opera|cirugia|tratamiento|terapia|rehabilitacion|curar|sanar|puedo tomar|debo tomar|deberia tomar|hay que tomar|puedo hacer|que hago (si|con|para)|que hago si me|me recomienda)\b/.test(msg)) return true
+  // Diagnóstico y consulta clínica — sólo términos clínicos explícitos.
+  if (/\b(diagnostico|que me pasa|que le pasa|enfermedad|condicion medica|es grave|tengo que tomar|curable|cronico|agudo|benigno|maligno|cancer|tumor|quiste|cirugia|tratamiento|terapia|rehabilitacion|curar|sanar|puedo tomar|debo tomar|deberia tomar|hay que tomar)\b/.test(msg)) return true
 
   // Estudios y resultados clínicos
   if (/\b(analisis (de sangre|clinico|de orina)|estudio medico|resultado (del analisis|del estudio)|laboratorio|radiografia|ecografia|tomografia|resonancia|biopsia|cultivo|plaqueta|hemograma|colesterol|glucosa|glucemia|hormona|examen medico|informe medico)\b/.test(msg)) return true
@@ -482,6 +516,23 @@ function isMedicalQuery(msg: string): boolean {
   if (/\b(emergencia|guardia medica|sala de guardia|ambulancia|llamen al|urgencia medica)\b/.test(msg)) return true
 
   return false
+}
+
+/**
+ * Expresiones que PUEDEN ser una consulta médica pero también aparecen en
+ * frases perfectamente normales sobre un turno. No deciden: sólo mandan el
+ * mensaje a la IA para que lo lea completo.
+ *
+ * Cada una con el falso positivo real o plausible que la volvió sospechosa:
+ *   que tengo      → "los turnos que tengo para mañana"  (caso Guemes, 1/9/2026)
+ *   puedo hacer    → "¿puedo hacer el cambio de fecha?"
+ *   es normal que  → "¿es normal que tarden tanto en atender?"
+ *   me recomienda  → "¿qué sede me recomienda?"
+ *   que hago si    → "¿qué hago si no puedo ir?"  (en realidad: cancelación)
+ *   opera / calcul → palabras cortas que aparecen dentro de otras ideas
+ */
+function tieneSenalMedicaAmbigua(msg: string): boolean {
+  return /\b(que tengo|puedo hacer|es normal que|me recomienda|que hago (si|con|para)|opera|calcul)\b/.test(msg)
 }
 
 /** Consultas administrativas que no podemos responder (derivar a clínica) */
@@ -522,12 +573,23 @@ function isCancellation(msg: string): boolean {
   // queja genérica, sin buscar el turno ni ofrecer cancelarlo. Se agregan las
   // conjugaciones de imperativo más comunes en español rioplatense (formal
   // "cancele", informal "cancela"/"cancelame"/"cancelalo").
-  return /\b(cancelo|cancela|cancele|cancelame|cancelalo|cancelar( el turno)?|tengo que cancelar|quiero cancelar|no puedo (ir|asistir|concurrir)|no (voy|ire|asistire)|no voy a poder|no podre ir|no podré ir|baja el turno|bajar el turno|dar de baja el turno)\b/.test(msg)
+  // 1/9/2026: "no voy" se acotó a "no voy a (ir|poder|asistir)". Suelto matcheaba
+  // también "no voy a cancelar" — es decir, la frase que significa exactamente lo
+  // contrario terminaba clasificada como cancelación.
+  return /\b(cancelo|cancela|cancele|cancelame|cancelalo|cancelar( el turno)?|tengo que cancelar|quiero cancelar|no puedo (ir|asistir|concurrir)|no (ire|asistire)|no voy a (ir|poder|asistir)|no podre ir|no podré ir|baja el turno|bajar el turno|dar de baja el turno)\b/.test(msg)
 }
 
-/** Reagendamiento */
+/**
+ * Reagendamiento.
+ *
+ * 1/9/2026 — hueco encontrado revisando el caso Guemes: el patrón sólo aceptaba
+ * "cambiar la fecha/turno/horario". La forma más natural de decirlo en
+ * castellano — "cambiar *el* turno", "cambiar *mis* turnos" — no matcheaba, así
+ * que la frase más común de todas caía a la IA en vez de resolverse por regla.
+ * Acá ampliar SÍ es seguro: son determinantes, no cambian el significado.
+ */
 function isReschedule(msg: string): boolean {
-  return /\b(reagend|cambiar (la )?(fecha|turno|horario)|otra fecha|otro horario|distinto horario|mover (el )?turno|postergar( el turno)?|adelantar( el turno)?|cambio de (fecha|horario)|diferente fecha|nuevo horario|otro dia para|otro momento para)\b/.test(msg)
+  return /\b(reagend|cambiar (el |la |los |las |mi |mis )?(fecha|fechas|turno|turnos|horario|horarios)|otra fecha|otro horario|distinto horario|mover (el |mi )?turno|postergar( el turno)?|adelantar( el turno)?|cambio de (fecha|horario)|diferente fecha|nuevo horario|otro dia para|otro momento para)\b/.test(msg)
 }
 
 /** Consulta informativa sobre datos del turno (dirección, hora, profesional) */
@@ -535,9 +597,18 @@ function isInformationalQuery(msg: string): boolean {
   return /\b(donde (queda|es|esta) (la sede|el consultorio|el lugar)?|a que hora (es|tengo)|con quien (es|tengo)|cual es la (direccion|sede|lugar)|como llego (a la sede|al consultorio)?|la direccion( exacta)?|la hora (del turno|es)?|fecha (del turno|exacta)?|quien es (el|la) (medico|profesional|doctor)|en que (sede|consultorio|lugar))\b/.test(msg)
 }
 
-/** Queja o frustración */
+/**
+ * Queja o frustración.
+ *
+ * 1/9/2026 — se sacaron dos patrones por la misma razón que `que tengo` en las
+ * consultas médicas (ver esConsultaMedicaInequivoca):
+ *   "muy mal"    → "ese horario me viene muy mal" es un REAGENDAMIENTO, no una queja.
+ *   "paciencia"  → "gracias por la paciencia" es lo contrario de una queja.
+ * Sin ellos, esos mensajes bajan de confianza y los clasifica la IA leyendo la
+ * frase entera.
+ */
 function isComplaint(msg: string): boolean {
-  return /\b(estuve (llamando|intentando|tratando)|nunca (atienden|funcionan|me atendieron|me respondieron)|siempre igual|imposible (comunicarse|contactarlos|hablar)|nadie (atiende|responde|contesta)|dias (llamando|esperando|tratando)|horas (esperando|llamando)|muy (mal|malo)|pesimo|nefasto|terrible|horrible|un desastre|no funciona(n)?|mal servicio|paciencia|no es posible que|increible que)\b/.test(msg)
+  return /\b(estuve (llamando|intentando|tratando)|nunca (atienden|funcionan|me atendieron|me respondieron)|siempre igual|imposible (comunicarse|contactarlos|hablar)|nadie (atiende|responde|contesta)|dias (llamando|esperando|tratando)|horas (esperando|llamando)|pesimo|nefasto|terrible|horrible|un desastre|no funciona(n)?|mal servicio|no es posible que|increible que)\b/.test(msg)
 }
 
 /** Explicación contextual — el paciente informa un motivo */
@@ -592,12 +663,30 @@ function classifyIntentWithRules(
 ): FallbackIntentResult {
   const msg = normalizeText(userMessage)
 
-  // 1. PRIORIDAD MÁXIMA: consulta médica prohibida
-  if (isMedicalQuery(msg)) {
+  // 1. PRIORIDAD MÁXIMA: consulta médica prohibida.
+  //    Sólo el vocabulario inequívoco decide acá (ver esConsultaMedicaInequivoca).
+  if (esConsultaMedicaInequivoca(msg)) {
     return {
       intent: "consulta_medica_prohibida",
       confidence: 0.95,
       reasoning: "Consulta médica detectada — derivar a profesional de salud",
+    }
+  }
+
+  // 1b. Señal ambigua: puede ser médica o puede ser una frase común sobre el
+  //     turno. No se decide por regla — se devuelve confianza baja a propósito
+  //     para que classifyIntent escale a la IA, que lee la oración completa.
+  if (tieneSenalMedicaAmbigua(msg)) {
+    void recordDiag(undefined, DIAG.REGLA_AMBIGUA_ESCALADA_A_IA)
+    void recordDiagSample({
+      tipo: DIAG.REGLA_AMBIGUA_ESCALADA_A_IA,
+      mensaje: userMessage,
+      detalle: { detector: "consulta_medica" },
+    })
+    return {
+      intent: "otro",
+      confidence: 0.3,
+      reasoning: "Señal médica ambigua — la decide la IA con la oración completa",
     }
   }
 

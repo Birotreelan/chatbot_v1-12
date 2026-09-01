@@ -125,6 +125,15 @@ export const DIAG = {
    * Si este contador sube, hay un camino que deja avanzar sin identidad.
    */
   RESERVA_SIN_DATOS_PACIENTE: "reserva_sin_datos_paciente",
+  /**
+   * Un clasificador por reglas encontró una expresión AMBIGUA y, en vez de
+   * decidir, cedió el mensaje a la IA (1/9/2026, caso Guemes).
+   *
+   * Las muestras de esta métrica son la materia prima para afinar los patrones:
+   * si una expresión escala siempre y la IA siempre coincide con la regla, se
+   * puede promover a inequívoca; si la IA suele contradecirla, se saca del todo.
+   */
+  REGLA_AMBIGUA_ESCALADA_A_IA: "regla_ambigua_escalada_a_ia",
   OTRA_CONSULTA_SIN_RESPUESTA: "otra_consulta_sin_respuesta", // opción 3 del menú
   /** "Otra consulta" SÍ se pudo responder con la base de conocimiento institucional (Tarea #42, 31/8/2026). */
   OTRA_CONSULTA_RESPONDIDA_CLINIC_INFO: "otra_consulta_respondida_clinic_info",

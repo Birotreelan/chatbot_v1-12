@@ -231,12 +231,15 @@ function classifyFarewellByRules(message: string): { intent: FarewellIntent; con
     }
   }
   
-  // Si contiene signos de interrogación, probablemente es consulta
+  // 1/9/2026 — Misma corrección que en direct-confirmation-handler.ts: un signo
+  // de interrogación es puntuación, no intención ("Si es posible ?" es una
+  // afirmación). Sigue siendo una pista, pero por debajo del umbral, para que
+  // decida la IA leyendo la frase entera.
   if (message.includes("?")) {
     return {
       intent: "consulta_con_cortesia",
-      confidence: 0.85,
-      reasoning: "Contiene signo de interrogación, indica consulta",
+      confidence: 0.5,
+      reasoning: "Tiene signo de interrogación — pista débil, la decide la IA",
     }
   }
   

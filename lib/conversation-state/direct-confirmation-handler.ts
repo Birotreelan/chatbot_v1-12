@@ -400,12 +400,21 @@ function classifyByRules(message: string): NLUResult {
     }
   }
 
-  // Si contiene signos de interrogación, probablemente es consulta
+  // 1/9/2026 — Antes acá alcanzaba con que el mensaje tuviera un "?" para
+  // clasificarlo como consulta con confianza 0.85, es decir, para DECIDIR.
+  // Un signo de puntuación no dice nada sobre la intención: en el caso Guemes
+  // (tel. 2214001402) el paciente respondió "Si es posible ?" a un menú de dos
+  // opciones — una afirmación, no una consulta — y esta regla la desvió.
+  //
+  // Ahora la interrogación sigue siendo una pista, pero con confianza por
+  // debajo del umbral: el mensaje escala al clasificador con IA, que lee la
+  // frase completa y el contexto del turno. Misma política que en
+  // nlu-fallback-handler.ts (ver esConsultaMedicaInequivoca).
   if (message.includes("?")) {
     return {
       intent: "consulta_con_cortesia",
-      confidence: 0.85,
-      reasoning: "Contiene signo de interrogación, indica consulta",
+      confidence: 0.5,
+      reasoning: "Tiene signo de interrogación — pista débil, la decide la IA",
     }
   }
   
