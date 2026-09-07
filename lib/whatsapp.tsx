@@ -637,6 +637,17 @@ async function confirmarTurnoEnProxy(
     // Marcar el turno como confirmado para no volver a ofrecer "Confirmar asistencia"
     if (config.id) {
       await markAppointmentConfirmed(userPhoneNumber, config.id, getAppointmentRef(chatbotData))
+      // Refrescar el TTL del contexto (48h desde AHORA, no desde que se mandó el
+      // recordatorio). Caso Natalia (tel. 1140784331, 7/9/2026): confirmó a las
+      // 09:02 con el contexto todavía vivo (por 18 min), y a las 09:31 — 29 min
+      // después — quiso cancelar y el contexto ya había expirado (justo se había
+      // mandado el recordatorio 47.7h antes). El fallback a buscar el paciente por
+      // teléfono en el backend existe para este caso (incidente 2026-07-06), pero
+      // acá no encontró al paciente igual, y el bot respondió "no encontré un
+      // turno activo". En el momento de confirmar ya validamos el DNI y el turno
+      // contra el sistema externo — no hay motivo para dejar que ese conocimiento
+      // se pierda si el paciente escribe de nuevo minutos después.
+      await saveAppointmentContext(userPhoneNumber, config.id, chatbotData)
     }
     return { exito: true }
   } catch (error) {

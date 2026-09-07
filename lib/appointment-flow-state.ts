@@ -152,11 +152,18 @@ export function getAppointmentRef(chatbotData: ChatbotData | null | undefined): 
   const turno = Array.isArray(chatbotData.turnos) && chatbotData.turnos.length > 0
     ? chatbotData.turnos[0]
     : undefined
-  return (
+  const ref =
     turno?.agenda_id ||
     (chatbotData as unknown as { appointment_id?: string }).appointment_id ||
     undefined
-  )
+  // Caso Amalia (tel. 2234557171, 7/9/2026): el tipo dice `agenda_id: string`, pero
+  // el proxy externo lo manda como número JSON sin comillas ("agenda_id":321958).
+  // getAppointmentRef devolvía ese número tal cual, y isAppointmentConfirmed lo
+  // comparaba con "===" contra lo guardado en Redis (siempre string) — 321958 !==
+  // "321958", así que la comparación fallaba SIEMPRE que agenda_id llegara como
+  // número. El turno confirmado 27 segundos antes se volvía a dar por "no
+  // confirmado" y el bot le repetía el menú de confirmación explícita.
+  return ref === undefined || ref === null || ref === '' ? undefined : String(ref)
 }
 
 // ============================================================================
@@ -391,8 +398,10 @@ export async function isAppointmentConfirmed(
     // Marca genérica (sin ref) → aplica a cualquier turno activo
     if (storedRef === "1") return true
 
-    // Si tenemos ref del turno actual, exigir coincidencia con la marca guardada
-    if (appointmentRef) return storedRef === appointmentRef
+    // Si tenemos ref del turno actual, exigir coincidencia con la marca guardada.
+    // String() por si el caller no pasó por getAppointmentRef() y trae el ref
+    // como número (ver comentario en getAppointmentRef).
+    if (appointmentRef) return storedRef === String(appointmentRef)
 
     // Sin ref para comparar, asumimos que la marca aplica
     return true
