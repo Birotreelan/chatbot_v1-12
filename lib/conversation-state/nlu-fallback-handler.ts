@@ -1127,7 +1127,17 @@ function buildLlegoTardeResponse(
   const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
   const fechaFormateada = fecha ? formatDate(fecha) : 'la fecha indicada'
 
-  const empaticResponse = gptResponse || "Entendemos que estás en camino."
+  // 7/9/2026 (caso Jose Ibarra, tel. 1158352441): acá se usaba el texto libre
+  // que generaba GPT ("Entiendo, gracias por avisar. Te esperamos a las
+  // 12:50.") y el bot se lo repetía al paciente tal cual, rematado con
+  // "¡Te esperamos!". Eso es prometer en nombre de la clínica algo que el
+  // sistema no puede saber: si el profesional puede atender con esa demora
+  // depende de la agenda real (otros pacientes, horario de cierre, etc.), no
+  // de nuestros datos. Se deja de usar gptResponse para esta parte — el
+  // mensaje ahora es neutral (avisamos que tomamos nota, no confirmamos ni
+  // descartamos el horario nuevo) y siempre remite a la clínica, que es quien
+  // puede decidirlo.
+  const gracias = "Gracias por avisar."
 
   // Si el turno ya pasó hace rato, es posible que no puedan atenderlo
   if (turnoStatus === 'pasado_hoy' || turnoStatus === 'pasado') {
@@ -1136,15 +1146,16 @@ function buildLlegoTardeResponse(
           ? `Te recomendamos llamar a la clínica para consultar si aún pueden atenderte o coordinar un nuevo turno:\n\n${contactoDerivacion(escalationPhoneNumber)}`
           : `Te recomendamos llamar a la clínica al *${escalationPhoneNumber}* para consultar si aún pueden atenderte o coordinar un nuevo turno.`)
       : `Te recomendamos comunicarte con la clínica para consultar si aún pueden atenderte.`
-    return `${empaticResponse}\n\nEl turno era el ${fechaFormateada} a las ${hora || 'hora indicada'} con ${profesional || 'el profesional'} en ${sede || 'la sede'}.\n\n${contactMsg}`
+    return `${gracias}\n\nEl turno era el ${fechaFormateada} a las ${hora || 'hora indicada'} con ${profesional || 'el profesional'} en ${sede || 'la sede'}.\n\n${contactMsg}`
   }
 
-  // Turno en curso (puede que aún lleguen)
+  // Turno todavía no pasó (futuro, próximo o en curso): no podemos confirmar
+  // si la demora que menciona es aceptable — eso lo define la clínica.
   const contactMsg = escalationPhoneNumber
-    ? fraseDerivacion('Si querés avisarle a la clínica, podés llamar', escalationPhoneNumber)
-    : `Si podés, avisale a la clínica que estás en camino.`
+    ? fraseDerivacion('Avisale directamente a la clínica para que te confirmen si pueden esperarte', escalationPhoneNumber)
+    : `Avisale directamente a la clínica para que te confirmen si pueden esperarte.`
 
-  return `${empaticResponse} ¡Te esperamos!\n\nRecordá que tu turno es el ${fechaFormateada} a las *${hora || 'hora indicada'}* con ${profesional || 'el profesional'} en ${sede || 'la sede'}.\n\n${contactMsg}`
+  return `${gracias} No te puedo confirmar desde acá si van a poder esperarte con esa demora.\n\nTu turno sigue agendado para el ${fechaFormateada} a las *${hora || 'hora indicada'}* con ${profesional || 'el profesional'} en ${sede || 'la sede'}.\n\n${contactMsg}`
 }
 
 /**

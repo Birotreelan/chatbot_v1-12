@@ -405,18 +405,12 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
                   <CalendarClock className="h-6 w-6 text-amber-500 mx-auto mb-2" />
                   <div className="text-3xl font-bold text-green-600">{stats?.totalRescheduled || 0}</div>
                   <div className="text-sm text-muted-foreground mt-1">Turnos reagendados</div>
-                  <div className="text-xs text-green-600 mt-1">
-                    De {stats?.totalRescheduleStarted || 0} procesos iniciados ({stats?.rescheduleConversionRate?.toFixed(1) || 0}%)
-                  </div>
                 </div>
 
                 <div className="text-center p-4 bg-white rounded-lg border border-green-100">
                   <PlusCircle className="h-6 w-6 text-green-500 mx-auto mb-2" />
                   <div className="text-3xl font-bold text-green-600">{stats?.totalNewAppointments || 0}</div>
                   <div className="text-sm text-muted-foreground mt-1">Nuevos turnos agendados exitosamente</div>
-                  <div className="text-xs text-green-600 mt-1">
-                    De {stats?.totalUserInitiated || 0} conversaciones iniciadas ({newAppointmentConversionRate.toFixed(1)}%)
-                  </div>
                 </div>
               </div>
             </CardContent>

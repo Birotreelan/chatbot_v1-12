@@ -2067,13 +2067,25 @@ async function runPrimaryDispatcherNoFlow(
 ): Promise<boolean> {
   const routerLogger = createConversationLogger(userPhoneNumber, config.id, "router-primary")
   try {
-    const [dispatcherAppCtx, dispatcherHistory] = await Promise.all([
+    let [dispatcherAppCtx, dispatcherHistory] = await Promise.all([
       getAppointmentContext(userPhoneNumber, config.id).catch(() => null),
       import('./conversation-state/conversation-history')
         .then((m) => m.getHistory(userPhoneNumber))
         .then((msgs: any[]) => msgs.map((m: any) => `${m.role === 'user' ? 'Paciente' : 'Bot'}: ${m.text}`).join('\n'))
         .catch(() => ''),
     ])
+
+    // Caso Etcheverria (tel. 1140724398, 7/9/2026): paciente escribe en frío
+    // preguntando por su cirugía de mañana. Sin contexto en Redis (nunca se le
+    // mandó recordatorio, o venció), el dispatcher se quedaba con turnosCount:0
+    // y respondía "cuando tengas tu turno agendado vas a poder elegir..." — una
+    // mentira, porque el turno YA existe en el sistema del cliente. La misma
+    // información está a un get_paciente por teléfono de distancia (el mismo
+    // fallback que ya usa la cancelación cuando el contexto de Redis expiró,
+    // incidente 2026-07-06) — acá simplemente nunca se llamaba.
+    if (!dispatcherAppCtx && config.cliente_id) {
+      dispatcherAppCtx = await rebuildAppointmentContextFromBackend(userPhoneNumber, config).catch(() => null)
+    }
 
     const dispatcherCtx = await buildDispatcherContext(userPhoneNumber, config.id, dispatcherAppCtx, dispatcherHistory, config.cliente_id)
     const dispatcherResult = await runAIDispatcher(userPhoneNumber, config.id, userMessage, dispatcherCtx)
