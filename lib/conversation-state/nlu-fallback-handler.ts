@@ -74,6 +74,13 @@ export async function detectNLUFallbackPreFlow(
   conversationHistory?: string,
   escalationPhoneNumber?: string,
   alreadyConfirmed?: boolean,
+  /**
+   * true si hay un recordatorio reciente (ventana de 24h) pidiéndole al paciente
+   * que confirme o cancele, y todavía no lo hizo. Con esta señal las reglas se
+   * abstienen sobre mensajes cortos y deja decidir a la IA — ver
+   * ContextoParaReglas (7/9/2026).
+   */
+  confirmacionPendiente?: boolean,
 ): Promise<{
   shouldHandle: boolean
   result?: FallbackIntentResult
@@ -167,6 +174,9 @@ export async function detectNLUFallbackPreFlow(
     const classificationResult = await classifyIntent(
       userMessage,
       appointmentContext,
+      // Si el turno ya fue confirmado no hay nada pendiente, por más que la
+      // ventana de 24h siga abierta.
+      { confirmacionPendiente: confirmacionPendiente && !alreadyConfirmed },
     )
 
     logger.info(`[Sprint 18] Clasificación NLU completada`, classificationResult)
@@ -367,8 +377,9 @@ export async function detectNLUFallbackPreFlow(
 async function classifyIntent(
   userMessage: string,
   appointmentContext: any,
+  contexto: ContextoParaReglas = {},
 ): Promise<FallbackIntentResult> {
-  const rulesResult = classifyIntentWithRules(userMessage)
+  const rulesResult = classifyIntentWithRules(userMessage, contexto)
 
   if (rulesResult.confidence >= 0.7) {
     logger.info(`[Sprint 18] Clasificado por reglas: ${rulesResult.intent} (conf: ${rulesResult.confidence})`)
@@ -500,8 +511,12 @@ function esConsultaMedicaInequivoca(msg: string): boolean {
   // Medicamentos, dosis, administración
   if (/\b(medicamento|medicina|pastilla|comprimido|capsula|ibuprofeno|paracetamol|aspirina|antibiotico|antibioticos|vacuna|dosis|gotas (oculares|para|del)|pomada|crema|jarabe|inyeccion|suero|prescripcion|receta medica|me den una receta|necesito receta)\b/.test(msg)) return true
 
-  // Síntomas físicos
-  if (/\b(dolor|ardor|picazon|hinchazon|inflamacion|fiebre|temperatura (alta|elevada)|mareo|nausea|vomito|diarrea|constipacion|sangrado|herida|golpe|fractura|quemadura|alergia|sarpullido|erupcion|tos|gripe|covid|infeccion|bacteria|virus|hongo|vision borrosa|ojo (rojo|lastimado|hinchado)|oido|escucho mal|sordera|perdida de vision|perdida de audicion|sangre)\b/.test(msg)) return true
+  // Síntomas físicos.
+  // 1/9/2026 — el corpus destapó un falso NEGATIVO: estaba "dolor" (sustantivo)
+  // pero no las formas verbales, que son como la gente realmente escribe.
+  // "me duele mucho el ojo desde ayer" no matcheaba nada. En una barrera de
+  // seguridad, dejar pasar es el error más caro de los dos.
+  if (/\b(dolor|duele|duelen|dolia|dolian|me arde|arde|ardor|picazon|pica|hinchazon|hinchado|inflamacion|inflamado|fiebre|temperatura (alta|elevada)|mareo|mareos|nausea|nauseas|vomito|diarrea|constipacion|sangrado|sangra|herida|golpe|fractura|quemadura|alergia|sarpullido|erupcion|tos|gripe|covid|infeccion|bacteria|virus|hongo|vision borrosa|veo (borroso|mal|nublado)|ojo (rojo|lastimado|hinchado)|oido|escucho mal|sordera|perdida de vision|perdida de audicion|sangre)\b/.test(msg)) return true
 
   // Diagnóstico y consulta clínica — sólo términos clínicos explícitos.
   if (/\b(diagnostico|que me pasa|que le pasa|enfermedad|condicion medica|es grave|tengo que tomar|curable|cronico|agudo|benigno|maligno|cancer|tumor|quiste|cirugia|tratamiento|terapia|rehabilitacion|curar|sanar|puedo tomar|debo tomar|deberia tomar|hay que tomar)\b/.test(msg)) return true
@@ -588,8 +603,38 @@ function isCancellation(msg: string): boolean {
  * que la frase más común de todas caía a la IA en vez de resolverse por regla.
  * Acá ampliar SÍ es seguro: son determinantes, no cambian el significado.
  */
+/**
+ * ¿El mensaje NIEGA la cancelación en vez de pedirla?
+ *
+ * "no voy a cancelar, quiero confirmar" contiene la palabra "cancelar", así que
+ * isCancellation la reconoce — y terminaba clasificando como cancelación justo
+ * la frase que significa lo contrario. Es el límite estructural de una regex:
+ * ve la palabra, no la negación que la gobierna.
+ *
+ * Se busca un "no" seguido de hasta tres palabras y después la raíz "cancel".
+ * La coma corta el patrón a propósito: en "no puedo ir, cancelame el turno" la
+ * negación pertenece a otra oración y la cancelación sí es real.
+ */
+function tieneNegacionDeCancelacion(msg: string): boolean {
+  return /\bno\s+(\w+\s+){0,3}cancel/.test(msg)
+}
+
 function isReschedule(msg: string): boolean {
-  return /\b(reagend|cambiar (el |la |los |las |mi |mis )?(fecha|fechas|turno|turnos|horario|horarios)|otra fecha|otro horario|distinto horario|mover (el |mi )?turno|postergar( el turno)?|adelantar( el turno)?|cambio de (fecha|horario)|diferente fecha|nuevo horario|otro dia para|otro momento para)\b/.test(msg)
+  // 1/9/2026 — el corpus destapó DOS fallas acá, las dos por la misma causa:
+  // el `\b` de cierre del grupo exige límite de palabra justo después del
+  // patrón, y eso rompía los casos más naturales.
+  //
+  //   `reagend`      → nunca matcheó NADA. Estaba pensado como prefijo, pero
+  //                    después de "reagend" viene "a" en "reagendar", que es
+  //                    carácter de palabra: no hay límite, no hay match. La
+  //                    palabra más explícita de esta intención no funcionaba.
+  //   `cambiar los`  → no cubría el enclítico "cambiarLOS", que es como se
+  //                    escribe de verdad ("tendría que cambiarlos"). Era el
+  //                    segundo mensaje del caso Guemes.
+  // Ojo: los enclíticos van listados uno por uno y NO como "cambiar(lo|los)?".
+  // Con el grupo opcional, un "cambiar" pelado matchearía cualquier cosa
+  // ("cambiar de obra social") y volveríamos a tener una regla decidiendo de más.
+  return /\b(reagend[a-z]*|cambiarlo|cambiarla|cambiarlos|cambiarlas|cambiar (el |la |los |las |mi |mis )?(fecha|fechas|turno|turnos|horario|horarios)|otra fecha|otro horario|distinto horario|moverlo|moverlos|mover (el |mi )?turno|postergarlo|postergarlos|postergar( el turno)?|adelantar( el turno)?|cambio de (fecha|horario)|diferente fecha|nuevo horario|otro dia para|otro momento para)\b/.test(msg)
 }
 
 /** Consulta informativa sobre datos del turno (dirección, hora, profesional) */
@@ -658,10 +703,47 @@ function isSalutationOrFarewell(msg: string): boolean {
  * Clasifica la intención del usuario de forma determinística.
  * Sin llamadas externas — resultado instantáneo y predecible.
  */
-function classifyIntentWithRules(
+/**
+ * Contexto mínimo que necesitan las reglas para saber cuándo NO deben decidir.
+ *
+ * 7/9/2026 — Hasta acá esta función sólo recibía el texto del mensaje, y esa era
+ * su limitación de fondo: hay mensajes cuyo significado depende enteramente de
+ * qué se le preguntó al paciente. "Si mucha gracias" es una despedida si nadie
+ * le preguntó nada, y es una confirmación si acaba de recibir un recordatorio
+ * pidiéndole que confirme. Sin esta señal, la regla de despedida decidía con
+ * 0.8 y la IA nunca llegaba a ver el mensaje (caso Vicente, tel. 1139200357).
+ */
+export interface ContextoParaReglas {
+  /** true si hay un recordatorio reciente esperando que confirme o cancele. */
+  confirmacionPendiente?: boolean
+}
+
+export function classifyIntentWithRules(
   userMessage: string,
+  contexto: ContextoParaReglas = {},
 ): FallbackIntentResult {
   const msg = normalizeText(userMessage)
+
+  // Con una confirmación pendiente, un mensaje corto de cortesía o afirmación
+  // NO puede resolverse mirando palabras: "gracias" puede ser el cierre de un
+  // "sí, gracias". Se cede a la IA, que sí ve la pregunta y el contexto.
+  //
+  // Se acota a mensajes CORTOS a propósito: un texto largo que menciona un
+  // agradecimiento suele traer además una intención propia, y para esos las
+  // reglas siguen sirviendo.
+  if (contexto.confirmacionPendiente && userMessage.trim().split(/\s+/).length <= 6) {
+    void recordDiag(undefined, DIAG.REGLA_AMBIGUA_ESCALADA_A_IA)
+    void recordDiagSample({
+      tipo: DIAG.REGLA_AMBIGUA_ESCALADA_A_IA,
+      mensaje: userMessage,
+      detalle: { detector: "confirmacion_pendiente" },
+    })
+    return {
+      intent: "otro",
+      confidence: 0.3,
+      reasoning: "Hay una confirmación pendiente y el mensaje es corto — la decide la IA",
+    }
+  }
 
   // 1. PRIORIDAD MÁXIMA: consulta médica prohibida.
   //    Sólo el vocabulario inequívoco decide acá (ver esConsultaMedicaInequivoca).
@@ -673,22 +755,6 @@ function classifyIntentWithRules(
     }
   }
 
-  // 1b. Señal ambigua: puede ser médica o puede ser una frase común sobre el
-  //     turno. No se decide por regla — se devuelve confianza baja a propósito
-  //     para que classifyIntent escale a la IA, que lee la oración completa.
-  if (tieneSenalMedicaAmbigua(msg)) {
-    void recordDiag(undefined, DIAG.REGLA_AMBIGUA_ESCALADA_A_IA)
-    void recordDiagSample({
-      tipo: DIAG.REGLA_AMBIGUA_ESCALADA_A_IA,
-      mensaje: userMessage,
-      detalle: { detector: "consulta_medica" },
-    })
-    return {
-      intent: "otro",
-      confidence: 0.3,
-      reasoning: "Señal médica ambigua — la decide la IA con la oración completa",
-    }
-  }
 
   // 2. Número equivocado
   if (isWrongNumber(msg)) {
@@ -739,8 +805,24 @@ function classifyIntentWithRules(
     }
   }
 
-  // 5. Cancelación del turno
+  // 5. Cancelación del turno.
+  //    Si la palabra "cancelar" viene NEGADA ("no voy a cancelar", "no quiero
+  //    cancelar"), la regla no puede resolverlo: mira palabras, no la negación
+  //    que las gobierna. Se cede a la IA (1/9/2026, detectado por el corpus).
   if (isCancellation(msg)) {
+    if (tieneNegacionDeCancelacion(msg)) {
+      void recordDiag(undefined, DIAG.REGLA_AMBIGUA_ESCALADA_A_IA)
+      void recordDiagSample({
+        tipo: DIAG.REGLA_AMBIGUA_ESCALADA_A_IA,
+        mensaje: userMessage,
+        detalle: { detector: "cancelacion_negada" },
+      })
+      return {
+        intent: "otro",
+        confidence: 0.3,
+        reasoning: "Menciona cancelar pero negado — la decide la IA",
+      }
+    }
     return {
       intent: "cancelar_turno",
       confidence: 0.85,
@@ -795,6 +877,29 @@ function classifyIntentWithRules(
       confidence: 0.8,
       reasoning: "Saludo o despedida detectado",
       response: "¡Un placer! Si necesitás algo más, estoy acá para ayudarte.",
+    }
+  }
+
+  // Señal médica ambigua, evaluada AL FINAL a propósito.
+  //
+  // Al principio esta comprobación estaba arriba de todo, junto a la consulta
+  // médica inequívoca — y era un error: cortocircuitaba mensajes que las reglas
+  // de abajo resuelven perfectamente. "voy a tener que cambiar los turnos con
+  // Guemes que tengo para mañana" contiene "que tengo", pero también contiene
+  // "cambiar los turnos", que isReschedule reconoce sin ninguna duda. Poniéndola
+  // acá, ese mensaje se resuelve por regla (gratis, instantáneo) y sólo escalan
+  // a la IA los que de verdad quedaron sin clasificar.
+  if (tieneSenalMedicaAmbigua(msg)) {
+    void recordDiag(undefined, DIAG.REGLA_AMBIGUA_ESCALADA_A_IA)
+    void recordDiagSample({
+      tipo: DIAG.REGLA_AMBIGUA_ESCALADA_A_IA,
+      mensaje: userMessage,
+      detalle: { detector: "consulta_medica" },
+    })
+    return {
+      intent: "otro",
+      confidence: 0.3,
+      reasoning: "Señal médica ambigua y ninguna otra regla aplicó — la decide la IA",
     }
   }
 

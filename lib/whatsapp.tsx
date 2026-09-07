@@ -128,6 +128,10 @@ import {
   resetDetectionToMainMenu,
   restoreDetectionStateFromCache,
 } from "./conversation-state/patient-detection/patient-flow-integration"
+// getPatientDetectionState vive en el handler, no en la integración (7/9/2026:
+// lo importé del módulo equivocado y Next.js sólo avisó con un warning — en
+// runtime habría sido `undefined` y hubiera roto el guard del router).
+import { getPatientDetectionState } from "./conversation-state/patient-detection/patient-flow-handler"
 import { isWhatsAppWidgetPresetMessage } from "./whatsapp-widget-preset-message"
 import {
   initializeExistingPatientFlow,
@@ -2234,6 +2238,22 @@ function isObviousStepInput(message: string): boolean {
   if (/^\d+$/.test(t)) return true                 // número (selección)
   if (t.replace(/\D/g, '').length >= 7 && t.replace(/\D/g, '').length <= 9 && !/[a-záéíóúñ?]/i.test(t)) return true // DNI
   if (/^\S+@\S+\.\S+$/.test(t)) return true         // email
+
+  // DNI acompañado del nombre — "9390322 rosa mattos", "dni 30111222 Juan Perez".
+  //
+  // 7/9/2026 (caso Rosa Mattos, tel. 1162028924): la regla de arriba exige que NO
+  // haya letras, así que la forma más natural de contestar "indicame tu DNI" —
+  // mandar el documento junto con el nombre — no se reconocía como input de paso.
+  // El mensaje se iba al router de intercaladas, que lo interpretó como un pedido
+  // de menú, descartó el dato y volvió al principio.
+  //
+  // Se exige UN solo documento y un mensaje corto: así "mi dni es 9390322 pero
+  // necesito cancelar el turno" no cae acá, sino en el router, que es quien debe
+  // resolver un mensaje con dos intenciones.
+  if (!t.includes('?')) {
+    const documentos = t.match(/\b\d{7,8}\b/g) || []
+    if (documentos.length === 1 && t.split(/\s+/).length <= 5) return true
+  }
   // Token corto sin signos de pregunta: probable nombre / apellido / obra social / "particular".
   const words = t.split(/\s+/)
   if (words.length <= 2 && t.length <= 25 && !t.includes('?') && /[a-záéíóúñ]/i.test(t)) {
@@ -2386,8 +2406,39 @@ async function runInterjectionInActiveFlow(
     // vez de tocar el historial. Caso Liliana, tel. 1155891028, 9/7/2026: ver
     // PLAN-DE-TRABAJO.md.
     if (isPatientDetectionFlow) {
-      const answerDet = (action.type === 'send_and_return' || action.type === 'derive_external')
-        ? action.message.replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '').trimEnd()
+      // ── Guard: no pisar una pregunta pendiente con el menú ──────────────────
+      //
+      // 7/9/2026 (caso Rosa Mattos, tel. 1162028924). Si el flujo está esperando
+      // un dato concreto que acabamos de pedir (el DNI para desambiguar entre
+      // varios pacientes, el DNI de un familiar), volver a mostrar el menú
+      // DESCARTA la respuesta del paciente y además resetea la fase — que es
+      // exactamente lo que pasó: mandó "9390322 rosa mattos" y terminó agendando
+      // un turno sin nombre ni documento.
+      //
+      // Cuando el dispatcher no trae una respuesta concreta que dar (o sea, no es
+      // una consulta intercalada de verdad), se cede al handler del flujo, que
+      // sabe interpretar el dato que se pidió.
+      const traeRespuestaParaElPaciente =
+        action.type === 'send_and_return' || action.type === 'derive_external'
+
+      if (!traeRespuestaParaElPaciente) {
+        const FASES_ESPERANDO_DATO = new Set([
+          'awaiting_dni_for_disambiguation',
+          'awaiting_familiar_dni',
+          'awaiting_initial_response',
+        ])
+        const estadoDet = await getPatientDetectionState(userPhoneNumber).catch(() => null)
+        if (estadoDet?.phase && FASES_ESPERANDO_DATO.has(estadoDet.phase)) {
+          routerLogger.info(
+            '[Router intercalada] El flujo espera un dato puntual — se cede al handler en vez de re-mostrar el menú',
+            { fase: estadoDet.phase },
+          )
+          return false
+        }
+      }
+
+      const answerDet = traeRespuestaParaElPaciente
+        ? (action as any).message.replace(/\n*Si necesit[aá]s gestionar un turno,?\s*escribime y te ayudo\.?\s*$/i, '').trimEnd()
         : ''
       // Retomar con el menú corto "¿En qué más puedo ayudarte?" (returnPatientToMenu),
       // NO con el saludo completo de initializePatientDetection ("bienvenido de
@@ -4512,6 +4563,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         getAppointmentRef(appointmentData)
       )
 
+      // 7/9/2026: hay un recordatorio abierto esperando respuesta. Con esta señal
+      // las reglas se abstienen sobre mensajes cortos ("si mucha gracias") en vez
+      // de resolverlos como despedida, y decide la IA, que ve la pregunta.
+      const hayConfirmacionPendiente = config.cliente_id
+        ? await isWithinTemplateWindow(config.cliente_id, userPhoneNumber).catch(() => false)
+        : false
+
       const nluFallbackResult = await detectNLUFallbackPreFlow(
         userPhoneNumber,
         userMessage,
@@ -4519,7 +4577,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         appointmentData,
         undefined, // conversationHistory - puede agregarse después si es necesario
         config.escalationPhoneNumber, // Número de derivación para consultas que no podemos responder
-        appointmentAlreadyConfirmed
+        appointmentAlreadyConfirmed,
+        hayConfirmacionPendiente
       )
       
       if (nluFallbackResult.shouldHandle && nluFallbackResult.response) {
@@ -5883,7 +5942,23 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
                 return
               }
-              if (flowType === 'reschedule') {
+              // 7/9/2026 — Estos dos tipos son nuevos en el contexto (auditoría de
+              // visibilidad de flujos). Sus mensajes los atienden handlers que
+              // corren ANTES en la cascada (handlePendingFlowResponse para las
+              // decisiones pendientes, handleDNIIfAwaiting para la espera de DNI),
+              // así que acá lo correcto es NO responder nada y dejar que el
+              // pipeline siga su curso: si intentáramos "continuar el flujo"
+              // desde acá lo duplicaríamos.
+              //
+              // Lo importante es que NO caigan al bloque de más abajo, que muestra
+              // el menú principal y borraría la pregunta pendiente.
+              const cedeALaCascada = flowType === 'decision_pendiente' || flowType === 'esperando_dni'
+              if (cedeALaCascada) {
+                createConversationLogger(userPhoneNumber, config.id, "ai-dispatcher")
+                  .info('[Dispatcher] continuar_flujo con decisión/DNI pendiente — cede a la cascada', { flowType })
+              }
+
+              if (!cedeALaCascada && flowType === 'reschedule') {
                 // 31/8/2026: el reagendamiento ahora figura como flujo activo en el
                 // contexto del dispatcher. Sin esta rama, un 'continue_active_flow'
                 // durante un reagendamiento caía al bloque de abajo y mostraba el
@@ -5902,15 +5977,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               // devuelve handled:false + shouldCallOpenAI:true — antes acá se
               // ignoraba esa señal y se cortaba sin responder nada (mismo bug
               // que "hoal" sin contestar, 6/8/2026). Ahora cae a OpenAI.
-              const noFlowResult = await initializePatientDetection(
-                userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
-              )
-              if (noFlowResult?.handled) {
-                if (noFlowResult.message) {
-                  await sendDirectResponse(dispatcherCtxDirect, noFlowResult.message, "ai-dispatcher-no-flow-menu")
+              if (!cedeALaCascada) {
+                const noFlowResult = await initializePatientDetection(
+                  userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
+                )
+                if (noFlowResult?.handled) {
+                  if (noFlowResult.message) {
+                    await sendDirectResponse(dispatcherCtxDirect, noFlowResult.message, "ai-dispatcher-no-flow-menu")
+                  }
+                  await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                  return
                 }
-                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-                return
               }
             }
 

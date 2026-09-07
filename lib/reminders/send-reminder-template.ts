@@ -279,6 +279,34 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
     console.warn("[REMINDERS] ⚠️ ADVERTENCIA: No se recibió Chatbot_Data en la solicitud")
   }
 
+  // ── Guardar el recordatorio como "paso pendiente" (7/9/2026) ──────────────
+  //
+  // El recordatorio le hace al paciente una pregunta concreta ("por favor,
+  // confirme o cancele su asistencia"), pero se envía por sendWhatsAppTemplate,
+  // no por sendDirectResponse — que es donde se guarda el paso. Resultado: el
+  // dispatcher nunca veía el texto de la pregunta que estaba respondiendo.
+  //
+  // Ese es el caso Vicente (tel. 1139200357, 19/8/2026): contestó "Si mucha
+  // gracias" al recordatorio y se leyó como un agradecimiento suelto, porque
+  // sin la pregunta a la vista "gracias" es cortesía. Con el texto del
+  // recordatorio en el contexto, ese "Si" es inequívocamente la respuesta.
+  //
+  // Se guarda el contenido legible reconstruido (extractTemplateContent), no el
+  // JSON del template: es lo que el paciente efectivamente leyó.
+  if (config?.id && cleanPhoneNumber) {
+    try {
+      const textoRecordatorio = extractTemplateContent(Body, Chatbot_Data)
+      if (textoRecordatorio && !textoRecordatorio.startsWith("Plantilla enviada")) {
+        const { saveStepPrompt } = await import("../appointment-flow-state")
+        await saveStepPrompt(cleanPhoneNumber, config.id, textoRecordatorio)
+        console.log("[REMINDERS] ✅ Recordatorio guardado como paso pendiente para el dispatcher")
+      }
+    } catch (e) {
+      // Nunca puede romper el envío del recordatorio: es sólo contexto extra.
+      console.error("[REMINDERS] ⚠️ No se pudo guardar el recordatorio como paso (continuando):", e)
+    }
+  }
+
   // Registrar en el contexto de la conversación que se envió esta plantilla.
   //
   // 31/8/2026: esto llamaba a getThreadForUser + safelyAddMessageToThread (la

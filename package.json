@@ -6,7 +6,10 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "corpus": "vitest run lib/evaluacion/corpus.test.ts --reporter=verbose"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.0",

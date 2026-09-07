@@ -11,10 +11,16 @@
 import { getRedisClient } from '@/lib/redis'
 import { getExistingPatientState } from '../existing-patient/existing-patient-flow-handler'
 import { isExistingPatientFlowActive } from '../existing-patient/existing-patient-flow-integration'
-import { isNewPatientFlowActive } from '../new-patient/new-patient-flow-integration'
-import { isPatientDetectionFlowActive, getIdentifiedPatient } from '../patient-detection/patient-flow-handler'
+import { isNewPatientFlowActive, getNewPatientState } from '../new-patient/new-patient-flow-integration'
+import {
+  isPatientDetectionFlowActive,
+  getIdentifiedPatient,
+  getPatientDetectionState,
+} from '../patient-detection/patient-flow-handler'
 import { getBookingFlowState } from '../booking-flow-handler'
 import { getRescheduleState } from '../reschedule-flow-handler'
+import { getFlowState, getStepPrompt } from '@/lib/appointment-flow-state'
+import { getDNIAwaitingState } from '../dni-handler'
 import { getClinicInfo } from '@/lib/db'
 import { formatClinicInfoForLLM } from '@/lib/clinic-info/context'
 import { isWithinTemplateWindow } from '@/lib/appointment-stats'
@@ -33,7 +39,17 @@ export interface TurnoSnapshot {
 }
 
 export interface ActiveFlowSnapshot {
-  type: 'patient_detection' | 'existing_patient' | 'new_patient' | 'booking' | 'reschedule' | 'none'
+  type:
+    | 'patient_detection'
+    | 'existing_patient'
+    | 'new_patient'
+    | 'booking'
+    | 'reschedule'
+    /** Decisión pendiente sobre un turno existente: doble confirmación de cancelación, elegir turno, etc. */
+    | 'decision_pendiente'
+    /** Se le pidió el DNI y estamos esperando que lo mande (dni-handler). */
+    | 'esperando_dni'
+    | 'none'
   phase: string   // fase actual dentro del flujo, o "none"
   description: string  // texto legible para el LLM: "esperando selección de sede"
 }
@@ -78,6 +94,20 @@ export interface DispatcherContext {
    * asistencia.
    */
   clinicTemplateType?: 'turno_confirmado_clinica' | 'turno_cancelado_clinica'
+  /**
+   * Texto EXACTO del último paso que se le envió al paciente — la pregunta que
+   * está respondiendo (7/9/2026).
+   *
+   * Hasta acá el contexto describía la situación en abstracto ("se le pidió que
+   * confirme la cancelación"), y para varios casos eso no alcanza: el modelo
+   * necesita ver qué opciones se le ofrecieron y con qué palabras. El caso que
+   * lo motivó es "Si mucha gracias" — sin la pregunta a la vista es cortesía;
+   * con ella a la vista es, claramente, un sí.
+   *
+   * Sale de `getStepPrompt`, que ya guardaba este texto para poder re-mostrar el
+   * paso ante una consulta intercalada. Acá se reusa ese mismo dato.
+   */
+  ultimaPregunta?: string
 }
 
 // ============================================================================
@@ -90,6 +120,12 @@ const PHASE_DESCRIPTIONS: Record<string, string> = {
   awaiting_action_selection: 'El paciente está viendo el menú de acciones sobre su turno',
   awaiting_initial_response: 'Se le pidió el DNI al paciente para comenzar el flujo',
   awaiting_familiar_dni: 'Se le pidió el DNI de un familiar para agendar un turno',
+  // 7/9/2026: esta fase existía en el flujo pero no estaba descripta acá, así que
+  // el modelo no tenía forma de saber que el mensaje esperado era un DNI.
+  awaiting_dni_for_disambiguation:
+    'El teléfono tiene VARIOS pacientes asociados y se le pidió el DNI para saber cuál es. ' +
+    'Un documento suelto, o un documento con su nombre, ES la respuesta esperada a esa pregunta',
+  detecting: 'Se está identificando al paciente y mostrando el menú inicial',
 
   // Existing patient flow
   awaiting_sede: 'Se le está pidiendo al paciente que elija una sede',
@@ -114,11 +150,51 @@ const PHASE_DESCRIPTIONS: Record<string, string> = {
   showing_turns: 'Se le está mostrando la lista de turnos disponibles para reagendar su turno',
   awaiting_selection: 'Se le está pidiendo que elija uno de los turnos disponibles para reagendar',
 
+  // Decisiones pendientes sobre un turno existente (lib/appointment-flow-state.ts).
+  // 7/9/2026: este flujo era INVISIBLE para el dispatcher. Se le mostraba al
+  // paciente un menú de dos opciones y, si respondía algo que no era "1" ni "2",
+  // el contexto decía "no hay flujo activo" — con esa premisa el modelo mandaba
+  // al menú principal y se perdía la decisión a medio tomar (caso Ives, 31/8).
+  awaiting_cancel_confirmation:
+    'Se le pidió que CONFIRME la cancelación de su turno (1 = sí cancelar, 2 = mantenerlo). ' +
+    'Una respuesta afirmativa o negativa, aunque venga con otras palabras, responde a ESA pregunta',
+  awaiting_reschedule_choice: 'Se le preguntó si quiere reagendar el turno que acaba de cancelar',
+  awaiting_cancel_and_reschedule_confirm:
+    'Se le mostró un menú para decidir entre confirmar la asistencia o cancelar y pedir otro turno',
+  awaiting_cancel_all_confirmation: 'Se le pidió que confirme la cancelación de TODOS sus turnos',
+
+  // Espera de DNI fuera del flujo de detección (lib/conversation-state/dni-handler.ts).
+  esperando_dni:
+    'Se le pidió el DNI al paciente y estamos esperando que lo mande. Un documento, ' +
+    'solo o acompañado del nombre, ES la respuesta esperada',
+
   none: 'No hay flujo activo — el paciente no está en medio de ninguna acción',
 }
 
 function describePhase(phase: string): string {
   return PHASE_DESCRIPTIONS[phase] ?? `Fase: ${phase}`
+}
+
+/**
+ * Recorta la última pregunta para meterla en el prompt sin inflar el costo.
+ *
+ * El problema: algunos pasos son cortos ("1- Sí, cancelar / 2- No, mantener")
+ * pero otros son la lista de turnos, que pasa los 3 KB. Mandarla entera en CADA
+ * mensaje multiplicaría los tokens de entrada sin necesidad.
+ *
+ * El recorte conserva el PRINCIPIO y el FINAL, que es donde vive lo que importa
+ * para clasificar: arriba la pregunta, abajo las opciones. Lo que se descarta es
+ * el medio — en la lista de turnos, las 40 filas de horarios, que no aportan
+ * nada para decidir la intención.
+ */
+const MAX_CHARS_ULTIMA_PREGUNTA = 500
+
+function recortarUltimaPregunta(texto: string): string {
+  const limpio = texto.trim()
+  if (limpio.length <= MAX_CHARS_ULTIMA_PREGUNTA) return limpio
+
+  const mitad = Math.floor(MAX_CHARS_ULTIMA_PREGUNTA / 2)
+  return `${limpio.slice(0, mitad).trimEnd()}\n[...]\n${limpio.slice(-mitad).trimStart()}`
 }
 
 // ============================================================================
@@ -154,6 +230,9 @@ export async function buildDispatcherContext(
     detectionActive,
     bookingState,
     rescheduleState,
+    decisionPendiente,
+    esperandoDNI,
+    ultimoPasoEnviado,
     clinicInfo,
     withinTemplateWindow,
   ] = await Promise.all([
@@ -168,6 +247,19 @@ export async function buildDispatcherContext(
     // ("5/10 15 hs.") se clasificaba como "mostrar menú principal" y la
     // conversación volvía al saludo inicial.
     getRescheduleState(phoneNumber, configId).catch(() => null),
+    // 7/9/2026 (auditoría de visibilidad de flujos). Estos dos también faltaban:
+    //
+    //   getFlowState      → las decisiones pendientes sobre un turno existente:
+    //                       la doble confirmación de cancelación, el menú de
+    //                       "confirmar o cancelar y pedir otro", la selección de
+    //                       cuál turno operar. Es DONDE MÁS caro sale que el
+    //                       modelo crea que no pasa nada: son preguntas de sí/no
+    //                       sobre cancelar un turno médico.
+    //   getDNIAwaitingState → la espera de DNI fuera del flujo de detección.
+    getFlowState(phoneNumber, configId).catch(() => null),
+    getDNIAwaitingState(phoneNumber, configId).catch(() => null),
+    // Texto literal de la última pregunta que le hicimos (ver `ultimaPregunta`).
+    getStepPrompt(phoneNumber, configId).catch(() => null),
     clienteId ? getClinicInfo(clienteId) : Promise.resolve(null),
     clienteId ? isWithinTemplateWindow(clienteId, phoneNumber).catch(() => false) : Promise.resolve(false),
   ])
@@ -205,14 +297,28 @@ export async function buildDispatcherContext(
   }
 
   // ── Flujo activo ───────────────────────────────────────────────────────────
-  // Prioridad: existing_patient > new_patient > patient_detection > booking
+  //
+  // Prioridad: decision_pendiente > existing_patient > new_patient >
+  //            patient_detection > booking > reschedule > esperando_dni
+  //
+  // La decisión pendiente va PRIMERA a propósito (7/9/2026): es una pregunta
+  // concreta de sí/no que acabamos de hacerle al paciente sobre un turno médico
+  // ("¿confirmás que querés cancelar?"). Si hay una de esas abierta, es lo más
+  // inmediato que hay en la conversación, por encima de cualquier flujo de
+  // reserva que también esté a medias.
   let activeFlow: ActiveFlowSnapshot = {
     type: 'none',
     phase: 'none',
     description: describePhase('none'),
   }
 
-  if (existingActive) {
+  if (decisionPendiente?.type) {
+    activeFlow = {
+      type: 'decision_pendiente',
+      phase: decisionPendiente.type,
+      description: describePhase(decisionPendiente.type),
+    }
+  } else if (existingActive) {
     // Solo leemos el estado detallado si el flujo está activo (evitar read innecesario)
     const existingState = await getExistingPatientState(phoneNumber)
     const phase = existingState?.phase ?? 'unknown'
@@ -222,16 +328,39 @@ export async function buildDispatcherContext(
       description: describePhase(phase),
     }
   } else if (newActive) {
+    // 7/9/2026 — Misma falla que tenía patient_detection: la fase estaba
+    // hardcodeada en 'in_progress', así que el modelo no distinguía si le
+    // acabábamos de pedir el apellido, el email, la obra social o la sede.
+    // Todas esas respuestas le llegaban como "está en el flujo de registro".
+    const estadoNuevo = await getNewPatientState(phoneNumber)
+    const faseNuevo = estadoNuevo?.phase ?? 'in_progress'
     activeFlow = {
       type: 'new_patient',
-      phase: 'in_progress',
-      description: 'El paciente está en el flujo de registro como paciente nuevo',
+      phase: faseNuevo,
+      description:
+        faseNuevo === 'in_progress'
+          ? 'El paciente está en el flujo de registro como paciente nuevo'
+          : `Registro de paciente nuevo — ${describePhase(faseNuevo)}`,
     }
   } else if (detectionActive) {
+    // 7/9/2026 (caso Rosa Mattos, tel. 1162028924) — Acá la fase estaba HARDCODEADA
+    // en 'detecting' con la descripción "mostrando el menú inicial", sin importar en
+    // qué paso estuviera realmente el flujo. El dispatcher nunca se enteraba de que
+    // le acabábamos de pedir el DNI al paciente.
+    //
+    // Consecuencia real: se le pidió el DNI, respondió "9390322 rosa mattos" — el
+    // dato exacto que se le había pedido — y el modelo, creyendo que sólo se estaba
+    // mostrando un menú, lo clasificó como "mostrar menú principal". Se le volvió a
+    // mostrar el menú, se perdió la identificación y terminó agendando un turno como
+    // "Paciente", sin nombre ni DNI.
+    //
+    // Leer la fase real cuesta una lectura de Redis sólo cuando el flujo está activo.
+    const estadoDeteccion = await getPatientDetectionState(phoneNumber)
+    const fase = estadoDeteccion?.phase ?? 'detecting'
     activeFlow = {
       type: 'patient_detection',
-      phase: 'detecting',
-      description: 'Se está identificando al paciente y mostrando el menú inicial',
+      phase: fase,
+      description: describePhase(fase),
     }
   } else if (bookingState?.step) {
     activeFlow = {
@@ -246,6 +375,14 @@ export async function buildDispatcherContext(
       type: 'reschedule',
       phase: rescheduleState.phase,
       description: describePhase(rescheduleState.phase),
+    }
+  } else if (esperandoDNI) {
+    // Última en la cadena: es el estado más débil (sólo dice "le pedimos el DNI"),
+    // así que cualquier flujo concreto que esté abierto describe mejor la situación.
+    activeFlow = {
+      type: 'esperando_dni',
+      phase: 'esperando_dni',
+      description: describePhase('esperando_dni'),
     }
   }
 
@@ -269,6 +406,10 @@ export async function buildDispatcherContext(
     // interpretara cualquier respuesta afirmativa como "confirmar asistencia".
     templatePendingConfirmation: withinTemplateWindow && turnos.length > 0 && !clinicTemplateType,
     clinicTemplateType,
+    ultimaPregunta:
+      typeof ultimoPasoEnviado === 'string' && ultimoPasoEnviado.trim()
+        ? recortarUltimaPregunta(ultimoPasoEnviado)
+        : undefined,
   }
 }
 
@@ -331,6 +472,36 @@ export function formatContextForLLM(ctx: DispatcherContext): string {
     lines.push(`ACCIÓN PENDIENTE: Cualquier respuesta afirmativa, aunque sea breve o venga mezclada con cortesía ("sí, gracias", "dale, gracias", "ok, muchas gracias"), es MUY probablemente la respuesta a esa pregunta → confirmar_asistencia_turno. Una respuesta negativa ("no puedo", "no voy a poder ir") → cancelar_turno. Usá respuesta_empatica para el agradecimiento SOLO si el mensaje claramente no responde la pregunta (agradece por otra cosa, hace una pregunta nueva, etc.).`)
   } else {
     lines.push(`ESTADO DEL FLUJO: ${ctx.activeFlow.description}`)
+  }
+
+  // Última pregunta, TEXTUAL (7/9/2026).
+  //
+  // La descripción del flujo dice qué estamos esperando en abstracto; esto
+  // muestra con qué palabras se lo preguntamos y qué opciones se le dieron.
+  // Para mensajes cortos y ambiguos ("sí", "el segundo", "si mucha gracias",
+  // "dale") es la diferencia entre entenderlos y no: sin la pregunta a la
+  // vista, "si mucha gracias" es una cortesía; con ella, es un sí.
+  //
+  // Va DESPUÉS del estado del flujo y ANTES del historial a propósito: es el
+  // dato más inmediato y el que más pesa para leer el mensaje entrante.
+  //
+  // Sólo se muestra si hay algo pendiente. El paso guardado vive 1 hora, así que
+  // sin esta condición un paciente que vuelve a escribir 50 minutos después —
+  // ya con otro tema — vería su mensaje interpretado como respuesta a una
+  // pregunta vieja. Es el mismo riesgo que documenta clearStepState (caso
+  // 26/8/2026, tel. 2215029948: se re-mostraba un mensaje terminal como si fuera
+  // el paso vigente).
+  if (ctx.ultimaPregunta && (ctx.hasActiveFlow || ctx.templatePendingConfirmation)) {
+    lines.push('')
+    lines.push(`ÚLTIMO MENSAJE QUE LE ENVIAMOS (es lo que el paciente está respondiendo):`)
+    lines.push(`"""`)
+    lines.push(ctx.ultimaPregunta)
+    lines.push(`"""`)
+    lines.push(
+      `CÓMO USARLO: si el mensaje del paciente encaja como respuesta a eso — aunque sea corto, ` +
+        `informal, con errores de tipeo o mezclado con cortesía — entonces está continuando ese ` +
+        `paso, no empezando algo nuevo. Sólo tratalo como intención nueva si claramente cambia de tema.`,
+    )
   }
 
   // Historial

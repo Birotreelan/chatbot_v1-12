@@ -44,8 +44,15 @@ const DIAG_TTL = 30 * 24 * 60 * 60
 // muestras es constante por día, no proporcional al tráfico.
 const MAX_SAMPLES_PER_DAY = 400
 
-/** Permite apagar la instrumentación sin deploy si hiciera falta. */
+/**
+ * Permite apagar la instrumentación sin deploy si hiciera falta.
+ *
+ * En tests se apaga siempre: el corpus de evaluación ejercita clasificadores que
+ * registran métricas, y sin Redis configurado cada llamada ensuciaba la salida
+ * con avisos de Upstash que no aportan nada (1/9/2026).
+ */
 function diagnosticsEnabled(): boolean {
+  if (process.env.NODE_ENV === "test" || process.env.VITEST) return false
   return process.env.DIAGNOSTICS_ENABLED !== "false"
 }
 

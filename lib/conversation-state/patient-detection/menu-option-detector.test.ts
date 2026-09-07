@@ -33,23 +33,36 @@ describe('Menu Option Detector', () => {
     createMock.mockReset();
   });
 
-  it('should detect "solicitar turno" as option 1 for new patient menu', async () => {
+  // ── Actualizados el 7/9/2026 ──────────────────────────────────────────────
+  //
+  // Estos tests afirmaban que UNA sola keyword alcanza para detectar la opción.
+  // Eso dejó de ser cierto el 18/8/2026, cuando el umbral de la capa rápida se
+  // subió de 0.60 a 0.90 a propósito: con 0.60, "Y el otro ta. Bien" matcheaba
+  // la keyword "otro" y se interpretaba como "cancelar y solicitar turno nuevo"
+  // (caso Felipe, tel. 1161995183). Los tests quedaron desactualizados y nadie
+  // lo notó porque no había config ni script de vitest para correrlos.
+  //
+  // Lo que se verifica ahora es el comportamiento REAL y buscado: con 1 keyword
+  // la capa gratis se abstiene y el mensaje baja a la capa de IA. No es una
+  // regresión — es la protección funcionando.
+
+  it('con 1 sola keyword la capa rápida se abstiene y delega en la IA', async () => {
+    mockAIResponse(1, 0.9);
     const result = await detectMenuOption('solicitar turno', NEW_PATIENT_MENU, '1234567890');
     expect(result.detected).toBe(true);
     expect(result.selectedOption).toBe(1);
-    expect(result.confidence).toBeGreaterThan(0.5);
+    // La clave: la decisión la tomó la IA, no el matcheo de keywords.
+    expect(createMock).toHaveBeenCalledTimes(1);
   });
 
-  it('should detect "turno" as option 1', async () => {
-    const result = await detectMenuOption('turno', NEW_PATIENT_MENU, '1234567890');
-    expect(result.detected).toBe(true);
-    expect(result.selectedOption).toBe(1);
+  it('"turno" solo no alcanza para la capa rápida (sin IA no se detecta)', async () => {
+    const result = await detectMenuOption('turno', NEW_PATIENT_MENU, '1234567890', false);
+    expect(result.detected).toBe(false);
   });
 
-  it('should detect "agendar" as option 1', async () => {
-    const result = await detectMenuOption('agendar', NEW_PATIENT_MENU, '1234567890');
-    expect(result.detected).toBe(true);
-    expect(result.selectedOption).toBe(1);
+  it('"agendar" solo no alcanza para la capa rápida (sin IA no se detecta)', async () => {
+    const result = await detectMenuOption('agendar', NEW_PATIENT_MENU, '1234567890', false);
+    expect(result.detected).toBe(false);
   });
 
   it('should resolve "consulta" as option 3 via AI fallback (1 sola keyword, bajo el umbral determinístico)', async () => {
@@ -73,13 +86,18 @@ describe('Menu Option Detector', () => {
     expect(result.selectedOption).toBe(3);
   });
 
+  // Mayúsculas y espacios de más: lo que se prueba es que la normalización
+  // funcione, o sea que estas variantes se comporten IGUAL que el texto limpio
+  // (que con 1 keyword baja a la capa de IA — ver los tests de arriba).
   it('should handle case-insensitive input', async () => {
+    mockAIResponse(1, 0.9);
     const result = await detectMenuOption('SOLICITAR TURNO', NEW_PATIENT_MENU, '1234567890');
     expect(result.detected).toBe(true);
     expect(result.selectedOption).toBe(1);
   });
 
   it('should handle extra spaces', async () => {
+    mockAIResponse(1, 0.9);
     const result = await detectMenuOption('  solicitar turno  ', NEW_PATIENT_MENU, '1234567890');
     expect(result.detected).toBe(true);
     expect(result.selectedOption).toBe(1);
