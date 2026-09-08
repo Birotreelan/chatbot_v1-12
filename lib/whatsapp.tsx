@@ -4650,23 +4650,43 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           hasRecentReminder = templateSentAt !== null
         }
         
+        // Datos para distinguir "número equivocado" de "confundió al profesional
+        // con el destinatario" (8/9/2026, caso "Este celular no es de Orozco Marta").
+        const ctxParaWrongNumber = await getAppointmentContext(userPhoneNumber, config.id).catch(() => null)
+        const turnoWN: any = ctxParaWrongNumber?.turnos?.[0]
+        const datosTurnoWN = {
+          profesional: turnoWN?.profesional || undefined,
+          titular: [ctxParaWrongNumber?.paciente?.nombres, ctxParaWrongNumber?.paciente?.apellido]
+            .filter(Boolean)
+            .join(' ')
+            .trim() || undefined,
+        }
+
         const wrongNumberResult = await detectWrongNumberPreFlow(
           userMessage,
           userPhoneNumber,
           config.id,
-          hasRecentReminder
+          hasRecentReminder,
+          datosTurnoWN
         )
-        
+
+        const wrongNumberCtx: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+        }
+
+        // Confundió al profesional con el destinatario: NO se marca el teléfono,
+        // se aclara quién es quién y el turno sigue vigente.
+        if (!wrongNumberResult.isWrongNumber && wrongNumberResult.response) {
+          await sendDirectResponse(wrongNumberCtx, wrongNumberResult.response, "wrong_number_confusion_profesional")
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+
         if (wrongNumberResult.isWrongNumber && wrongNumberResult.response) {
-          
-          const wrongNumberCtx: DirectResponseContext = {
-            phoneNumberId: value.metadata.phone_number_id,
-            accessToken: config.accessToken,
-            userPhoneNumber,
-            configId: config.id,
-            clienteId: config.cliente_id,
-          }
-          
   await sendDirectResponse(wrongNumberCtx, wrongNumberResult.response, "wrong_person_confirmed")
   await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
   return

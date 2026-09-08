@@ -213,6 +213,60 @@ export interface WrongNumberDetectionResult {
   confidence: "high" | "medium" | "low"
 }
 
+/** Datos del turno necesarios para distinguir una confusión de un número equivocado real. */
+export interface DatosTurnoParaDesambiguar {
+  /** Profesional que atiende — el nombre que aparece en el recordatorio. */
+  profesional?: string
+  /** Titular del turno: a nombre de quién está. */
+  titular?: string
+}
+
+/**
+ * Palabras del nombre que sirven para reconocerlo dentro de un mensaje.
+ * Se descartan las cortas y las partículas ("de", "la", "del") para no
+ * matchear por casualidad.
+ */
+function tokensDeNombre(nombre: string): string[] {
+  return normalizar(nombre)
+    .split(/[\s,]+/)
+    .filter((t) => t.length >= 4)
+}
+
+function normalizar(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+}
+
+/** ¿El mensaje nombra a esta persona? */
+function mencionaA(mensaje: string, nombre?: string): boolean {
+  if (!nombre) return false
+  const tokens = tokensDeNombre(nombre)
+  if (tokens.length === 0) return false
+  const msg = normalizar(mensaje)
+  return tokens.some((t) => msg.includes(t))
+}
+
+/**
+ * Mensaje para cuando el paciente confundió al PROFESIONAL con el destinatario
+ * del recordatorio (8/9/2026, caso "Este celular no es de Orozco Marta").
+ *
+ * El recordatorio dice "tiene un turno ... con OROZCO MARTA", y un nombre en
+ * formato apellido-nombre se lee fácil como el destinatario. La confusión es
+ * previsible, y tratarla como número equivocado tiene consecuencias caras: se
+ * marca el teléfono por 24h y se le dice que va a dejar de recibir avisos de un
+ * turno que sí es suyo.
+ */
+function buildConfusionProfesionalResponse(profesional: string, titular?: string): string {
+  const aclaracion = titular
+    ? `*${profesional}* es la profesional que te va a atender, y el turno está a nombre de *${titular}*.`
+    : `*${profesional}* es el profesional que atiende el turno, no la persona a la que va dirigido el recordatorio.`
+
+  return `¡No hay problema, te aclaro! ${aclaracion}\n\nAsí que el recordatorio sí corresponde a este número. Si necesitás confirmarlo o cancelarlo, decime y te ayudo.`
+}
+
 /**
  * Detecta si el mensaje indica numero equivocado y genera respuesta
  * 
@@ -227,17 +281,43 @@ export async function detectWrongNumberPreFlow(
   message: string,
   userPhone: string,
   configId: string,
-  hasRecentReminder: boolean = false
+  hasRecentReminder: boolean = false,
+  datosTurno?: DatosTurnoParaDesambiguar
 ): Promise<WrongNumberDetectionResult> {
   const logger = createConversationLogger(userPhone, configId, "wrong-number")
+
+  // Paso 0 (8/9/2026): ¿está negando el nombre del PROFESIONAL?
+  //
+  // Caso real: "Este celular no es de Orozco Marta" — Orozco Marta es la médica
+  // que figura en el recordatorio, no la destinataria. El patrón de la línea 79
+  // ("este celular no es...") matchea igual, así que la regla determinística lo
+  // dio por número equivocado, marcó el teléfono 24h y le avisó que dejaría de
+  // recibir avisos de un turno que SÍ era suyo.
+  //
+  // Se exige que nombre al profesional y NO al titular: si nombra a los dos, o
+  // sólo al titular, la negación es genuina y sigue el camino normal.
+  const nombraAlProfesional = mencionaA(message, datosTurno?.profesional)
+  const nombraAlTitular = mencionaA(message, datosTurno?.titular)
+
+  if (nombraAlProfesional && !nombraAlTitular && (isWrongNumberPattern(message) || mightBeWrongNumber(message))) {
+    logger.info("Confusión con el nombre del profesional — NO es número equivocado", {
+      message,
+      profesional: datosTurno?.profesional,
+    })
+    return {
+      isWrongNumber: false,
+      response: buildConfusionProfesionalResponse(datosTurno!.profesional!, datosTurno?.titular),
+      confidence: "high",
+    }
+  }
 
   // Paso 1: Verificar patron claro (alta confianza)
   if (isWrongNumberPattern(message)) {
     logger.info("Numero equivocado detectado por patron", { message })
-    
+
     // Marcar usuario como "persona equivocada"
     await setWrongPersonState(userPhone, configId)
-    
+
     const response = buildWrongNumberResponse()
     return { 
       isWrongNumber: true, 
