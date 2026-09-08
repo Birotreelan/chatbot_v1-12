@@ -29,6 +29,11 @@ export default defineConfig({
       // renombrarlo para no romper referencias; si algún día se le escriben
       // tests de verdad, se saca de esta lista.
       'lib/conversation-state/selection-extractor.test.ts',
+      // Evaluación del AI Dispatcher: llama a la API real, cuesta plata y puede
+      // variar entre corridas. No puede vivir en el build. Se corre a mano con
+      // `pnpm eval:dispatcher` (vitest.eval.config.ts), al tocar el prompt, el
+      // modelo o el manifiesto de tools.
+      'lib/evaluacion/dispatcher.test.ts',
     ],
   },
 })

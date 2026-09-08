@@ -14,6 +14,8 @@
 import { openai } from "@/lib/openai"
 import type { ClinicInfo } from "@/lib/types"
 
+import { MODELO_EXTRACCION } from "@/lib/ai-models"
+
 const EXTRACTION_SYSTEM_PROMPT = `Sos un asistente que extrae información institucional de una clínica oftalmológica a partir del texto de su sitio web.
 
 REGLA MÁS IMPORTANTE: NUNCA inventes ni infieras datos que no estén explícitamente en el texto. Si un dato no aparece, dejá el campo vacío (string vacío, array vacío, o el campo ausente). No completes con conocimiento general sobre clínicas oftalmológicas ni "supongas" nada.
@@ -67,7 +69,7 @@ function cleanArray(arr: unknown): string[] | undefined {
  */
 export async function extractClinicInfoFromText(text: string): Promise<Partial<ClinicInfo>> {
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: MODELO_EXTRACCION,
     temperature: 0,
     response_format: { type: "json_object" },
     messages: [

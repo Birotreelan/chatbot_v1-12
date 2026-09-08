@@ -14,6 +14,8 @@ import { createConversationLogger } from '../logger'
 import type { StateContract, StateContext } from './contract'
 import { recordDiag, recordDiagSample, DIAG } from '@/lib/diagnostics'
 
+import { MODELO_CLASIFICACION } from "@/lib/ai-models"
+
 export interface ClassifyResult {
   actionId: string | null
   slots: Record<string, any>
@@ -77,7 +79,7 @@ export async function classifyIntent(
     const systemPrompt = buildSystemPrompt(contract, ctx)
 
     const completionPromise = openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_CLASIFICACION,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: message },

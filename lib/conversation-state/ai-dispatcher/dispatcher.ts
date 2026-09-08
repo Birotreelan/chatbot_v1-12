@@ -17,6 +17,8 @@ import { DISPATCHER_TOOLS, TOOL_NAMES, type ToolName } from './tool-manifest'
 import { type DispatcherContext, formatContextForLLM } from './context-builder'
 import { recordDiag, recordDiagSample, DIAG } from '@/lib/diagnostics'
 
+import { MODELO_DISPATCHER } from "@/lib/ai-models"
+
 // ============================================================================
 // TIPOS
 // ============================================================================
@@ -38,14 +40,34 @@ export type DispatcherResult = DispatcherDecision | DispatcherPassthrough
 // SYSTEM PROMPT
 // ============================================================================
 
+/**
+ * Arma el system prompt del dispatcher.
+ *
+ * ── ORDEN DEL PROMPT: ESTÁTICO PRIMERO, CONTEXTO AL FINAL (7/9/2026) ──────
+ *
+ * El bloque de contexto (que cambia en CADA mensaje) estaba arriba de todo,
+ * antes de las ~4.300 tokens de instrucciones y reglas que son siempre
+ * idénticas. El caché de prompt —tanto en OpenAI como en Anthropic— funciona
+ * sobre el PREFIJO: se reutiliza sólo mientras el principio del prompt sea
+ * byte por byte igual al de la llamada anterior. Con el contexto adelante,
+ * el prefijo cambiaba en cada mensaje y absolutamente nada se cacheaba, ni
+ * siquiera las reglas que nunca cambian.
+ *
+ * Poniendo primero todo lo estático (rol, instrucciones, reglas,
+ * restricciones) y el contexto del paciente al final, el prefijo estable pasa
+ * a ser la mayor parte del prompt. El dispatcher corre en casi todos los
+ * mensajes y es el que más tokens consume del sistema, así que es donde más
+ * rinde.
+ *
+ * Efecto secundario buscado: dejar el contexto y el mensaje del paciente
+ * pegados al final también los deja en la posición de mayor atención del
+ * modelo, que es donde conviene que estén los datos del caso concreto.
+ */
 function buildSystemPrompt(ctx: DispatcherContext): string {
   const contextBlock = formatContextForLLM(ctx)
 
   return `Sos el orquestador de un chatbot de WhatsApp para gestión de turnos médicos en Argentina.
 Tu único trabajo es seleccionar el tool correcto. NO respondés al paciente directamente — solo elegís una acción.
-
-CONTEXTO DEL PACIENTE:
-${contextBlock}
 
 INSTRUCCIONES DE CLASIFICACIÓN:
 1. Analizá la intención principal del mensaje, ignorando detalles secundarios (horario preferido, día específico, etc.).
@@ -78,7 +100,10 @@ RESTRICCIONES CRÍTICAS:
 - NUNCA respondas consultas médicas o administrativas.
 - NUNCA respondas con respuesta_empatica preguntas sobre qué llevar, requisitos, ayuno, duración o preparación para un turno/estudio — eso es derivar_consulta_externa, no importa cuán simple parezca la pregunta.
 - Ante cualquier duda, preferí mostrar_menu_principal antes que inventar información.
-- Usá voseo rioplatense solo en respuestas generadas por respuesta_empatica.`
+- Usá voseo rioplatense solo en respuestas generadas por respuesta_empatica.
+
+CONTEXTO DEL PACIENTE:
+${contextBlock}`
 }
 
 // ============================================================================
@@ -110,7 +135,7 @@ export async function runAIDispatcher(
     const systemPrompt = buildSystemPrompt(ctx)
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_DISPATCHER,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
@@ -119,6 +144,20 @@ export async function runAIDispatcher(
       tool_choice: 'required',   // el LLM SIEMPRE debe llamar a un tool
       temperature: 0,
       max_tokens: 300,
+    })
+
+    // Consumo real de la llamada. `cached_tokens` es lo que efectivamente
+    // reutilizó el caché de prompt: es la única forma de saber si el reordenado
+    // del prompt (estático primero, contexto al final) está sirviendo de algo,
+    // en vez de asumirlo. Si esto queda en 0 de forma consistente, el prefijo
+    // estable no se está reutilizando y hay que revisar por qué antes de sacar
+    // conclusiones de costo.
+    const uso = response.usage
+    logger.info('[Dispatcher] Consumo', {
+      modelo: MODELO_DISPATCHER,
+      tokensEntrada: uso?.prompt_tokens,
+      tokensCacheados: uso?.prompt_tokens_details?.cached_tokens ?? 0,
+      tokensSalida: uso?.completion_tokens,
     })
 
     const choice = response.choices[0]

@@ -9,7 +9,8 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "corpus": "vitest run lib/evaluacion/corpus.test.ts --reporter=verbose"
+    "corpus": "vitest run lib/evaluacion/corpus.test.ts --reporter=verbose",
+    "eval:dispatcher": "vitest run --config vitest.eval.config.ts --reporter=verbose"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.0",

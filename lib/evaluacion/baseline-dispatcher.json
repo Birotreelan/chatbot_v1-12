@@ -1,0 +1,21 @@
+{
+  "fecha": "2026-09-07T23:41:30.979Z",
+  "modelo": "gpt-4o-mini",
+  "resultados": {
+    "9390322 rosa mattos": "continuar_flujo_activo",
+    "Lunes 14. 11:15": "continuar_flujo_activo",
+    "5/10 15 hs.": "continuar_flujo_activo",
+    "Si es posible ?": "mostrar_menu_principal",
+    "Si mucha gracias": "respuesta_empatica",
+    "Muchas gracias": "respuesta_empatica",
+    "Necesito saber el horario de mi cirugía de mañana con el.dr.Etcheverria. gracias": "derivar_consulta_externa",
+    "Buenos dias nuevamente, Natalia no puede llegar por un inconveniente que le surgió camino al lugar": "cancelar_turno",
+    "tengo que estar en ayunas?": "derivar_consulta_externa",
+    "se podrá ir un poco mas tarde tipo 12:50?": "cancelar_y_solicitar_nuevo_turno",
+    "quiero hablar con una persona": "solicitar_atencion_humana",
+    "Hola, buenos días": "mostrar_menu_principal",
+    "necesito un turno con oftalmología": "iniciar_reserva_turno",
+    "quiero cambiar la fecha del turno": "cancelar_y_solicitar_nuevo_turno",
+    "gracias, nada más por ahora": "finalizar_conversacion"
+  }
+}

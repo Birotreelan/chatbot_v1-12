@@ -15,6 +15,8 @@
 
 import { openai } from '@/lib/openai'
 
+import { MODELO_REDACCION } from "@/lib/ai-models"
+
 const COMPOSE_TIMEOUT_MS = 3000
 
 export interface ComposeReentryParams {
@@ -50,7 +52,7 @@ Escribí el mensaje único, natural y humano.`
 
   try {
     const completion = openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_REDACCION,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userPrompt },

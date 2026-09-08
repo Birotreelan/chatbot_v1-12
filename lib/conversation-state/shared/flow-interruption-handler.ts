@@ -22,6 +22,8 @@ import { openai } from '@/lib/openai'
 import { createConversationLogger } from '../logger'
 import { fraseDerivacion, esContactoMultilinea } from '@/lib/utils/escalation-contact'
 
+import { MODELO_CLASIFICACION } from "@/lib/ai-models"
+
 // ---------------------------------------------------------------------------
 // Tipos públicos
 // ---------------------------------------------------------------------------
@@ -133,7 +135,7 @@ Intents posibles:
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_CLASIFICACION,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },

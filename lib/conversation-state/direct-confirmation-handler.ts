@@ -18,6 +18,8 @@ import { isWithinTemplateWindow } from "@/lib/appointment-stats"
 import { isAppointmentConfirmed, getAppointmentRef } from "@/lib/appointment-flow-state"
 import { isMarkedAsWrongPerson } from "./wrong-number-handler"
 
+import { MODELO_CLASIFICACION } from "@/lib/ai-models"
+
 // ============================================================================
 // PATRONES DE CONFIRMACIÓN
 // ============================================================================
@@ -323,7 +325,7 @@ export async function classifyDirectActionWithNLU(
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODELO_CLASIFICACION,
       messages: [
         {
           role: "system",

@@ -12,6 +12,8 @@ import { getRedisClient } from "@/lib/redis"
 import { openai } from "../openai"
 import { createConversationLogger } from "./logger"
 
+import { MODELO_CLASIFICACION } from "@/lib/ai-models"
+
 const POST_ACTION_PREFIX = "post-action:"
 const POST_ACTION_TTL = 2 * 60 * 60 // 2 horas
 
@@ -228,7 +230,7 @@ Clasifica la intención del mensaje.`
     })
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODELO_CLASIFICACION,
       messages: [
         { role: "system", content: POST_ACTION_NLU_SYSTEM_PROMPT },
         { role: "user", content: userPrompt }

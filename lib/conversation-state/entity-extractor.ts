@@ -23,6 +23,8 @@
 import { openai } from '@/lib/openai'
 import { formatHistoryForPrompt, type ConversationMessage } from './conversation-history'
 
+import { MODELO_EXTRACCION } from "@/lib/ai-models"
+
 // ============================================================================
 // TIPOS
 // ============================================================================
@@ -130,7 +132,7 @@ No inventes datos. No asumas. Solo extrae lo que el paciente escribió explícit
     : `Mensaje del paciente:\n"${userMessage}"`
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: MODELO_EXTRACCION,
     temperature: 0,
     max_tokens: 150,
     messages: [

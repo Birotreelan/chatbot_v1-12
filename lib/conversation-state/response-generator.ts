@@ -16,6 +16,8 @@
 import { openai } from '@/lib/openai'
 import { formatHistoryForPrompt, type ConversationMessage } from './conversation-history'
 
+import { MODELO_REDACCION } from "@/lib/ai-models"
+
 // ============================================================================
 // TIPOS DE RESPUESTA
 // ============================================================================
@@ -80,7 +82,7 @@ export async function generateResponse(
     const userPrompt = buildUserPrompt(context, historyContext)
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_REDACCION,
       temperature: 0.4,
       max_tokens: 200,
       messages: [

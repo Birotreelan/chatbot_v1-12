@@ -20,6 +20,8 @@
 
 import { openai } from '@/lib/openai'
 
+import { MODELO_CLASIFICACION } from "@/lib/ai-models"
+
 export interface AIOptionCandidate {
   /** Número que el sistema espera de vuelta si el paciente elige esta opción. */
   index: number
@@ -85,7 +87,7 @@ Respondé SOLO con JSON: {"selectedOption": <número o null>, "confidence": 0.0-
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_CLASIFICACION,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Mensaje del paciente: "${userMessage}"` },

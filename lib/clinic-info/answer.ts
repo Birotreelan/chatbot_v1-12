@@ -26,6 +26,8 @@ import { getClinicInfo } from '@/lib/db'
 import { formatClinicInfoForLLM } from './context'
 import { recordDiag, recordDiagSample, DIAG } from '@/lib/diagnostics'
 
+import { MODELO_REDACCION } from "@/lib/ai-models"
+
 const SIN_DATOS = 'SIN_DATOS'
 
 const SYSTEM_PROMPT = `Sos el asistente virtual de una clínica médica. Un paciente eligió la opción "Realizar otra consulta" en el menú y escribió algo que NO es sobre agendar, cancelar o confirmar un turno.
@@ -66,7 +68,7 @@ export async function answerFromClinicInfo(
     }
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_REDACCION,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: `${bloque}\n\nPregunta del paciente: "${userMessage.trim()}"` },

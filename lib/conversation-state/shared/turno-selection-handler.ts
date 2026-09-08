@@ -17,6 +17,8 @@ import { buildTurnosFilteredMessage, buildTurnosWindowMessage, formatHoraSinHipe
 import type { TurnoOption, HandlerResult, SearchType } from './types'
 import { parseOptionNumber } from '../selection-extractor'
 
+import { MODELO_EXTRACCION } from "@/lib/ai-models"
+
 /**
  * Formatea fecha para mostrar al usuario (formato argentino)
  */
@@ -414,7 +416,7 @@ Retorna JSON.`
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_EXTRACCION,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },

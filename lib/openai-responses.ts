@@ -51,6 +51,7 @@ import { nanoid } from "nanoid"
 import { incrementMetric } from "./metrics"
 import { logError } from "./logging"
 import { executeOpenAITool, generateDynamicWaitingMessage } from "./openai-tools"
+import { MODELO_ASISTENTE } from "./ai-models"
 
 // ============================================================================
 // Historial en Redis (reemplaza el thread_id de OpenAI)
@@ -253,7 +254,7 @@ Además, llamá a la función \`registrar_error_de_uso\`, incluyendo:
 - tipo: "uso_incorrecto" o "spam" según corresponda
 - conversacionCompleta: todos los mensajes hasta ese punto (usuario y asistente)`
 
-const MODEL = "gpt-4.1"
+const MODEL = MODELO_ASISTENTE
 const TEMPERATURE = 0.01
 const TOP_P = 0.4
 

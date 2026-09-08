@@ -22,6 +22,8 @@ import { recordDiag, recordDiagSample, DIAG } from "@/lib/diagnostics"
 import { getRedisClient } from "@/lib/redis"
 import { isMarkedAsWrongPerson } from "./wrong-number-handler"
 
+import { MODELO_CLASIFICACION } from "@/lib/ai-models"
+
 const logger = createConversationLogger("nlu-fallback-handler")
 
 // ============================================================================
@@ -436,7 +438,7 @@ Respondé SOLO con JSON:
 {"intent": "...", "confidence": 0.0-1.0, "reasoning": "...", "response": "respuesta empática breve en español rioplatense (1-2 oraciones), omitir para consulta_medica_prohibida"}`
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: MODELO_CLASIFICACION,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: `Mensaje del paciente: "${userMessage}"` },

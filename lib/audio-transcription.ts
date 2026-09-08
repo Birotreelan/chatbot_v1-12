@@ -1,5 +1,7 @@
 import OpenAI from "openai"
 
+import { MODELO_TRANSCRIPCION } from "@/lib/ai-models"
+
 function getOpenAI() {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 }
@@ -80,7 +82,7 @@ export async function transcribeAudio(audioBuffer: Buffer, mimeType = "audio/ogg
     const openai = getOpenAI()
     const transcription = await openai.audio.transcriptions.create({
       file: file,
-      model: "whisper-1",
+      model: MODELO_TRANSCRIPCION,
       language: "es", // Optimized for Spanish
     })
 

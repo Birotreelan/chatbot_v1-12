@@ -4,7 +4,7 @@
  * Maneja mensajes de texto libre durante awaiting_turno_selection en el booking flow.
  * Capas (en orden de prioridad):
  *   1. Filtro determinístico: día de semana, horario, profesional
- *   2. Extracción de fechas para nueva búsqueda (gpt-4o-mini)
+ *   2. Extracción de fechas para nueva búsqueda (IA, ver MODELO_EXTRACCION)
  *   3. Construcción de mensajes de lista filtrada
  *   4. Mapeo de respuesta de API a TurnoOption[]
  */
@@ -12,6 +12,8 @@
 import { openai } from '@/lib/openai'
 import type { TurnoOption } from './booking-flow-handler'
 import { formatHoraSinHipervinculo } from './shared/turnos-handler'
+
+import { MODELO_EXTRACCION } from "@/lib/ai-models"
 
 // ============================================================================
 // TIPOS
@@ -221,7 +223,7 @@ export function detectAndApplyFilter(
 // ============================================================================
 
 /**
- * Usa gpt-4o-mini para extraer un rango de fechas del mensaje.
+ * Usa la IA (MODELO_EXTRACCION) para extraer un rango de fechas del mensaje.
  * Se usa cuando el usuario pide turnos en fechas fuera de la lista actual.
  */
 export async function extractNewSearchDates(
@@ -234,7 +236,7 @@ export async function extractNewSearchDates(
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_EXTRACCION,
       messages: [
         {
           role: 'system',

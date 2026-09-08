@@ -15,6 +15,8 @@
 import { openai } from '@/lib/openai'
 import type { TurnoOption } from './types'
 
+import { MODELO_EXTRACCION } from "@/lib/ai-models"
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export interface FilterCriteria {
@@ -115,7 +117,7 @@ Ejemplos:
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODELO_EXTRACCION,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userInput },

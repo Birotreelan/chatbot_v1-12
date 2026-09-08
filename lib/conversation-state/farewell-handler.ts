@@ -14,6 +14,8 @@ import { getRedisClient } from "@/lib/redis"
 import { openai } from "@/lib/openai"
 import { getArgentinaHour } from "@/lib/utils/date-utils"
 
+import { MODELO_CLASIFICACION } from "@/lib/ai-models"
+
 const FAREWELL_KEYWORDS = [
   "gracias",
   "muchas gracias", 
@@ -180,7 +182,7 @@ export async function classifyFarewellWithNLU(
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODELO_CLASIFICACION,
       messages: [
         {
           role: "system",
