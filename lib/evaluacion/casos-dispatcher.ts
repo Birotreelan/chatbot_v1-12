@@ -32,7 +32,7 @@
  * sistema. Ante la duda, se deja afuera.
  */
 
-import type { DispatcherContext, TurnoSnapshot } from '../conversation-state/ai-dispatcher/context-builder'
+import type { CirugiaSnapshot, DispatcherContext, TurnoSnapshot } from '../conversation-state/ai-dispatcher/context-builder'
 import { TOOL_NAMES, type ToolName } from '../conversation-state/ai-dispatcher/tool-manifest'
 
 export interface CasoDispatcher {
@@ -81,12 +81,29 @@ const TURNO_CIRUGIA: TurnoSnapshot = {
   estado: 'Confirmado',
 }
 
+/**
+ * Cirugía real de María García, copiada de la respuesta de get_paciente
+ * verificada el 8/9/2026. Se usa el dato real, con los nombres de campo reales,
+ * porque la primera versión de este fixture asumía que una cirugía tenía la
+ * misma forma que un turno médico (profesional/sede) — y no la tiene.
+ *
+ * `observ` de la API queda deliberadamente afuera: son notas clínicas internas.
+ */
+const CIRUGIA_MARIA: CirugiaSnapshot = {
+  fecha: '2026-09-09',
+  hora: '08:30:00',
+  cirugia: 'OI - EXTRACCION DEL CRISTALINO POR FACOEMULSIFICACION DE CATARATAS (FACO)',
+  cirujano: 'BLOCK GLYN',
+  estado: 'Programada',
+}
+
 /** Arma un DispatcherContext completo a partir de lo poco que cambia por caso. */
 function contexto(over: Partial<DispatcherContext> = {}): DispatcherContext {
   const activeFlow = over.activeFlow ?? { type: 'none' as const, phase: 'none', description: 'No hay flujo activo' }
   return {
     patient: { identified: false, phone: '1100000000' },
     turnos: [],
+    turnosQx: [],
     activeFlow,
     hasActiveFlow: activeFlow.type !== 'none',
     conversationHistory: '',
@@ -261,7 +278,39 @@ export const CASOS_DISPATCHER: CasoDispatcher[] = [
       'sin usar la palabra "cancelar".',
   },
 
+  {
+    mensaje: 'Tengo cirugía el nueve de septiembre,',
+    esperado: TOOL_NAMES.CONSULTA_INFORMATIVA,
+    tipo: 'regresion',
+    origen: 'produccion',
+    ctx: contexto({
+      turnos: [TURNO_CONFIRMADO],
+      turnosQx: [CIRUGIA_MARIA],
+    }),
+    nota:
+      'Caso María García (tel. 1133550488, 8/9/2026). Avisó que tenía una cirugía el día ANTERIOR ' +
+      'a su turno y recibió el bloque de "no puedo brindarte información médica": la palabra ' +
+      '"cirugia" decidía sola con confianza 0.95. Un turno quirúrgico agendado es un dato, no una ' +
+      'consulta clínica. Con la cirugía en contexto, corresponde confirmarle los datos.',
+  },
+
   // ── Cobertura: comportamiento correcto que no queremos romper ────────────
+
+  {
+    mensaje: '¿la cirugía es riesgosa? me da miedo',
+    esperado: TOOL_NAMES.DERIVAR_CONSULTA,
+    tipo: 'cobertura',
+    origen: 'sintético',
+    ctx: contexto({
+      turnos: [TURNO_CONFIRMADO],
+      turnosQx: [CIRUGIA_MARIA],
+    }),
+    nota:
+      'Contracara del caso anterior: sacar "cirugia" de las señales médicas inequívocas NO puede ' +
+      'abrir la puerta a que el bot opine sobre riesgos quirúrgicos. Acá la palabra viene en una ' +
+      'pregunta clínica real y tiene que derivar.',
+  },
+
 
   {
     mensaje: 'tengo que estar en ayunas?',

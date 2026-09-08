@@ -64,10 +64,28 @@ export interface ChatbotDataTurnoCancelado {
 export interface ChatbotData {
   paciente: ChatbotDataPaciente
   turnos: ChatbotDataTurno[]
-  turnos_qx?: ChatbotDataTurno[]
+  /**
+   * Cirugías programadas. OJO: tienen forma propia (cirujano / cirugia_nombre /
+   * quirofano / ojo), NO la de un turno médico — el tipo acá está mal desde el
+   * origen y se mantiene por compatibilidad; el mapeo correcto vive en
+   * CirugiaSnapshot (ai-dispatcher/context-builder.ts).
+   */
+  turnos_qx?: any[]
   cantidad_turnos: number
   cantidad_cirugias?: number
   tiene_cirugias?: boolean
+  /**
+   * true cuando ya consultamos al backend por las cirugías de este paciente
+   * (8/9/2026, caso María García).
+   *
+   * Hace falta un marcador propio porque NINGÚN campo del payload sirve para
+   * saberlo: el recordatorio llega con turnos_qx=[], cantidad_cirugias=0 y
+   * tiene_cirugias=false incluso cuando la paciente SÍ tiene una cirugía
+   * programada. Los tres mienten por omisión, así que "está vacío" no puede
+   * distinguirse de "ya lo verificamos y no tiene". Sin este flag, o no
+   * consultábamos nunca, o consultábamos en cada mensaje.
+   */
+  cirugias_verificadas?: boolean
   sede_id: string
   clinica: string
   tipo_mensaje: string

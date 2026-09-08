@@ -1711,6 +1711,19 @@ async function rebuildAppointmentContextFromBackend(
         estado: t.Estado || t.estado || '',
       })),
       cantidad_turnos: turnosActivos.length,
+      // Cirugías programadas (8/9/2026, caso María García): get_paciente las
+      // devuelve en turnos_qx, pero el payload del recordatorio venía con el
+      // array vacío. Si reconstruimos el contexto desde el backend, es la
+      // oportunidad de traerlas. Se copian los campos uno por uno a propósito:
+      // la respuesta incluye `observ` con notas clínicas internas que no deben
+      // propagarse (ver CirugiaSnapshot en ai-dispatcher/context-builder.ts).
+      turnos_qx: ((resp as any).turnosQx || (datos as any).turnos_qx || []).map((qx: any) => ({
+        fecha: qx.fecha || qx.Fecha || '',
+        hora: qx.hora || qx.Hora || '',
+        cirugia_nombre: qx.cirugia_nombre || '',
+        cirujano: qx.cirujano || '',
+        Estado_Texto: qx.Estado_Texto || '',
+      })),
       sede_id: primerTurno.Sede_Id || primerTurno.sede_id || '',
       clinica: config.displayName || 'Clínica',
       tipo_mensaje: 'user_initiated',
@@ -1724,6 +1737,72 @@ async function rebuildAppointmentContextFromBackend(
   } catch (error) {
     console.error(`[CANCEL-FALLBACK] Error reconstruyendo contexto desde backend:`, error)
     return null
+  }
+}
+
+/**
+ * Completa el contexto del turno con las CIRUGÍAS del paciente (8/9/2026).
+ *
+ * El payload del recordatorio llega con `turnos_qx: []` aunque el paciente tenga
+ * una cirugía programada: el caso que lo destapó es María García (tel.
+ * 1133550488), que avisó que se operaba el día anterior a su turno — que era
+ * justamente el control postoperatorio — y el bot no tenía forma de saberlo.
+ * `get_paciente` sí la devuelve.
+ *
+ * Se consulta UNA sola vez por contexto: el resultado se persiste con el flag
+ * `cirugias_verificadas`, así que el resto de la conversación lo reusa sin
+ * volver a pegarle al backend. No alcanza con mirar si `turnos_qx` está vacío
+ * — el recordatorio lo manda vacío igual — por eso el flag es explícito.
+ *
+ * Es best-effort: si la consulta falla, se devuelve el contexto tal cual estaba.
+ * Nunca conviene romper la conversación por un dato accesorio.
+ */
+async function enriquecerContextoConCirugias(
+  userPhoneNumber: string,
+  config: any,
+  appointmentCtx: ChatbotData | null,
+): Promise<ChatbotData | null> {
+  if (!appointmentCtx || !config.cliente_id) return appointmentCtx
+  if (appointmentCtx.cirugias_verificadas) return appointmentCtx
+
+  try {
+    const dni = appointmentCtx.paciente?.dni
+    // El DNI identifica a UNA persona; el teléfono puede estar compartido por
+    // varios pacientes (familias). Se prefiere el DNI cuando está.
+    const resp = dni
+      ? await buscarPaciente(config.cliente_id, { dni })
+      : await buscarPaciente(config.cliente_id, { telefono: userPhoneNumber })
+
+    if (!resp.exito) {
+      console.log('[CIRUGIAS] No se pudo verificar cirugías — se sigue sin ellas')
+      return appointmentCtx
+    }
+
+    const crudas: any[] = (resp.turnosQx as any[]) || []
+    // Copia campo por campo: la respuesta trae `observ` con notas clínicas
+    // internas del paciente que NO deben propagarse al contexto ni al prompt.
+    const cirugias = crudas.map((qx: any) => ({
+      fecha: qx.fecha || qx.Fecha || '',
+      hora: qx.hora || qx.Hora || '',
+      cirugia_nombre: qx.cirugia_nombre || '',
+      cirujano: qx.cirujano || '',
+      Estado_Texto: qx.Estado_Texto || '',
+    }))
+
+    const enriquecido: ChatbotData = {
+      ...appointmentCtx,
+      turnos_qx: cirugias,
+      cantidad_cirugias: cirugias.length,
+      tiene_cirugias: cirugias.length > 0,
+      cirugias_verificadas: true,
+    }
+
+    await saveAppointmentContext(userPhoneNumber, config.id, enriquecido)
+    console.log(`[CIRUGIAS] Contexto enriquecido: ${cirugias.length} cirugía(s) programada(s)`)
+    return enriquecido
+  } catch (error) {
+    console.error('[CIRUGIAS] Error verificando cirugías (se continúa sin ellas):', error)
+    return appointmentCtx
   }
 }
 
@@ -2092,6 +2171,8 @@ async function runPrimaryDispatcherNoFlow(
     if (!dispatcherAppCtx && config.cliente_id) {
       dispatcherAppCtx = await rebuildAppointmentContextFromBackend(userPhoneNumber, config).catch(() => null)
     }
+    // Las cirugías ya se completaron más arriba en el pipeline, antes de los
+    // interceptores — ver "CIRUGÍAS: completar el contexto".
 
     const dispatcherCtx = await buildDispatcherContext(userPhoneNumber, config.id, dispatcherAppCtx, dispatcherHistory, config.cliente_id)
     const dispatcherResult = await runAIDispatcher(userPhoneNumber, config.id, userMessage, dispatcherCtx)
@@ -3826,10 +3907,27 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // Refactor Paso 2: cálculo centralizado (antes: Promise.all copiado a mano
         // acá y en otros puntos del archivo — ver lib/conversation-state/active-flow.ts
         // para la única fuente de verdad de "¿hay un flujo activo?").
-        const [activeFlow, apptCtx] = await Promise.all([
+        const [activeFlow, apptCtxCrudo] = await Promise.all([
           resolveActiveFlow(userPhoneNumber, config.id),
           getAppointmentContext(userPhoneNumber, config.id).catch(() => null),
         ])
+
+        // CIRUGÍAS: completar el contexto ANTES de que decida cualquier capa.
+        //
+        // El payload del recordatorio llega con turnos_qx=[] aunque el paciente
+        // tenga una cirugía programada, y acá el primero que responde gana: en el
+        // caso María García (tel. 1133550488, 8/9/2026) contestó el NLU fallback,
+        // mucho antes de que el mensaje llegara al dispatcher. Enriquecer más
+        // abajo no serviría — hay que hacerlo antes de la primera bifurcación.
+        //
+        // Se persiste en Redis, así que todos los lectores posteriores (router
+        // primario, Sprint 14/16/17, NLU fallback, dispatcher) lo ven sin volver
+        // a consultar. `cirugias_verificadas` lo limita a UNA llamada por
+        // contexto — no una por mensaje.
+        const apptCtx =
+          message.type === "text" && config.cliente_id && apptCtxCrudo && !apptCtxCrudo.cirugias_verificadas
+            ? await enriquecerContextoConCirugias(userPhoneNumber, config, apptCtxCrudo).catch(() => apptCtxCrudo)
+            : apptCtxCrudo
         const detActive = activeFlow.detection
         const tipoClinica = (apptCtx as any)?.tipo_mensaje
         const hasClinicaTemplate = tipoClinica === 'turno_cancelado_clinica' || tipoClinica === 'turno_confirmado_clinica'

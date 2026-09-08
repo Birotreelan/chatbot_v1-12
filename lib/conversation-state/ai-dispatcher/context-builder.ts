@@ -38,6 +38,27 @@ export interface TurnoSnapshot {
   estado: string   // "Confirmado" | "No confirmado" | "Pendiente de aprobación"
 }
 
+/**
+ * Turno de CIRUGÍA. Tiene forma propia — no es un turno médico con otros valores
+ * (verificado el 8/9/2026 contra la respuesta real de get_paciente): no trae
+ * `profesional` ni `sede`, sino `cirujano`, `quirofano`, `cirugia_nombre` y `ojo`.
+ *
+ * DELIBERADAMENTE NO incluye el campo `observ` de la API. Ahí la clínica guarda
+ * notas clínicas internas — en el caso que originó esto: "hipertensa y diabetica
+ * mov sola". Eso no puede entrar en el prompt de un modelo que después redacta
+ * mensajes hacia la paciente. Se mapea campo por campo, no con spread, para que
+ * agregar un campo nuevo sea una decisión explícita y no un descuido.
+ */
+export interface CirugiaSnapshot {
+  fecha: string
+  hora: string
+  /** Nombre del procedimiento tal como lo registra la clínica. */
+  cirugia: string
+  cirujano: string
+  /** "Programada", "Suspendida", etc. */
+  estado: string
+}
+
 export interface ActiveFlowSnapshot {
   type:
     | 'patient_detection'
@@ -68,6 +89,16 @@ export interface PatientSnapshot {
 export interface DispatcherContext {
   patient: PatientSnapshot
   turnos: TurnoSnapshot[]           // turnos próximos del paciente
+  /**
+   * Turnos de CIRUGÍA agendados (turnos_qx). Son informativos: el paciente no
+   * puede confirmarlos ni cancelarlos por este canal, los gestiona la clínica.
+   *
+   * 8/9/2026 (caso María García, tel. 1133550488): este dato ya venía en el
+   * Chatbot_Data y ya se mostraba en el saludo inicial, pero era invisible para
+   * el dispatcher. La paciente escribió "Tengo cirugía el nueve de septiembre"
+   * y el sistema no tenía forma de saber si eso era cierto ni de responderle.
+   */
+  turnosQx: CirugiaSnapshot[]
   activeFlow: ActiveFlowSnapshot    // flujo determinístico activo (si hay)
   hasActiveFlow: boolean
   conversationHistory: string       // últimos N mensajes formateados
@@ -296,6 +327,23 @@ export async function buildDispatcherContext(
     })
   }
 
+  // ── Turnos de cirugía (informativos) ───────────────────────────────────────
+  // Mapeo explícito campo por campo: la API usa nombres propios para las
+  // cirugías (cirujano/quirofano/cirugia_nombre) y trae además `observ`, con
+  // notas clínicas internas que NO deben llegar al prompt. Ver CirugiaSnapshot.
+  const turnosQx: CirugiaSnapshot[] = []
+  if (Array.isArray(appointmentCtx?.turnos_qx)) {
+    for (const qx of appointmentCtx.turnos_qx) {
+      turnosQx.push({
+        fecha:    qx.fecha || qx.Fecha || '',
+        hora:     qx.hora  || qx.Hora  || '',
+        cirugia:  qx.cirugia_nombre || qx.Cirugia_Nombre || '',
+        cirujano: qx.cirujano || qx.Cirujano || '',
+        estado:   qx.Estado_Texto || qx.estado_texto || '',
+      })
+    }
+  }
+
   // ── Flujo activo ───────────────────────────────────────────────────────────
   //
   // Prioridad: decision_pendiente > existing_patient > new_patient >
@@ -396,6 +444,7 @@ export async function buildDispatcherContext(
   return {
     patient,
     turnos,
+    turnosQx,
     activeFlow,
     hasActiveFlow: activeFlow.type !== 'none',
     conversationHistory: historyLines,
@@ -437,6 +486,25 @@ export function formatContextForLLM(ctx: DispatcherContext): string {
     ctx.turnos.forEach((t, i) => {
       lines.push(`TURNO ${i + 1}: ${t.fecha} a las ${t.hora} con ${t.profesional} en ${t.sede} — Estado: ${t.estado}`)
     })
+  }
+
+  // Cirugías: informativas. Se listan aparte de los turnos médicos porque el
+  // paciente NO puede gestionarlas por este canal, y confundirlas con un turno
+  // normal llevaría a ofrecerle cancelar o reagendar algo que no corresponde.
+  if (ctx.turnosQx.length > 0) {
+    ctx.turnosQx.forEach((qx, i) => {
+      const partes = [
+        `CIRUGÍA ${i + 1}: ${qx.fecha}`,
+        qx.hora ? ` a las ${qx.hora}` : '',
+        qx.cirujano ? ` con ${qx.cirujano}` : '',
+        qx.cirugia ? ` — ${qx.cirugia}` : '',
+        qx.estado ? ` (${qx.estado})` : '',
+      ]
+      lines.push(partes.join(''))
+    })
+    lines.push(
+      `SOBRE LAS CIRUGÍAS: son sólo informativas. Si el paciente pregunta por la fecha u hora de su cirugía, o menciona una que figura arriba, podés confirmarle esos datos con responder_consulta_informativa. Lo que NO podés es confirmarla, cancelarla ni reagendarla por este canal: para eso, derivar_consulta_externa.`,
+    )
   }
 
   // Template informativo de la clínica (no pide nada al paciente). Va antes del

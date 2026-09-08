@@ -277,6 +277,10 @@ export async function buscarPaciente(
   if (resultado.exito && resultado.datos) {
     const pacienteData = resultado.datos.paciente || resultado.datos
     const turnosProximos = resultado.datos.turnos_proximos || []
+    // Cirugías programadas. Se descartaban acá (8/9/2026, caso María García,
+    // tel. 1133550488): la paciente avisó que se operaba el día anterior a su
+    // turno y el sistema no tenía forma de saberlo, aunque la API lo devolvía.
+    const turnosQx = resultado.datos.turnos_qx || []
     const esPrimeraVez = resultado.datos.es_primera_vez ?? null
     // Límite de turnos activos (17/7/2026) — si la clínica no lo configuró,
     // resultado.datos.limite_turnos viene ausente/null y no se aplica límite.
@@ -285,6 +289,7 @@ export async function buscarPaciente(
       exito: true,
       datos: pacienteData,
       turnosProximos: turnosProximos,
+      turnosQx: turnosQx,
       esPrimeraVez: esPrimeraVez,
       limiteTurnos: limiteTurnos,
     }

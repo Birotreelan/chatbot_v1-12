@@ -521,7 +521,16 @@ function esConsultaMedicaInequivoca(msg: string): boolean {
   if (/\b(dolor|duele|duelen|dolia|dolian|me arde|arde|ardor|picazon|pica|hinchazon|hinchado|inflamacion|inflamado|fiebre|temperatura (alta|elevada)|mareo|mareos|nausea|nauseas|vomito|diarrea|constipacion|sangrado|sangra|herida|golpe|fractura|quemadura|alergia|sarpullido|erupcion|tos|gripe|covid|infeccion|bacteria|virus|hongo|vision borrosa|veo (borroso|mal|nublado)|ojo (rojo|lastimado|hinchado)|oido|escucho mal|sordera|perdida de vision|perdida de audicion|sangre)\b/.test(msg)) return true
 
   // Diagnóstico y consulta clínica — sólo términos clínicos explícitos.
-  if (/\b(diagnostico|que me pasa|que le pasa|enfermedad|condicion medica|es grave|tengo que tomar|curable|cronico|agudo|benigno|maligno|cancer|tumor|quiste|cirugia|tratamiento|terapia|rehabilitacion|curar|sanar|puedo tomar|debo tomar|deberia tomar|hay que tomar)\b/.test(msg)) return true
+  // 8/9/2026 — "cirugia" salió de esta lista (caso María García, tel. 1133550488).
+  // Es la misma clase de error que "que tengo" y el signo de interrogación: una
+  // palabra que aparece tanto en una consulta médica ("¿la cirugía es riesgosa?")
+  // como en un dato perfectamente administrativo sobre un turno ya agendado
+  // ("Tengo cirugía el nueve de septiembre"). María estaba avisando que tenía una
+  // cirugía el día ANTERIOR a su turno — probablemente para saber si le afectaba —
+  // y recibió el bloque de "no puedo brindarte información médica". Ahora la
+  // palabra sola no decide: escala a la IA, que lee la oración entera (ver
+  // tieneSenalMedicaAmbigua).
+  if (/\b(diagnostico|que me pasa|que le pasa|enfermedad|condicion medica|es grave|tengo que tomar|curable|cronico|agudo|benigno|maligno|cancer|tumor|quiste|tratamiento|terapia|rehabilitacion|curar|sanar|puedo tomar|debo tomar|deberia tomar|hay que tomar)\b/.test(msg)) return true
 
   // Estudios y resultados clínicos
   if (/\b(analisis (de sangre|clinico|de orina)|estudio medico|resultado (del analisis|del estudio)|laboratorio|radiografia|ecografia|tomografia|resonancia|biopsia|cultivo|plaqueta|hemograma|colesterol|glucosa|glucemia|hormona|examen medico|informe medico)\b/.test(msg)) return true
@@ -547,9 +556,13 @@ function esConsultaMedicaInequivoca(msg: string): boolean {
  *   me recomienda  → "¿qué sede me recomienda?"
  *   que hago si    → "¿qué hago si no puedo ir?"  (en realidad: cancelación)
  *   opera / calcul → palabras cortas que aparecen dentro de otras ideas
+ *   cirugia        → "Tengo cirugía el nueve de septiembre" (caso María García,
+ *                    8/9/2026): un turno quirúrgico agendado es un DATO, no una
+ *                    consulta clínica. "¿la cirugía duele?" sí lo es, y para
+ *                    distinguirlas hay que leer la oración completa.
  */
 function tieneSenalMedicaAmbigua(msg: string): boolean {
-  return /\b(que tengo|puedo hacer|es normal que|me recomienda|que hago (si|con|para)|opera|calcul)\b/.test(msg)
+  return /\b(que tengo|puedo hacer|es normal que|me recomienda|que hago (si|con|para)|opera|calcul|cirugia|cirugias)\b/.test(msg)
 }
 
 /** Consultas administrativas que no podemos responder (derivar a clínica) */

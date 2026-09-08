@@ -236,7 +236,33 @@ export const CORPUS: CasoCorpus[] = [
     requiereIA: true,
   },
 
+  {
+    mensaje: 'la cirugia es riesgosa? me da miedo',
+    esperado: 'consulta_medica_prohibida',
+    tipo: 'cobertura',
+    origen: 'sintético',
+    nota:
+      'El uso LEGÍTIMO de "cirugia". Al sacarla de las reglas inequívocas (caso María García, ' +
+      '8/9/2026), este caso pasa a depender de la IA — por eso está marcado como requiereIA. ' +
+      'La protección no desaparece: se mueve de capa.',
+    requiereIA: true,
+  },
+
   // ── Frases con expresiones ambiguas que NO son consultas médicas ──────────
+
+  {
+    mensaje: 'Tengo cirugía el nueve de septiembre,',
+    esperado: 'otro',
+    tipo: 'regresion',
+    origen: 'produccion',
+    nota:
+      'Caso María García (tel. 1133550488, 8/9/2026). Avisar que tenés una cirugía agendada es un ' +
+      'DATO sobre tu agenda, no una consulta clínica. La palabra "cirugia" decidía sola con 0.95 ' +
+      'y la paciente recibió el bloque de "no puedo brindarte información médica" cuando lo único ' +
+      'que hizo fue avisar que se operaba el día anterior a su turno. Las reglas ahora se abstienen.',
+    requiereIA: true,
+  },
+
   {
     mensaje: 'puedo hacer el cambio de fecha por acá?',
     esperado: 'reagendar_turno',

@@ -47,6 +47,14 @@ export interface ApiResponse<T> {
     mensaje: string
   }
   turnosProximos?: Cita[]
+  /**
+   * Cirugías programadas (turnos_qx). Tienen forma propia — cirujano, quirofano,
+   * cirugia_nombre, ojo — distinta de la de un turno médico, por eso no se
+   * tipan como Cita. Ver CirugiaSnapshot en ai-dispatcher/context-builder.ts
+   * para el subconjunto que sí se le muestra al modelo: la respuesta cruda
+   * incluye `observ`, con notas clínicas internas del paciente.
+   */
+  turnosQx?: unknown[]
   esPrimeraVez?: boolean | null
   /**
    * Límite de turnos activos permitidos por paciente (17/7/2026). Ausente o
