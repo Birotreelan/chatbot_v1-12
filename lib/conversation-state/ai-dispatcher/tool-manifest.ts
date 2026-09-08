@@ -92,7 +92,11 @@ que le impide asistir. Mostrará un menú de confirmación de cancelación.`,
       description: `El paciente quiere cancelar su turno actual y obtener uno nuevo.
 Usá este tool cuando pide cambiar la fecha, reagendar, o cancelar para agendar otro:
 "Quiero otro horario", "Cambiar la fecha", "Reagendar", "Necesito otro turno".
-Cancelará el turno actual e iniciará el flujo de reserva.`,
+Cancelará el turno actual e iniciará el flujo de reserva.
+NO lo uses cuando el paciente solo avisa que LLEGA TARDE al turno que ya tiene
+("voy a llegar 15 minutos tarde", "¿se podrá ir un poco más tarde?", "estoy demorado en camino"):
+eso NO es pedir otro turno, y este tool le cancelaría el turno vigente. Para esos casos,
+derivar_consulta_externa — solo la clínica sabe si puede esperarlo.`,
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
