@@ -296,10 +296,21 @@ export async function buildDispatcherContext(
   ])
 
   // ── Paciente identificado ──────────────────────────────────────────────────
+  // 8/9/2026 (caso Elsa Silva, tel. 1141898093): `identified` sale de una
+  // identificación previa en Redis, que en una conversación abierta desde un
+  // recordatorio no existe. Pero el titular del turno viene en el propio
+  // Chatbot_Data del recordatorio — lo teníamos y no se lo mostrábamos al
+  // modelo. Sin ese dato, "¿Discúlpame, para Elsa Silva?" se leyó como número
+  // equivocado y se le respondió que se había confundido.
+  const titularDelTurno = [appointmentCtx?.paciente?.nombres, appointmentCtx?.paciente?.apellido]
+    .filter(Boolean)
+    .join(' ')
+    .trim()
+
   const patient: PatientSnapshot = {
     identified: !!identified,
-    name: identified?.patientName,
-    dni: identified?.patientDNI,
+    name: identified?.patientName || titularDelTurno || undefined,
+    dni: identified?.patientDNI || appointmentCtx?.paciente?.dni,
     phone: phoneNumber,
   }
 
@@ -475,6 +486,14 @@ export function formatContextForLLM(ctx: DispatcherContext): string {
   // Paciente
   if (ctx.patient.identified) {
     lines.push(`PACIENTE IDENTIFICADO: ${ctx.patient.name ?? 'Nombre desconocido'} (DNI: ${ctx.patient.dni ?? 'N/D'})`)
+  } else if (ctx.patient.name) {
+    // Sin identificación previa, pero el recordatorio dice a nombre de quién
+    // está el turno. Sirve para reconocer cuándo alguien pregunta justamente por
+    // ese nombre (caso Elsa Silva, 8/9/2026).
+    lines.push(`TITULAR DEL TURNO: ${ctx.patient.name}`)
+    lines.push(
+      `SI EL PACIENTE PREGUNTA POR ESE NOMBRE ("¿es para ${ctx.patient.name.split(' ')[0]}?", "¿para quién es el turno?"), está verificando que el recordatorio le corresponde → responder_consulta_informativa. NO es un número equivocado.`,
+    )
   } else {
     lines.push(`PACIENTE: No identificado aún`)
   }

@@ -27,6 +27,7 @@ export type InformationalQueryType =
   | "direccion"          // ¿Dónde queda? ¿Cuál es la dirección?
   | "horario"            // ¿A qué hora es? ¿Cuál es el horario?
   | "profesional"        // ¿Con quién es el turno? ¿Quién me atiende?
+  | "paciente"           // ¿Para quién es el turno? ¿A nombre de quién está?
   | "unknown"            // No detectado por regex
 
 // ============================================================================
@@ -55,9 +56,30 @@ const CLEAR_SCHEDULE_PATTERNS = [
 ]
 
 const CLEAR_PROFESSIONAL_PATTERNS = [
-  /\b(?:con\s+)?qui[eé]n\s+(?:es|tengo)(?:\s+el\s+turno)?\b/i, // "con quién es/tengo"
-  /\b(?:qui[eé]n\s+)?(?:me\s+)?atiende\b/i,                    // "quién me atiende"
+  // 8/9/2026 (caso Elsa Silva, tel. 1141898093): el "con" era OPCIONAL —
+  // `(?:con\s+)?quién es` — así que "el turno PARA QUIÉN es?" matcheaba acá y se
+  // respondía con el nombre del profesional. Son preguntas opuestas: una es por
+  // el médico, la otra por el paciente. Ahora el "con" es obligatorio y la
+  // pregunta por el paciente tiene sus propios patrones (ver PATIENT_PATTERNS).
+  /\bcon\s+qui[eé]n\s+(?:es|tengo)(?:\s+el\s+turno)?\b/i,      // "con quién es/tengo"
+  /\bqui[eé]n\s+me\s+atiende\b/i,                              // "quién me atiende"
   /\bme\s+atiende\b/i,                                         // "me atiende"
+  /\bqu[eé]\s+(?:m[eé]dico|doctor|profesional)\b/i,            // "qué médico/doctor me toca"
+]
+
+/**
+ * Pregunta por el TITULAR del turno, no por el profesional.
+ *
+ * Caso real: el recordatorio no dice a nombre de quién está el turno, así que
+ * en un teléfono familiar la pregunta es natural y frecuente. Antes caía en el
+ * patrón del profesional y se respondía otra cosa.
+ */
+const CLEAR_PATIENT_PATTERNS = [
+  /\bpara\s+qui[eé]n\s+(?:es|era|ser[ií]a)\b/i,                // "para quién es (el turno)"
+  /\bel\s+turno\s+para\s+qui[eé]n\b/i,                         // "el turno para quién es"
+  /\ba\s+nombre\s+de\s+qui[eé]n\b/i,                           // "a nombre de quién está"
+  /\bde\s+qui[eé]n\s+es\s+(?:el\s+)?turno\b/i,                 // "de quién es el turno"
+  /\bqui[eé]n\s+tiene\s+(?:el\s+)?turno\b/i,                   // "quién tiene el turno"
 ]
 
 // ============================================================================
@@ -74,6 +96,13 @@ export function detectInformationalQueryType(message: string): InformationalQuer
 
   if (CLEAR_SCHEDULE_PATTERNS.some(p => p.test(cleanMessage))) {
     return "horario"
+  }
+
+  // El paciente se evalúa ANTES que el profesional: "para quién es el turno"
+  // contiene "quién es", y si el profesional gana la carrera se responde con el
+  // médico una pregunta que era sobre el titular (caso Elsa Silva, 8/9/2026).
+  if (CLEAR_PATIENT_PATTERNS.some(p => p.test(cleanMessage))) {
+    return "paciente"
   }
 
   if (CLEAR_PROFESSIONAL_PATTERNS.some(p => p.test(cleanMessage))) {
@@ -141,6 +170,33 @@ export function buildProfessionalResponse(appointmentData: ChatbotData): string 
   return "No tengo la información del profesional en este momento. ¿Hay algo más en lo que pueda ayudarte?"
 }
 
+/**
+ * Responde a quién pertenece el turno (8/9/2026, caso Elsa Silva).
+ *
+ * El recordatorio no incluye el nombre del titular, y en un teléfono usado por
+ * varias personas de una familia la pregunta aparece sola. Antes se respondía
+ * con el profesional, y cuando la paciente reformuló ("¿para Elsa Silva?") el
+ * sistema le contestó que se había equivocado de número.
+ *
+ * Sobre exponer el nombre: la clínica registró ESTE teléfono como el de contacto
+ * de la paciente y ya le mandó a ese número la fecha, la hora, el profesional y
+ * la sede. El nombre del titular es un dato menos sensible que los que ya viajan
+ * en el recordatorio. Aun así es información de salud: si preferís no darlo
+ * completo, alcanza con cambiar `nombreCompleto` por el primer nombre.
+ */
+export function buildPatientResponse(appointmentData: ChatbotData): string {
+  const paciente = (appointmentData as any).paciente
+  const nombres = (paciente?.nombres || "").trim()
+  const apellido = (paciente?.apellido || "").trim()
+  const nombreCompleto = [nombres, apellido].filter(Boolean).join(" ")
+
+  if (!nombreCompleto) {
+    return "No tengo el nombre del titular del turno en este momento. Para confirmarlo, comunicate con la clínica.\n\n¿Hay algo más en lo que pueda ayudarte?"
+  }
+
+  return `El turno está a nombre de *${nombreCompleto}*.\n\n¿Hay algo más en lo que pueda ayudarte?`
+}
+
 export function buildInformationalResponse(
   queryType: InformationalQueryType,
   appointmentData: ChatbotData
@@ -152,6 +208,8 @@ export function buildInformationalResponse(
       return buildScheduleResponse(appointmentData)
     case "profesional":
       return buildProfessionalResponse(appointmentData)
+    case "paciente":
+      return buildPatientResponse(appointmentData)
     default:
       return "¿En qué puedo ayudarte?"
   }

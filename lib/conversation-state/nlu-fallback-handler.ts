@@ -410,6 +410,9 @@ async function classifyIntentWithGPT(
   appointmentContext: any,
 ): Promise<FallbackIntentResult> {
   const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
+  // Nombre del titular: estaba en el contexto y nunca se le mostraba al modelo.
+  const pac = (appointmentContext as any)?.paciente
+  const nombreTitular = [pac?.nombres, pac?.apellido].filter(Boolean).join(' ').trim()
 
   const systemPrompt = `Sos un clasificador de intenciones para un chatbot de turnos médicos de WhatsApp.
 Clasificá el mensaje en UNA de estas categorías:
@@ -429,10 +432,20 @@ Clasificá el mensaje en UNA de estas categorías:
 - otro: no encaja en ninguna categoría anterior
 
 Turno activo del paciente:
+- Titular del turno: ${nombreTitular || 'no disponible'}
 - Fecha: ${fecha || 'no disponible'}
 - Hora: ${hora || 'no disponible'}
 - Profesional: ${profesional || 'no disponible'}
 - Sede: ${sede || 'no disponible'}
+
+SOBRE EL TITULAR (8/9/2026, caso Elsa Silva, tel. 1141898093): si el mensaje MENCIONA
+el nombre del titular —aunque sea preguntando ("¿Discúlpame, para Elsa Silva?", "es
+para Elsa?", "el turno es de mi mamá Elsa?")— NO es numero_equivocado: es alguien
+verificando que el recordatorio corresponde a esa persona → consulta_informativa.
+Usá numero_equivocado SOLO cuando dice explícitamente que NO conoce a esa persona o
+que el mensaje no es para él/ella ("no soy yo", "acá no vive ninguna Elsa", "se
+equivocaron de número"). Decirle "te confundiste de número" a quien preguntó por el
+nombre correcto lo empuja a ignorar un turno que sí es suyo.
 
 Respondé SOLO con JSON:
 {"intent": "...", "confidence": 0.0-1.0, "reasoning": "...", "response": "respuesta empática breve en español rioplatense (1-2 oraciones), omitir para consulta_medica_prohibida"}`

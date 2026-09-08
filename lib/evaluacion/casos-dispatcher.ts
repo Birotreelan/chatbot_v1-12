@@ -294,7 +294,41 @@ export const CASOS_DISPATCHER: CasoDispatcher[] = [
       'consulta clínica. Con la cirugía en contexto, corresponde confirmarle los datos.',
   },
 
+  {
+    mensaje: 'Discúlpame para Elsa Silva?',
+    esperado: TOOL_NAMES.CONSULTA_INFORMATIVA,
+    tipo: 'regresion',
+    origen: 'produccion',
+    ctx: contexto({
+      patient: { identified: false, name: 'ELSA SILVA', dni: '5716515', phone: '1141898093' },
+      turnos: [TURNO_CONFIRMADO],
+      templatePendingConfirmation: true,
+    }),
+    nota:
+      'Caso Elsa Silva (tel. 1141898093, 8/9/2026). Preguntó si el turno era para Elsa Silva —el ' +
+      'nombre correcto del titular— y el sistema le respondió "parece que te has confundido de ' +
+      'número". El titular venía en el Chatbot_Data y nunca se le mostraba al modelo. Decirle a ' +
+      'alguien que se equivocó de número cuando preguntó por el nombre correcto lo empuja a ' +
+      'ignorar un turno que sí es suyo.',
+  },
+
   // ── Cobertura: comportamiento correcto que no queremos romper ────────────
+
+  {
+    mensaje: 'acá no vive ninguna Elsa, se equivocaron de número',
+    esperado: TOOL_NAMES.DERIVAR_CONSULTA,
+    tipo: 'cobertura',
+    origen: 'sintético',
+    ctx: contexto({
+      patient: { identified: false, name: 'ELSA SILVA', dni: '5716515', phone: '1141898093' },
+      turnos: [TURNO_CONFIRMADO],
+      templatePendingConfirmation: true,
+    }),
+    nota:
+      'Contracara del anterior: mostrarle el nombre del titular al modelo no puede hacer que deje ' +
+      'de reconocer un número REALMENTE equivocado. Acá la persona niega explícitamente conocerla.',
+  },
+
 
   {
     mensaje: '¿la cirugía es riesgosa? me da miedo',
