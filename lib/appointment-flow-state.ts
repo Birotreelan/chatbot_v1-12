@@ -110,7 +110,14 @@ export interface FlowState {
   // "2" se interpretaba siempre con el mapeo clásico (mantener), invirtiendo
   // la decisión del paciente cuando en realidad se le había mostrado el menú
   // de 3 opciones. Caso 26/8/2026, tel. 1139310751: ver PLAN-DE-TRABAJO.md.
-  menuVariant?: 'confirmar_cancelar_otro'
+  // 8/9/2026 (caso Roberto Brullo, tel. 1151144710): segunda variante, ahora para
+  // 'awaiting_cancel_and_reschedule_confirm'. El menú que arma
+  // buildAskExplicitConfirmationMessage ("1- Sí, confirmo" / "2- No, quiero
+  // cancelar") tiene el MISMO mapeo que ese estado para el "1" (confirmar
+  // asistencia), pero no para el "2": ahí el paciente pide cancelar a secas, no
+  // cancelar para pedir otro turno. Sin distinguirlo, contestar "2" lo metía en
+  // el flujo de reagendamiento sin haberlo pedido.
+  menuVariant?: 'confirmar_cancelar_otro' | 'confirmar_o_cancelar'
 }
 
 // ============================================================================

@@ -1485,14 +1485,20 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
       // el handler de 'awaiting_cancel_confirmation' cancela vía proxy y, gracias a
       // postCancelAction='reschedule', redirige al flujo de reagendamiento.
       const turnoIndex = flowState.turnoIndex || 0
+      // 8/9/2026: en el menú "1- Sí, confirmo / 2- No, quiero cancelar" (variante
+      // confirmar_o_cancelar, ver buildAskExplicitConfirmationMessage) el "2" es
+      // una cancelación a secas — el paciente NO pidió otro turno. Encadenar el
+      // reagendamiento ahí lo metería en un flujo de reserva que no pidió. En el
+      // menú original ("cancelar el turno y solicitar uno nuevo") sí corresponde.
+      const postCancel = flowState.menuVariant === 'confirmar_o_cancelar' ? undefined : 'reschedule' as const
       await setFlowState(userPhoneNumber, config.id, {
         type: 'awaiting_cancel_confirmation',
         createdAt: new Date().toISOString(),
         turnoIndex,
-        postCancelAction: 'reschedule',
+        ...(postCancel ? { postCancelAction: postCancel } : {}),
       })
-      const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex, 'reschedule')
-      await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_and_reschedule", CANCEL_TO_REBOOK_BUTTONS)
+      const doubleConfirmMsg = buildCancelDoubleConfirmMessage(chatbotData, turnoIndex, postCancel)
+      await sendDirectResponse(ctx, doubleConfirmMsg, "cancel_and_reschedule", postCancel ? CANCEL_TO_REBOOK_BUTTONS : CANCEL_CONFIRM_BUTTONS)
       return true
 
     } else {
@@ -4370,6 +4376,25 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               configId: config.id,
               clienteId: config.cliente_id,
             }
+
+            // 8/9/2026 (caso Roberto Brullo, tel. 1151144710): esta rama hacía la
+            // pregunta y NO guardaba ningún estado. Cuando el paciente contestaba
+            // "1", nadie sabía a qué pregunta estaba respondiendo: el NLU lo
+            // clasificaba (correctamente) como "otro" — un número suelto sin
+            // contexto no es una intención — y el mensaje terminaba en el
+            // dispatcher, que mostraba el menú de bienvenida. El paciente había
+            // confirmado su asistencia y el turno quedaba sin confirmar.
+            //
+            // Se reusa 'awaiting_cancel_and_reschedule_confirm' porque su handler
+            // ya tiene exactamente el mapeo de este menú para el "1" (confirmar
+            // asistencia contra el proxy). La variante distingue el "2", que acá
+            // es cancelar a secas.
+            await setFlowState(userPhoneNumber, config.id, {
+              type: 'awaiting_cancel_and_reschedule_confirm',
+              createdAt: new Date().toISOString(),
+              turnoIndex: 0,
+              menuVariant: 'confirmar_o_cancelar',
+            })
 
             await sendDirectResponse(askExplicitCtx, askExplicitMessage, "ask_explicit_confirmation")
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })

@@ -180,6 +180,31 @@ export const CASOS_DISPATCHER: CasoDispatcher[] = [
   },
 
   {
+    mensaje: '1',
+    esperado: TOOL_NAMES.CONTINUAR_FLUJO,
+    tipo: 'regresion',
+    origen: 'produccion',
+    ctx: contexto({
+      activeFlow: {
+        type: 'decision_pendiente',
+        phase: 'awaiting_cancel_and_reschedule_confirm',
+        description: 'Se le mostró un menú para decidir entre confirmar la asistencia o cancelar y pedir otro turno',
+      },
+      turnos: [TURNO_PROXIMO],
+      templatePendingConfirmation: true,
+      ultimaPregunta:
+        'Gracias por tu mensaje. Para confirmar, ¿asistirás al siguiente turno?\n\n' +
+        '📅 10/09/2026 a las 11:30\n👨‍⚕️ SOBRINO CLAUDIA\n📍 San Cristobal\n\n1- Sí, confirmo\n2- No, quiero cancelar',
+    }),
+    nota:
+      'Caso Roberto Brullo (tel. 1151144710, 8/9/2026). El bot le preguntó "1- Sí, confirmo / ' +
+      '2- No, quiero cancelar", contestó "1" y recibió el menú de bienvenida: la rama ask_explicit ' +
+      'hacía la pregunta sin guardar ningún estado, así que nadie sabía a qué respondía ese "1". ' +
+      'Se arregló guardando el estado; este caso cubre la otra mitad — que el dispatcher tampoco ' +
+      'se lo lleve al menú si algún día llega hasta él.',
+  },
+
+  {
     mensaje: 'Si mucha gracias',
     esperado: TOOL_NAMES.CONFIRMAR_ASISTENCIA,
     tipo: 'regresion',
