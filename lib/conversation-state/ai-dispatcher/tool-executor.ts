@@ -123,8 +123,18 @@ function construirSaludo(ctx: DispatcherContext, clinicName?: string): string {
     : `*¡Hola!* Soy Iris, la asistente virtual${deClinica}.`
 }
 
-/** Antepone el saludo sólo si es la primera respuesta y el mensaje no saluda ya. */
-function conSaludoSiCorresponde(mensaje: string, ctx: DispatcherContext, deps: ExecutorDeps): string {
+/**
+ * Antepone el saludo sólo si es la primera respuesta y el mensaje no saluda ya.
+ *
+ * 10/9/2026: pasó a exportarse. El comentario de arriba daba por sentado que las
+ * respuestas del executor eran "las únicas que pueden ser lo PRIMERO que el
+ * paciente lee". No era cierto: el router primario de whatsapp.tsx contesta por
+ * su cuenta —sin pasar por el executor— y también puede abrir la conversación.
+ * Un paciente escribió "Confirmo asistencia pos cirugía ojo izquierdo..." como
+ * primer mensaje del día y recibió una respuesta seca, sin saludo (tel.
+ * 1169503625).
+ */
+export function conSaludoSiCorresponde(mensaje: string, ctx: DispatcherContext, deps: ExecutorDeps): string {
   if (!esPrimeraRespuestaDeLaConversacion(ctx)) return mensaje
   if (YA_SALUDA_RE.test(mensaje)) return mensaje
   return `${construirSaludo(ctx, deps.clinicName)}\n\n${mensaje}`

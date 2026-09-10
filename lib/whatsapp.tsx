@@ -153,7 +153,7 @@ import {
 } from "./conversation-state/pending-flow-nlu/contextual-intent-handler"
 import { buildDispatcherContext } from "./conversation-state/ai-dispatcher/context-builder"
 import { runAIDispatcher } from "./conversation-state/ai-dispatcher/dispatcher"
-import { executeDispatcherDecision, type ExecutorDeps } from "./conversation-state/ai-dispatcher/tool-executor"
+import { executeDispatcherDecision, conSaludoSiCorresponde, type ExecutorDeps } from "./conversation-state/ai-dispatcher/tool-executor"
 
 
 // Función para extraer el contenido del mensaje según su tipo
@@ -1680,7 +1680,50 @@ async function rebuildAppointmentContextFromBackend(
       const estado = String(t.Estado ?? t.estado ?? '').trim().toLowerCase()
       return estado !== 'cancelado'
     })
+    // Cirugías: se mapean ANTES del corte por "sin turnos activos" (10/9/2026).
+    // Antes ese early-return descartaba la respuesta entera, incluidas las
+    // cirugías que acabábamos de traer en la misma llamada. Caso María Gladys
+    // Noguera (tel. 1169503625): tenía turnos_proximos vacío y una cirugía
+    // agendada para el día siguiente; el log decía "Paciente sin turnos activos"
+    // y el sistema seguía como si no supiéramos nada de ella.
+    //
+    // Copia campo por campo a propósito: la respuesta trae `observ` con notas
+    // clínicas internas que no deben propagarse (ver CirugiaSnapshot).
+    const cirugiasRaw: any[] = ((resp as any).turnosQx || (datos as any).turnos_qx || []) as any[]
+    const cirugias = cirugiasRaw.map((qx: any) => ({
+      fecha: qx.fecha || qx.Fecha || '',
+      hora: qx.hora || qx.Hora || '',
+      cirugia_nombre: qx.cirugia_nombre || '',
+      cirujano: qx.cirujano || '',
+      Estado_Texto: qx.Estado_Texto || '',
+    }))
+
     if (turnosActivos.length === 0) {
+      // Sin turnos médicos pero CON cirugía: igual hay que devolver contexto, o
+      // el sistema le responde a ciegas. Los callers que necesitan un turno
+      // médico ya validan `turnos.length` (ver startCancelDoubleConfirm).
+      if (cirugias.length > 0) {
+        const soloCirugias: ChatbotData = {
+          paciente: {
+            nombres: (paciente.Nombres || paciente.nombres || paciente.nombre || 'Paciente').trim(),
+            apellido: (paciente.Apellido || paciente.apellido || '').trim(),
+            dni: (paciente.Nrodoc || paciente.dni || '').toString(),
+            telefono: userPhoneNumber,
+          },
+          turnos: [],
+          turnos_qx: cirugias,
+          cantidad_turnos: 0,
+          cantidad_cirugias: cirugias.length,
+          tiene_cirugias: true,
+          cirugias_verificadas: true,
+          sede_id: '',
+          clinica: config.displayName || 'Clínica',
+          tipo_mensaje: 'user_initiated',
+        }
+        await saveAppointmentContext(userPhoneNumber, config.id, soloCirugias)
+        console.log(`[CANCEL-FALLBACK] Sin turnos médicos, pero ${cirugias.length} cirugía(s) agendada(s)`)
+        return soloCirugias
+      }
       console.log(`[CANCEL-FALLBACK] Paciente sin turnos activos en backend`)
       return null
     }
@@ -1713,17 +1756,11 @@ async function rebuildAppointmentContextFromBackend(
       cantidad_turnos: turnosActivos.length,
       // Cirugías programadas (8/9/2026, caso María García): get_paciente las
       // devuelve en turnos_qx, pero el payload del recordatorio venía con el
-      // array vacío. Si reconstruimos el contexto desde el backend, es la
-      // oportunidad de traerlas. Se copian los campos uno por uno a propósito:
-      // la respuesta incluye `observ` con notas clínicas internas que no deben
-      // propagarse (ver CirugiaSnapshot en ai-dispatcher/context-builder.ts).
-      turnos_qx: ((resp as any).turnosQx || (datos as any).turnos_qx || []).map((qx: any) => ({
-        fecha: qx.fecha || qx.Fecha || '',
-        hora: qx.hora || qx.Hora || '',
-        cirugia_nombre: qx.cirugia_nombre || '',
-        cirujano: qx.cirujano || '',
-        Estado_Texto: qx.Estado_Texto || '',
-      })),
+      // array vacío. Ya vienen mapeadas más arriba, sin el campo `observ`.
+      turnos_qx: cirugias,
+      cantidad_cirugias: cirugias.length,
+      tiene_cirugias: cirugias.length > 0,
+      cirugias_verificadas: true,
       sede_id: primerTurno.Sede_Id || primerTurno.sede_id || '',
       clinica: config.displayName || 'Clínica',
       tipo_mensaje: 'user_initiated',
@@ -2271,14 +2308,45 @@ async function runPrimaryDispatcherNoFlow(
       return true
     }
 
+    // 10/9/2026 (tel. 1169503625): estas ramas contestan sin pasar por el
+    // executor, así que se salteaban el saludo. Un paciente escribió "Confirmo
+    // asistencia pos cirugía ojo izquierdo..." como primer mensaje del día y
+    // recibió la respuesta a secas. Si es lo primero que el bot dice en la
+    // conversación, corresponde saludar — conSaludoSiCorresponde no hace nada
+    // si ya hubo respuestas antes o si el mensaje ya arranca saludando.
+    // Sólo tiene cirugía agendada (10/9/2026, caso María Gladys Noguera, tel.
+    // 1169503625). Confirmar o cancelar NO aplica: los turnos quirúrgicos se
+    // gestionan con la clínica. Antes se le respondía "tu turno ya está
+    // agendado, todavía no hace falta que confirmes" — afirmando un turno médico
+    // inexistente e ignorando la cirugía que sí tenía, al día siguiente.
+    const soloTieneCirugias =
+      (dispatcherCtx.turnos?.length ?? 0) === 0 && (dispatcherCtx.turnosQx?.length ?? 0) > 0
+
+    if (
+      soloTieneCirugias &&
+      (action.type === 'trigger_confirm_appointment' ||
+        action.type === 'trigger_cancel_menu' ||
+        action.type === 'trigger_cancel_and_rebook')
+    ) {
+      const { buildTurnosQuirurgicosInfo } = await import('./conversation-state/patient-detection/patient-templates')
+      const infoQx = buildTurnosQuirurgicosInfo(dispatcherAppCtx?.turnos_qx || [])
+      routerLogger.info('[Router primario] Sólo cirugías agendadas — se informa y se deriva a la clínica', {
+        accion: action.type,
+        cirugias: dispatcherCtx.turnosQx.length,
+      })
+      await sendDirectResponse(ctxDirect, conSaludoSiCorresponde(infoQx.trim(), dispatcherCtx, executorDeps), "router-primary-solo-cirugia")
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      return true
+    }
+
     if (action.type === 'trigger_confirm_appointment') {
-      if (dispatcherAppCtx) {
+      if (dispatcherAppCtx && (dispatcherAppCtx.turnos?.length ?? 0) > 0) {
         const confirmMsg = buildConfirmationMessage(dispatcherAppCtx, 0)
-        await sendDirectResponse(ctxDirect, confirmMsg, "router-primary-confirm")
+        await sendDirectResponse(ctxDirect, conSaludoSiCorresponde(confirmMsg, dispatcherCtx, executorDeps), "router-primary-confirm")
       } else {
         // Fuera de la ventana de recordatorio (24-48hs antes del turno) — no confirmamos
         // todavía, pero le explicamos por qué en vez de dejarlo sin respuesta.
-        await sendDirectResponse(ctxDirect, buildConfirmNotYetMessage(), "router-primary-confirm-not-yet")
+        await sendDirectResponse(ctxDirect, conSaludoSiCorresponde(buildConfirmNotYetMessage(), dispatcherCtx, executorDeps), "router-primary-confirm-not-yet")
       }
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
       return true
@@ -2287,7 +2355,11 @@ async function runPrimaryDispatcherNoFlow(
     if (action.type === 'trigger_cancel_menu' || action.type === 'trigger_cancel_and_rebook') {
       const postAction = action.type === 'trigger_cancel_and_rebook' ? 'reschedule' : undefined
       if (await startCancelDoubleConfirm(userPhoneNumber, config, ctxDirect, postAction)) return true
-      await sendDirectResponse(ctxDirect, 'No encontré un turno activo para cancelar. Si necesitás ayuda, escribime.', "router-cancel-no-turno")
+      await sendDirectResponse(
+        ctxDirect,
+        conSaludoSiCorresponde('No encontré un turno activo para cancelar. Si necesitás ayuda, escribime.', dispatcherCtx, executorDeps),
+        "router-cancel-no-turno",
+      )
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
       return true
     }
