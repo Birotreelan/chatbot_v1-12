@@ -2814,6 +2814,92 @@ export async function handleMessage(value: any) {
       return
     }
 
+    // ============================================================================
+    // AUDIO → TEXTO, ANTES DE RUTEAR (14/9/2026)
+    // ============================================================================
+    // Hasta acá los audios se transcribían en processIndividualMessage, que corre
+    // DESPUÉS de toda la cascada de ruteo de esta función. Consecuencia: las 24
+    // compuertas de abajo filtran por `message.type` y ninguna acepta "audio",
+    // así que un audio las atravesaba todas sin que ninguna lo mirara — el
+    // dispatcher, los interceptores de confirmación, el NLU fallback — y caía al
+    // asistente de texto libre. Un paciente recibía un trato completamente
+    // distinto según hablara o escribiera lo mismo. El caso que lo destapó: una
+    // nota de voz con una queja terminó en el corte por "uso indebido", en vez
+    // de tratarse como la queja que era (14/9/2026, tel. 1132779363).
+    //
+    // Transcribir acá arriba hace que el texto resultante recorra exactamente el
+    // mismo camino que si lo hubieran tipeado. Se normaliza `message.type` a
+    // "text" en vez de tocar las 24 condiciones: un solo punto de cambio, y
+    // ninguna queda olvidada. Los datos del audio (audioId/audioMimeType) siguen
+    // disponibles en sus propias variables para el reproductor del panel.
+    let mensajeGuardadoComoAudio = false
+
+    if (message.type === "audio" && audioId) {
+      try {
+        // Se descarga UNA vez y sirve para dos cosas: transcribir y guardar el
+        // original, para poder escuchar en el panel qué dijo realmente el
+        // paciente cuando la transcripción no cierra.
+        const audioBuffer = await downloadWhatsAppMedia(audioId, config.accessToken)
+        void saveConversationAudio(config.id, userPhoneNumber, audioId, audioBuffer, audioMimeType).catch(() => {})
+
+        const transcription = await transcribeAudio(audioBuffer, audioMimeType)
+
+        if (!transcription || !transcription.trim()) {
+          const errorMessage =
+            "Lo siento, no pude entender el audio que enviaste. ¿Podrías intentar nuevamente o enviar tu mensaje por escrito?"
+          await saveConversationMessage({
+            id: nanoid(),
+            role: "assistant",
+            content: errorMessage,
+            timestamp: new Date().toISOString(),
+            phoneNumber: userPhoneNumber,
+            configId: config.id,
+            messageType: "error",
+          })
+          await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, errorMessage)
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return
+        }
+
+        userMessage = transcription
+        // El mensaje del paciente se guarda acá, con el id del audio para que el
+        // panel ofrezca el reproductor. El guardado genérico de más abajo se
+        // saltea este caso para no duplicar la burbuja.
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: transcription,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: "audio",
+          audioMessageId: audioId,
+        })
+        appendToHistory(userPhoneNumber, { role: 'user', text: transcription, timestamp: Date.now() }).catch(() => {})
+        mensajeGuardadoComoAudio = true
+
+        // A partir de acá es un mensaje de texto a todos los efectos del ruteo.
+        message.type = "text"
+        console.info(`[WHATSAPP] Audio transcripto y ruteado como texto: "${transcription.substring(0, 60)}"`)
+      } catch (transcriptionError) {
+        console.error(`[WHATSAPP] ❌ Error transcribiendo audio:`, transcriptionError)
+        const errorMessage =
+          "Lo siento, hubo un problema al procesar tu mensaje de voz. ¿Podrías intentar nuevamente o enviar tu mensaje por escrito?"
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: errorMessage,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+          messageType: "error",
+        })
+        await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, errorMessage)
+        await updateWhatsAppStats(config.id, { errors: 1 })
+        return
+      }
+    }
+
     // Verificar si es una conversación user-initiated (sin template o fuera de ventana 24h)
     // Solo verificar si hay cliente_id configurado para el tracking de estadísticas
     if (config.cliente_id) {
@@ -3142,11 +3228,10 @@ export async function handleMessage(value: any) {
       return
     }
 
-    // Los audios NO se guardan acá: en este punto todavía no están transcriptos
-    // (userMessage viene vacío de extractMessageContent) y se guardaba una burbuja
-    // en blanco por cada nota de voz. processIndividualMessage lo guarda después
-    // de transcribir, con el texto real y el id del audio para reproducirlo.
-    if (userMessage) {
+    // Los audios ya se guardaron arriba, al transcribirlos, con el id del audio
+    // para que el panel ofrezca el reproductor (14/9/2026). Si se guardaran otra
+    // vez acá quedarían dos burbujas por cada nota de voz.
+    if (userMessage && !mensajeGuardadoComoAudio) {
       await saveConversationMessage({
         id: nanoid(),
         role: "user",
@@ -6759,6 +6844,12 @@ Hola, quisiera reagendar mi turno.`
     // ============================================================================
     // PROCESAMIENTO NORMAL DE MENSAJES
     // ============================================================================
+    // 14/9/2026: en la práctica este bloque ya no se alcanza desde WhatsApp.
+    // handleMessage transcribe ANTES de rutear y encola el mensaje como "text",
+    // justamente para que el audio recorra el mismo camino que un mensaje
+    // tipeado (ver "AUDIO → TEXTO, ANTES DE RUTEAR"). Se conserva como red de
+    // seguridad para cualquier otro llamador de la cola que todavía encole un
+    // audio sin transcribir; si se elimina, ese caso quedaría sin transcripción.
     if (messageType === "audio" && audioId) {
 
       try {
