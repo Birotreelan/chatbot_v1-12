@@ -508,6 +508,33 @@ export async function identifyPatientByDNI(
   }
 }
 
+/**
+ * ¿La consulta al backend FALLÓ, en vez de responder "no existe"?
+ *
+ * La distinción es la que se perdía (14/9/2026). `exito: false` cubre dos
+ * situaciones opuestas:
+ *
+ *   - "consultamos y el paciente no está"  → seguir con el alta de paciente nuevo
+ *   - "no pudimos consultar"               → no sabemos nada; no decidir
+ *
+ * Tratar la segunda como la primera manda a registrarse de nuevo a alguien que
+ * ya está en el sistema, y deja un duplicado en la base de la clínica — algo que
+ * no se ve en la conversación y que alguien tiene que limpiar después. El caso
+ * que lo destapó: un ETIMEDOUT contra el proxy el 8/9/2026 (DNI 29171192).
+ *
+ * Se consideran fallos técnicos los errores de red y los HTTP_5xx/4xx del proxy:
+ * en todos, la respuesta no dice nada sobre si el paciente existe.
+ */
+export function esFalloTecnicoDeBackend(respuesta: {
+  exito?: boolean
+  error?: { codigo?: string }
+}): boolean {
+  if (respuesta.exito) return false
+  const codigo = respuesta.error?.codigo
+  if (!codigo) return false
+  return codigo === 'ERROR_RED' || codigo.startsWith('HTTP_')
+}
+
 export async function processDNIForDisambiguation(
   phoneNumber: string,
   dni: string,
@@ -520,6 +547,17 @@ export async function processDNIForDisambiguation(
   turnos?: any[]
   message?: string
   error?: string
+  /**
+   * true cuando NO pudimos consultar al backend (timeout, caída de red).
+   *
+   * 14/9/2026: distinguirlo importa porque `found: false` venía significando dos
+   * cosas opuestas — "consultamos y no existe" y "no pudimos consultar". Con un
+   * ETIMEDOUT contra el proxy (caso del 8/9, DNI 29171192) el sistema daba por
+   * inexistente a un paciente y lo mandaba a registrarse de nuevo, creando un
+   * duplicado en el sistema de la clínica. No saber no es lo mismo que saber que
+   * no está.
+   */
+  errorTecnico?: boolean
 }> {
   const logger = createConversationLogger(phoneNumber, configId, 'dni_disambiguation')
   logger.info('Processing DNI for patient disambiguation', { dni: dni.substring(0, 3) + '****' })
@@ -593,9 +631,22 @@ export async function processDNIForDisambiguation(
     const clinicAPI = await ClinicAPI.create(clienteId)
     const patientResponse = await clinicAPI.paciente_dni(foundPatientDNI)
 
+    // No pudimos consultar ≠ el paciente no existe (14/9/2026). Ante un fallo
+    // técnico no se consume intento ni se avanza: se avisa y se reintenta.
+    if (esFalloTecnicoDeBackend(patientResponse)) {
+      logger.error('No se pudo consultar el backend para validar el DNI — NO se trata como paciente inexistente', undefined, {
+        codigo: patientResponse.error?.codigo,
+      })
+      return {
+        found: false,
+        errorTecnico: true,
+        error: 'No pudimos verificar tus datos en este momento.',
+      }
+    }
+
     if (!patientResponse.exito || !patientResponse.datos) {
       logger.warn('Patient not found via get_paciente', { dni: foundPatientDNI.substring(0, 3) + '****' })
-      
+
       // Incrementar intentos
       state.attempts = (state.attempts || 0) + 1
       if (state.attempts >= 3) {

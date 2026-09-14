@@ -797,6 +797,20 @@ export async function handleDNIForMultiplePatients(
     clienteId
   )
 
+  // No pudimos consultar al backend (14/9/2026): no se lo trata como paciente
+  // inexistente ni se lo manda al alta — puede estar perfectamente registrado y
+  // registrarlo de nuevo crearía un duplicado en el sistema de la clínica.
+  if (result.errorTecnico) {
+    logger.error('Fallo técnico validando el DNI — no se registra como paciente nuevo', undefined, {})
+    return {
+      handled: true,
+      message:
+        'Estoy teniendo un problema para acceder a tus datos en este momento. ' +
+        '¿Me reenviás tu DNI en un minuto, por favor? Si sigue sin funcionar, comunicate con la clínica.',
+      patientInfo: { isNewPatient: false },
+    }
+  }
+
   if (!result.found) {
     logger.warn('DNI not found in patients list', {})
 

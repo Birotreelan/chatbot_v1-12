@@ -1,6 +1,13 @@
 import type { ApiResponse, Paciente } from "./api-tools/types"
-import { TIMEOUTS, fetchWithTimeout } from "./config/timeouts"
+import { TIMEOUTS, fetchWithRetry, RETRY_PRESETS } from "./config/timeouts"
 import { resolveProxyUrl } from "./proxy-url-resolver"
+
+/**
+ * Acciones que MODIFICAN datos. Se reintentan sólo si la request nunca llegó al
+ * servidor, para no arriesgar una reserva o una cancelación duplicada.
+ * Misma lista que en api-tools/api-functions.ts.
+ */
+const MUTATION_ACTIONS = ["cancelar_turno", "confirmar_turno", "reservar_turno", "set_turno"]
 
 // Función helper para obtener fechas dinámicas
 function getDefaultDateRange(): string {
@@ -58,7 +65,18 @@ export class ClinicAPI {
         params,
       })
 
-      const response = await fetchWithTimeout(
+      // REINTENTOS (14/9/2026): este módulo se había quedado sin ellos.
+      //
+      // El 27/8 se agregaron en api-tools/api-functions.ts, con este diagnóstico:
+      // las fallas del proxy de la clínica son intermitentes y el 28% de las
+      // conversaciones terminaba viendo un error técnico. Pero el arreglo se
+      // aplicó a UN módulo y no al otro, y toda la detección de pacientes pasa
+      // por acá. El 8/9 (DNI 29171192) un único ETIMEDOUT contra el proxy bastó
+      // para dar por inexistente a un paciente y mandarlo a registrarse de nuevo.
+      //
+      // Mismos presets que el otro módulo, por las mismas razones.
+      const esMutacion = MUTATION_ACTIONS.includes(action)
+      const response = await fetchWithRetry(
         this.proxyUrl,
         {
           method: "POST",
@@ -68,6 +86,7 @@ export class ClinicAPI {
           body: JSON.stringify(requestBody),
         },
         TIMEOUTS.PROXY_TIMEOUT,
+        esMutacion ? RETRY_PRESETS.MUTATION : RETRY_PRESETS.INTERACTIVE_READ,
       )
 
       // Obtener el texto de la respuesta
