@@ -136,6 +136,28 @@ export const SESSION_COOKIE_OPTIONS = {
   path: "/",
 }
 
+/**
+ * Devuelve el ID de sesión vigente, sin resolver los datos en Redis.
+ *
+ * 14/9/2026: hacía falta para que el panel pueda ARRASTRAR la sesión en las
+ * navegaciones internas. Hasta acá, el cliente sólo conocía su session ID si
+ * venía un `_sid` en la URL — el camino que se construyó para Safari. En Chrome
+ * nunca hizo falta porque la cookie viajaba sola, así que el cliente quedaba sin
+ * saberlo y las navegaciones dentro de /support salían "peladas".
+ *
+ * Al exponerlo, el arrastre deja de depender de qué decida cada navegador sobre
+ * las cookies de terceros dentro de un iframe — que es un terreno que se sigue
+ * moviendo (Safari lo cerró hace años, Chrome lo está cerrando ahora).
+ */
+export async function getSessionId(): Promise<string | null> {
+  const cookieStore = await cookies()
+  const fromCookie = cookieStore.get("session_id")?.value
+  if (fromCookie) return fromCookie
+
+  const headerStore = await headers()
+  return headerStore.get("x-session-id") || null
+}
+
 export async function getSession(): Promise<SessionData | null> {
   const cookieStore = await cookies()
   let sessionId = cookieStore.get("session_id")?.value

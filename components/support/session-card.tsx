@@ -18,7 +18,7 @@ interface SessionCardProps {
 export function SessionCard({ session, onUpdate }: SessionCardProps) {
   const router = useRouter()
   const [assigning, setAssigning] = useState(false)
-  const { getAuthHeaders, sessionId: ssoSessionId } = useSession()
+  const { getAuthHeaders, sessionId: ssoSessionId, appendSessionToUrl } = useSession()
 
   const priorityConfig = {
     low: { color: "bg-blue-100 text-blue-700 border-blue-200", label: "Baja" },
@@ -76,12 +76,7 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
       await onUpdate()
 
       console.log("[v0] [CLIENT] Redirigiendo a la conversación...")
-      // Incluir _sid en la URL para Safari fallback
-      let redirectUrl = `/support/${session.id}`
-      if (ssoSessionId) {
-        redirectUrl += `?_sid=${encodeURIComponent(ssoSessionId)}`
-      }
-      router.push(redirectUrl)
+      router.push(appendSessionToUrl(`/support/${session.id}`))
     } catch (error) {
       console.error("[v0] [CLIENT] Error en handleAssign:", error)
       alert("Error al asignar la conversación: " + (error instanceof Error ? error.message : "Error desconocido"))
@@ -92,12 +87,10 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
   }
 
   function handleView() {
-    // Incluir _sid en la URL para Safari fallback
-    let redirectUrl = `/support/${session.id}`
-    if (ssoSessionId) {
-      redirectUrl += `?_sid=${encodeURIComponent(ssoSessionId)}`
-    }
-    router.push(redirectUrl)
+    // 14/9/2026: el session ID se arrastra SIEMPRE, no sólo en Safari. Depender
+    // de la cookie dentro del iframe dejó de funcionar en Chrome (ver el
+    // comentario del layout de /support).
+    router.push(appendSessionToUrl(`/support/${session.id}`))
   }
 
   const timeAgo = formatDistanceToNow(new Date(session.requestedAt), {
