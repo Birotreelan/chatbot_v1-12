@@ -136,8 +136,22 @@ export function middleware(request: NextRequest) {
       // iframe, así que `existingCookie` ahí siempre es undefined y esta
       // rama nunca se disparaba (22/7/2026).
       if (existingCookie === sidParam && !pathname.startsWith("/api/")) {
-        console.log("[MIDDLEWARE] SSO: Cookie ya existe con el valor correcto, redirigiendo a URL limpia")
-        const cleanUrl = new URL("/support", request.url)
+        // 15/9/2026: acá se redirigía a "/support" fijo, DESCARTANDO el pathname.
+        // Estaba escrito cuando `_sid` sólo aparecía al entrar por SSO, así que
+        // "limpiar la URL" y "volver al panel" eran lo mismo.
+        //
+        // Al hacer que todas las navegaciones internas arrastren `_sid` (14/9,
+        // para que el panel no dependa de la cookie de terceros en el iframe),
+        // esta rama pasó a secuestrar los enlaces profundos: tocar "Ver" iba a
+        // /support/{id}?_sid=XYZ, la cookie coincidía, y el middleware devolvía
+        // al listado. En ventana privada no hay cookie previa, la rama no se
+        // dispara y por eso ahí sí funcionaba.
+        //
+        // Ahora se limpia SÓLO el parámetro, conservando la ruta y el resto de
+        // la query.
+        const cleanUrl = new URL(request.url)
+        cleanUrl.searchParams.delete("_sid")
+        console.log("[MIDDLEWARE] SSO: Cookie ya existe con el valor correcto, limpiando _sid de", pathname)
         return NextResponse.redirect(cleanUrl)
       }
       

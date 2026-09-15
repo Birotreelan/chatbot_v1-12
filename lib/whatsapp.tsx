@@ -82,6 +82,7 @@ import { detectInformationalQueryPreFlow } from "./conversation-state/informatio
 import { detectPostActionContextPreFlow, savePostActionContext } from "./conversation-state/post-action-context"
 import { detectNLUFallbackPreFlow } from "./conversation-state/nlu-fallback-handler"
 import { appendToHistory } from "./conversation-state/conversation-history"
+import { evaluarSeleccionFueraDeMenu, listarOpciones } from "./conversation-state/opciones-ofrecidas"
 import {
   handleTurnSelectionIfPending,
   buildInvalidSelectionMessage,
@@ -2947,6 +2948,46 @@ export async function handleMessage(value: any) {
           userMessage = globalNumericId
         }
         // Si resetOk=false: el bloque SPRINT9A re-detectará al paciente y mostrará el menú
+      }
+    }
+
+    // ============================================================================
+    // OPCIÓN FUERA DEL MENÚ: RE-PREGUNTAR, NUNCA REINICIAR (14/9/2026)
+    // ============================================================================
+    // Caso Marta: se le mostró un menú de DOS opciones (su obra social no permite
+    // agendar por el bot, así que esa opción ni figuraba), contestó "3", ninguna
+    // capa lo reconoció, el mensaje cayó hasta el fondo de la cascada — y el
+    // fondo REINICIA. La saludaron de nuevo como si recién llegara y le
+    // ofrecieron agendar un turno que un mensaje antes le habían dicho que no
+    // podía sacar.
+    //
+    // Se valida contra las opciones que enumera el texto del último paso, no
+    // contra los botones guardados: los botones son 3 como máximo y una lista de
+    // turnos ofrece 20 números. Ver opciones-ofrecidas.ts.
+    if (message.type === "text" && userMessage) {
+      const textoDelPaso = await getStepPrompt(userPhoneNumber, config.id).catch(() => null)
+      const seleccion = evaluarSeleccionFueraDeMenu(userMessage, textoDelPaso)
+
+      if (seleccion.fueraDeMenu && textoDelPaso) {
+        const ctxFueraDeMenu: DirectResponseContext = {
+          phoneNumberId: value.metadata.phone_number_id,
+          accessToken: config.accessToken,
+          userPhoneNumber,
+          configId: config.id,
+          clienteId: config.cliente_id,
+        }
+        const botonesDelPaso = await getStepButtons(userPhoneNumber, config.id).catch(() => null)
+
+        console.info(`[OPCIONES] "${seleccion.elegida}" no está en el menú (disponibles: ${seleccion.disponibles.join(', ')}) — se re-pregunta`)
+        await sendDirectResponse(
+          ctxFueraDeMenu,
+          `La opción ${seleccion.elegida} no está disponible. Elegí ${listarOpciones(seleccion.disponibles)}:\n\n${textoDelPaso}`,
+          // Phase de re-pregunta: no debe pisar el paso real que está repitiendo.
+          "router-fallback-resume",
+          botonesDelPaso || undefined,
+        )
+        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+        return
       }
     }
 
