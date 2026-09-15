@@ -51,14 +51,21 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
   const [patient, setPatient] = useState<PatientData | null>(null)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [isNewPatient, setIsNewPatient] = useState(false)
+  const [datosNoDisponibles, setDatosNoDisponibles] = useState(false)
   const [phoneNumber, setPhoneNumber] = useState<string | null>(null)
   const [lastFetch, setLastFetch] = useState<number>(0)
   const { getAuthHeaders, sessionId: ssoSessionId } = useSession()
 
   const fetchPatientData = useCallback(async () => {
-    // Cache de 2 minutos para evitar llamadas innecesarias
+    // Cache de 2 minutos para evitar llamadas innecesarias.
+    //
+    // 15/9/2026: la condición exigía además `patient !== null`. Con el efecto
+    // dependiendo de esta función, un paciente NO encontrado (patient = null, que
+    // es un resultado válido y frecuente: gente que escribe por primera vez)
+    // dejaba la guarda siempre en falso y la carga se repetía sin fin. El corte
+    // tiene que ser sólo temporal, que es lo que un caché de 2 minutos significa.
     const now = Date.now()
-    if (now - lastFetch < 120000 && patient !== null) {
+    if (lastFetch > 0 && now - lastFetch < 120000) {
       return
     }
 
@@ -79,7 +86,27 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
       })
       
       if (!response.ok) {
-        throw new Error("Error al cargar datos del paciente")
+        // 15/9/2026: antes se tiraba un Error genérico y se perdía el status, así
+        // que desde el panel era imposible distinguir un 401 (sesión) de un 500
+        // (backend) — y había que adivinar. El detalle va al mensaje y a la
+        // consola: el agente ve algo accionable y nosotros vemos la causa.
+        let detalle = ""
+        try {
+          const cuerpo = await response.json()
+          detalle = cuerpo?.error || ""
+        } catch {
+          /* la respuesta no era JSON */
+        }
+        console.error("[PATIENT-PANEL] Fallo la carga", { status: response.status, detalle })
+
+        if (response.status === 401) {
+          throw new Error("Tu sesión expiró. Recargá la página para volver a entrar.")
+        }
+        throw new Error(
+          detalle
+            ? `No se pudieron cargar los datos del paciente: ${detalle}`
+            : `No se pudieron cargar los datos del paciente (error ${response.status}).`,
+        )
       }
 
       const data = await response.json()
@@ -87,7 +114,8 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
       if (data.success) {
         setPatient(data.patient)
         setAppointments(data.upcomingAppointments || [])
-        setIsNewPatient(data.isNewPatient || !data.patient)
+        setIsNewPatient(data.isNewPatient || (!data.patient && !data.datosNoDisponibles))
+        setDatosNoDisponibles(!!data.datosNoDisponibles)
         setPhoneNumber(data.phoneNumber)
         setLastFetch(now)
         setError(null)
@@ -99,11 +127,17 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
     } finally {
       setLoading(false)
     }
-  }, [sessionId, lastFetch, patient])
+    // 15/9/2026: `ssoSessionId` y `getAuthHeaders` faltaban en las dependencias.
+    // Como el efecto de abajo dispara la carga apenas monta el componente, la
+    // función quedaba capturada con el valor INICIAL de ssoSessionId — que puede
+    // ser null mientras el SessionProvider todavía lo está resolviendo. Si en ese
+    // momento la cookie tampoco viaja (iframe de terceros en Chrome), la request
+    // salía sin ninguna credencial y volvía 401.
+  }, [sessionId, lastFetch, ssoSessionId, getAuthHeaders])
 
   useEffect(() => {
     fetchPatientData()
-  }, [sessionId]) // Solo recargar cuando cambie el sessionId
+  }, [sessionId, fetchPatientData])
 
   // Formatear nombre completo
   const getFullName = () => {
@@ -169,6 +203,41 @@ export function PatientInfoPanel({ sessionId }: PatientInfoPanelProps) {
           <span className="text-xs font-medium">Error</span>
         </div>
         <p className="text-xs text-muted-foreground">{error}</p>
+      </div>
+    )
+  }
+
+  // No pudimos consultar al sistema de la clínica (15/9/2026). Distinto de
+  // "paciente nuevo": mostrarle la ficha de alta al agente cuando en realidad no
+  // sabemos nada lo puede llevar a cargar de nuevo a alguien que ya existe.
+  if (datosNoDisponibles) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 h-full">
+        <div className="flex items-center gap-2 mb-2">
+          <AlertCircle className="h-4 w-4 text-amber-600" />
+          <span className="text-xs font-medium text-amber-800">Datos no disponibles</span>
+        </div>
+        <p className="text-xs text-amber-700/90">
+          No pudimos consultar el sistema de la clínica, así que no sabemos si esta persona está
+          registrada. <strong>No asumas que es un paciente nuevo.</strong>
+        </p>
+        {phoneNumber && (
+          <div className="flex items-center gap-1.5 text-xs text-amber-700 mt-2">
+            <Phone className="h-3 w-3" />
+            <span>{phoneNumber}</span>
+          </div>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs mt-3"
+          onClick={() => {
+            setLastFetch(0)
+            fetchPatientData()
+          }}
+        >
+          Reintentar
+        </Button>
       </div>
     )
   }
