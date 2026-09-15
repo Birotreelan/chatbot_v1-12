@@ -8,6 +8,7 @@ import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
+import { registrarMensajeEntrante } from "./ventana-atencion"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData, isWithinTemplateWindow } from "./appointment-stats"
@@ -2788,6 +2789,37 @@ export async function handleMessage(value: any) {
 
     console.info(`[WHATSAPP] Mensaje de ${userPhoneNumber}: "${userMessage.substring(0, 50)}${userMessage.length > 50 ? '...' : ''}" (${message.type})`)
 
+    // Obtener la configuración de WhatsApp
+    const config = await getWhatsAppConfigByPhoneId(value.metadata.phone_number_id)
+
+    if (!config) {
+      console.error(
+        `[WHATSAPP] Configuración no encontrada para el número de teléfono ID: ${value.metadata.phone_number_id}`,
+      )
+      return
+    }
+
+    // ============================================================================
+    // VENTANA DE ATENCIÓN DE 24 HORAS (15/9/2026)
+    // ============================================================================
+    // Cualquier mensaje del paciente reabre la ventana durante la cual WhatsApp
+    // permite responderle libremente (texto, imágenes, documentos). El panel de
+    // atención necesita ese dato para avisarle al agente antes de que escriba o
+    // adjunte algo, en vez de dejar que WhatsApp lo rechace después.
+    //
+    // Se registra ACÁ, antes de los filtros de stickers y emojis, justamente
+    // porque esos mensajes también reabren la ventana del lado de WhatsApp: si
+    // los descartáramos antes de registrarlos, el panel le diría al agente que
+    // la ventana está cerrada cuando en realidad está abierta, y le bloquearía
+    // un envío válido.
+    //
+    // Se espera, aunque sea un solo SET a Redis: en serverless, una promesa
+    // sin await puede quedar sin ejecutar cuando la función termina y el
+    // contenedor se congela. Perder este registro hace que el panel muestre
+    // "cerrada" o "desconocida" con la ventana abierta. La función se traga sus
+    // propios errores, así que esto nunca interrumpe la atención al paciente.
+    await registrarMensajeEntrante(config.id, userPhoneNumber, message.timestamp)
+
     // Ignorar stickers, reacciones e iconos (mensajes de texto compuestos únicamente por emojis)
     if (message.type === "sticker" || message.type === "reaction") {
       return
@@ -2802,16 +2834,6 @@ export async function handleMessage(value: any) {
       /^[\p{Emoji}\p{Emoji_Presentation}\p{Extended_Pictographic}\u{FE0E}\u{FE0F}\u{200D}\s]+$/u.test(userMessage.trim()) &&
       !/[\p{L}\p{N}]/u.test(userMessage)
     ) {
-      return
-    }
-
-    // Obtener la configuración de WhatsApp
-    const config = await getWhatsAppConfigByPhoneId(value.metadata.phone_number_id)
-
-    if (!config) {
-      console.error(
-        `[WHATSAPP] Configuración no encontrada para el número de teléfono ID: ${value.metadata.phone_number_id}`,
-      )
       return
     }
 

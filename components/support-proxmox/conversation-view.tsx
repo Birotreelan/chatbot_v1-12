@@ -8,7 +8,7 @@ import { MessageInput } from "./message-input"
 import { CloseSessionDialog } from "./close-session-dialog"
 import { useSession } from "./session-provider"
 import type { HumanSupportSession, HumanSupportMessage } from "@/lib/types"
-import { ArrowLeft, Phone, XCircle } from "lucide-react"
+import { ArrowLeft, Phone, XCircle, Clock } from "lucide-react"
 import { PatientInfoPanel } from "./patient-info-panel"
 import { Badge } from "@/components/ui/badge"
 
@@ -20,6 +20,15 @@ interface ConversationViewProps {
   sessionId: string
 }
 
+/** "3 h 40 min" / "25 min" — cuánto queda de la ventana de 24 h de WhatsApp. */
+function describirRestante(cierreIso: string): string {
+  const minutos = Math.max(0, Math.floor((new Date(cierreIso).getTime() - Date.now()) / 60000))
+  if (minutos < 60) return `${minutos} min`
+  const horas = Math.floor(minutos / 60)
+  const resto = minutos % 60
+  return resto === 0 ? `${horas} h` : `${horas} h ${resto} min`
+}
+
 export function ConversationView({ sessionId }: ConversationViewProps) {
   const router = useRouter()
   const [session, setSession] = useState<ExtendedSession | null>(null)
@@ -27,6 +36,12 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCloseDialog, setShowCloseDialog] = useState(false)
+  // Momento en que se cierra la ventana de 24 h de WhatsApp (15/9/2026).
+  // Guardamos la fecha, no el estado, para poder recalcularlo en el cliente sin
+  // depender de que el servidor nos vuelva a responder: la ventana se cierra
+  // sola con el paso del tiempo, aunque no pase nada en la conversación.
+  const [cierreVentana, setCierreVentana] = useState<string | null>(null)
+  const [ventanaConocida, setVentanaConocida] = useState(false)
   const { getAuthHeaders, sessionId: ssoSessionId } = useSession()
 
   // OPTIMIZACIÓN BANDWIDTH (2026-07-06):
@@ -68,6 +83,11 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
 
       if (typeof data.lastActivity === "number") {
         lastActivityRef.current = data.lastActivity
+      }
+
+      if (data.ventana) {
+        setVentanaConocida(data.ventana.estado !== "desconocida")
+        setCierreVentana(data.ventana.cierraEn ?? null)
       }
 
       // Sin novedades desde el último poll → mantener el estado actual
@@ -133,6 +153,59 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
     }
   }
 
+  /**
+   * Envía un archivo al paciente (15/9/2026).
+   *
+   * Va por su propia ruta (/api/support/media) porque el cuerpo es multipart y
+   * no JSON. El texto del cuadro viaja como epígrafe del archivo, para que al
+   * paciente le llegue todo junto en un solo mensaje.
+   */
+  async function handleSendFile(archivo: File, caption: string) {
+    let url = `/api/support/media`
+    if (ssoSessionId) {
+      url += `?_sid=${encodeURIComponent(ssoSessionId)}`
+    }
+
+    const formData = new FormData()
+    formData.append("sessionId", sessionId)
+    formData.append("file", archivo)
+    if (caption) formData.append("caption", caption)
+
+    // Sin Content-Type: lo pone el navegador con el boundary del multipart.
+    const response = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...getAuthHeaders() },
+      body: formData,
+    })
+
+    const data = await response.json().catch(() => null)
+
+    if (!response.ok || !data?.success) {
+      const motivo = data?.error || "No se pudo enviar el archivo."
+      // Si el rechazo fue por la ventana de 24 h, actualizamos el aviso del
+      // cuadro de texto: WhatsApp acaba de confirmar lo que nuestro registro
+      // quizá no sabía.
+      if (data?.ventanaCerrada) {
+        setVentanaConocida(true)
+        setCierreVentana(new Date().toISOString())
+      }
+      alert(motivo)
+      throw new Error(motivo)
+    }
+
+    await loadSession()
+  }
+
+  /** URL autenticada para pedirle un archivo de esta conversación al servidor. */
+  function construirUrlMedia(mediaId: string): string {
+    let url = `/api/support/media?sessionId=${encodeURIComponent(sessionId)}&mediaId=${encodeURIComponent(mediaId)}`
+    if (ssoSessionId) {
+      url += `&_sid=${encodeURIComponent(ssoSessionId)}`
+    }
+    return url
+  }
+
   async function handleCloseSession() {
     try {
       // Construir URL con _sid para Safari fallback
@@ -173,6 +246,15 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
     }
     router.push(redirectUrl)
   }
+
+  // Se recalcula en cada render a partir de la fecha de cierre, no del estado
+  // que mandó el servidor: si el agente deja el panel abierto, la ventana se
+  // cierra mientras mira la pantalla y el aviso tiene que aparecer solo.
+  const estadoVentanaActual: "abierta" | "cerrada" | "desconocida" = !ventanaConocida || !cierreVentana
+    ? "desconocida"
+    : new Date(cierreVentana).getTime() > Date.now()
+      ? "abierta"
+      : "cerrada"
 
   if (loading) {
     return (
@@ -236,18 +318,39 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
         {/* Conversación - ocupa el resto */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-card rounded-lg border">
           {/* Header del chat */}
-          <div className="px-3 py-2 border-b bg-muted/30">
+          <div className="px-3 py-2 border-b bg-muted/30 flex items-center justify-between gap-2">
             <h3 className="text-xs font-medium text-muted-foreground">Historial de Conversacion</h3>
+            {estadoVentanaActual !== "desconocida" && (
+              <span
+                className={`flex items-center gap-1 text-[11px] whitespace-nowrap ${
+                  estadoVentanaActual === "abierta" ? "text-muted-foreground" : "text-amber-700"
+                }`}
+                title="WhatsApp solo permite responder libremente dentro de las 24 h posteriores al último mensaje del paciente."
+              >
+                <Clock className="h-3 w-3" />
+                {estadoVentanaActual === "abierta"
+                  ? `${describirRestante(cierreVentana!)} de ventana`
+                  : "Ventana de 24 h cerrada"}
+              </span>
+            )}
           </div>
           
           {/* Lista de mensajes */}
           <div className="flex-1 min-h-0">
-            <MessageList messages={session.messages} agentLabel={agentName} />
+            <MessageList
+              messages={session.messages}
+              agentLabel={agentName}
+              construirUrlMedia={construirUrlMedia}
+            />
           </div>
 
           {/* Input para responder */}
           <div className="p-2 border-t">
-            <MessageInput onSend={handleSendMessage} />
+            <MessageInput
+              onSend={handleSendMessage}
+              onSendFile={handleSendFile}
+              ventana={estadoVentanaActual}
+            />
           </div>
         </div>
       </div>

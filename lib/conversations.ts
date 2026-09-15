@@ -1,4 +1,5 @@
 import { getRedisClient } from "./redis"
+import type { MediaAdjunta } from "./types"
 
 // Prefijos para las claves en Redis
 const CONVERSATION_PREFIX = "conversation:"
@@ -29,6 +30,11 @@ export interface ConversationMessage {
    * reproducir la voz real — ver lib/conversation-audio.ts.
    */
   audioMessageId?: string
+  /**
+   * Archivo adjunto (15/9/2026). Solo la referencia: el archivo vive en
+   * WhatsApp, no acá. Ver lib/types.ts → MediaAdjunta.
+   */
+  media?: MediaAdjunta
 }
 
 export interface ConversationContact {

@@ -14,6 +14,8 @@ import {
 import { getConversationMessages, getAllConversationMessages, saveConversationMessage, getConversationLastActivity } from "@/lib/conversations"
 import { getWhatsAppConfigById, getThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
+import { estadoVentana } from "@/lib/ventana-atencion"
+import { interpretarErrorCrudo } from "@/lib/whatsapp-media"
 import { nanoid } from "nanoid"
 import type { HumanSupportMessage } from "@/lib/types"
 
@@ -77,6 +79,10 @@ export async function GET(request: Request) {
               : ("assistant" as const),
         content: msg.content,
         timestamp: msg.timestamp,
+        // Referencia al archivo adjunto, si el mensaje era uno (15/9/2026).
+        // Sin esto el panel muestra "[Archivo enviado: orden.pdf]" como texto
+        // plano y el agente no puede abrir lo que él mismo mandó.
+        ...(msg.media ? { media: msg.media } : {}),
       })),
       // Mensajes de soporte humano (agente únicamente)
       ...supportMessages,
@@ -94,9 +100,15 @@ export async function GET(request: Request) {
       uniqueMessages.map((m) => ({ role: m.role, content: m.content.substring(0, 30) })),
     )
 
+    // Estado de la ventana de 24 h de WhatsApp (15/9/2026). El panel la muestra
+    // para que el agente sepa ANTES de escribir o adjuntar si el mensaje va a
+    // poder salir, en vez de enterarse por un rechazo de Meta.
+    const ventana = await estadoVentana(supportSession.configId, supportSession.phoneNumber)
+
     return NextResponse.json({
       success: true,
       lastActivity: lastActivity || Date.now(),
+      ventana,
       session: {
         ...supportSession,
         messages: uniqueMessages,
@@ -469,7 +481,21 @@ async function handleMessage(sessionId: string, session: SessionData, message: s
     })
 
     console.log("[v0] [MESSAGE] Enviando mensaje a WhatsApp...")
-    await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, supportSession.phoneNumber, message.trim())
+    try {
+      await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, supportSession.phoneNumber, message.trim())
+    } catch (error) {
+      // Antes este error subía tal cual y el agente veía el JSON de Meta en un
+      // alert. El caso más frecuente es la ventana de 24 h cerrada, que no es
+      // una falla del sistema sino una regla de WhatsApp: reintentar no sirve,
+      // y el agente tiene que saber por qué (15/9/2026).
+      const { mensaje, codigo } = interpretarErrorCrudo(error)
+      const esVentana = codigo === 131047
+      console.error("[v0] [MESSAGE] ❌ WhatsApp rechazó el mensaje:", codigo, mensaje)
+      return NextResponse.json(
+        { success: false, error: mensaje, codigo, ventanaCerrada: esVentana },
+        { status: esVentana ? 409 : 502 },
+      )
+    }
     console.log("[v0] [MESSAGE] ✅ Mensaje enviado a WhatsApp exitosamente")
 
     const supportMessage: HumanSupportMessage = {

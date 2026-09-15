@@ -255,6 +255,28 @@ export interface HumanSupportSession {
   pendingMessages: ConversationMessage[]
 }
 
+/**
+ * Archivo enviado o recibido por WhatsApp (15/9/2026).
+ *
+ * Deliberadamente NO guardamos el archivo: solo esta referencia. WhatsApp
+ * conserva el contenido 30 días y el panel se lo pide a ellos cuando hay que
+ * mostrarlo (ver app/api/support/media/route.ts). Son documentos clínicos, y
+ * no tenerlos en reposo en nuestra infraestructura es una decisión, no un
+ * descuido.
+ *
+ * `disponibleHasta` existe para que la interfaz pueda avisar antes de que el
+ * archivo desaparezca, en vez de mostrar un recuadro roto sin explicación.
+ */
+export interface MediaAdjunta {
+  mediaId: string
+  tipo: "image" | "document"
+  mimeType: string
+  nombreArchivo: string
+  tamanoBytes: number
+  /** ISO. Pasada esta fecha WhatsApp ya no entrega el archivo. */
+  disponibleHasta: string
+}
+
 export interface HumanSupportMessage {
   id: string
   sessionId: string
@@ -263,6 +285,8 @@ export interface HumanSupportMessage {
   timestamp: string
   agentId?: string
   phoneNumber?: string
+  /** Presente cuando el mensaje es un archivo; `content` es el texto que lo acompaña. */
+  media?: MediaAdjunta
 }
 
 export interface ConversationAnalytics {
