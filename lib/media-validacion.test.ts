@@ -23,7 +23,11 @@ import {
   formatearTamano,
   LIMITE_SUBIDA_PANEL,
 } from "./media-validacion"
-import { interpretarErrorDeWhatsApp, interpretarErrorCrudo } from "./whatsapp-media"
+import {
+  interpretarErrorDeWhatsApp,
+  interpretarErrorCrudo,
+  cabeceraContentDisposition,
+} from "./whatsapp-media"
 
 const MB = 1024 * 1024
 
@@ -230,6 +234,60 @@ describe("interpretarErrorCrudo — errores que vienen envueltos en un Error", (
   it("no explota con null ni con un JSON roto", () => {
     expect(interpretarErrorCrudo(null).mensaje.length).toBeGreaterThan(0)
     expect(interpretarErrorCrudo(new Error("error: {esto no es json")).mensaje.length).toBeGreaterThan(0)
+  })
+})
+
+describe("cabeceraContentDisposition", () => {
+  /**
+   * El bug real: el 15/9/2026 el preview devolvía 500 con el archivo ya
+   * descargado. El nombre era una captura de macOS, que trae U+202F (espacio
+   * fino) antes del "p. m.", y las cabeceras HTTP son Latin-1.
+   *
+   * La prueba de fuego de todos estos casos es la misma: el resultado tiene que
+   * ser representable como ByteString, es decir, ningún carácter por encima de
+   * 255. Si no, la respuesta explota al construirse.
+   */
+  function esByteStringValida(valor: string): boolean {
+    for (const caracter of valor) {
+      if (caracter.codePointAt(0)! > 255) return false
+    }
+    return true
+  }
+
+  it("sobrevive al nombre de una captura de macOS", () => {
+    const nombre = "Captura de pantalla 2026-09-15 a la(s) 12.19.54 p. m..png"
+    const cabecera = cabeceraContentDisposition(nombre)
+    expect(esByteStringValida(cabecera)).toBe(true)
+  })
+
+  it("mantiene el nombre real en filename*, para que el navegador lo muestre bien", () => {
+    const cabecera = cabeceraContentDisposition("Orden médica.pdf")
+    expect(cabecera).toContain("filename*=UTF-8''")
+    expect(cabecera).toContain(encodeURIComponent("Orden médica.pdf"))
+    expect(esByteStringValida(cabecera)).toBe(true)
+  })
+
+  it("deja un respaldo ASCII legible para clientes viejos", () => {
+    expect(cabeceraContentDisposition("Orden médica.pdf")).toContain('filename="Orden m_dica.pdf"')
+  })
+
+  it("escapa comillas y barras, que romperían la cabecera", () => {
+    const cabecera = cabeceraContentDisposition('or"den\\.pdf')
+    expect(cabecera).toContain('filename="or_den_.pdf"')
+  })
+
+  it("escapa los caracteres que RFC 5987 no admite y encodeURIComponent deja pasar", () => {
+    const cabecera = cabeceraContentDisposition("a(1)'s*.pdf")
+    expect(cabecera).not.toMatch(/filename\*=UTF-8''.*[('*)]/)
+  })
+
+  it("nunca deja el filename vacío", () => {
+    expect(cabeceraContentDisposition("")).toContain('filename="archivo"')
+    expect(cabeceraContentDisposition("日本語")).toContain('filename="___"')
+  })
+
+  it("permite pedir descarga en lugar de vista en línea", () => {
+    expect(cabeceraContentDisposition("a.pdf", "attachment")).toMatch(/^attachment; /)
   })
 })
 

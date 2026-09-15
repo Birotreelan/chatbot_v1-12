@@ -35,6 +35,7 @@ import {
   uploadWhatsAppMedia,
   sendWhatsAppMedia,
   descargarMediaParaPanel,
+  cabeceraContentDisposition,
   formatearTamano,
   ErrorDeWhatsApp,
   DIAS_RETENCION_WHATSAPP,
@@ -283,7 +284,10 @@ export async function GET(request: Request) {
       headers: {
         "Content-Type": media.mimeType,
         "Content-Length": String(buffer.length),
-        "Content-Disposition": `inline; filename="${media.nombreArchivo}"`,
+        // Interpolar el nombre acá directamente devolvía 500 con el archivo ya
+        // descargado en cuanto tenía un acento o un espacio fino de macOS: las
+        // cabeceras HTTP son Latin-1. Ver cabeceraContentDisposition.
+        "Content-Disposition": cabeceraContentDisposition(media.nombreArchivo),
         // Son datos clínicos: no deben quedar en caches compartidas.
         "Cache-Control": "private, max-age=300",
       },

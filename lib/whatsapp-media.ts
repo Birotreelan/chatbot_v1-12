@@ -108,6 +108,41 @@ export function interpretarErrorCrudo(error: unknown): { mensaje: string; codigo
   return { mensaje: texto || "No se pudo enviar el mensaje." }
 }
 
+/**
+ * Arma el `Content-Disposition` con un nombre de archivo que puede tener
+ * acentos, eñes o caracteres raros.
+ *
+ * Las cabeceras HTTP solo admiten Latin-1. Un nombre con cualquier carácter
+ * fuera de ese rango hace que la construcción de la respuesta lance
+ * `TypeError: Cannot convert argument to a ByteString` y la ruta devuelva 500
+ * con el archivo ya descargado — que es exactamente lo que pasó en producción
+ * el 15/9/2026 con una captura de pantalla de macOS: el nombre traía U+202F
+ * (espacio fino) antes del "p. m.".
+ *
+ * La solución es la de RFC 6266: un `filename` ASCII como respaldo para
+ * clientes viejos, y un `filename*` codificado en UTF-8 que los navegadores
+ * actuales prefieren y muestran con el nombre real.
+ */
+export function cabeceraContentDisposition(
+  nombreArchivo: string,
+  disposicion: "inline" | "attachment" = "inline",
+): string {
+  // Respaldo: solo ASCII imprimible, sin comillas ni barras que rompan el header.
+  const ascii = (nombreArchivo || "")
+    .replace(/[^\x20-\x7e]/g, "_")
+    .replace(/["\\]/g, "_")
+    .trim()
+  const respaldo = ascii.length > 0 ? ascii : "archivo"
+
+  // RFC 5987 no admite ' ( ) * , que encodeURIComponent deja sin escapar.
+  const utf8 = encodeURIComponent(nombreArchivo || "archivo").replace(
+    /['()*]/g,
+    (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
+  )
+
+  return `${disposicion}; filename="${respaldo}"; filename*=UTF-8''${utf8}`
+}
+
 /** Error con el mensaje ya traducido, para que la ruta no tenga que interpretarlo. */
 export class ErrorDeWhatsApp extends Error {
   codigo?: number
