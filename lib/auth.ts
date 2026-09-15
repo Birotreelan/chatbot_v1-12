@@ -385,6 +385,28 @@ function homeRouteForRole(role: SessionData["role"]): string {
   return "/login"
 }
 
+/**
+ * Panel de soporte que le corresponde a un cliente (15/9/2026).
+ *
+ * Los clientes marcados como "Cliente Proxmox" usan /support_proxmox, una copia
+ * independiente del panel (páginas + componentes) para poder adaptarla a ese
+ * sistema sin tocar la que está en producción.
+ *
+ * Ante cualquier problema devuelve "/support": si no podemos leer la config, es
+ * preferible mandar al agente al panel conocido antes que dejarlo sin panel.
+ */
+export async function rutaPanelSoporte(tenantId?: string | null): Promise<string> {
+  if (!tenantId) return "/support"
+  try {
+    const { getConfigByClienteId } = await import("./db")
+    const config = await getConfigByClienteId(tenantId)
+    return config?.clienteProxmox ? "/support_proxmox" : "/support"
+  } catch (error) {
+    console.error("[Auth] No se pudo resolver el panel de soporte, se usa /support:", error)
+    return "/support"
+  }
+}
+
 export async function requireSuperAdmin(): Promise<SessionData> {
   const session = await getSession()
   if (!session) {

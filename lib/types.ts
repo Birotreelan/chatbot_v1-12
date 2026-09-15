@@ -40,6 +40,17 @@ export interface WhatsAppConfig {
   /** Si es false, el paciente no puede cancelar un turno por este medio. */
   permitirCancelacion?: boolean
 
+  /**
+   * Cliente sobre infraestructura Proxmox (15/9/2026).
+   *
+   * Cuando está en true, sus agentes de soporte usan el panel /support_proxmox
+   * en vez de /support. Los dos paneles son independientes a nivel de pantallas
+   * y componentes (components/support-proxmox/), justamente para poder
+   * adaptarlos a ese sistema sin tocar el panel vigente. Las rutas de API
+   * (/api/support/*) se comparten.
+   */
+  clienteProxmox?: boolean
+
   healthStatus?: "AVAILABLE" | "LIMITED" | "BLOCKED"
   lastHealthCheck?: string
   healthCheckError?: string

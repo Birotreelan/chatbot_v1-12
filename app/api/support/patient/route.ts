@@ -3,7 +3,65 @@ import { requireSupportAgentFromRequest } from "@/lib/auth"
 import { getSupportSession } from "@/lib/human-support"
 import { savePatientSnapshot } from "@/lib/conversations"
 
-const PROXY_URL = "https://proxy.santiagovulliez.com/proxy_service/"
+/**
+ * 15/9/2026: acá había una URL de proxy FIJA
+ * ("https://proxy.santiagovulliez.com/proxy_service/"), y el proxy respondía con
+ * el cuerpo vacío — de ahí el "Unexpected end of JSON input" que veía el agente.
+ *
+ * El sistema es multi-cliente y cada clínica tiene su propio proxy (Salud Ocular
+ * usa saludocular.com.ar/treelan/proxy/, otras usan
+ * api.santiagovulliez.com/bridge_proxy.php). Reemplazar un literal por otro
+ * arreglaría una clínica y rompería las demás, así que se usa `resolveProxyUrl`,
+ * que ya es la fuente de verdad del resto del sistema: lee el campo "proxy" de
+ * la config de cada cliente y cae a la env var global si todavía no lo cargaron.
+ *
+ * Sobre la acción: `get_paciente_interfaz` es la variante para agentes, que
+ * suma los enlaces al sistema de la clínica (url_paciente / url_agenda). No
+ * todos los proxies la implementan, así que si no devuelve nada se reintenta con
+ * `get_paciente` — la acción estándar, que sabemos que funciona en los proxies
+ * por clínica. Se pierden los enlaces, pero el agente ve los datos del paciente,
+ * que es lo que necesita para atender.
+ */
+import { resolveProxyUrl } from "@/lib/proxy-url-resolver"
+
+interface RespuestaProxy {
+  datos: any | null
+  /** Qué falló, para poder decírselo al agente en vez de un error genérico. */
+  motivo?: string
+}
+
+async function consultarPaciente(
+  proxyUrl: string,
+  clienteId: string,
+  telefono: string,
+  accion: string,
+): Promise<RespuestaProxy> {
+  const respuesta = await fetch(proxyUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ Cliente_Id: clienteId, Action: accion, telefono }),
+  })
+
+  if (!respuesta.ok) {
+    console.error(`[SUPPORT_PATIENT] ${accion} → HTTP ${respuesta.status} en ${proxyUrl}`)
+    return { datos: null, motivo: `El sistema de la clínica respondió con un error (${respuesta.status}).` }
+  }
+
+  // Leer como texto y parsear con red: el proxy puede responder 200 con el
+  // cuerpo vacío, y `.json()` ahí explota con "Unexpected end of JSON input".
+  const crudo = await respuesta.text()
+  if (!crudo || !crudo.trim()) {
+    console.error(`[SUPPORT_PATIENT] ${accion} → 200 con cuerpo vacío en ${proxyUrl}`)
+    return { datos: null, motivo: "El sistema de la clínica no devolvió datos." }
+  }
+
+  try {
+    return { datos: JSON.parse(crudo) }
+  } catch {
+    console.error(`[SUPPORT_PATIENT] ${accion} → respuesta no es JSON:`, crudo.substring(0, 200))
+    return { datos: null, motivo: "El sistema de la clínica devolvió una respuesta que no pudimos interpretar." }
+  }
+}
 
 export async function GET(request: Request) {
   try {
@@ -57,71 +115,32 @@ export async function GET(request: Request) {
 
     console.log(`[SUPPORT_PATIENT] Buscando paciente con telefono: ${telefonoNormalizado} (original: ${phoneNumber}) para cliente: ${clienteId}`)
 
-    // Llamar al proxy para obtener datos del paciente (usando get_paciente_interfaz)
-    const proxyResponse = await fetch(PROXY_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        Cliente_Id: clienteId,
-        Action: "get_paciente_interfaz",
-        telefono: telefonoNormalizado,
-      }),
-    })
+    // Proxy propio de esta clínica, no uno fijo para todas.
+    const proxyUrl = await resolveProxyUrl(clienteId)
+    console.log(`[SUPPORT_PATIENT] Proxy resuelto para ${clienteId}: ${proxyUrl}`)
 
-    // "No pudimos consultar" NO es "el paciente es nuevo" (15/9/2026).
-    //
-    // Antes, un fallo del proxy devolvía `isNewPatient: true`, y el panel le
-    // mostraba al agente la ficha de paciente nuevo. Es la misma confusión que
-    // arreglamos ayer en la detección por DNI: el agente puede terminar cargando
-    // de nuevo a alguien que ya existe. Ahora se informa que el dato no está
-    // disponible, que es lo que realmente sabemos.
-    if (!proxyResponse.ok) {
-      console.error(`[SUPPORT_PATIENT] Error del proxy: ${proxyResponse.status} ${proxyResponse.statusText}`)
+    // Primero la variante para agentes (trae los enlaces al sistema de la
+    // clínica); si ese proxy no la implementa, la acción estándar.
+    let consulta = await consultarPaciente(proxyUrl, clienteId, telefonoNormalizado, "get_paciente_interfaz")
+
+    if (!consulta.datos) {
+      console.warn(`[SUPPORT_PATIENT] get_paciente_interfaz no devolvió datos — reintentando con get_paciente`)
+      consulta = await consultarPaciente(proxyUrl, clienteId, telefonoNormalizado, "get_paciente")
+    }
+
+    if (!consulta.datos) {
       return NextResponse.json({
         success: true,
         patient: null,
         isNewPatient: false,
         datosNoDisponibles: true,
         phoneNumber: phoneNumber,
-        message: `El sistema de la clínica respondió con un error (${proxyResponse.status}).`,
+        message: consulta.motivo || "No pudimos consultar el sistema de la clínica.",
       })
     }
 
-    // El proxy puede responder 200 con el cuerpo VACÍO. `.json()` explota ahí con
-    // "Unexpected end of JSON input", y como no estaba envuelto, la excepción
-    // escalaba al catch general y el panel mostraba "Error al cargar datos del
-    // paciente" sin más pistas (caso real, 15/9/2026). Se lee como texto y se
-    // parsea con red, igual que hace fetchProxyApi en el resto del sistema.
-    const cuerpoCrudo = await proxyResponse.text()
+    const resultado = consulta.datos
 
-    if (!cuerpoCrudo || !cuerpoCrudo.trim()) {
-      console.error(`[SUPPORT_PATIENT] El proxy respondió 200 con cuerpo vacío (telefono: ${telefonoNormalizado})`)
-      return NextResponse.json({
-        success: true,
-        patient: null,
-        isNewPatient: false,
-        datosNoDisponibles: true,
-        phoneNumber: phoneNumber,
-        message: "El sistema de la clínica no devolvió datos.",
-      })
-    }
-
-    let resultado: any
-    try {
-      resultado = JSON.parse(cuerpoCrudo)
-    } catch {
-      console.error(`[SUPPORT_PATIENT] Respuesta no es JSON válido:`, cuerpoCrudo.substring(0, 200))
-      return NextResponse.json({
-        success: true,
-        patient: null,
-        isNewPatient: false,
-        datosNoDisponibles: true,
-        phoneNumber: phoneNumber,
-        message: "El sistema de la clínica devolvió una respuesta que no pudimos interpretar.",
-      })
-    }
     console.log(`[SUPPORT_PATIENT] Respuesta del proxy:`, JSON.stringify(resultado, null, 2))
 
     // Verificar si se encontro el paciente

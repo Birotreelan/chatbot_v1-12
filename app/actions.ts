@@ -20,7 +20,10 @@ export async function login(username: string, password: string) {
       } else if (result.user.role === "billing_agent") {
         redirect("/facturacion")
       } else {
-        redirect("/support")
+        // Clientes Proxmox van a su propio panel (15/9/2026). El layout lo
+        // revalida igual; resolverlo acá evita un redirect extra al entrar.
+        const { rutaPanelSoporte } = await import("@/lib/auth")
+        redirect(await rutaPanelSoporte(result.user.tenantId))
       }
     } else {
       return { success: false, error: result.error || "Usuario o contraseña incorrectos" }

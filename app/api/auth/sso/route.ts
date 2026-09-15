@@ -89,7 +89,12 @@ export async function GET(request: NextRequest) {
     // de cookies de terceros en Safari cuando se usa dentro de un iframe.
     // El layout de /support leerá este parámetro server-side, establecerá la cookie
     // y redirigirá limpiando la URL.
-    const redirectUrl = new URL('/support', request.url);
+    // Panel que le corresponde a este cliente: los marcados como Proxmox usan
+    // /support_proxmox (15/9/2026). El layout igual lo revalida, pero resolverlo
+    // acá evita un redirect extra en cada entrada por SSO.
+    const { rutaPanelSoporte } = await import('@/lib/auth');
+    const panel = await rutaPanelSoporte(cliente_id);
+    const redirectUrl = new URL(panel, request.url);
     redirectUrl.searchParams.set('_sid', sessionId);
     console.log('[SSO API] Redirigiendo a:', redirectUrl.toString());
 

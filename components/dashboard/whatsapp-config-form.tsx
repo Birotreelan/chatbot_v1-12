@@ -548,6 +548,25 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
 
               <Separator className="my-4" />
 
+              <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                <Switch
+                  id="clienteProxmox"
+                  checked={formData.clienteProxmox === true}
+                  onCheckedChange={(checked) => updateFormData("clienteProxmox", checked)}
+                />
+                <div className="flex-1">
+                  <Label htmlFor="clienteProxmox" className="text-sm font-medium">
+                    Cliente Proxmox
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Sus agentes de soporte van a usar el panel adaptado a ese sistema
+                    (/support_proxmox) en lugar del panel estándar
+                  </p>
+                </div>
+              </div>
+
+              <Separator className="my-4" />
+
               <ScheduleConfigurator
                 schedule={formData.businessHours || []}
                 onChange={(schedule) => updateFormData("businessHours", schedule)}

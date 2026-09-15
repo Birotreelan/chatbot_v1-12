@@ -1,7 +1,7 @@
 import type React from "react"
 import { Suspense } from "react"
-import { SupportNav } from "@/components/support/support-nav"
-import { SessionProvider } from "@/components/support/session-provider"
+import { SupportNav } from "@/components/support-proxmox/support-nav"
+import { SessionProvider } from "@/components/support-proxmox/session-provider"
 import { redirect } from "next/navigation"
 import { requireSupportAgent, getSessionId, rutaPanelSoporte } from "@/lib/auth"
 
@@ -16,12 +16,11 @@ export default async function SupportLayout({
   // Nota: El middleware maneja el SSO (_sid) antes de llegar aquí
   const sesion = await requireSupportAgent()
 
-  // Los clientes Proxmox tienen su propio panel. El control se hace acá, en el
-  // layout, y no sólo en los puntos de entrada (login, SSO): así, venga de donde
-  // venga el agente —un enlace viejo, un favorito— siempre termina en el panel
-  // que le corresponde.
+  // Espejo del control del panel estándar: si este cliente NO es Proxmox, no
+  // tiene nada que hacer acá. Evita que los dos paneles queden accesibles a
+  // cualquiera por conocer la URL.
   const panelQueCorresponde = await rutaPanelSoporte(sesion.tenantId)
-  if (panelQueCorresponde !== "/support") {
+  if (panelQueCorresponde !== "/support_proxmox") {
     redirect(panelQueCorresponde)
   }
 
