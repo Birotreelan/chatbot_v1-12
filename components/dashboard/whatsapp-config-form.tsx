@@ -345,6 +345,23 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </p>
               </div>
 
+              <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                <Switch
+                  id="clienteProxmox"
+                  checked={formData.clienteProxmox === true}
+                  onCheckedChange={(checked) => updateFormData("clienteProxmox", checked)}
+                />
+                <div className="flex-1">
+                  <Label htmlFor="clienteProxmox" className="text-sm font-medium">
+                    Cliente Proxmox
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Sus agentes de soporte van a usar el panel adaptado a ese sistema
+                    (/support_proxmox) en lugar del panel estándar
+                  </p>
+                </div>
+              </div>
+
               <Separator className="my-4" />
 
               <div className="space-y-3">
@@ -544,25 +561,6 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                     <SelectItem value="America/Mexico_City">Ciudad de México (GMT-6)</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-
-              <Separator className="my-4" />
-
-              <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
-                <Switch
-                  id="clienteProxmox"
-                  checked={formData.clienteProxmox === true}
-                  onCheckedChange={(checked) => updateFormData("clienteProxmox", checked)}
-                />
-                <div className="flex-1">
-                  <Label htmlFor="clienteProxmox" className="text-sm font-medium">
-                    Cliente Proxmox
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Sus agentes de soporte van a usar el panel adaptado a ese sistema
-                    (/support_proxmox) en lugar del panel estándar
-                  </p>
-                </div>
               </div>
 
               <Separator className="my-4" />
