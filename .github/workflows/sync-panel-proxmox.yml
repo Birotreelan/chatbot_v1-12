@@ -1,0 +1,103 @@
+# Sincroniza el panel Proxmox desde su repositorio propio.
+#
+# Creado el 15/9/2026. El equipo externo trabaja en `panel-proxmox`, que contiene
+# ÚNICAMENTE las dos carpetas del panel. Cuando pushean, su repo avisa acá y este
+# workflow copia esas carpetas al proyecto — y Vercel despliega a producción.
+#
+# ── Por qué este archivo vive ACÁ y no en el repo de ellos ─────────────────
+#
+# Porque define QUÉ carpetas se copian. Si viviera en su repositorio, podrían
+# editarlo y ampliar el alcance a `lib/`, `app/api/` o cualquier otra cosa, y la
+# restricción sería solamente aparente. Acá no tienen permiso de escritura.
+#
+# RUTAS_PERMITIDAS es el límite real del acceso del equipo externo. Cualquier
+# archivo que manden fuera de esas carpetas se ignora.
+
+name: Sincronizar panel Proxmox
+
+on:
+  # Lo dispara el repo del panel al pushear (ver README de panel-proxmox).
+  repository_dispatch:
+    types: [panel-proxmox-updated]
+  # Para poder correrlo a mano desde la pestaña Actions si hiciera falta.
+  workflow_dispatch:
+
+# Si llegan dos pushes seguidos, que se ejecute el último y no se pisen entre sí.
+concurrency:
+  group: sync-panel-proxmox
+  cancel-in-progress: false
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Traer este proyecto
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Traer el repo del panel
+        uses: actions/checkout@v4
+        with:
+          repository: Birotreelan/panel-proxmox
+          path: .panel-origen
+          # Sólo hace falta si el repo del panel es privado.
+          token: ${{ secrets.PANEL_PROXMOX_TOKEN || github.token }}
+
+      - name: Copiar únicamente las carpetas del panel
+        run: |
+          set -euo pipefail
+
+          # El límite del acceso del equipo externo. No agregar rutas acá sin
+          # entender que habilita a modificar esa parte del proyecto.
+          RUTAS_PERMITIDAS=(
+            "app/support_proxmox"
+            "components/support-proxmox"
+          )
+
+          for ruta in "${RUTAS_PERMITIDAS[@]}"; do
+            origen=".panel-origen/$ruta"
+
+            if [ ! -d "$origen" ]; then
+              echo "::error::El repo del panel no trae '$ruta'. Se aborta para no borrar el panel en producción."
+              exit 1
+            fi
+
+            # Una carpeta vacía borraría el panel entero: mejor frenar.
+            if [ -z "$(ls -A "$origen")" ]; then
+              echo "::error::'$ruta' llegó vacía. Se aborta."
+              exit 1
+            fi
+
+            echo "Sincronizando $ruta"
+            # --delete para que borrar un archivo en su repo también lo borre acá,
+            # pero acotado a esta carpeta: nunca toca nada fuera de ella.
+            rsync -a --delete "$origen/" "$ruta/"
+          done
+
+      - name: Commitear y desplegar si hubo cambios
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Se agregan SOLO las rutas permitidas: si por algún motivo el checkout
+          # dejara archivos sueltos, no entran al commit.
+          git add app/support_proxmox components/support-proxmox
+
+          if git diff --cached --quiet; then
+            echo "Sin cambios en el panel — no se despliega nada."
+            exit 0
+          fi
+
+          git commit -m "chore(panel-proxmox): sincronizar desde panel-proxmox
+
+          Origen: ${{ github.event.client_payload.commit || 'manual' }}
+          Autor:  ${{ github.event.client_payload.autor || 'workflow_dispatch' }}"
+
+          git push
+          echo "Panel sincronizado. Vercel va a desplegar el cambio."

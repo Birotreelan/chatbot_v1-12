@@ -1,0 +1,45 @@
+# CODEOWNERS — quién tiene que aprobar cada parte del proyecto
+#
+# Creado el 15/9/2026, al incorporar un equipo externo para trabajar sobre el
+# panel /support_proxmox.
+#
+# Cómo funciona: GitHub pide la revisión del dueño de cada ruta tocada en un Pull
+# Request. Combinado con la protección de rama en `main` (ver
+# PANEL_PROXMOX_HANDOFF.md), esto significa que un cambio fuera del panel Proxmox
+# NO se puede mergear sin aprobación explícita.
+#
+# Importante: esto NO impide editar archivos localmente — Git no restringe a
+# nivel de archivo, y además el proyecto entero hace falta para compilar. Lo que
+# controla es qué entra a `main` y, por lo tanto, qué llega a producción.
+
+# ---------------------------------------------------------------------------
+# Por defecto: todo el proyecto requiere aprobación del dueño del repositorio.
+# ---------------------------------------------------------------------------
+*                                   @Birotreelan
+
+# ---------------------------------------------------------------------------
+# Panel Proxmox: el equipo externo es dueño de estos archivos y puede aprobarlos
+# por su cuenta.
+#
+# Para activarlo hay que reemplazar @equipo-proxmox por el usuario o el equipo
+# real de GitHub (ej: @juanperez, o @Birotreelan/proxmox si se crea un team).
+# ---------------------------------------------------------------------------
+/app/support_proxmox/               @equipo-proxmox @Birotreelan
+/components/support-proxmox/        @equipo-proxmox @Birotreelan
+
+# ---------------------------------------------------------------------------
+# Zonas sensibles: siempre requieren aprobación del dueño, aunque el cambio
+# venga del equipo externo.
+#
+# Un cambio acá afecta a TODAS las clínicas, no sólo a las Proxmox.
+# ---------------------------------------------------------------------------
+/app/api/                           @Birotreelan
+/lib/                               @Birotreelan
+/middleware.ts                      @Birotreelan
+/components/dashboard/              @Birotreelan
+/components/ui/                     @Birotreelan
+/app/support/                       @Birotreelan
+/components/support/                @Birotreelan
+/package.json                       @Birotreelan
+/vercel.json                        @Birotreelan
+/.github/                           @Birotreelan
