@@ -144,13 +144,102 @@ export function conSaludoSiCorresponde(mensaje: string, ctx: DispatcherContext, 
 // EXECUTOR PRINCIPAL
 // ============================================================================
 
+/**
+ * Flujos "por pasos": los que le hicieron al paciente una pregunta concreta y
+ * están esperando un dato suyo (el número de turno de una lista, el apellido,
+ * la obra social).
+ *
+ * Es la misma lista que `hasStepFlow` en lib/conversation-state/active-flow.ts,
+ * y por el mismo motivo: dentro de estos flujos, el mensaje del paciente es un
+ * dato del paso, no una intención nueva. Se excluyen a propósito
+ * `patient_detection` (reconstruye su propio menú y no necesita esta guarda),
+ * `decision_pendiente` y `esperando_dni` (ahí la pregunta abierta ES sobre el
+ * turno, así que el dispatcher decidiendo es justamente lo que queremos).
+ */
+const FLUJOS_POR_PASOS = new Set(['reschedule', 'existing_patient', 'new_patient', 'booking'])
+
+/**
+ * Acciones que cambian el estado de la conversación: arrancan un flujo nuevo,
+ * reinician la identificación del paciente o tocan un turno.
+ *
+ * Las que NO están acá (responder, derivar, continuar el flujo, despedirse)
+ * solo emiten un mensaje: son inofensivas aunque el modelo se equivoque.
+ */
+const ACCIONES_QUE_DESVIAN: ReadonlySet<ExecutorAction['type']> = new Set([
+  'init_patient_detection',
+  'init_existing_patient_flow',
+  'init_new_patient_flow',
+  'init_familiar_flow',
+  'trigger_confirm_appointment',
+  'trigger_cancel_menu',
+  'trigger_cancel_and_rebook',
+])
+
+/**
+ * Con un flujo por pasos abierto, el dispatcher puede HABLAR pero no CONDUCIR.
+ *
+ * ── El caso que lo motivó (16/9/2026, tel. 1140688863) ─────────────────────
+ *
+ * Una paciente canceló su turno, aceptó reagendar y estaba eligiendo entre 52
+ * turnos. Escribió "Si por favor. Puede ser un lunes. Martes o viernes" y el
+ * dispatcher eligió `cancelar_y_solicitar_nuevo_turno` → "No encontré un turno
+ * activo para cancelar" (ya lo había cancelado ella misma cinco minutos antes).
+ * Más tarde escribió "Viernes 9 de octubre." y el dispatcher eligió
+ * `mostrar_menu_principal` → la conversación volvió a cero y le pidió el DNI.
+ *
+ * En los dos casos el contexto que recibió el modelo decía, correctamente,
+ * `activeFlowType: "reschedule"`. Tenía el dato y eligió igual. Por eso la
+ * defensa no puede ser una regla más en el prompt: tiene que ser estructural.
+ *
+ * Lo que hace este veto es convertir esas decisiones en `continue_active_flow`,
+ * que ya está cableado para delegar en el handler del flujo correspondiente
+ * (whatsapp.tsx). El handler sabe qué hacer con un mensaje que no encaja: lo
+ * vuelve a preguntar sin destruir nada — que es exactamente lo que hizo bien
+ * con "Viernes 9 de octubre. Puede ser" dos minutos antes.
+ *
+ * NO se convierte a `passthrough`: ese camino termina en
+ * `initializePatientDetection`, o sea el mismo reinicio que queremos evitar.
+ */
+export function vetarDesvioDeFlujoPorPasos(
+  resultado: ExecutorResult,
+  ctx: DispatcherContext,
+): ExecutorResult {
+  if (!FLUJOS_POR_PASOS.has(ctx.activeFlow.type)) return resultado
+  if (!ACCIONES_QUE_DESVIAN.has(resultado.action.type)) return resultado
+
+  return {
+    action: { type: 'continue_active_flow' },
+    logNote: `Veto: '${resultado.action.type}' con flujo '${ctx.activeFlow.type}' abierto — se cede al handler del flujo`,
+  }
+}
+
 export async function executeDispatcherDecision(
   decision: DispatcherDecision,
   ctx: DispatcherContext,
   deps: ExecutorDeps,
 ): Promise<ExecutorResult> {
   const logger = createConversationLogger(deps.phoneNumber, deps.configId, 'ai-dispatcher-executor')
+  const resultado = await resolverDecision(decision, ctx, deps, logger)
+  const final = vetarDesvioDeFlujoPorPasos(resultado, ctx)
 
+  if (final !== resultado) {
+    logger.warn('[Executor] Decisión vetada para no romper el flujo activo', {
+      tool: decision.tool,
+      accionDescartada: resultado.action.type,
+      flujoActivo: ctx.activeFlow.type,
+      fase: ctx.activeFlow.phase,
+    })
+  }
+
+  return final
+}
+
+async function resolverDecision(
+  decision: DispatcherDecision,
+  ctx: DispatcherContext,
+  deps: ExecutorDeps,
+  logger: ReturnType<typeof createConversationLogger>,
+): Promise<ExecutorResult> {
   logger.info('[Executor] Ejecutando tool', { tool: decision.tool, args: decision.args })
 
   switch (decision.tool) {

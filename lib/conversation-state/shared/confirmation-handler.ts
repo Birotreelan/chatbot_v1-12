@@ -8,6 +8,7 @@ import { getFirstName } from '../../utils/name-utils'
 import type { TurnoOption, HandlerResult, SharedFlowState } from './types'
 import { parseOptionNumber } from '../selection-extractor'
 import { classifyOptionWithAI } from './ai-option-classifier'
+import { interpretarConfirmacion } from './interpretar-confirmacion'
 import { trackAppointmentEvent, checkAndClearPendingReschedule } from '../../appointment-stats'
 
 /**
@@ -80,22 +81,24 @@ export async function handleConfirmationResponse(
 ): Promise<HandlerResult & { confirmed?: boolean }> {
   const logger = createConversationLogger(phoneNumber, clientId, 'confirmation_response')
 
-  const inputNormalizado = userInput.trim().toLowerCase()
+  // 16/9/2026 — Acá había dos listas comparadas con `includes()`, o sea
+  // búsqueda de SUBCADENA. Una paciente respondió "Jueves 17\n2" (su respuesta
+  // era el 2: "No, modificar") y el "1" de "17" la dio por confirmada: se le
+  // reservó un turno que no había confirmado. Ver interpretar-confirmacion.ts
+  // para el criterio; en resumen, las reglas ahora deciden sólo con un mensaje
+  // que no contiene nada más que la respuesta, y ante la duda se abstienen.
+  const lectura = interpretarConfirmacion(userInput)
 
-  // Detectar confirmacion positiva
-  const confirmacionPositiva = ['si', 'sí', 'yes', 'confirmo', 'confirmar', 'ok', 'dale', 'bueno', 'perfecto', '1']
-  const confirmacionNegativa = ['no', 'cancelar', 'cancelo', 'no quiero', 'modificar', '2']
-
-  if (confirmacionPositiva.some((c) => inputNormalizado.includes(c))) {
-    logger.info('Confirmacion positiva recibida', {})
+  if (lectura.lectura === 'confirma') {
+    logger.info('Confirmacion positiva recibida', { motivo: lectura.motivo })
     return {
       handled: true,
       confirmed: true,
     }
   }
 
-  if (confirmacionNegativa.some((c) => inputNormalizado.includes(c))) {
-    logger.info('Confirmacion negativa recibida', {})
+  if (lectura.lectura === 'rechaza') {
+    logger.info('Confirmacion negativa recibida', { motivo: lectura.motivo })
     return {
       handled: true,
       confirmed: false,
@@ -103,6 +106,11 @@ export async function handleConfirmationResponse(
       nextPhase: 'awaiting_modify_selection',
     }
   }
+
+  logger.info('Confirmacion ambigua — no se decide por reglas, escala a la IA', {
+    input: userInput,
+    motivo: lectura.motivo,
+  })
 
   // Input no claro por reglas — último recurso: clasificador de IA compartido
   // (26/8/2026, pedido de Nicolás: capa global de IA para cualquier selección
