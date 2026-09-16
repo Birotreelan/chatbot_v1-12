@@ -57,6 +57,20 @@ describe("con un flujo por pasos abierto, se vetan las acciones que lo destruir�
     expect(r.action.type).toBe("continue_active_flow")
   })
 
+  it("segundo caso real: elegir un turno por la hora no es confirmar asistencia", () => {
+    // 16/9/2026, tel. 2234217045. La paciente estaba eligiendo entre 38 turnos y
+    // escribió "16.15" para pedir el de las 16:15 (opción 11). El dispatcher lo
+    // leyó como `confirmar_asistencia_turno` y el router de intercalada le
+    // contestó "Tu turno ya está agendado, todavía no hace falta que confirmes".
+    // El handler del flujo nunca vio el mensaje — y sí sabe leer "16.15",
+    // porque su regex de hora acepta el punto además de los dos puntos.
+    const r = vetarDesvioDeFlujoPorPasos(
+      resultado({ type: "trigger_confirm_appointment" }),
+      contextoCon("existing_patient", "awaiting_turno_selection"),
+    )
+    expect(r.action.type).toBe("continue_active_flow")
+  })
+
   it("no arranca una reserva nueva en medio del alta de un paciente nuevo", () => {
     const r = vetarDesvioDeFlujoPorPasos(
       resultado({ type: "init_existing_patient_flow" }),
