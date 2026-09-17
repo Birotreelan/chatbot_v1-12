@@ -331,8 +331,8 @@ export async function classifyDirectActionWithNLU(
           role: "system",
           content: `Clasificá la intención de un mensaje de WhatsApp en el contexto de un chatbot de turnos médicos.
 
-El paciente recibió un recordatorio de turno. Clasificá su respuesta en:
-- "confirmar_asistencia": confirma que va a ir al turno (ej: "si estaré", "ahi voy", "voy a ir", "la confirmo", "confirmo", incluso con typos)
+El paciente recibió un recordatorio de turno que le pide confirmar o cancelar su asistencia. Clasificá su respuesta en:
+- "confirmar_asistencia": confirma que va a ir al turno (ej: "si estaré", "ahi voy", "voy a ir", "la confirmo", "confirmo", incluso con typos). TAMBIÉN entra acá el acuse de recibo sin objeción: "gracias", "gracias por avisar", "ok gracias", "perfecto", "dale", "recibido", "buenísimo", "👍". Quien agradece el recordatorio y no plantea ningún problema está aceptando el turno.
 - "cancelar_turno": quiere cancelar (ej: "no puedo ir", "cancelo", "no voy a poder", "quiero cancelar")
 - "aclaracion_horario": comenta que tenía otro horario en mente o muestra confusión sobre la hora/fecha, SIN pedir cancelar ni cambiar nada (ej: "me habían dicho que era a las 15", "pensé que era más temprano", "yo tenía anotado 15:30", "me había llamado que era 15 y 30 entonces 18 y 30")
 - "consulta_con_cortesia": pregunta o solicita algo distinto a confirmar/cancelar (ej: "¿puedo cambiar el horario?", "¿cuánto cuesta?")
@@ -341,6 +341,11 @@ El paciente recibió un recordatorio de turno. Clasificá su respuesta en:
 IMPORTANTE: Aunque haya typos o lenguaje informal, si la intención es clara, clasificar correctamente.
 IMPORTANTE: "cancelar_turno" SOLO si el paciente expresa que NO va a asistir o pide cancelar. Mencionar un horario distinto al del turno o darse cuenta de que lo tenía mal agendado NO es cancelación: es "aclaracion_horario".
 IMPORTANTE: Un número suelto o token corto sin contexto (ej: "15", "2", "1", "ver_mas") NUNCA es "aclaracion_horario" ni "cancelar_turno" ni "confirmar_asistencia": puede ser la selección de una opción de otro menú. Clasificá como "otro".
+IMPORTANTE (17/9/2026): el acuse cuenta como confirmación SOLO si no viene con una objeción, una pregunta ni una imposibilidad. La cortesía no cambia la intención — mirá lo que el mensaje pide, no cómo lo dice:
+  · "Gracias por avisar" → confirmar_asistencia
+  · "Gracias, pero no voy a poder ir" → cancelar_turno
+  · "Gracias, ¿puedo cambiar el horario?" → consulta_con_cortesia
+  · "Gracias, me habían dicho que era a las 15" → aclaracion_horario
 
 Respondé SOLO con JSON: {"intent": "confirmar_asistencia"|"cancelar_turno"|"aclaracion_horario"|"consulta_con_cortesia"|"otro", "confidence": 0.0-1.0, "reasoning": "..."}`,
         },
@@ -605,18 +610,26 @@ export async function detectDirectConfirmationPreFlow(
     return { detected: true, action: "confirm", appointmentContext }
   }
 
-  // Paso 5: Acuse ambiguo (saludo + gracias) → pedir confirmación explícita con opciones
-  // "buen día gracias", "muchas gracias", "ok gracias"
-  if (isAmbiguousAck(message)) {
-    logger.info("Acuse ambiguo — solicitando confirmación explícita", { message })
-    return { detected: true, action: "ask_explicit", appointmentContext }
-  }
+  // Paso 5 / 5b: acuse ambiguo o despedida/saludo con el recordatorio pendiente.
+  //
+  // 17/9/2026 — Antes cada uno cortaba acá y pedía confirmación explícita. El
+  // problema es que ninguna regex va a cubrir todas las formas de agradecer:
+  // "Gracias por avisar" (tel. 1121607311) no matcheaba ninguna, caía al
+  // interceptor de despedidas y el paciente recibía "¡Un placer!" con el turno
+  // sin confirmar. Tuvo que apretar "Confirmar" él; la mayoría no lo hace.
+  //
+  // Ahora estos pasos sólo MARCAN el mensaje como acuse del recordatorio y
+  // dejan que decida la IA, que es la única capaz de distinguir "gracias"
+  // (acepta el turno) de "gracias, pero no voy a poder ir" (lo cancela). Sumar
+  // regexes acá sería perseguir infinitas formas de decir lo mismo.
+  //
+  // La marca importa para el final: si la IA tampoco puede decidir, se pide
+  // confirmación explícita — nunca se cae a una despedida que deje el
+  // recordatorio sin responder.
+  const esAcuseDelRecordatorio = isAmbiguousAck(message) || isFarewellOrGreetingInContext(message)
 
-  // Paso 5b: Despedida o saludo puro con reminder pendiente → pedir confirmación explícita
-  // "chau", "hasta luego", "buen día", etc. NO deben cerrar la conversación cuando
-  // el paciente todavía no respondió el recordatorio del turno.
-  if (isFarewellOrGreetingInContext(message)) {
-    logger.info("Despedida/saludo con reminder pendiente — solicitando confirmación explícita", { message })
+  if (esAcuseDelRecordatorio && !useNLU) {
+    logger.info("Acuse del recordatorio sin NLU disponible — solicitando confirmación explícita", { message })
     return { detected: true, action: "ask_explicit", appointmentContext }
   }
 
@@ -643,6 +656,19 @@ export async function detectDirectConfirmationPreFlow(
 
     if (classification.intent === "aclaracion_horario" && classification.confidence >= 0.70) {
       return { detected: true, action: "clarify_time", appointmentContext }
+    }
+
+    // La IA no se decidió. Si el mensaje era un acuse del recordatorio, NO lo
+    // dejamos seguir: más abajo en la cascada está el interceptor de despedidas,
+    // que respondería un saludo cordial y daría la conversación por terminada
+    // con el turno sin confirmar. Preferimos preguntar (17/9/2026).
+    if (esAcuseDelRecordatorio) {
+      logger.info("Acuse sin decisión de la IA — solicitando confirmación explícita", {
+        message,
+        intent: classification.intent,
+        confidence: classification.confidence,
+      })
+      return { detected: true, action: "ask_explicit", appointmentContext }
     }
 
     // GPT clasifica como consulta u otro → continuar flujo normal
