@@ -95,12 +95,39 @@ const NEGATIVAS = new Set([
 ])
 
 /**
- * Palabras de cortesía que acompañan la respuesta sin cambiarla.
+ * Palabras que acompañan la respuesta sin cambiar su intención.
  *
- * Están para que "sí, muchas gracias" o "no, gracias" sigan resolviéndose por
- * reglas, sin pagar una llamada a la IA por algo que es evidente.
+ * Son de dos clases:
+ *
+ *  - Cortesía: "sí, muchas gracias" se resuelve por reglas, sin pagar una
+ *    llamada a la IA por algo evidente.
+ *
+ *  - Las palabras de NUESTRA PROPIA pregunta (17/9/2026). El caso que lo
+ *    motivó: a Antonia le repreguntamos con el texto *"1. Sí, confirmar la
+ *    reserva del turno"* y ella respondió exactamente eso — copiando la opción
+ *    que le ofrecimos. Se le contestó "No entendí tu respuesta". Tres veces.
+ *
+ *    Que el paciente repita el texto del menú es la respuesta más clara
+ *    posible, no la más confusa. "reserva" y "turno" salieron de nuestra boca:
+ *    no son información nueva que obligue a dudar.
  */
 const RELLENO = new Set([
+  // Las palabras de nuestras propias opciones
+  "reserva",
+  "reservas",
+  "reservar",
+  "turno",
+  "turnos",
+  "cita",
+  "citas",
+  "asistencia",
+  "opcion",
+  "opciones",
+  "numero",
+  "del",
+  "mi",
+  "al",
+  // Cortesía
   "gracias",
   "muchas",
   "mucho",

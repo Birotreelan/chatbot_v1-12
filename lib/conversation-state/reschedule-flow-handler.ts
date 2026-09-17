@@ -16,6 +16,8 @@ import { isBackCommand } from "./shared/back-navigation"
 import type { ChatbotData, ChatbotDataTurno } from "../appointment-flow-state"
 import { getNextWindow, buildTurnosWindowMessage } from "./shared/turnos-handler"
 import { handleTurnoSelection } from "./shared/turno-selection-handler"
+import { interpretarConfirmacion } from "./shared/interpretar-confirmacion"
+import { classifyOptionWithAI } from "./shared/ai-option-classifier"
 import type { TurnoOption } from "./shared/types"
 
 // ============================================================================
@@ -534,7 +536,35 @@ export async function handleRescheduleMessage(
 
   // Fase 3: Esperando confirmacion
   if (state.phase === 'awaiting_confirmation') {
-    if (isConfirmation(message)) {
+    // 17/9/2026 — Acá había una segunda implementación de "¿el paciente
+    // confirmó?", distinta de la del flujo de agendamiento, y peor: regexes
+    // ANCLADAS (/^(si|s)\.?$/), o sea que el mensaje tenía que ser exactamente
+    // "si" o "1". Caso de Antonia (tel. 1144175052): respondió "Si confirmar",
+    // después "1.  Si confirmar", después "1. Si confirmar la reserva del
+    // turno" —copiando textualmente la opción que le habíamos ofrecido— y las
+    // tres veces recibió "No entendí tu respuesta". Recién funcionó con "Si"
+    // solo, al cuarto intento.
+    //
+    // Ahora usa el mismo interpretador que el flujo de agendamiento
+    // (shared/interpretar-confirmacion.ts) y, cuando las reglas se abstienen,
+    // el mismo clasificador de IA. Dos caminos que le hacen al paciente la
+    // misma pregunta tienen que entender las mismas respuestas.
+    let lectura = interpretarConfirmacion(message).lectura
+
+    if (lectura === 'ambiguo') {
+      const aiResult = await classifyOptionWithAI(
+        message,
+        [
+          { index: 1, label: 'Sí, confirmar la reserva del turno' },
+          { index: 2, label: 'No, modificar (elegir otro turno)' },
+        ],
+        'El paciente está confirmando si quiere reservar el turno que eligió para reagendar.',
+      )
+      if (aiResult.detected && aiResult.selectedOption === 1) lectura = 'confirma'
+      else if (aiResult.detected && aiResult.selectedOption === 2) lectura = 'rechaza'
+    }
+
+    if (lectura === 'confirma') {
       console.log(`[RESCHEDULE-FLOW] Confirmacion recibida, ejecutando reserva`)
       state.phase = 'completed'
       state.turnoReservado = state.turnoSeleccionado
@@ -545,7 +575,10 @@ export async function handleRescheduleMessage(
         message: "Turno reservado exitosamente",
         state,
       }
-    } else if (isRejection(message)) {
+    } else if (lectura === 'rechaza' || isRejection(message)) {
+      // isRejection se conserva además del interpretador porque cubre formas
+      // propias de este flujo que no son una negación ("otro", "volver",
+      // "anterior").
       console.log(`[RESCHEDULE-FLOW] Rechazo, volviendo a seleccion`)
       state.phase = 'awaiting_selection'
       state.turnoSeleccionado = null

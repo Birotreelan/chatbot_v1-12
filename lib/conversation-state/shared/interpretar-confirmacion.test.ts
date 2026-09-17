@@ -85,6 +85,43 @@ describe("confirma lo que claramente es un sí", () => {
   })
 })
 
+describe("el paciente repite la opción que le ofrecimos", () => {
+  /**
+   * Caso de Antonia (tel. 1144175052, 17/9/2026). Le repreguntamos con
+   * "1. *Sí, confirmar* la reserva del turno" y ella respondió justamente eso.
+   * Tres intentos, tres "No entendí tu respuesta". Recién funcionó con "Si"
+   * solo, al cuarto.
+   *
+   * Que el paciente copie el texto del menú es la respuesta más clara posible.
+   * "reserva" y "turno" salieron de nuestra propia pregunta: no son información
+   * nueva que obligue a dudar.
+   */
+  it("acepta los tres mensajes que Antonia escribió", () => {
+    for (const entrada of ["Si confirmar", "1.  Si confirmar", "1. Si confirmar la reserva del turno"]) {
+      expect(interpretarConfirmacion(entrada).lectura, entrada).toBe("confirma")
+    }
+  })
+
+  it("acepta también la opción 2 escrita entera", () => {
+    for (const entrada of ["2. No, modificar", "No, modificar", "modificar el turno"]) {
+      expect(interpretarConfirmacion(entrada).lectura, entrada).toBe("rechaza")
+    }
+  })
+
+  it("entiende 'opcion 1' y 'el numero 2'", () => {
+    expect(interpretarConfirmacion("opcion 1").lectura).toBe("confirma")
+    expect(interpretarConfirmacion("el numero 2").lectura).toBe("rechaza")
+  })
+
+  it("no se vuelve laxo: sigue absteniéndose con contenido ajeno al menú", () => {
+    // Las palabras que agregamos son las de NUESTRA pregunta. Cualquier otra
+    // cosa que traiga el paciente sigue mandando el mensaje a la IA.
+    expect(interpretarConfirmacion("quiero otro turno").lectura).toBe("ambiguo")
+    expect(interpretarConfirmacion("Jueves 17 \n2").lectura).toBe("ambiguo")
+    expect(interpretarConfirmacion("el turno del 21 no me sirve").lectura).toBe("ambiguo")
+  })
+})
+
 describe("rechaza lo que claramente es un no", () => {
   it("la opción del menú", () => {
     expect(interpretarConfirmacion("2").lectura).toBe("rechaza")
