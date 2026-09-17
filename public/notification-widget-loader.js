@@ -88,7 +88,11 @@
     total: 0,
     connected: false,
     eventSource: null,
-    lastUpdate: null
+    lastUpdate: null,
+    // Fallos de conexión seguidos; se reinicia en cada onopen (17/9/2026).
+    reintentos: 0,
+    // true cuando se agotaron los reintentos: deja de golpear al servidor.
+    sesionVencida: false
   };
 
   // Colores por tema
@@ -479,7 +483,15 @@
 
     if (status) {
       status.className = state.connected ? "connected" : "disconnected";
-      status.title = state.connected ? "Conectado" : "Desconectado";
+      // 17/9/2026: antes, con la sesión vencida el widget sólo decía
+      // "Desconectado" y seguía reintentando en silencio. El agente veía el
+      // punto en rojo, asumía un problema de red y no recibía avisos por días.
+      // Ahora el tooltip dice qué hacer.
+      status.title = state.connected
+        ? "Conectado"
+        : state.sesionVencida
+          ? "Sesión vencida — recargá la página para volver a recibir avisos"
+          : "Desconectado, reintentando…";
     }
 
     if (tooltipPending) {
@@ -493,6 +505,55 @@
 
   // Variable para polling
   var pollingInterval = null;
+
+  // ── Reconexión con backoff (17/9/2026) ───────────────────────────────────
+  //
+  // Antes esto era un setTimeout fijo de 5 s que reconectaba SIEMPRE, con el
+  // mismo token. Cuando el token vencía —a las 24 h, con la pestaña abierta—
+  // el widget quedaba golpeando el servidor cada 5 segundos indefinidamente:
+  // 4.400 requests por hora, todas con 401, y el usuario sin notificaciones
+  // sin enterarse.
+  //
+  // Ahora hay tres cambios:
+  //  · backoff creciente con tope, en vez de 5 s fijos;
+  //  · un límite de intentos: si no se recupera, se corta y se avisa, porque
+  //    un 401 no se arregla reintentando;
+  //  · un solo timer vivo a la vez — antes, si onerror disparaba dos veces
+  //    seguidas, los setTimeout se apilaban y el ritmo se multiplicaba.
+  //
+  // onerror de EventSource no expone el status HTTP, así que no podemos
+  // distinguir un 401 de un corte de red. Por eso el criterio es el número de
+  // fallos seguidos: un corte real se recupera en pocos intentos.
+  var ESPERAS_RECONEXION_MS = [5000, 10000, 20000, 40000, 60000];
+  var MAX_REINTENTOS = 8;
+  var reconexionTimeoutId = null;
+
+  function programarReconexion() {
+    if (reconexionTimeoutId) {
+      clearTimeout(reconexionTimeoutId);
+      reconexionTimeoutId = null;
+    }
+
+    state.reintentos = (state.reintentos || 0) + 1;
+
+    if (state.reintentos > MAX_REINTENTOS) {
+      console.warn(
+        "[NOTIFICATION-WIDGET] Sin conexión tras " + MAX_REINTENTOS +
+        " intentos. La sesión probablemente venció: recargá la página."
+      );
+      state.sesionVencida = true;
+      updateUI();
+      return;
+    }
+
+    var espera = ESPERAS_RECONEXION_MS[Math.min(state.reintentos - 1, ESPERAS_RECONEXION_MS.length - 1)];
+    console.log("[NOTIFICATION-WIDGET] Reintento " + state.reintentos + "/" + MAX_REINTENTOS + " en " + (espera / 1000) + "s");
+
+    reconexionTimeoutId = setTimeout(function() {
+      reconexionTimeoutId = null;
+      connectSSE();
+    }, espera);
+  }
 
   // Conectar al stream SSE
   function connectSSE() {
@@ -509,8 +570,28 @@
       state.eventSource.onopen = function() {
         console.log("[NOTIFICATION-WIDGET] SSE conectado");
         state.connected = true;
+        // Conexión buena: se reinicia el backoff de reconexión.
+        state.reintentos = 0;
         updateUI();
       };
+
+      // Renovación deslizante del token (17/9/2026).
+      //
+      // El servidor manda un token fresco en cada conexión, y esta conexión se
+      // renueva sola cada 4 minutos. Mientras la pestaña esté abierta, la
+      // sesión no vence — aunque el sistema de la clínica nunca renueve el
+      // token original con el que se cargó el widget.
+      state.eventSource.addEventListener("token_renovado", function(event) {
+        try {
+          var data = JSON.parse(event.data);
+          if (data && data.sso_token) {
+            config.ssoToken = data.sso_token;
+            console.log("[NOTIFICATION-WIDGET] Token renovado");
+          }
+        } catch (error) {
+          console.error("[NOTIFICATION-WIDGET] Error procesando el token renovado:", error);
+        }
+      });
 
       state.eventSource.onmessage = function(event) {
         try {
@@ -539,12 +620,7 @@
         console.error("[NOTIFICATION-WIDGET] Error SSE:", error);
         state.connected = false;
         updateUI();
-
-        // Reconectar despues de 5 segundos
-        setTimeout(function() {
-          console.log("[NOTIFICATION-WIDGET] Intentando reconectar...");
-          connectSSE();
-        }, 5000);
+        programarReconexion();
       };
     } catch (error) {
       console.error("[NOTIFICATION-WIDGET] Error creando EventSource:", error);

@@ -1,4 +1,4 @@
-import { validateSSOToken, buildSsoUserId } from "@/lib/sso"
+import { validateSSOToken, buildSsoUserId, renovarTokenSSO } from "@/lib/sso"
 import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
 import { getRedisClient } from "@/lib/redis"
 
@@ -123,6 +123,27 @@ export async function GET(request: Request) {
 
       // Enviar retry hint: el cliente reconectará en 3 s si el servidor cierra la conexión
       controller.enqueue(encoder.encode(`retry: 3000\n\n`))
+
+      // ── Renovación deslizante del token (17/9/2026) ────────────────────────
+      //
+      // Esta conexión se cierra sola a los 240 s y el cliente reconecta, así que
+      // acá pasa un token nuevo cada 4 minutos mientras la pestaña esté abierta.
+      // Mientras el widget siga en uso, la sesión no se cae aunque el sistema de
+      // la clínica nunca renueve el token original.
+      //
+      // Antes, al vencer el token a las 24 h, el widget quedaba reconectando
+      // cada 5 s contra un 401: 4.400 requests por hora y el usuario sin
+      // notificaciones sin enterarse (caso del 17/9, usuario Pablo Deromedis).
+      //
+      // Se manda como evento con nombre propio para que un cliente viejo, que
+      // sólo escucha `onmessage`, lo ignore sin romperse.
+      const tokenRenovado = renovarTokenSSO(payload)
+      if (tokenRenovado) {
+        controller.enqueue(
+          encoder.encode(`event: token_renovado\ndata: ${JSON.stringify({ sso_token: tokenRenovado })}\n\n`),
+        )
+        console.log("[Notifications Stream] Token renovado enviado al cliente")
+      }
 
       // Enviar estado inicial inmediatamente
       await sendUpdate()

@@ -132,6 +132,67 @@ function isTokenExpired(expirationTime: number): boolean {
 }
 
 /**
+ * Cuánto dura un token recién emitido por nosotros. Igual que el original que
+ * emite el sistema de la clínica: 24 horas.
+ */
+const VIDA_TOKEN_RENOVADO_SEGUNDOS = 24 * 60 * 60
+
+/**
+ * Vuelve a firmar un token SSO válido, con la misma identidad y una expiración
+ * nueva (17/9/2026).
+ *
+ * ── Por qué existe ─────────────────────────────────────────────────────────
+ *
+ * El widget de notificaciones queda embebido en el sistema de la clínica, en
+ * una pestaña que sigue abierta durante días. El token vence a las 24 horas y
+ * el sistema de la clínica no lo renueva, así que a partir de ahí el widget
+ * reconectaba cada 5 segundos contra un 401 — 4.400 requests por hora, el 80%
+ * del tráfico del proyecto, y el usuario sin notificaciones sin enterarse.
+ *
+ * La alternativa era sacarle la expiración al token. No se hizo, y el motivo
+ * está a la vista en los propios logs: la URL completa se escribe ahí con el
+ * token y su firma. Sin expiración, cada token que alguna vez pasó por un log
+ * quedaría siendo una llave permanente al panel de esa clínica, sin manera de
+ * revocarla. El fingerprint no ayuda: hoy sólo advierte, no bloquea.
+ *
+ * Con renovación deslizante se consigue lo que se necesitaba —mientras la
+ * pestaña esté abierta la sesión no se cae— sin ese costo: un token que se
+ * filtró y nadie usa sigue caducando solo.
+ *
+ * NO valida nada: el llamador tiene que haber validado el token primero. Sólo
+ * re-firma un payload que ya se dio por bueno.
+ */
+export function renovarTokenSSO(payload: SSOTokenPayload): string | null {
+  const secret = process.env.TREELAN_BOT_SECRET
+  if (!secret) {
+    console.log('[SSO] No se puede renovar el token: TREELAN_BOT_SECRET no está configurado')
+    return null
+  }
+
+  try {
+    const ahora = Math.floor(Date.now() / 1000)
+    const nuevoPayload: SSOTokenPayload = {
+      ...payload,
+      iat: ahora,
+      exp: ahora + VIDA_TOKEN_RENOVADO_SEGUNDOS,
+    }
+
+    const payloadBase64 = Buffer.from(JSON.stringify(nuevoPayload), 'utf-8').toString('base64')
+
+    // Mismo esquema que verifySignature: sha256(SECRET + cliente_id) como clave.
+    const derivedSecret = createHash('sha256')
+      .update(secret + payload.cliente_id)
+      .digest('hex')
+    const firma = createHmac('sha256', derivedSecret).update(payloadBase64).digest('hex')
+
+    return `${payloadBase64}.${firma}`
+  } catch (error) {
+    console.error('[SSO] Error renovando el token:', error)
+    return null
+  }
+}
+
+/**
  * Obtiene la configuración del cliente y valida que exista y esté activo
  * Retorna la config con id, displayName y cliente_id si existe
  */
