@@ -18,81 +18,24 @@ import { nanoid } from "nanoid"
 import { trackTemplateSent } from "../appointment-stats"
 import { extractAndFormatDate } from "../utils/date-utils"
 import { saveAppointmentContext } from "../appointment-flow-state"
+import { extraerDatosDelTurno, type DatosDelTurno } from "./datos-del-turno"
 
-// Función para extraer información del turno desde el template
-export function extractAppointmentInfo(templateBody: any): any {
+/**
+ * Extrae los datos del turno de un template que se está por enviar.
+ *
+ * Delega en lib/reminders/datos-del-turno.ts, que es puro y está testeado. Ver
+ * ahí el porqué: la versión anterior leía los parámetros por posición, y con
+ * `cancelar_turno_solicitado` —que no lleva el nombre de la clínica al
+ * principio— guardaba la hora como fecha y el teléfono como profesional.
+ *
+ * `chatbotData` es opcional sólo por compatibilidad con llamadas viejas; sin él
+ * la extracción es mucho más pobre, porque es la fuente autoritativa.
+ */
+export function extractAppointmentInfo(templateBody: any, chatbotData?: any): DatosDelTurno | null {
   try {
-    const appointmentInfo = {
-      fecha: null,
-      hora: null,
-      profesional: null,
-      especialidad: null,
-      lugar: null,
-    }
-
-    // Si el Body es string, intentar parsearlo
-    const templateData = typeof templateBody === "string" ? JSON.parse(templateBody) : templateBody
-
-    // Buscar en los componentes del template
-    if (templateData.template && templateData.template.components) {
-      for (const component of templateData.template.components) {
-        if (component.type === "body" && component.parameters) {
-          // Los parámetros venguen en este orden:
-          // [0] = Nombre de la clínica
-          // [1] = Fecha
-          // [2] = Hora
-          // [3] = Profesional
-          // [4] = Lugar/Dirección
-          const params = component.parameters
-
-          if (params.length >= 2 && params[1].text) {
-            // Segundo parámetro es la fecha
-            appointmentInfo.fecha = params[1].text
-          }
-
-          if (params.length >= 3 && params[2].text) {
-            // Tercer parámetro es la hora
-            appointmentInfo.hora = params[2].text
-          }
-
-          if (params.length >= 4 && params[3].text) {
-            // Cuarto parámetro es el profesional
-            appointmentInfo.profesional = params[3].text
-          }
-
-          if (params.length >= 5 && params[4].text) {
-            // Quinto parámetro es el lugar
-            appointmentInfo.lugar = params[4].text
-          }
-        }
-      }
-    }
-
-    // También buscar en el texto plano si no encontramos en los parámetros
-    if (!appointmentInfo.fecha || !appointmentInfo.hora) {
-      const bodyText = JSON.stringify(templateData)
-
-      // Buscar patrones de fecha (DD/MM/YYYY)
-      const fechaMatch = bodyText.match(/(\d{1,2}\/\d{1,2}\/\d{4})/g)
-      if (fechaMatch && fechaMatch.length > 0) {
-        appointmentInfo.fecha = fechaMatch[0]
-      }
-
-      // Buscar patrones de hora (HH:MM)
-      const horaMatch = bodyText.match(/(\d{1,2}:\d{2})/g)
-      if (horaMatch && horaMatch.length > 0) {
-        appointmentInfo.hora = horaMatch[0]
-      }
-
-      // Buscar nombres de profesionales (palabras que empiecen con mayúscula)
-      const profesionalMatch = bodyText.match(/([A-Z][a-z]+,?\s+[A-Z][a-z]+)/g)
-      if (profesionalMatch && profesionalMatch.length > 0) {
-        appointmentInfo.profesional = profesionalMatch[0]
-      }
-    }
-
-    console.log("[REMINDERS] Información del turno extraída:", appointmentInfo)
-    return appointmentInfo
+    const datos = extraerDatosDelTurno(templateBody, chatbotData)
+    console.log("[REMINDERS] Información del turno extraída:", datos)
+    return datos
   } catch (error) {
     console.error("[REMINDERS] Error al extraer información del turno:", error)
     return null
@@ -223,7 +166,22 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
     console.error("[REMINDERS] ⚠️ Error guardando plantilla en conversation-history (continuando):", e)
   }
 
-  const appointmentInfo = extractAppointmentInfo(Body)
+  // Parsear Chatbot_Data ANTES de extraer los datos del turno (17/9/2026).
+  // Antes se parseaba más abajo y extractAppointmentInfo sólo recibía el Body
+  // del template, así que tenía que deducir los campos por la posición de los
+  // parámetros — y con `cancelar_turno_solicitado`, que no lleva el nombre de
+  // la clínica al principio, quedaban todos corridos un lugar. Chatbot_Data
+  // trae los mismos datos con nombre; era cuestión de leerlos antes.
+  let chatbotDataParsed: any = null
+  if (Chatbot_Data) {
+    try {
+      chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
+    } catch (e) {
+      console.error("[REMINDERS] ❌ Error al parsear Chatbot_Data:", e)
+    }
+  }
+
+  const appointmentInfo = extractAppointmentInfo(Body, chatbotDataParsed)
   console.log(`[REMINDERS] 📊 config.id: ${config.id}`)
   console.log(`[REMINDERS] 📊 config.cliente_id: ${config.cliente_id || "NO DISPONIBLE"}`)
 
@@ -235,16 +193,7 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
     console.warn(`[REMINDERS] ⚠️ No hay cliente_id para config ${config.id}, no se puede trackear template`)
   }
 
-  // Parsear Chatbot_Data (lo necesita tanto el guardado de contexto de abajo
-  // como la notificación a OpenAI más abajo).
-  let chatbotDataParsed: any = null
-  if (Chatbot_Data) {
-    try {
-      chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
-    } catch (e) {
-      console.error("[REMINDERS] ❌ Error al parsear Chatbot_Data:", e)
-    }
-  }
+  // (Chatbot_Data ya se parseó más arriba, antes de extraer los datos del turno.)
 
   // CRÍTICO (fix 27/8/2026): guardar el contexto del turno en Redis para que
   // el flujo de respuestas DIRECTAS (botones "Confirmar"/"Cancelar", que no
