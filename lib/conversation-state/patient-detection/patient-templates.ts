@@ -258,7 +258,7 @@ export function buildTurnosQuirurgicosInfo(turnosQx: any[]): string {
     })
   }
 
-  bloque += `La gestión de turnos quirúrgicos (cancelación, modificación o confirmación) debe realizarse comunicándote directamente con la clínica.\n\n`
+  bloque += `La gestión de turnos quirúrgicos (en casos de requerir cancelación o modificación) debe realizarse comunicándote directamente con la clínica.\n\n`
 
   return bloque
 }

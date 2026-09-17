@@ -125,7 +125,7 @@ function buildSoloCirugiaGreeting(firstName: string, turnosQx: any[], clinicName
     })
   }
 
-  m += `La gestión de turnos quirúrgicos (cancelación, modificación o confirmación) debe realizarse comunicándote directamente con la clínica.\n\n`
+  m += `La gestión de turnos quirúrgicos (en casos de requerir cancelación o modificación) debe realizarse comunicándote directamente con la clínica.\n\n`
   m += `¿En qué más te puedo ayudar?\n\n`
   m += `1- Solicitar un turno médico\n`
   m += `2- Realizar otra consulta\n\n`

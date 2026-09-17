@@ -147,17 +147,24 @@ Iniciará el flujo de reserva completo (sede → especialidad/médico → turno 
     type: 'function',
     function: {
       name: TOOL_NAMES.CONSULTA_INFORMATIVA,
-      description: `El paciente pregunta por datos de su turno próximo.
+      description: `El paciente pregunta por datos de algo que ya tiene agendado: un turno médico O una cirugía.
 Usá este tool para preguntas como:
-"¿A qué hora es?", "¿Dónde queda?", "¿Con quién es el turno?", "¿Cuál es la dirección?".
-Solo responde información que ya tenemos del turno. No inventes datos.`,
+"¿A qué hora es?", "¿Dónde queda?", "¿Con quién es el turno?", "¿Cuál es la dirección?", "¿Qué día es mi operación?", "¿A qué hora entro a cirugía?".
+Solo responde información que ya figura en el contexto. No inventes datos.
+Si pregunta por una CIRUGÍA, pasá tipo: "cirugia" — se le informan los datos igual, aclarándole que los cambios se gestionan con la clínica.`,
       parameters: {
         type: 'object',
         properties: {
           aspecto: {
             type: 'string',
             enum: ['hora', 'fecha', 'profesional', 'sede', 'direccion', 'general'],
-            description: 'Qué aspecto del turno está preguntando el paciente.',
+            description: 'Qué aspecto está preguntando el paciente.',
+          },
+          tipo: {
+            type: 'string',
+            enum: ['turno', 'cirugia'],
+            description:
+              'Sobre qué pregunta: su turno médico o su cirugía. Importa cuando tiene los dos agendados. Por defecto, "turno".',
           },
         },
         required: ['aspecto'],

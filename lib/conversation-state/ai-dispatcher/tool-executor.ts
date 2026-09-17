@@ -18,7 +18,7 @@ import { recordDiag, DIAG } from '@/lib/diagnostics'
 import { fraseDerivacion } from '@/lib/utils/escalation-contact'
 import { TOOL_NAMES } from './tool-manifest'
 import type { DispatcherDecision } from './dispatcher'
-import type { DispatcherContext } from './context-builder'
+import type { DispatcherContext, CirugiaSnapshot } from './context-builder'
 
 // ============================================================================
 // TIPOS
@@ -289,7 +289,34 @@ async function resolverDecision(
 
     // ── Consulta informativa ─────────────────────────────────────────────────
     case TOOL_NAMES.CONSULTA_INFORMATIVA: {
+      const aspecto = (decision.args.aspecto as string) ?? 'general'
+      const tipoPedido = decision.args.tipo as string | undefined
       const turno = ctx.turnos[0]
+      const cirugia = ctx.turnosQx[0]
+
+      // 17/9/2026 — Acá el executor contradecía a su propio contexto. El
+      // contexto ya le dice al modelo: "si el paciente pregunta por la fecha u
+      // hora de su cirugía, podés confirmarle esos datos con
+      // responder_consulta_informativa". El modelo lo hacía bien, pero esta
+      // rama sólo miraba ctx.turnos, así que a un paciente con una cirugía
+      // agendada y ningún turno médico le contestaba "No encontré turnos
+      // próximos en tu cuenta" — teniendo el dato a mano.
+      //
+      // Caso real: tel. 1133126267 preguntó el horario de su operación. El log
+      // decía "Sin turnos médicos, pero 1 cirugía(s) agendada(s)" en la línea
+      // anterior a la respuesta que le negaba tener algo agendado.
+      //
+      // Se responde por la cirugía cuando el modelo lo pidió explícitamente
+      // (tipo: 'cirugia') o cuando es lo único que el paciente tiene.
+      if (cirugia && (tipoPedido === 'cirugia' || !turno)) {
+        const message = conSaludoSiCorresponde(
+          buildInfoCirugia(cirugia, aspecto, deps.escalationPhone),
+          ctx,
+          deps,
+        )
+        return { action: { type: 'send_and_return', message }, logNote: `Dispatcher → info cirugía (${aspecto})` }
+      }
+
       if (!turno) {
         return {
           action: {
@@ -304,7 +331,6 @@ async function resolverDecision(
         }
       }
 
-      const aspecto = decision.args.aspecto ?? 'general'
       const message = conSaludoSiCorresponde(buildInfoResponse(turno, aspecto), ctx, deps)
       return { action: { type: 'send_and_return', message }, logNote: `Dispatcher → info turno (${aspecto})` }
     }
@@ -376,6 +402,53 @@ async function resolverDecision(
 // ============================================================================
 // BUILDERS DE RESPUESTA
 // ============================================================================
+
+/**
+ * Datos de una cirugía agendada (17/9/2026).
+ *
+ * Siempre cierra remitiendo a la clínica: la cirugía es informativa en este
+ * canal — el paciente no puede confirmarla, cancelarla ni reagendarla acá, y
+ * sugerirle lo contrario sería peor que no responderle.
+ */
+function buildInfoCirugia(
+  cirugia: CirugiaSnapshot,
+  aspecto: string,
+  escalationPhone?: string,
+): string {
+  const fecha = cirugia.fecha || 'fecha no disponible'
+  const hora = cirugia.hora || 'hora no disponible'
+  const queCirugia = cirugia.cirugia ? ` de *${cirugia.cirugia}*` : ''
+
+  const paraCambios = escalationPhone
+    ? fraseDerivacion('Para cualquier cambio o duda sobre la cirugía, comunicate con nosotros', escalationPhone)
+    : 'Para cualquier cambio o duda sobre la cirugía, comunicate con la clínica.'
+
+  let detalle: string
+  switch (aspecto) {
+    case 'hora':
+      detalle = `Tu cirugía${queCirugia} está agendada para el ${fecha} a las *${hora}*.`
+      break
+    case 'fecha':
+      detalle = `Tu cirugía${queCirugia} está agendada para el *${fecha}* a las ${hora}.`
+      break
+    case 'profesional':
+      detalle = `Tu cirugía${queCirugia} es con *${cirugia.cirujano || 'el cirujano asignado'}*.`
+      break
+    default:
+      detalle = [
+        `Acá están los datos de tu cirugía:`,
+        `📅 *Fecha:* ${fecha}`,
+        `🕐 *Hora:* ${hora}`,
+        cirugia.cirujano ? `👨‍⚕️ *Cirujano:* ${cirugia.cirujano}` : '',
+        cirugia.cirugia ? `🏥 *Práctica:* ${cirugia.cirugia}` : '',
+        cirugia.estado ? `📋 *Estado:* ${cirugia.estado}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+  }
+
+  return `${detalle}\n\n${paraCambios}`
+}
 
 function buildInfoResponse(
   turno: { fecha: string; hora: string; profesional: string; sede: string },
