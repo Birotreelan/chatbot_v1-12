@@ -9,6 +9,7 @@ import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { registrarMensajeEntrante } from "./ventana-atencion"
+import { presentarSiCorresponde } from "./conversation-state/presentacion-inicial"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData, isWithinTemplateWindow } from "./appointment-stats"
@@ -262,6 +263,13 @@ async function sendDirectResponse(
 ): Promise<boolean> {
   const logger = createConversationLogger(ctx.userPhoneNumber, ctx.configId, phase)
   try {
+    // Presentación como asistente de IA en la primera respuesta del día
+    // (17/9/2026). Se decide acá, en el embudo, y no en cada rama: estaba
+    // resuelta a mano en 13 lugares y cada capa nueva se olvidaba —el executor,
+    // el router primario y el NLU fallback, tres parches del mismo agujero.
+    // Ver lib/conversation-state/presentacion-inicial.ts.
+    message = await presentarSiCorresponde(message, ctx.configId, ctx.userPhoneNumber)
+
     if (buttons && buttons.length > 0) {
       try {
         await sendWhatsAppInteractive(ctx.phoneNumberId, ctx.accessToken, ctx.userPhoneNumber, message, buttons)

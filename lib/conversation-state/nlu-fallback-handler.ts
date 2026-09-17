@@ -21,6 +21,7 @@ import { fraseDerivacion, contactoDerivacion, esContactoMultilinea } from "@/lib
 import { recordDiag, recordDiagSample, DIAG } from "@/lib/diagnostics"
 import { getRedisClient } from "@/lib/redis"
 import { isMarkedAsWrongPerson } from "./wrong-number-handler"
+import { describirTurnos, hayVariosTurnos, formatearHora } from "./descripcion-turnos"
 
 import { MODELO_CLASIFICACION } from "@/lib/ai-models"
 
@@ -955,14 +956,20 @@ function extractTurnoData(appointmentContext: any): {
   profesional: string
   sede: string
 } {
-  // Si tiene array de turnos (estructura ChatbotData), usar el primero
+  // Si tiene array de turnos (estructura ChatbotData), usar el primero.
+  //
+  // OJO (17/9/2026): quedarse con turnos[0] es correcto sólo para los mensajes
+  // que hablan de UN turno. Para los que enumeran lo que el paciente tiene
+  // agendado, usar describirTurnos() — si no, con dos turnos el mismo día el
+  // segundo desaparece de la conversación. Ver descripcion-turnos.ts.
   if (appointmentContext?.turnos && Array.isArray(appointmentContext.turnos) && appointmentContext.turnos.length > 0) {
     const turno = appointmentContext.turnos[0]
     return {
       // SIEMPRE usar fecha raw (YYYY-MM-DD) - formatDate() lo convertirá correctamente
       fecha: turno.fecha || turno.fecha_formateada || '',
-      // Para hora, preferir formato raw si existe, sino usar formateada
-      hora: turno.hora || turno.hora_formateada || '',
+      // Hora normalizada: el backend la manda con segundos ("08:25:00") y así
+      // se le mostraba al paciente.
+      hora: formatearHora(turno.hora || turno.hora_formateada),
       profesional: turno.profesional || '',
       sede: turno.sede || ''
     }
@@ -971,7 +978,7 @@ function extractTurnoData(appointmentContext: any): {
   // Fallback a propiedades directas (por compatibilidad)
   return {
     fecha: appointmentContext?.fecha || appointmentContext?.appointment_date || '',
-    hora: appointmentContext?.hora || appointmentContext?.appointment_time || '',
+    hora: formatearHora(appointmentContext?.hora || appointmentContext?.appointment_time),
     profesional: appointmentContext?.profesional || appointmentContext?.professional_name || '',
     sede: appointmentContext?.sede || appointmentContext?.sede_name || ''
   }
@@ -1001,6 +1008,20 @@ const MENU_REAGENDAR_CON_TURNO_ACTIVO = `¿Qué preferís hacer?
 Respondé con el número de opción que prefieras.`
 
 /**
+ * El mismo menú en plural (17/9/2026).
+ *
+ * No es sólo redacción: la confirmación y la cancelación se mandan al proxy POR
+ * FECHA, así que con dos turnos el mismo día la acción alcanza a los dos.
+ * Decirle "el turno médico" a quien tiene dos le oculta qué está por pasar.
+ */
+const MENU_REAGENDAR_CON_VARIOS_TURNOS = `¿Qué preferís hacer?
+
+1- Confirmar asistencia a los turnos médicos
+2- Cancelar los turnos médicos y solicitar uno nuevo
+
+Respondé con el número de opción que prefieras.`
+
+/**
  * Respuesta para confirmación directa (sin menú)
  */
 function buildConfirmationResponse(appointmentContext: any): string {
@@ -1017,15 +1038,17 @@ Si necesitás algo más, no dudes en escribirme.`
  * Usada para: queja_frustracion, explicacion_contextual, cancelar_turno, reagendar_turno
  */
 function buildMenuResponse(appointmentContext: any, gptResponse?: string): string {
-  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
-  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
-
   // Usar respuesta de GPT si existe, sino usar fallback
   const empaticResponse = gptResponse || "Entendemos tu situación."
 
+  const descripcion = describirTurnos(appointmentContext, formatDate)
+  if (!descripcion) {
+    return `${empaticResponse}\n\n${MENU_OPCIONES}`
+  }
+
   return `${empaticResponse}
 
-Veo que tenés un turno programado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
+Veo que tenés ${descripcion}
 
 ${MENU_OPCIONES}`
 }
@@ -1070,16 +1093,25 @@ Tu turno del *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${
  * El turno activo no puede omitirse: primero se cancela, luego se agenda el nuevo.
  */
 function buildCancelAndRescheduleMenuResponse(appointmentContext: any, gptResponse?: string): string {
-  const { fecha, hora, profesional, sede } = extractTurnoData(appointmentContext)
-  const fechaFormateada = fecha ? formatDate(fecha) : 'fecha no disponible'
-
   const empaticResponse = gptResponse || "Entendemos que necesitás cambiar la fecha del turno."
+
+  // 17/9/2026: antes esto describía turnos[0] y descartaba el resto. Con el
+  // recordatorio de dos turnos de Marcela, el segundo desaparecía de la
+  // conversación aunque la cancelación fuera a alcanzarlo igual.
+  const descripcion = describirTurnos(appointmentContext, formatDate)
+  const menu = hayVariosTurnos(appointmentContext)
+    ? MENU_REAGENDAR_CON_VARIOS_TURNOS
+    : MENU_REAGENDAR_CON_TURNO_ACTIVO
+
+  if (!descripcion) {
+    return `${empaticResponse}\n\n${menu}`
+  }
 
   return `${empaticResponse}
 
-Veo que tenés un turno programado para el *${fechaFormateada}* a las *${hora || 'hora no disponible'}* con ${profesional || 'el profesional'} en ${sede || 'la sede indicada'}.
+Veo que tenés ${descripcion}
 
-${MENU_REAGENDAR_CON_TURNO_ACTIVO}`
+${menu}`
 }
 
 /**
