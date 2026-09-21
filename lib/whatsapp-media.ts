@@ -24,14 +24,14 @@
  * https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media
  */
 
-import { downloadWhatsAppMedia } from "./audio-transcription"
-import { formatearTamano, type TipoMedia } from "./media-validacion"
+import { formatearTamano, LIMITE_DESCARGA_PANEL, type TipoMedia } from "./media-validacion"
 
 export {
   validarArchivo,
   detectarTipoReal,
   formatearTamano,
   LIMITE_SUBIDA_PANEL,
+  LIMITE_DESCARGA_PANEL,
   EXTENSIONES_ACEPTADAS,
   MIME_TYPES_ACEPTADOS,
   DIAS_RETENCION_WHATSAPP,
@@ -249,23 +249,80 @@ export async function sendWhatsAppMedia(
   return data
 }
 
+export type DescargaMedia =
+  | { estado: "ok"; buffer: Buffer; tamanoBytes: number; mimeTypeInformado: string }
+  /** Pasó el plazo de retención de WhatsApp, o el id no existe. */
+  | { estado: "caducado" }
+  | { estado: "demasiado_grande"; tamanoBytes: number }
+
 /**
  * Trae el archivo desde WhatsApp para mostrarlo en el panel.
  *
- * Reusa `downloadWhatsAppMedia`, que ya resuelve los dos pasos (consultar el
- * media_id para obtener una URL, que dura 5 minutos, y después descargarla).
- * Devuelve null si el archivo ya no está — pasado el plazo de retención es lo
- * esperable, no una falla.
+ * Son dos llamadas: consultar el media_id (devuelve una URL que dura 5 minutos,
+ * el mime type y el tamaño) y después bajar esa URL.
+ *
+ * ── Por qué mira el tamaño ANTES de bajar (21/9/2026) ──────────────────────
+ *
+ * Porque desde que el paciente también manda archivos, el tamaño dejó de estar
+ * bajo nuestro control: WhatsApp le permite hasta 100 MB. Esta función arma un
+ * Buffer en memoria dentro de una función serverless, así que preguntar primero
+ * y cortar es la diferencia entre un mensaje claro para el agente y una función
+ * muerta sin explicación.
+ *
+ * Por eso no reusa `downloadWhatsAppMedia` de una: esa hace las dos llamadas de
+ * corrido y descarta la metadata, que es justamente el dato que necesitamos.
  */
 export async function descargarMediaParaPanel(
   mediaId: string,
   accessToken: string,
-): Promise<Buffer | null> {
+  limiteBytes: number = LIMITE_DESCARGA_PANEL,
+): Promise<DescargaMedia> {
   try {
-    return await downloadWhatsAppMedia(mediaId, accessToken)
+    const info = await fetch(`https://graph.facebook.com/v17.0/${mediaId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+
+    if (!info.ok) {
+      // Lo esperable pasado el plazo de retención. No es una falla del sistema.
+      console.warn(`[WHATSAPP_MEDIA] Metadata de ${mediaId} no disponible (${info.status})`)
+      return { estado: "caducado" }
+    }
+
+    const meta = await info.json()
+    const tamanoBytes = Number(meta?.file_size) || 0
+
+    if (tamanoBytes > limiteBytes) {
+      console.warn(
+        `[WHATSAPP_MEDIA] ${mediaId} pesa ${formatearTamano(tamanoBytes)}, por encima del tope de ${formatearTamano(limiteBytes)}`,
+      )
+      return { estado: "demasiado_grande", tamanoBytes }
+    }
+
+    if (!meta?.url) return { estado: "caducado" }
+
+    const archivo = await fetch(meta.url, { headers: { Authorization: `Bearer ${accessToken}` } })
+    if (!archivo.ok) {
+      console.warn(`[WHATSAPP_MEDIA] No se pudo bajar ${mediaId}: ${archivo.status}`)
+      return { estado: "caducado" }
+    }
+
+    const buffer = Buffer.from(await archivo.arrayBuffer())
+
+    // El tamaño informado y el real pueden no coincidir. El que manda es el
+    // real, porque es el que ocupa memoria.
+    if (buffer.length > limiteBytes) {
+      return { estado: "demasiado_grande", tamanoBytes: buffer.length }
+    }
+
+    return {
+      estado: "ok",
+      buffer,
+      tamanoBytes: buffer.length,
+      mimeTypeInformado: String(meta?.mime_type || "").split(";")[0].trim().toLowerCase(),
+    }
   } catch (error) {
     console.warn(`[WHATSAPP_MEDIA] No se pudo descargar ${mediaId}:`, error)
-    return null
+    return { estado: "caducado" }
   }
 }
 

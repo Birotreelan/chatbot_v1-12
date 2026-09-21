@@ -9,6 +9,7 @@ import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { registrarMensajeEntrante } from "./ventana-atencion"
+import { leerMediaDelWebhook, describirArchivoRecibido } from "./media-entrante"
 import { presentarSiCorresponde } from "./conversation-state/presentacion-inicial"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
@@ -22,13 +23,15 @@ import {
   clearPendingHumanSupportOffer,
   createSupportSession,
   setPendingHumanSupportOffer,
+  registrarArchivoEntrante,
 } from "./human-support"
 import {
   getHumanSupportSchedule,
   isWithinHumanSupportHours,
   formatSupportHoursLines,
+  formatSupportHoursForPatient,
 } from "./human-support-schedule"
-import type { HumanSupportMessage } from "./types"
+import type { HumanSupportMessage, MediaAdjunta } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 import {
   getAppointmentContext,
@@ -160,7 +163,12 @@ import { executeDispatcherDecision, conSaludoSiCorresponde, type ExecutorDeps } 
 
 
 // Función para extraer el contenido del mensaje según su tipo
-function extractMessageContent(message: any): { content: string; audioId?: string; audioMimeType?: string } {
+function extractMessageContent(message: any): {
+  content: string
+  audioId?: string
+  audioMimeType?: string
+  media?: MediaAdjunta
+} {
   switch (message.type) {
     case "text":
       return { content: message.text?.body || "" }
@@ -180,6 +188,24 @@ function extractMessageContent(message: any): { content: string; audioId?: strin
         audioId: message.audio?.id,
         audioMimeType: message.audio?.mime_type || "audio/ogg",
       }
+
+    // ── Archivos que manda el paciente (21/9/2026) ──────────────────────────
+    //
+    // Estos tres tipos caían antes en `default: { content: "" }`. El media_id se
+    // perdía —y vive solo 7 días, sin forma de recuperarlo después— y el mensaje
+    // seguía viaje vacío: burbuja en blanco para el agente, o el embudo entero
+    // procesando un string vacío. Ver lib/media-entrante.ts.
+    case "image":
+    case "document":
+    case "video": {
+      const leida = leerMediaDelWebhook(message)
+      if (!leida) return { content: "" }
+      return {
+        content: describirArchivoRecibido(leida.media, leida.caption),
+        media: leida.media,
+      }
+    }
+
     default:
       return { content: "" }
   }
@@ -2794,6 +2820,8 @@ export async function handleMessage(value: any) {
     const originalMessage = userMessage
     const audioId = extractedContent.audioId
     const audioMimeType = extractedContent.audioMimeType
+    /** Archivo que mandó el paciente, si mandó alguno. Ver el bloque ARCHIVO ENTRANTE. */
+    const mediaEntrante = extractedContent.media
 
     console.info(`[WHATSAPP] Mensaje de ${userPhoneNumber}: "${userMessage.substring(0, 50)}${userMessage.length > 50 ? '...' : ''}" (${message.type})`)
 
@@ -3124,6 +3152,184 @@ export async function handleMessage(value: any) {
           return
         }
       }
+    }
+
+    // ============================================================================
+    // ARCHIVO ENTRANTE (21/9/2026)
+    // ============================================================================
+    // El camino inverso al de los archivos que manda el panel. Se resuelve acá,
+    // arriba de todo el ruteo, por el mismo motivo por el que el audio se
+    // transcribe antes de rutear: un archivo no es una consulta que el asistente
+    // pueda interpretar, y dejarlo bajar por el embudo lo convierte en un
+    // mensaje vacío que ninguna condición mira.
+    //
+    // Las tres reglas, en orden:
+    //
+    //  1. Sin sesión de atención abierta → se deriva automáticamente, con el
+    //     motivo "Envío de archivo". No se le pregunta al paciente si quiere
+    //     atención humana ni se le pide que elija un motivo del menú, aunque el
+    //     cliente esté en modo oferta: mandar un archivo YA es la intención.
+    //  2. Si la clínica no tiene atención humana habilitada → se le avisa con
+    //     claridad que no podemos recibir archivos. Es lo único honesto: nadie
+    //     del otro lado va a poder abrirlo.
+    //  3. Si ya hay una sesión, `registrarArchivoEntrante` decide: si está
+    //     esperando agente le suma el archivo al motivo; si un agente ya la
+    //     tiene abierta, el archivo aparece solo en la conversación.
+    //
+    // El conteo y el lock viven en registrarArchivoEntrante (lib/human-support.ts),
+    // porque cinco fotos seguidas son cinco webhooks sin serializar entre sí.
+    if (mediaEntrante) {
+      const mensajeId = nanoid()
+      const ahora = new Date().toISOString()
+
+      // Lo primero es guardar la referencia. El media_id vive 7 días y no hay
+      // forma de recuperarlo después: pase lo que pase con el ruteo, esto no se
+      // puede perder.
+      await saveConversationMessage({
+        id: mensajeId,
+        role: "user",
+        content: userMessage,
+        timestamp: ahora,
+        phoneNumber: userPhoneNumber,
+        configId: config.id,
+        media: mediaEntrante,
+      })
+      appendToHistory(userPhoneNumber, { role: "user", text: userMessage, timestamp: Date.now() }).catch(() => {})
+      await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+
+      const flagsArchivo = await getEffectiveFeatureFlags(config.id)
+
+      // ── Regla 2: la clínica no recibe archivos ────────────────────────────
+      if (!flagsArchivo.humanSupport) {
+        // Por el mismo embudo que el resto: si es el primer mensaje del día, el
+        // paciente tiene que saber que le está contestando una IA antes de que
+        // le digamos que no podemos abrir su estudio.
+        const aviso = await presentarSiCorresponde(
+          `Recibí tu archivo, pero por este canal no podemos abrirlo. ` +
+            `Si es una orden, un estudio o una receta, lo mejor es que lo lleves o lo consultes directamente con ${config.displayName || "la clínica"}.\n\n` +
+            `Si querés, contame por acá qué necesitás y te ayudo con turnos.`,
+          config.id,
+          userPhoneNumber,
+        )
+        await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, aviso)
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: aviso,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
+        appendToHistory(userPhoneNumber, { role: "bot", text: aviso, timestamp: Date.now() }).catch(() => {})
+        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+        console.log(`[ARCHIVO_ENTRANTE] ${userPhoneNumber}: atención humana deshabilitada, se avisó al paciente`)
+        return
+      }
+
+      // ── Reglas 1 y 3: derivar, o sumar a la sesión que ya existe ──────────
+      let hilo = ""
+      try {
+        hilo = (await getThreadForUser(userPhoneNumber, config.id)).threadId
+      } catch {
+        // Sin thread la sesión se crea igual: el agente no lo necesita para
+        // leer la conversación, y quedarse sin derivar sería mucho peor.
+      }
+
+      const registro = await registrarArchivoEntrante({
+        configId: config.id,
+        phoneNumber: userPhoneNumber,
+        tenantId: config.cliente_id || "unknown",
+        threadId: hilo,
+        assistantId: config.whatsappAssistantId,
+        displayName: config.displayName,
+      })
+
+      if (!registro) {
+        // Redis caído. El archivo ya quedó en el historial; lo que no se pudo
+        // fue derivar. Se lo decimos en vez de dejarlo esperando.
+        const falla =
+          "Recibí tu archivo, pero tuve un problema para derivarte con el equipo. " +
+          "Por favor, escribinos de nuevo en unos minutos."
+        await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, falla)
+        console.error(`[ARCHIVO_ENTRANTE] ❌ No se pudo registrar la sesión para ${userPhoneNumber}`)
+        return
+      }
+
+      if (registro.resultado === "en_curso") {
+        // Otro archivo del mismo paciente está creando la sesión en este mismo
+        // instante. Este ya quedó en el historial de la conversación, que es de
+        // donde el panel arma los mensajes: no hay nada más que hacer y no hay
+        // nada que avisarle. Decirle "hubo un problema" sería mentirle.
+        console.log(`[ARCHIVO_ENTRANTE] ${userPhoneNumber}: derivación en curso en otro webhook`)
+        return
+      }
+
+      // El archivo también va al historial de soporte, que es lo que lee el
+      // panel. Con el MISMO id que el de arriba: el panel combina los dos
+      // historiales y deduplica por id, y dos ids distintos duplicarían la
+      // burbuja (ver la nota en app/api/support/media/route.ts).
+      const mensajeDeSoporte: HumanSupportMessage = {
+        id: mensajeId,
+        sessionId: registro.session.id,
+        role: "user",
+        content: userMessage,
+        timestamp: ahora,
+        media: mediaEntrante,
+      }
+
+      // Se guarda igual esté la sesión esperando agente o ya asignada.
+      //
+      // El camino de los mensajes de texto usa `addPendingMessageToSession`
+      // cuando la sesión está en `pending`, pero acá no sirve: ese campo
+      // (`session.pendingMessages`) se escribe y no lo lee nadie —ninguna ruta
+      // ni componente lo consulta— y su tipo (`ConversationMessage` de
+      // lib/types.ts, que es OTRO distinto del de lib/conversations.ts) ni
+      // siquiera tiene lugar para el adjunto. El archivo se perdería de vista
+      // justo en el caso que más importa: la sesión que todavía nadie tomó.
+      await saveSupportMessage(mensajeDeSoporte)
+
+      // Solo se le avisa al paciente cuando la derivación es nueva. Si ya estaba
+      // en atención, mandarle "te derivo" por cada foto sería ruido — y un
+      // mensaje facturable por foto.
+      if (registro.resultado === "creada") {
+        // Si tenía una oferta de atención humana pendiente, ya no corresponde:
+        // el archivo la respondió.
+        await clearPendingHumanSupportOffer(config.id, userPhoneNumber).catch(() => {})
+
+        const horarios = await getHumanSupportSchedule(config.id)
+        const enHorario = isWithinHumanSupportHours(horarios)
+
+        // Este mensaje ya dice "asistente virtual", así que presentarSiCorresponde
+        // no le antepone nada — pero igual marca al paciente como presentado,
+        // que es lo que evita que se le repita la presentación más adelante.
+        let aviso =
+          `Recibí tu archivo. Como soy un asistente virtual de inteligencia artificial y no puedo abrirlo, ` +
+          `te estoy derivando con una persona del equipo de ${config.displayName || "la clínica"} para que lo revise.`
+        if (!enHorario && horarios.length > 0) {
+          // La versión "para paciente", no la de viñetas: esta va en medio de
+          // una oración y formatSupportHoursLines devuelve un array.
+          const texto = formatSupportHoursForPatient(horarios)
+          aviso += `\n\n_En este momento estamos fuera del horario de atención${texto ? ` (${texto})` : ""}. Te van a responder dentro de ese horario._`
+        }
+        aviso = await presentarSiCorresponde(aviso, config.id, userPhoneNumber)
+
+        await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, aviso)
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "assistant",
+          content: aviso,
+          timestamp: new Date().toISOString(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
+        appendToHistory(userPhoneNumber, { role: "bot", text: aviso, timestamp: Date.now() }).catch(() => {})
+        await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      }
+
+      console.log(
+        `[ARCHIVO_ENTRANTE] ${userPhoneNumber}: ${mediaEntrante.tipo} (${mediaEntrante.mimeType}) → sesión ${registro.session.id} (${registro.resultado})`,
+      )
+      return
     }
 
     const activeSession = await getActiveSessionByPhone(config.id, userPhoneNumber)

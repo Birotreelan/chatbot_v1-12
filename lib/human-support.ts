@@ -4,6 +4,7 @@ import type { HumanSupportSession, HumanSupportMessage, ConversationMessage } fr
 import { setConversationPaused } from "./conversations"
 import { getWhatsAppConfigById } from "./db"
 import { sendWhatsAppMessage } from "./whatsapp-api"
+import { anotarArchivosEnMotivo, MOTIVO_ARCHIVO } from "./media-entrante"
 
 // Prefijos Redis
 const SUPPORT_SESSION_PREFIX = "human_support:session:"
@@ -74,6 +75,116 @@ export async function createSupportSession(params: CreateSupportSessionParams): 
   console.log(`[HUMAN_SUPPORT] ✅ Sesión creada: ${sessionId} para ${params.phoneNumber}`)
 
   return session
+}
+
+/**
+ * Registra que el paciente mandó un archivo, creando o actualizando la sesión
+ * de atención (21/9/2026).
+ *
+ * ── Por qué está acá y no en whatsapp.tsx ──────────────────────────────────
+ *
+ * Porque necesita un lock, y el lock necesita las claves de este módulo.
+ *
+ * Un paciente que fotografía una orden médica manda cuatro o cinco fotos
+ * seguidas. Cada una es un webhook, y la cola por usuario (`enqueueUserMessage`)
+ * recién actúa al final de `handleMessage`: estos bloques tempranos NO están
+ * serializados. Sin lock, dos webhooks casi simultáneos ven los dos que no hay
+ * sesión, crean dos, y la segunda pisa el puntero `human_support:phone:…`
+ * dejando la primera huérfana — con el primer archivo adentro, invisible para
+ * todos.
+ *
+ * Mismo patrón de lock que `assignSessionToAgent`, por el mismo motivo.
+ *
+ * ── Qué devuelve ───────────────────────────────────────────────────────────
+ *
+ *  - `creada`: no había sesión; se derivó al paciente (regla 1).
+ *  - `anotada`: ya había una esperando agente; se le sumó el archivo al motivo,
+ *    para que quien la tome sepa cuántos lo esperan antes de abrirla (regla 3).
+ *  - `abierta`: un agente ya la tiene asignada. No se toca el motivo: el archivo
+ *    aparece solo en la conversación, que es donde el agente está mirando.
+ *  - `en_curso`: otro webhook del mismo paciente está haciendo esto ahora mismo.
+ *  - `null`: Redis no disponible. Esto sí es una falla.
+ */
+export type RegistroDeArchivo =
+  | { resultado: "creada" | "anotada" | "abierta"; session: HumanSupportSession }
+  | { resultado: "en_curso"; session: null }
+  | null
+
+export async function registrarArchivoEntrante(params: {
+  configId: string
+  phoneNumber: string
+  tenantId: string
+  threadId: string
+  assistantId: string
+  displayName: string
+}): Promise<RegistroDeArchivo> {
+  const redis = getRedisClient()
+  if (!redis) return null
+
+  const lockKey = `human_support:lock:archivo:${params.configId}:${params.phoneNumber}`
+
+  // Se espera el lock en vez de rendirse en el primer intento.
+  //
+  // Rendirse era un error con consecuencia visible: el webhook que perdía la
+  // carrera miraba si ya había sesión, no la encontraba —porque el que tenía el
+  // lock todavía la estaba creando— y devolvía null. El llamador interpretaba
+  // eso como "no se pudo derivar" y le decía al paciente que hubo un problema,
+  // mientras el otro webhook lo estaba derivando perfectamente.
+  //
+  // Crear una sesión son tres escrituras a Redis: 250 ms por intento alcanzan
+  // de sobra, y el peor caso es un segundo en un camino que casi nunca se toma.
+  let lockAcquired: unknown = null
+  for (let intento = 0; intento < 4 && !lockAcquired; intento++) {
+    if (intento > 0) await new Promise((r) => setTimeout(r, 250))
+    // En minúscula. El cliente de Upstash hace `"nx" in opts`: con `NX` en
+    // mayúscula la opción se ignora en silencio y el `set` pasa a ser
+    // incondicional — es decir, el lock no bloquea nada. Ver la nota en
+    // assignSessionToAgent.
+    lockAcquired = await redis.set(lockKey, Date.now().toString(), { nx: true, ex: 15 })
+  }
+
+  if (!lockAcquired) {
+    // Cuatro intentos y el lock sigue tomado. El archivo ya está guardado en el
+    // historial de la conversación, que es de donde el panel arma los mensajes,
+    // así que no se pierde: lo único que no pasó es sumarlo a la cuenta del
+    // motivo. `en_curso` existe para que el llamador se quede callado en vez de
+    // alarmar al paciente por algo que otro webhook está resolviendo bien.
+    console.log(`[HUMAN_SUPPORT] Lock de archivo ocupado para ${params.phoneNumber}; lo maneja otro webhook`)
+    return { resultado: "en_curso", session: null }
+  }
+
+  try {
+    const existente = await getActiveSessionByPhone(params.configId, params.phoneNumber)
+
+    if (existente && (existente.status === "pending" || existente.status === "in_progress")) {
+      if (existente.status === "in_progress") {
+        return { resultado: "abierta", session: existente }
+      }
+
+      existente.reason = anotarArchivosEnMotivo(existente.reason)
+      await redis.set(`${SUPPORT_SESSION_PREFIX}${existente.id}`, JSON.stringify(existente))
+      console.log(`[HUMAN_SUPPORT] 📎 Archivo sumado al motivo de ${existente.id}: "${existente.reason}"`)
+      return { resultado: "anotada", session: existente }
+    }
+
+    const session = await createSupportSession({
+      phoneNumber: params.phoneNumber,
+      configId: params.configId,
+      tenantId: params.tenantId,
+      threadId: params.threadId,
+      assistantId: params.assistantId,
+      displayName: params.displayName,
+      reason: anotarArchivosEnMotivo(MOTIVO_ARCHIVO),
+      priority: "medium",
+      summary:
+        "El paciente envió un archivo por WhatsApp. Se derivó automáticamente porque el asistente no puede interpretarlo.",
+    })
+
+    console.log(`[HUMAN_SUPPORT] 📎 Sesión creada por archivo entrante: ${session.id}`)
+    return { resultado: "creada", session }
+  } finally {
+    await redis.del(lockKey)
+  }
 }
 
 // Obtener sesión activa por teléfono
@@ -188,9 +299,17 @@ export async function assignSessionToAgent(sessionId: string, agentId: string): 
   const lockTTL = 30 // segundos
 
   // Intentar adquirir el lock de forma atómica (solo si no existe)
+  //
+  // 21/9/2026: estas opciones estaban en MAYÚSCULA (`NX`/`EX`), que es la
+  // sintaxis de node-redis. El cliente de Upstash las busca en minúscula
+  // (`"nx" in opts`), así que las ignoraba: el `set` era incondicional, siempre
+  // devolvía "OK" y el lock nunca bloqueó a nadie. Lo único que evitaba la doble
+  // asignación era el chequeo de `status !== "pending"` de abajo, que es un
+  // read-then-write y no es atómico. De paso, sin `EX` la clave del lock tampoco
+  // expiraba: quedaba una por cada sesión asignada, para siempre.
   const lockAcquired = await redis.set(lockKey, lockValue, {
-    NX: true, // Only set if not exists
-    EX: lockTTL, // Expiración automática en caso de error
+    nx: true, // Only set if not exists
+    ex: lockTTL, // Expiración automática en caso de error
   })
 
   // Si no pudimos adquirir el lock, otro agente está procesando esta sesión

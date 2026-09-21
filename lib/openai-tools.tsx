@@ -1543,7 +1543,11 @@ async function createNewThread(
         `thread:${nanoid()}:${configId}`,
         JSON.stringify({ threadId: thread.id, phoneNumber, configId }),
         {
-          EX: 60 * 60 * 24 * 7, // Expire after 7 days
+          // En minúscula: el cliente de Upstash busca `ex`, no `EX`. Con la
+          // mayúscula la opción se ignoraba y la clave quedaba SIN vencimiento
+          // — una por cada thread creado, acumulándose para siempre (21/9/2026,
+          // mismo error que en lib/human-support.ts).
+          ex: 60 * 60 * 24 * 7, // Expire after 7 days
         },
       )
     }

@@ -61,6 +61,20 @@ const TIPOS_PERMITIDOS: TipoPermitido[] = [
  */
 export const LIMITE_SUBIDA_PANEL = 4 * MB
 
+/**
+ * Tope de lo que el panel se anima a BAJAR (21/9/2026).
+ *
+ * En la salida el tamaño lo controlamos nosotros; en la entrada no. WhatsApp le
+ * deja al paciente mandar hasta 100 MB, y el panel arma la respuesta con el
+ * archivo entero en memoria dentro de una función serverless: un PDF de 80 MB
+ * no es una descarga lenta, es un timeout o un proceso muerto.
+ *
+ * 20 MB entra cómodo en cualquier foto de celular y en cualquier estudio
+ * escaneado. Arriba de eso se le dice al agente qué pasó y cuánto pesa, en vez
+ * de dejarlo mirando un spinner que nunca termina.
+ */
+export const LIMITE_DESCARGA_PANEL = 20 * MB
+
 /** Para el atributo `accept` del input de archivo. */
 export const EXTENSIONES_ACEPTADAS = ".jpg,.jpeg,.png,.pdf"
 export const MIME_TYPES_ACEPTADOS = TIPOS_PERMITIDOS.map((t) => t.mimeType).join(",")

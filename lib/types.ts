@@ -267,14 +267,32 @@ export interface HumanSupportSession {
  * `disponibleHasta` existe para que la interfaz pueda avisar antes de que el
  * archivo desaparezca, en vez de mostrar un recuadro roto sin explicación.
  */
+/**
+ * Lo que puede LLEGAR es más amplio que lo que podemos ENVIAR (21/9/2026).
+ *
+ * El panel solo deja subir JPG, PNG y PDF, porque cada formato habilitado es un
+ * formato que podemos terminar entregándole a un paciente. Pero al paciente no
+ * se le puede limitar lo que manda: si adjunta un video o un .docx, el archivo
+ * ya llegó. Ensanchar el tipo acá es reconocer eso en vez de forzar los que
+ * llegan dentro de dos categorías que no los describen.
+ */
+export type TipoMediaEntrante = "image" | "document" | "video" | "audio"
+
 export interface MediaAdjunta {
   mediaId: string
-  tipo: "image" | "document"
+  tipo: TipoMediaEntrante
   mimeType: string
   nombreArchivo: string
+  /** 0 cuando todavía no se conoce: el webhook de WhatsApp no informa el tamaño. */
   tamanoBytes: number
   /** ISO. Pasada esta fecha WhatsApp ya no entrega el archivo. */
   disponibleHasta: string
+  /**
+   * Quién lo mandó. Cambia la retención (30 días lo nuestro, 7 lo del paciente)
+   * y qué se puede hacer con él: lo que sube un agente pasó por validación de
+   * contenido, lo que manda un paciente no.
+   */
+  direccion?: "saliente" | "entrante"
 }
 
 export interface HumanSupportMessage {

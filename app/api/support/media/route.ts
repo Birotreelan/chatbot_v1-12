@@ -39,6 +39,8 @@ import {
   formatearTamano,
   ErrorDeWhatsApp,
   DIAS_RETENCION_WHATSAPP,
+  DIAS_RETENCION_ENTRANTE,
+  LIMITE_DESCARGA_PANEL,
 } from "@/lib/whatsapp-media"
 import type { HumanSupportMessage, MediaAdjunta } from "@/lib/types"
 import { nanoid } from "nanoid"
@@ -168,6 +170,7 @@ export async function POST(request: Request) {
       disponibleHasta: new Date(
         Date.now() + DIAS_RETENCION_WHATSAPP * 24 * 60 * 60 * 1000,
       ).toISOString(),
+      direccion: "saliente",
     }
 
     // El contenido de texto describe el archivo: así el mensaje se lee igual en
@@ -266,28 +269,67 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: "Configuración no encontrada" }, { status: 404 })
     }
 
-    const buffer = await descargarMediaParaPanel(mediaId, config.accessToken)
-    if (!buffer) {
-      // Lo esperable pasados los 30 días. No es un error del sistema.
+    const descarga = await descargarMediaParaPanel(mediaId, config.accessToken)
+
+    if (descarga.estado === "demasiado_grande") {
       return NextResponse.json(
         {
           success: false,
-          error: `El archivo ya no está disponible. WhatsApp los conserva ${DIAS_RETENCION_WHATSAPP} días.`,
+          error:
+            `El archivo pesa ${formatearTamano(descarga.tamanoBytes)} y no se puede abrir desde el panel ` +
+            `(el máximo es ${formatearTamano(LIMITE_DESCARGA_PANEL)}). Pedile al paciente que lo reenvíe más liviano.`,
+          demasiadoGrande: true,
+        },
+        { status: 413 },
+      )
+    }
+
+    if (descarga.estado !== "ok") {
+      // Lo esperable pasado el plazo de retención. No es un error del sistema.
+      const dias = media.direccion === "entrante" ? DIAS_RETENCION_ENTRANTE : DIAS_RETENCION_WHATSAPP
+      return NextResponse.json(
+        {
+          success: false,
+          error: `El archivo ya no está disponible. WhatsApp lo conserva ${dias} días.`,
           caducado: true,
         },
         { status: 404 },
       )
     }
 
+    const { buffer } = descarga
+
+    // ── Con qué tipo se sirve (21/9/2026) ────────────────────────────────────
+    //
+    // Nunca con el mime declarado. Cuando el archivo lo subió un agente, el POST
+    // ya verificó el contenido contra la declaración; pero desde que el paciente
+    // también manda archivos, el mime del historial puede venir de alguien que
+    // lo eligió a propósito. Servir `image/svg+xml` o `text/html` incrustado
+    // ejecutaría en el origen del panel, con la sesión del agente, un archivo
+    // que eligió un tercero.
+    //
+    // Entonces: se mira el contenido. Si es uno de los tres que sabemos
+    // reconocer, se sirve incrustado con ESE tipo. Cualquier otra cosa se baja
+    // como binario opaco, que es lo que el agente pidió poder hacer sin que el
+    // navegador la interprete.
+    const tipoReal = detectarTipoReal(buffer)
+    const incrustable = tipoReal !== null
+
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
-        "Content-Type": media.mimeType,
+        "Content-Type": incrustable ? tipoReal! : "application/octet-stream",
         "Content-Length": String(buffer.length),
         // Interpolar el nombre acá directamente devolvía 500 con el archivo ya
         // descargado en cuanto tenía un acento o un espacio fino de macOS: las
         // cabeceras HTTP son Latin-1. Ver cabeceraContentDisposition.
-        "Content-Disposition": cabeceraContentDisposition(media.nombreArchivo),
+        "Content-Disposition": cabeceraContentDisposition(
+          media.nombreArchivo,
+          incrustable ? "inline" : "attachment",
+        ),
+        // Sin esto, un navegador puede adivinar el tipo por el contenido y
+        // renderizar como HTML algo que mandamos como binario.
+        "X-Content-Type-Options": "nosniff",
         // Son datos clínicos: no deben quedar en caches compartidas.
         "Cache-Control": "private, max-age=300",
       },
