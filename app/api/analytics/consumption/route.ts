@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import type { ConversationAnalyticsResponse, ConsumptionSummary } from "@/lib/types"
+import { elegirNumeroDelWaba } from "@/lib/analytics/numero-del-waba"
 
 export async function GET(request: NextRequest) {
   try {
@@ -161,28 +162,85 @@ export async function GET(request: NextRequest) {
     })
 
     let messagingData = null
-    let phoneNumber = null
+    let phoneNumber: string | null = null
 
     if (messagingResponse.ok) {
       messagingData = await messagingResponse.json()
       console.log("[v0 Analytics] 📨 RESPUESTA MESSAGING API:")
       console.log(JSON.stringify(messagingData, null, 2))
 
-      // Extraer el número de teléfono de la respuesta
-      if (messagingData?.analytics?.phone_numbers?.[0]) {
-        phoneNumber = messagingData.analytics.phone_numbers[0]
-        console.log("[v0 Analytics] ✅ Número de teléfono detectado:", phoneNumber)
+      // ── A qué número corresponden estos consumos (21/9/2026) ──────────────
+      //
+      // Acá había un `phone_numbers[0]`: se tomaba el PRIMER número del WABA en
+      // vez del de esta configuración. Mientras cada cliente tuvo su propio
+      // WABA daba igual. Desde que varias clínicas comparten WABA, esta página
+      // —que se llama "Consumos y Facturación"— podía estar mostrando, y
+      // facturando, el consumo de otra clínica.
+      //
+      // Ver lib/analytics/numero-del-waba.ts: ante la duda no elige.
+      const resolucion = elegirNumeroDelWaba(messagingData?.analytics?.phone_numbers, config.whatsappNumber)
+
+      if (!resolucion.ok) {
+        console.log("[v0 Analytics] ⚠️ No se puede atribuir el consumo:", resolucion.motivo)
+        return NextResponse.json(
+          {
+            error: "No se puede atribuir el consumo a este cliente",
+            details: resolucion.motivo,
+            wabaId: config.wabaId,
+            numerosDelWaba: messagingData?.analytics?.phone_numbers ?? [],
+          },
+          { status: 409 },
+        )
+      }
+
+      phoneNumber = resolucion.numero
+      console.log(
+        `[v0 Analytics] ✅ Número atribuido: ${phoneNumber}${resolucion.unico ? " (único del WABA)" : " (elegido entre varios)"}`,
+      )
+
+      // Si el WABA tiene varios números, la primera consulta trajo los datos de
+      // TODOS sumados. Hay que volver a pedirlos filtrados por el nuestro, o
+      // estaríamos contando mensajes de las otras clínicas.
+      if (!resolucion.unico) {
+        const camposFiltrados = `analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${messagingGranularity}).phone_numbers([${phoneNumber}])`
+        const urlFiltrada = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${camposFiltrados}&access_token=${config.accessToken}`
+        const respuestaFiltrada = await fetch(urlFiltrada, { method: "GET" })
+
+        if (respuestaFiltrada.ok) {
+          messagingData = await respuestaFiltrada.json()
+          console.log("[v0 Analytics] 📨 Messaging re-consultado sólo para", phoneNumber)
+        } else {
+          // Antes que sumar los mensajes de otras clínicas, preferimos no
+          // informar ninguno: los contadores quedan en cero y el error queda
+          // en el log.
+          console.log("[v0 Analytics] ❌ No se pudo filtrar por número:", await respuestaFiltrada.text())
+          messagingData = null
+        }
       }
     } else {
       const errorText = await messagingResponse.text()
       console.log("[v0 Analytics] ❌ Error en Messaging API:", errorText)
     }
 
+    // Sin número resuelto no se consulta. La versión anterior caía a una
+    // consulta SIN filtro, que devuelve el WABA entero: con varias clínicas
+    // compartiendo WABA, ese "fallback" era la forma más silenciosa de
+    // facturarle a una el consumo de todas.
+    if (!phoneNumber) {
+      return NextResponse.json(
+        {
+          error: "No se pudo determinar el número de esta configuración",
+          details:
+            "Meta no respondió la lista de números del WABA, así que no se puede saber qué parte del consumo corresponde a este cliente.",
+          wabaId: config.wabaId,
+        },
+        { status: 409 },
+      )
+    }
+
     // Según docs oficiales, necesitamos: dimensions, metric_types, y el número específico
     // Los parámetros deben ir sin corchetes, separados por comas
-    const conversationFields = phoneNumber
-      ? `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers(${phoneNumber})`
-      : `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity})`
+    const conversationFields = `conversation_analytics.start(${startTimestamp}).end(${endTimestamp}).granularity(${conversationGranularity}).phone_numbers(${phoneNumber})`
 
     const conversationUrl = `https://graph.facebook.com/v18.0/${config.wabaId}?fields=${conversationFields}&access_token=${config.accessToken}`
 

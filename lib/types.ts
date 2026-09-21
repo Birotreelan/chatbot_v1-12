@@ -51,6 +51,46 @@ export interface WhatsAppConfig {
    */
   clienteProxmox?: boolean
 
+  /**
+   * Motor conversacional basado en WhatsApp Flows (21/9/2026).
+   *
+   * ── Por qué es un switch por cliente ───────────────────────────────────────
+   *
+   * El 1/10/2026 Meta empieza a cobrar los mensajes de servicio —los que hoy
+   * son gratis dentro de la ventana de 24 h— y también los templates utility
+   * enviados dentro de esa ventana. Una conversación de agendamiento, que hoy
+   * cuesta un solo cobro, pasa a costar uno por cada mensaje que manda el bot.
+   *
+   * Flows colapsa esa conversación en una sola burbuja: las pantallas que el
+   * paciente recorre no son mensajes y no se facturan. El camino de más volumen
+   * —confirmar o cancelar desde el recordatorio— pasa de 2–8 cobros a 2.
+   *
+   * El switch existe porque la migración es cliente por cliente: se prueba en
+   * uno, se mide, y recién después se mueven los demás. Los dos motores conviven;
+   * este flag decide cuál usa cada clínica.
+   *
+   * Ausente o false = motor conversacional actual, sin ningún cambio.
+   */
+  clienteFlows?: boolean
+
+  /**
+   * Id del Flow de reagendamiento publicado en el WABA de este cliente.
+   *
+   * El Flow es un objeto del WABA, no del número, así que varias clínicas que
+   * comparten WABA comparten también este id. Se guarda por configuración igual
+   * —y no por WABA— porque es el campo que consulta el envío del recordatorio y
+   * ahí lo que tenemos a mano es la config.
+   *
+   * Lo completa la pantalla de Flows del dashboard al crearlo.
+   */
+  flowIdReagendar?: string
+
+  /**
+   * Nombre del template de recordatorio con botones, el que reemplaza al
+   * original cuando `clienteFlows` está activo.
+   */
+  templateRecordatorioFlows?: string
+
   healthStatus?: "AVAILABLE" | "LIMITED" | "BLOCKED"
   lastHealthCheck?: string
   healthCheckError?: string

@@ -362,6 +362,24 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </div>
               </div>
 
+              <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                <Switch
+                  id="clienteFlows"
+                  checked={formData.clienteFlows === true}
+                  onCheckedChange={(checked) => updateFormData("clienteFlows", checked)}
+                />
+                <div className="flex-1">
+                  <Label htmlFor="clienteFlows" className="text-sm font-medium">
+                    Cliente Flows
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Los recordatorios y el agendamiento usan WhatsApp Flows en lugar del flujo
+                    conversacional por mensajes. Reduce los mensajes facturables por conversación.
+                    Se migra cliente por cliente: activalo en uno, medí, y después movés el resto.
+                  </p>
+                </div>
+              </div>
+
               <Separator className="my-4" />
 
               <div className="space-y-3">

@@ -46,6 +46,9 @@ export function DashboardNav() {
             <Link href="/dashboard/feature-flags" className="text-foreground/60 hover:text-foreground">
               Feature Flags
             </Link>
+            <Link href="/dashboard/flows" className="text-foreground/60 hover:text-foreground">
+              Flows
+            </Link>
             <Link
               href="/demo"
               className="text-foreground/60 hover:text-foreground"
