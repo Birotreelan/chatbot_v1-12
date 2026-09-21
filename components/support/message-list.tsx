@@ -18,7 +18,7 @@ interface MessageListProps {
    * quien renderiza, porque necesita el `_sid` de la sesión SSO y este
    * componente no tiene acceso al contexto.
    */
-  construirUrlMedia?: (mediaId: string) => string
+  construirUrlMedia?: (mediaId: string, descargar?: boolean) => string
 }
 
 /**
@@ -143,6 +143,7 @@ export function MessageList({ messages, agentLabel, construirUrlMedia }: Message
                 <AdjuntoDelMensaje
                   media={message.media}
                   url={construirUrlMedia?.(message.media.mediaId)}
+                  urlDescarga={construirUrlMedia?.(message.media.mediaId, true)}
                 />
               )}
 
@@ -176,9 +177,12 @@ export function MessageList({ messages, agentLabel, construirUrlMedia }: Message
 function AdjuntoDelMensaje({
   media,
   url,
+  urlDescarga,
 }: {
   media: NonNullable<HumanSupportMessage["media"]>
   url?: string
+  /** Misma URL con `descargar=1`: el servidor responde `attachment`. */
+  urlDescarga?: string
 }) {
   const caducado = new Date(media.disponibleHasta).getTime() < Date.now()
 
@@ -208,45 +212,72 @@ function AdjuntoDelMensaje({
   // y el servidor devuelve todo lo demás como binario opaco — pedirlo con un
   // <img> mostraría un recuadro roto en vez de ofrecer la descarga.
   const incrustable = esPrevisualizable(media.mimeType)
-
-  if (media.tipo === "image" && incrustable) {
-    return (
-      <a href={url} target="_blank" rel="noopener noreferrer" className="block mb-1.5">
-        {/* Sin next/image a propósito: el archivo lo sirve nuestra propia API con
-            autenticación, y el optimizador de Next no reenvía las credenciales. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={url}
-          alt={media.nombreArchivo}
-          className="max-h-48 w-auto rounded border bg-background object-contain"
-          loading="lazy"
-        />
-      </a>
-    )
-  }
+  const urlBajar = urlDescarga || url
 
   // `tamanoBytes` es 0 cuando el archivo entró por webhook: WhatsApp no informa
   // el tamaño ahí. Mostrar "0 bytes" sería decir algo falso; mejor no decir nada.
   const detalle = [
     media.tamanoBytes > 0 ? formatearTamano(media.tamanoBytes) : null,
-    incrustable ? null : "no se puede previsualizar — se descarga",
+    incrustable ? null : "no se puede previsualizar",
   ]
     .filter(Boolean)
     .join(" · ")
 
-  return (
+  // La descarga siempre es un control propio y visible, no un efecto lateral de
+  // hacer clic en la vista previa (pedido de Nicolás, 21/9/2026). El agente que
+  // recibe el estudio de un paciente casi siempre lo quiere guardar, no mirarlo.
+  const BarraDescarga = (
     <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="mb-1.5 flex items-center gap-2 rounded border bg-background/80 px-2 py-1.5 hover:bg-background"
+      href={urlBajar}
+      download={media.nombreArchivo}
+      className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted/60"
     >
-      <FileText className="h-4 w-4 shrink-0 text-foreground/70" />
-      <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-medium text-foreground truncate">{media.nombreArchivo}</p>
-        {detalle && <p className="text-[10px] text-muted-foreground">{detalle}</p>}
-      </div>
-      <Download className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <Download className="h-3 w-3 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{media.nombreArchivo}</span>
+      <span className="shrink-0 font-medium">Descargar</span>
     </a>
+  )
+
+  if (media.tipo === "image" && incrustable) {
+    return (
+      <div className="mb-1.5 overflow-hidden rounded border bg-background">
+        <a href={url} target="_blank" rel="noopener noreferrer" className="block">
+          {/* Sin next/image a propósito: el archivo lo sirve nuestra propia API con
+              autenticación, y el optimizador de Next no reenvía las credenciales. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={media.nombreArchivo}
+            className="max-h-48 w-full bg-background object-contain"
+            loading="lazy"
+          />
+        </a>
+        <div className="border-t">{BarraDescarga}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-1.5 overflow-hidden rounded border bg-background/80">
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <FileText className="h-4 w-4 shrink-0 text-foreground/70" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-medium text-foreground truncate">{media.nombreArchivo}</p>
+          {detalle && <p className="text-[10px] text-muted-foreground">{detalle}</p>}
+        </div>
+        {/* Un PDF se puede abrir en una pestaña; un .docx o un video, no. */}
+        {incrustable && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/60"
+          >
+            Abrir
+          </a>
+        )}
+      </div>
+      <div className="border-t">{BarraDescarga}</div>
+    </div>
   )
 }

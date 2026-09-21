@@ -9,7 +9,12 @@ import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { registrarMensajeEntrante } from "./ventana-atencion"
-import { leerMediaDelWebhook, describirArchivoRecibido } from "./media-entrante"
+import {
+  leerMediaDelWebhook,
+  describirArchivoRecibido,
+  mensajeDerivacionPorArchivo,
+  mensajeSinAtencionHumana,
+} from "./media-entrante"
 import { presentarSiCorresponde } from "./conversation-state/presentacion-inicial"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
@@ -3205,9 +3210,7 @@ export async function handleMessage(value: any) {
         // paciente tiene que saber que le está contestando una IA antes de que
         // le digamos que no podemos abrir su estudio.
         const aviso = await presentarSiCorresponde(
-          `Recibí tu archivo, pero por este canal no podemos abrirlo. ` +
-            `Si es una orden, un estudio o una receta, lo mejor es que lo lleves o lo consultes directamente con ${config.displayName || "la clínica"}.\n\n` +
-            `Si querés, contame por acá qué necesitás y te ayudo con turnos.`,
+          mensajeSinAtencionHumana(config.displayName),
           config.id,
           userPhoneNumber,
         )
@@ -3299,19 +3302,19 @@ export async function handleMessage(value: any) {
         const horarios = await getHumanSupportSchedule(config.id)
         const enHorario = isWithinHumanSupportHours(horarios)
 
-        // Este mensaje ya dice "asistente virtual", así que presentarSiCorresponde
-        // no le antepone nada — pero igual marca al paciente como presentado,
-        // que es lo que evita que se le repita la presentación más adelante.
-        let aviso =
-          `Recibí tu archivo. Como soy un asistente virtual de inteligencia artificial y no puedo abrirlo, ` +
-          `te estoy derivando con una persona del equipo de ${config.displayName || "la clínica"} para que lo revise.`
-        if (!enHorario && horarios.length > 0) {
-          // La versión "para paciente", no la de viñetas: esta va en medio de
-          // una oración y formatSupportHoursLines devuelve un array.
-          const texto = formatSupportHoursForPatient(horarios)
-          aviso += `\n\n_En este momento estamos fuera del horario de atención${texto ? ` (${texto})` : ""}. Te van a responder dentro de ese horario._`
-        }
-        aviso = await presentarSiCorresponde(aviso, config.id, userPhoneNumber)
+        // El texto vive en lib/media-entrante.ts, donde está testeado: las
+        // palabras que usa deciden si el paciente recibe o no el saludo del
+        // primer mensaje. Ver la nota de mensajeDerivacionPorArchivo.
+        //
+        // `formatSupportHoursForPatient` y no `formatSupportHoursLines`: esto va
+        // en medio de una oración y la de líneas devuelve un array.
+        const aviso = await presentarSiCorresponde(
+          mensajeDerivacionPorArchivo(
+            !enHorario && horarios.length > 0 ? formatSupportHoursForPatient(horarios) : undefined,
+          ),
+          config.id,
+          userPhoneNumber,
+        )
 
         await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, aviso)
         await saveConversationMessage({

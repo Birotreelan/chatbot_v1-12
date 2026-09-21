@@ -166,6 +166,47 @@ export function textoSinMarcadorRecibido(contenido: string): string {
   return (contenido || "").replace(/\n?\[(?:Imagen|Video|Archivo) recibid[oa]: [^\]]*\]/g, "").trim()
 }
 
+/**
+ * Los dos mensajes que recibe el paciente, acá y no incrustados en whatsapp.tsx,
+ * para poder testear lo que tienen de delicado: las palabras que usan.
+ *
+ * ── La trampa (21/9/2026) ──────────────────────────────────────────────────
+ *
+ * Ninguno puede contener la frase "asistente virtual". Suena al revés de lo que
+ * uno esperaría, pero `presentarSiCorresponde` usa
+ * `YA_SE_PRESENTA = /asistente virtual|bienvenid/i` para no presentarse dos
+ * veces: si el mensaje ya trae esa frase, el embudo lo deja intacto y el
+ * paciente se queda sin el saludo del primer mensaje del día.
+ *
+ * Pasó exactamente eso en la primera versión, que decía "como soy un asistente
+ * virtual de inteligencia artificial y no puedo abrirlo". La identificación la
+ * pone el embudo; estos textos solo dicen qué pasa con el archivo.
+ *
+ * Los tests de abajo lo verifican contra `anteponerPresentacion` de verdad, no
+ * contra una copia de la regex.
+ */
+export function mensajeDerivacionPorArchivo(horariosSiEstaCerrado?: string | null): string {
+  let texto =
+    "Recibí tu archivo. No puedo abrirlo desde acá, " +
+    "así que te derivo con una persona del equipo para que lo revise."
+
+  if (horariosSiEstaCerrado !== undefined && horariosSiEstaCerrado !== null) {
+    const entreParentesis = horariosSiEstaCerrado ? ` (${horariosSiEstaCerrado})` : ""
+    texto += `\n\n_En este momento estamos fuera del horario de atención${entreParentesis}. Te van a responder dentro de ese horario._`
+  }
+
+  return texto
+}
+
+/** Regla 2: la clínica no tiene atención humana, así que nadie va a poder abrirlo. */
+export function mensajeSinAtencionHumana(clinica?: string | null): string {
+  return (
+    "Recibí tu archivo, pero por este canal no podemos abrirlo. " +
+    `Si es una orden, un estudio o una receta, lo mejor es que lo lleves o lo consultes directamente con ${clinica || "la clínica"}.\n\n` +
+    "Si querés, contame por acá qué necesitás y te ayudo con turnos."
+  )
+}
+
 const SUFIJO_ARCHIVOS = /\s*\((\d+) archivos?\)$/
 
 /**

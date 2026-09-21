@@ -197,9 +197,17 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
     await loadSession()
   }
 
-  /** URL autenticada para pedirle un archivo de esta conversación al servidor. */
-  function construirUrlMedia(mediaId: string): string {
+  /**
+   * URL autenticada para pedirle un archivo de esta conversación al servidor.
+   *
+   * Con `descargar` el servidor responde con `Content-Disposition: attachment`
+   * en vez de `inline`. Se decide del lado del servidor y no con el atributo
+   * `download` del <a> porque ese atributo es una sugerencia que los
+   * navegadores tratan distinto cuando el servidor ya dijo `inline`.
+   */
+  function construirUrlMedia(mediaId: string, descargar?: boolean): string {
     let url = `/api/support/media?sessionId=${encodeURIComponent(sessionId)}&mediaId=${encodeURIComponent(mediaId)}`
+    if (descargar) url += `&descargar=1`
     if (ssoSessionId) {
       url += `&_sid=${encodeURIComponent(ssoSessionId)}`
     }

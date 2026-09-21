@@ -313,7 +313,15 @@ export async function GET(request: Request) {
     // como binario opaco, que es lo que el agente pidió poder hacer sin que el
     // navegador la interprete.
     const tipoReal = detectarTipoReal(buffer)
-    const incrustable = tipoReal !== null
+
+    // `?descargar=1` fuerza la descarga (botón de descarga del panel). Existe
+    // porque el atributo `download` del <a> es solo una sugerencia y los
+    // navegadores no lo respetan igual cuando el servidor manda `inline`:
+    // decidirlo del lado del servidor es lo único que se comporta igual en
+    // todos. También sirve para los tipos que sí se previsualizan — un agente
+    // puede querer guardar el PDF, no abrirlo.
+    const forzarDescarga = searchParams.get("descargar") === "1"
+    const incrustable = tipoReal !== null && !forzarDescarga
 
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,

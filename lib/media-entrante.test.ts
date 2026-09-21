@@ -17,8 +17,11 @@ import {
   textoSinMarcadorRecibido,
   anotarArchivosEnMotivo,
   esPrevisualizable,
+  mensajeDerivacionPorArchivo,
+  mensajeSinAtencionHumana,
   MOTIVO_ARCHIVO,
 } from "./media-entrante"
+import { anteponerPresentacion } from "./conversation-state/presentacion-inicial"
 
 /** Timestamp del webhook: segundos, no milisegundos. */
 const TS = "1758412800"
@@ -170,6 +173,62 @@ describe("describirArchivoRecibido — el contenido nunca queda vacío", () => {
   it("sin caption, sacar el marcador deja vacío y el panel no muestra texto", () => {
     const r = leerMediaDelWebhook(IMAGEN)!
     expect(textoSinMarcadorRecibido(describirArchivoRecibido(r.media, ""))).toBe("")
+  })
+})
+
+describe("los mensajes al paciente no se comen el saludo", () => {
+  /**
+   * El bug (21/9/2026, Instituto Santa Lucía Paraná): el aviso de derivación
+   * decía "como soy un asistente virtual de inteligencia artificial y no puedo
+   * abrirlo". `YA_SE_PRESENTA` es /asistente virtual|bienvenid/i, así que el
+   * embudo daba por hecho que el mensaje ya se identificaba y lo dejaba intacto.
+   * En el primer mensaje del día el paciente no recibía ningún saludo.
+   *
+   * Se prueba contra `anteponerPresentacion` de verdad, no contra una copia de
+   * la regex: si mañana cambia el criterio del embudo, estos tests lo siguen.
+   */
+  const PACIENTE = { nombre: "Nicolás", clinica: "Instituto Santa Lucía Paraná" }
+
+  it("el aviso de derivación recibe el saludo completo", () => {
+    const texto = anteponerPresentacion(mensajeDerivacionPorArchivo(), PACIENTE)
+    expect(texto).toContain("*¡Hola, Nicolás!*")
+    expect(texto).toContain("asistente virtual de inteligencia artificial")
+    expect(texto).toContain("Recibí tu archivo")
+  })
+
+  it("el aviso de 'no recibimos archivos' también", () => {
+    const texto = anteponerPresentacion(mensajeSinAtencionHumana("Instituto Santa Lucía Paraná"), PACIENTE)
+    expect(texto).toContain("*¡Hola, Nicolás!*")
+    expect(texto).toContain("asistente virtual de inteligencia artificial")
+  })
+
+  it("ninguno se identifica por su cuenta: esa es justamente la trampa", () => {
+    for (const texto of [mensajeDerivacionPorArchivo(), mensajeSinAtencionHumana("X")]) {
+      expect(texto.toLowerCase()).not.toContain("asistente virtual")
+      expect(texto.toLowerCase()).not.toContain("bienvenid")
+    }
+  })
+
+  it("el aviso fuera de horario se agrega al final, sin romper el saludo", () => {
+    const texto = anteponerPresentacion(
+      mensajeDerivacionPorArchivo("lunes a viernes de 9:00 a 18:00"),
+      PACIENTE,
+    )
+    expect(texto).toContain("*¡Hola, Nicolás!*")
+    expect(texto).toContain("fuera del horario de atención (lunes a viernes de 9:00 a 18:00)")
+  })
+
+  it("en horario no menciona horarios", () => {
+    expect(mensajeDerivacionPorArchivo()).not.toContain("horario")
+  })
+
+  it("sin horarios configurados no deja un paréntesis vacío", () => {
+    expect(mensajeDerivacionPorArchivo("")).not.toContain("()")
+  })
+
+  it("sin nombre de clínica no deja un hueco", () => {
+    expect(mensajeSinAtencionHumana(null)).toContain("la clínica")
+    expect(mensajeSinAtencionHumana(null)).not.toContain("con .")
   })
 })
 
