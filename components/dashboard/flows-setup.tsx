@@ -126,6 +126,16 @@ export function FlowsSetup({ configs }: Props) {
       )
       if (!seguro) return
     }
+    if (accion === "enviar_prueba") {
+      // Se manda un WhatsApp de verdad, desde el número de una clínica real, al
+      // que esté escrito acá. Un dígito de más y le llega a un paciente.
+      const seguro = window.confirm(
+        `Se va a enviar un WhatsApp REAL desde ${config?.displayName || "este cliente"} al número:\n\n` +
+          `${telefonoPrueba}\n\n` +
+          "Revisá que sea tu propio teléfono. ¿Enviar?",
+      )
+      if (!seguro) return
+    }
 
     setCargando(accion)
     setResultado(null)
@@ -322,6 +332,11 @@ export function FlowsSetup({ configs }: Props) {
             condiciones: las pantallas tienen que estar subidas (paso 3), y ese número tiene que
             haberle escrito al bot hace menos de 24 horas — si no, WhatsApp no deja mandar mensajes
             que no sean plantillas.
+            <br />
+            <br />
+            <strong>Es un mensaje real</strong>, enviado desde el número de este cliente. Poné tu
+            propio teléfono. El texto avisa que es una prueba, así que si se equivoca el destinatario
+            no va a creer que le movieron el turno.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-3">
@@ -388,12 +403,25 @@ export function FlowsSetup({ configs }: Props) {
                 ))}
               </div>
             )}
-            {Array.isArray(resultado.respuesta?.bloqueos) && resultado.respuesta.bloqueos.length === 0 && (
-              <p className="mb-3 rounded-md border border-green-500/40 bg-green-500/5 px-3 py-2 text-sm">
-                Ningún requisito de cuenta aparece bloqueado. Si el envío igual falla por integridad,
-                hay que reclamarlo al soporte de WhatsApp.
-              </p>
+            {Array.isArray(resultado.respuesta?.sinDatos) && resultado.respuesta.sinDatos.length > 0 && (
+              <div className="mb-3 space-y-2">
+                {resultado.respuesta.sinDatos.map((s: string, i: number) => (
+                  <p key={i} className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
+                    {s}
+                  </p>
+                ))}
+              </div>
             )}
+            {/* Verde sólo si se pudo mirar TODO. Sin esto, una consulta que
+                falla entera se veía como "está todo bien". */}
+            {resultado.respuesta?.concluyente === true &&
+              Array.isArray(resultado.respuesta?.bloqueos) &&
+              resultado.respuesta.bloqueos.length === 0 && (
+                <p className="mb-3 rounded-md border border-green-500/40 bg-green-500/5 px-3 py-2 text-sm">
+                  Se pudieron leer todos los requisitos y ninguno está bloqueado. Si el envío igual
+                  falla por integridad, ahí sí corresponde reclamarlo al soporte de WhatsApp.
+                </p>
+              )}
             {resultado.respuesta?.loQueDiceMeta && (
               <p className="mb-3 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-sm">
                 <span className="font-medium">Meta dice:</span> {resultado.respuesta.loQueDiceMeta}

@@ -117,26 +117,63 @@ export async function POST(request: Request) {
       case "diagnostico_cuenta": {
         const { waba, numero } = await diagnosticoDeLaCuenta(wabaId, config.phoneNumberId, accessToken)
 
-        // Se interpreta acá, pero sin ocultar nada: los campos crudos van
-        // igual. La lectura es para no tener que saberse de memoria qué
-        // significa cada enum de Meta.
+        // ── Lo que NO se pudo leer se dice, no se asume ────────────────────
+        //
+        // La primera versión listaba los bloqueos encontrados y, si la lista
+        // quedaba vacía, la interfaz decía "ningún requisito bloqueado". Pero
+        // la consulta al WABA puede fallar entera —pasa cuando el negocio dueño
+        // de la app no es Business Solution Provider— y entonces la lista queda
+        // vacía porque no se miró nada, no porque esté todo bien.
+        //
+        // Es el mismo error que venimos corrigiendo en el bot: la ausencia de
+        // un dato tratada como un dato positivo. Acá lo caro es que manda a
+        // reclamarle al soporte de Meta por algo que probablemente sea un
+        // trámite pendiente.
         const verificacion = waba.datos?.business_verification_status
         const revision = waba.datos?.account_review_status
         const calidad = numero.datos?.quality_rating
+        const tier = waba.datos?.messaging_limit_tier ?? numero.datos?.messaging_limit_tier
+        const verificacionDelCodigo = numero.datos?.code_verification_status
 
         const bloqueos: string[] = []
-        if (verificacion && verificacion !== "verified") {
+        const sinDatos: string[] = []
+
+        if (!waba.ok) {
+          sinDatos.push(
+            "No se pudo leer el estado del WABA: " +
+              (waba.datos?.error?.message || `HTTP ${waba.status}`) +
+              ". La verificación del negocio y la revisión de la cuenta hay que mirarlas a mano en el Business Manager.",
+          )
+        } else {
+          if (!verificacion) sinDatos.push("Meta no devolvió business_verification_status.")
+          else if (verificacion !== "verified") {
+            bloqueos.push(
+              `El negocio no está verificado (${verificacion}). Los Flows exigen verificación de negocio.`,
+            )
+          }
+          if (!revision) sinDatos.push("Meta no devolvió account_review_status.")
+          else if (revision !== "APPROVED") {
+            bloqueos.push(`La cuenta de WhatsApp está en estado ${revision}, no APPROVED.`)
+          }
+        }
+
+        if (!calidad) sinDatos.push("Meta no devolvió la calidad del número.")
+        else if (calidad !== "GREEN" && calidad !== "UNKNOWN") {
+          bloqueos.push(`La calidad del número está en ${calidad}, y los Flows piden buena calidad.`)
+        }
+
+        if (verificacionDelCodigo && verificacionDelCodigo !== "VERIFIED") {
           bloqueos.push(
-            `El negocio no está verificado (business_verification_status: ${verificacion}). ` +
-              "Los Flows exigen verificación de negocio. Se hace en el Centro de seguridad del Business Manager.",
+            `El número tiene code_verification_status: ${verificacionDelCodigo}. Conviene re-verificarlo antes de seguir.`,
           )
         }
-        if (revision && revision !== "APPROVED") {
-          bloqueos.push(`La cuenta de WhatsApp está en estado ${revision}, no APPROVED.`)
-        }
-        if (calidad && calidad !== "GREEN" && calidad !== "UNKNOWN") {
-          bloqueos.push(
-            `La calidad del número está en ${calidad}. Los Flows piden mantener buena calidad de mensajería.`,
+
+        // TIER_250 es el escalón más bajo. No es un bloqueo por sí mismo, pero
+        // es la marca de un número que todavía no pasó por verificación de
+        // negocio — que es justamente el requisito de Flows.
+        if (tier === "TIER_250") {
+          sinDatos.push(
+            "El número está en TIER_250, el escalón más bajo. Suele indicar que el negocio todavía no está verificado.",
           )
         }
 
@@ -144,11 +181,15 @@ export async function POST(request: Request) {
           ok: waba.ok && numero.ok,
           status: 200,
           bloqueos,
+          sinDatos,
+          // Sólo se afirma que está todo bien cuando de verdad se pudo mirar todo.
+          concluyente: waba.ok && numero.ok && sinDatos.length === 0,
           resumen: {
-            verificacionDelNegocio: verificacion ?? "no informado",
-            revisionDeLaCuenta: revision ?? "no informado",
-            calidadDelNumero: calidad ?? "no informado",
-            limiteDeMensajeria: waba.datos?.messaging_limit_tier ?? numero.datos?.messaging_limit_tier ?? "no informado",
+            verificacionDelNegocio: verificacion ?? "no se pudo leer",
+            revisionDeLaCuenta: revision ?? "no se pudo leer",
+            calidadDelNumero: calidad ?? "no se pudo leer",
+            verificacionDelCodigo: verificacionDelCodigo ?? "no se pudo leer",
+            limiteDeMensajeria: tier ?? "no se pudo leer",
           },
           datos: { waba: waba.datos, numero: numero.datos },
         })
@@ -355,7 +396,16 @@ export async function POST(request: Request) {
           // `prueba_` al principio para que el webhook lo reconozca y NO intente
           // reservar nada cuando vuelva el nfm_reply.
           flowToken: `prueba_${Date.now()}`,
-          cuerpo: String(cuerpo.cuerpo || "Elegí un nuevo horario para tu turno."),
+          // El texto por defecto dice que es una prueba, y no es cosmético.
+          // Esto se manda a un número escrito a mano, en el WABA de una clínica
+          // real. Un dígito de más y el mensaje le llega a un paciente: que ese
+          // mensaje diga "elegí un nuevo horario para tu turno" lo haría creer
+          // que su turno se movió. Que diga que es una prueba no le hace nada.
+          cuerpo: String(
+            cuerpo.cuerpo ||
+              "*Prueba del sistema.* Estamos probando el reagendamiento por WhatsApp. " +
+                "Este mensaje no corresponde a ningún turno real; podés ignorarlo.",
+          ),
           datosDeLaPantalla: datos,
           modo,
         })
