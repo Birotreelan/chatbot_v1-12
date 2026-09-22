@@ -96,6 +96,30 @@ export interface WhatsAppConfig {
   clienteFlows?: boolean
 
   /**
+   * Portal web de turnos (22/9/2026).
+   *
+   * El paciente recibe un mensaje con un botón que lo lleva a una interfaz
+   * nuestra, fuera de WhatsApp, donde hace la gestión completa. Vuelve a
+   * WhatsApp sólo para recibir la confirmación que la clínica ya manda hoy.
+   *
+   * Persigue el mismo objetivo que `clienteFlows` —colapsar una conversación de
+   * ocho mensajes en uno— por un camino que no depende de la infraestructura de
+   * Meta: sin aprobación de Flows, sin requisitos de verificación, sin riesgo de
+   * que Meta throttlee nada, y con libertad para mostrar una agenda de verdad.
+   *
+   * El costo es sacar al paciente de WhatsApp, y eso se paga en abandono. Por
+   * eso el switch es por cliente: se prueba en uno y se mide antes de mover
+   * el resto.
+   *
+   * Los dos motores son excluyentes en la práctica: si quedaran activos los dos,
+   * gana el portal, porque es el que está en producción. Ver el aviso en el
+   * formulario del dashboard.
+   *
+   * Ausente o false = motor conversacional actual, sin ningún cambio.
+   */
+  clientePortalWeb?: boolean
+
+  /**
    * Id del Flow de reagendamiento publicado en el WABA de este cliente.
    *
    * El Flow es un objeto del WABA, no del número, así que varias clínicas que

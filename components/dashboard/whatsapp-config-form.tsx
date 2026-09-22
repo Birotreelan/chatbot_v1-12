@@ -380,6 +380,33 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </div>
               </div>
 
+              <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                <Switch
+                  id="clientePortalWeb"
+                  checked={formData.clientePortalWeb === true}
+                  onCheckedChange={(checked) => updateFormData("clientePortalWeb", checked)}
+                />
+                <div className="flex-1">
+                  <Label htmlFor="clientePortalWeb" className="text-sm font-medium">
+                    Cliente Portal Web
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    En vez de resolver la gestión por mensajes, el paciente recibe un enlace a una
+                    interfaz nuestra donde agenda, reprograma o cancela. La confirmación le sigue
+                    llegando por WhatsApp como hasta ahora.
+                  </p>
+                </div>
+              </div>
+
+              {formData.clienteFlows === true && formData.clientePortalWeb === true && (
+                <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs">
+                  Tenés activados <strong>Flows</strong> y <strong>Portal Web</strong> al mismo
+                  tiempo. Los dos reemplazan el mismo tramo de la conversación, así que uno va a
+                  quedar sin efecto — gana el Portal Web. Conviene dejar activo sólo el que estés
+                  probando.
+                </p>
+              )}
+
               <Separator className="my-4" />
 
               <div className="space-y-3">
