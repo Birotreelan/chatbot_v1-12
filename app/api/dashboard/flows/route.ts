@@ -371,9 +371,64 @@ export async function POST(request: Request) {
           )
         }
 
-        // `draft` permite probar el Flow antes de publicarlo. En un Flow ya
-        // publicado también funciona, y manda la última versión subida.
-        const modo = cuerpo.modo === "published" ? "published" : "draft"
+        // ── Chequeo previo (22/9/2026) ────────────────────────────────────
+        //
+        // Meta rechaza el envío con un "Parameter flow_id is invalid" que sirve
+        // para tres situaciones muy distintas: el Flow no existe, no tiene
+        // pantallas, o está en borrador y el destinatario no es tester. Cada
+        // una se arregla de una manera diferente y el error no distingue.
+        //
+        // Dos consultas de lectura antes de mandar convierten eso en una frase
+        // accionable. Cuestan menos que un intento a ciegas.
+        const estado = await estadoDelFlow(flowId, accessToken)
+        if (!estado.ok) {
+          return NextResponse.json(
+            {
+              ok: false,
+              status: 400,
+              error: "Ese Flow no existe o no pertenece al WABA de este cliente.",
+              flowIdConsultado: flowId,
+              datos: estado.datos,
+            },
+            { status: 400 },
+          )
+        }
+
+        const assets = await assetsDelFlow(flowId, accessToken)
+        const tieneJson = Array.isArray(assets.datos?.data)
+          ? assets.datos.data.some((a: any) => a?.asset_type === "FLOW_JSON")
+          : false
+
+        if (!tieneJson) {
+          return NextResponse.json(
+            {
+              ok: false,
+              status: 400,
+              error: "Este Flow todavía no tiene pantallas cargadas. Falta el paso 3.",
+              flowIdConsultado: flowId,
+            },
+            { status: 400 },
+          )
+        }
+
+        const estadoDelFlowActual = String(estado.datos?.status || "").toUpperCase()
+
+        // El modo tiene que coincidir con el estado del Flow, o Meta devuelve
+        // "Invalid Flow Mode". Se deduce solo y el llamador puede forzarlo.
+        const modo: "draft" | "published" =
+          cuerpo.modo === "draft" || cuerpo.modo === "published"
+            ? cuerpo.modo
+            : estadoDelFlowActual === "PUBLISHED"
+              ? "published"
+              : "draft"
+
+        if (modo === "draft") {
+          // No se frena el envío —puede que el número SÍ sea tester— pero queda
+          // dicho de antemano para que el error, si llega, ya tenga explicación.
+          console.log(
+            `[FLOWS] Envío en modo draft a ${cuerpo.telefono}: sólo funciona si ese número está registrado como tester en la app de Meta.`,
+          )
+        }
 
         // Turnos de ejemplo: la prueba es del Flow, no de la agenda. Cuando esto
         // corra de verdad, los arma el webhook con la disponibilidad real.
@@ -424,20 +479,30 @@ export async function POST(request: Request) {
           // aparecen si no dijo nada específico. Un consejo que contradice al
           // error es peor que ningún consejo.
           const detalle = detalleDelErrorDeMeta(e?.message)
+
+          // El chequeo previo ya descartó que el Flow no exista o no tenga
+          // pantallas. Si igual falla el flow_id estando en borrador, la causa
+          // que queda es la del destinatario.
+          const pistas: string[] = []
+          if (modo === "draft" && /flow_id/i.test(detalle || e?.message || "")) {
+            pistas.push(
+              "El Flow está en borrador y en ese modo WhatsApp sólo se lo muestra a números registrados como tester en la app de Meta. " +
+                "O agregás ese teléfono como tester, o publicás el Flow (paso 4) y lo mandás en modo published.",
+            )
+          }
+          if (/131047|24 hour|re-?engagement/i.test(e?.message || "")) {
+            pistas.push("La ventana de 24 h está cerrada: ese número tiene que escribirle al bot primero.")
+          }
+
           return NextResponse.json(
             {
               ok: false,
               status: 502,
               error: e?.message || "No se pudo enviar",
               ...(detalle ? { loQueDiceMeta: detalle } : {}),
-              ...(detalle
-                ? {}
-                : {
-                    pistas: [
-                      "La ventana de 24 h tiene que estar abierta: ese número debe haberle escrito al bot hace menos de un día.",
-                      "Con mode=draft el Flow no necesita estar publicado, pero sí tener las pantallas subidas (paso 3).",
-                    ],
-                  }),
+              ...(pistas.length ? { pistas } : {}),
+              estadoDelFlow: estadoDelFlowActual,
+              modoUsado: modo,
               mensajeEnviado: mensaje,
             },
             { status: 502 },
