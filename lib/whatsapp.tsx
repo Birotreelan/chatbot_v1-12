@@ -16,6 +16,13 @@ import {
   mensajeSinAtencionHumana,
 } from "./media-entrante"
 import { presentarSiCorresponde } from "./conversation-state/presentacion-inicial"
+import {
+  mencionaOtraConsulta,
+  personalizarMenu,
+  personalizarBotones,
+  esBotonOtraConsulta,
+  BOTON_OTRA_CONSULTA,
+} from "./conversation-state/etiquetas-menu"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData, isWithinTemplateWindow } from "./appointment-stats"
@@ -300,6 +307,24 @@ async function sendDirectResponse(
     // el router primario y el NLU fallback, tres parches del mismo agujero.
     // Ver lib/conversation-state/presentacion-inicial.ts.
     message = await presentarSiCorresponde(message, ctx.configId, ctx.userPhoneNumber)
+
+    // Etiqueta propia de "Realizar otra consulta" (22/9/2026). Mismo criterio
+    // que la presentación: se decide en el embudo porque el texto está escrito
+    // en unos veinte menús distintos y cualquiera que se agregue mañana queda
+    // cubierto sin acordarse. Ver lib/conversation-state/etiquetas-menu.ts.
+    //
+    // Sólo se lee la configuración si el mensaje realmente trae la etiqueta:
+    // en el caso normal no cuesta nada.
+    if (mencionaOtraConsulta(message) || buttons?.some((b) => b.title === BOTON_OTRA_CONSULTA)) {
+      try {
+        const configEtiquetas = await getWhatsAppConfigById(ctx.configId)
+        message = personalizarMenu(message, configEtiquetas?.etiquetaOtraConsulta)
+        buttons = personalizarBotones(buttons, configEtiquetas?.botonOtraConsulta)
+      } catch {
+        // Una etiqueta sin personalizar es infinitamente mejor que una
+        // respuesta que no sale.
+      }
+    }
 
     if (buttons && buttons.length > 0) {
       try {
@@ -2991,7 +3016,15 @@ export async function handleMessage(value: any) {
         "turno para familiar": "2",
         "otra consulta":       "3",
       }
-      const globalNumericId = GLOBAL_MENU_BUTTONS[_btnTitle]
+      // El botón de "otra consulta" puede tener un título propio por cliente
+      // (22/9/2026). Sin esto, el cliente que lo personaliza pierde el
+      // interceptor global: tocar ese botón dentro de un sub-flujo dejaría de
+      // interrumpirlo y el paciente quedaría atrapado donde estaba.
+      // `esBotonOtraConsulta` acepta también el título por defecto, porque los
+      // menús enviados antes del cambio siguen en el chat con los botones viejos.
+      const globalNumericId =
+        GLOBAL_MENU_BUTTONS[_btnTitle] ??
+        (esBotonOtraConsulta(_btnTitle, config.botonOtraConsulta) ? "3" : undefined)
       if (globalNumericId) {
         console.log(`[v0] [GLOBAL_BTN] Botón global detectado: "${_btnTitle}" → id="${globalNumericId}"`)
         // Limpiar TODOS los sub-flujos activos
@@ -4303,18 +4336,19 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               configId: config.id,
               clienteId: config.cliente_id,
             }
-            if (eff.buttons && eff.buttons.length) {
-              try {
-                await sendWhatsAppInteractive(routerCtx.phoneNumberId, routerCtx.accessToken, userPhoneNumber, eff.message, eff.buttons)
-                await saveConversationMessage({ id: nanoid(), role: "assistant", content: eff.message, timestamp: new Date().toISOString(), phoneNumber: userPhoneNumber, configId: config.id })
-                appendToHistory(userPhoneNumber, { role: 'bot', text: eff.message, timestamp: Date.now() }).catch(() => {})
-                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-              } catch {
-                await sendDirectResponse(routerCtx, eff.message, "router_clinica")
-              }
-            } else {
-              await sendDirectResponse(routerCtx, eff.message, "router_clinica")
-            }
+            // 22/9/2026: esto mandaba con sendWhatsAppInteractive() directo.
+            // Hacía lo mismo que sendDirectResponse salvo tres cosas que no son
+            // menores y que se perdían sólo en esta rama:
+            //
+            //  - la presentación como asistente de IA (el embudo del 17/9),
+            //  - saveStepButtons/saveStepPrompt, que es lo que permite detectar
+            //    que el paciente eligió una opción que no le ofrecimos en vez
+            //    de reiniciar la conversación (caso Marta, 14/9),
+            //  - la etiqueta propia del menú.
+            //
+            // El fallback a texto plano que tenía ya está adentro de
+            // sendDirectResponse, así que no se pierde nada.
+            await sendDirectResponse(routerCtx, eff.message, "router_clinica", eff.buttons)
             return
           }
           // 'init_booking' / 'clear_state_and_passthrough' / 'noop':

@@ -383,6 +383,50 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               <Separator className="my-4" />
 
               <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Menú principal</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Personaliza cómo se lee la opción &ldquo;Realizar otra consulta&rdquo;. Es sólo el
+                    texto: la opción mantiene su número y hace exactamente lo mismo. Dejalo vacío
+                    para usar el texto por defecto.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="etiquetaOtraConsulta">Texto en el menú</Label>
+                    <Input
+                      id="etiquetaOtraConsulta"
+                      value={formData.etiquetaOtraConsulta || ""}
+                      onChange={(e) => updateFormData("etiquetaOtraConsulta", e.target.value)}
+                      placeholder="Realizar otra consulta"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Ej: &ldquo;Realizar otra consulta o solicitar turno de estudios&rdquo;
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="botonOtraConsulta">Texto del botón</Label>
+                    <Input
+                      id="botonOtraConsulta"
+                      value={formData.botonOtraConsulta || ""}
+                      onChange={(e) => updateFormData("botonOtraConsulta", e.target.value)}
+                      placeholder="Otra consulta"
+                      maxLength={20}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Máximo 20 caracteres: es el límite de WhatsApp para botones.{" "}
+                      {(formData.botonOtraConsulta || "").length > 0 &&
+                        `Usados ${(formData.botonOtraConsulta || "").length}/20.`}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Separator className="my-4" />
+
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
                     <Label className="text-base font-semibold">Opciones de Búsqueda de Turnos</Label>

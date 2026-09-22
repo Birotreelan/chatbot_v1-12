@@ -52,6 +52,28 @@ export interface WhatsAppConfig {
   clienteProxmox?: boolean
 
   /**
+   * Reemplaza "Realizar otra consulta" en el menú principal (22/9/2026).
+   *
+   * Nace de una clínica que también toma turnos de estudios y quería que esa
+   * opción lo dijera: "Realizar otra consulta o solicitar turno de estudios".
+   *
+   * Es sólo la etiqueta: la opción sigue siendo la misma, con el mismo número y
+   * la misma acción. Por eso no hay que tocar el action map — y por eso es
+   * seguro. Vacío = el texto de siempre.
+   */
+  etiquetaOtraConsulta?: string
+
+  /**
+   * Título del botón de esa misma opción. Máximo 20 caracteres (tope de
+   * WhatsApp para botones de respuesta rápida).
+   *
+   * Va aparte del texto del menú porque la línea del menú puede ser larga y el
+   * botón no: "Realizar otra consulta o solicitar turno de estudios" son 51
+   * caracteres. Si se deja vacío, el botón sigue diciendo "Otra consulta".
+   */
+  botonOtraConsulta?: string
+
+  /**
    * Motor conversacional basado en WhatsApp Flows (21/9/2026).
    *
    * ── Por qué es un switch por cliente ───────────────────────────────────────
