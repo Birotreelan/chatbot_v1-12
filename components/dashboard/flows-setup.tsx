@@ -92,6 +92,7 @@ const PASOS = [
   { accion: "subir_json", titulo: "3. Subir las pantallas", ayuda: "Acá se ven los errores de validación del Flow JSON." },
   { accion: "publicar_flow", titulo: "4. Publicar el Flow", ayuda: "No se puede deshacer: un Flow publicado se deprecia, no se despublica." },
   { accion: "estado_flow", titulo: "5. Ver el estado", ayuda: "DRAFT o PUBLISHED, y los errores si quedaron." },
+  { accion: "ver_json", titulo: "5b. Ver qué pantallas tiene", ayuda: "Si dice WELCOME_SCREEN, el Flow sigue con la plantilla por defecto de Meta." },
   { accion: "crear_template", titulo: "6. Crear el template", ayuda: "La respuesta dice en qué categoría lo clasificó Meta." },
   { accion: "estado_template", titulo: "7. Ver el template", ayuda: "En qué estado de aprobación quedó." },
 ] as const
@@ -101,6 +102,7 @@ export function FlowsSetup({ configs }: Props) {
   const [nombreFlow, setNombreFlow] = useState("reagendar_turno")
   const [nombreTemplate, setNombreTemplate] = useState("confirmacion_1_turno_flows")
   const [cuerpo, setCuerpo] = useState("")
+  const [flowIdManual, setFlowIdManual] = useState("")
   const [telefonoPrueba, setTelefonoPrueba] = useState("")
   const [cargando, setCargando] = useState<string | null>(null)
   const [resultado, setResultado] = useState<Resultado | null>(null)
@@ -127,6 +129,9 @@ export function FlowsSetup({ configs }: Props) {
           configId,
           accion,
           nombre: accion === "crear_flow" ? nombreFlow : accion.includes("template") ? nombreTemplate : undefined,
+          // Si está cargado a mano, manda al Flow que digas y no al guardado en
+          // la configuración. Es lo que permite desempatar cuando hay más de uno.
+          ...(flowIdManual.trim() ? { flowId: flowIdManual.trim() } : {}),
           ...(accion === "crear_template" && cuerpo.trim() ? { cuerpo: cuerpo.trim() } : {}),
           ...(accion === "enviar_prueba" ? { telefono: telefonoPrueba } : {}),
         }),
@@ -205,6 +210,22 @@ export function FlowsSetup({ configs }: Props) {
               onChange={(e) => setNombreTemplate(e.target.value)}
             />
           </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="flowIdManual">Flow ID (opcional)</Label>
+            <Input
+              id="flowIdManual"
+              value={flowIdManual}
+              onChange={(e) => setFlowIdManual(e.target.value)}
+              placeholder={config?.flowIdReagendar || "el guardado en la configuración"}
+              className="font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">
+              Si lo completás, todos los pasos apuntan a ESE Flow en vez del guardado. Sirve para
+              desempatar cuando hay más de uno en el WABA: corré el paso 1, mirá los ids, y pegá el
+              que corresponda.
+            </p>
+          </div>
+
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="cuerpo">Cuerpo del template (opcional)</Label>
             <Textarea
@@ -314,6 +335,30 @@ export function FlowsSetup({ configs }: Props) {
             {resultado.respuesta?.valido === false && (
               <p className="mb-3 text-sm text-red-500">
                 El JSON se subió pero tiene errores de validación. Mirá <code>validation_errors</code>.
+              </p>
+            )}
+            {resultado.respuesta?.loQueDiceMeta && (
+              <p className="mb-3 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-sm">
+                <span className="font-medium">Meta dice:</span> {resultado.respuesta.loQueDiceMeta}
+              </p>
+            )}
+            {Array.isArray(resultado.respuesta?.pantallas) && (
+              <p className="mb-3 text-sm">
+                Pantallas de este Flow:{" "}
+                {resultado.respuesta.pantallas.length === 0 ? (
+                  <span className="text-muted-foreground">ninguna</span>
+                ) : (
+                  resultado.respuesta.pantallas.map((p: string) => (
+                    <Badge key={p} variant={p === "ELEGIR_TURNO" ? "default" : "destructive"} className="mr-1">
+                      {p}
+                    </Badge>
+                  ))
+                )}
+              </p>
+            )}
+            {resultado.respuesta?.flowIdConsultado && (
+              <p className="mb-3 text-xs text-muted-foreground">
+                Flow consultado: <code>{resultado.respuesta.flowIdConsultado}</code>
               </p>
             )}
             {Array.isArray(resultado.respuesta?.pistas) && (

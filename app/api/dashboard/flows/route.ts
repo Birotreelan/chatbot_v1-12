@@ -24,6 +24,8 @@ import {
   estadoDelFlow,
   crearTemplate,
   buscarTemplate,
+  assetsDelFlow,
+  descargarFlowJson,
 } from "@/lib/flows/meta-flows-api"
 import { construirFlowJson, construirDatosDeLaPantalla, VERSION_FLOW_JSON } from "@/lib/flows/flow-reagendar"
 import { construirMensajeFlow, enviarMensajeFlow } from "@/lib/flows/mensaje-flow"
@@ -45,6 +47,27 @@ type Accion =
   | "crear_template"
   | "estado_template"
   | "enviar_prueba"
+  | "ver_json"
+
+/**
+ * El `error_data.details` que Meta mete adentro del mensaje de error.
+ *
+ * Suele ser la frase más útil de toda la respuesta —"Specified screen X is not
+ * allowed as first screen of this flow"— y queda sepultada en un JSON escapado
+ * dentro de un string. Sacarla afuera es la diferencia entre un diagnóstico y
+ * una adivinanza.
+ */
+function detalleDelErrorDeMeta(mensaje?: string): string | null {
+  if (!mensaje) return null
+  const inicio = mensaje.indexOf("{")
+  if (inicio === -1) return null
+  try {
+    const parseado = JSON.parse(mensaje.slice(inicio))
+    return parseado?.error?.error_data?.details || parseado?.error?.message || null
+  } catch {
+    return null
+  }
+}
 
 export async function POST(request: Request) {
   const { session, error } = await requireAuthFromRequest(request)
@@ -127,7 +150,42 @@ export async function POST(request: Request) {
       case "estado_flow": {
         const flowId = String(cuerpo.flowId || config.flowIdReagendar || "")
         if (!flowId) return NextResponse.json({ error: "No hay flowId" }, { status: 400 })
-        return NextResponse.json(await estadoDelFlow(flowId, accessToken))
+        return NextResponse.json({ ...(await estadoDelFlow(flowId, accessToken)), flowIdConsultado: flowId })
+      }
+
+      case "ver_json": {
+        // Qué pantallas tiene REALMENTE este Flow. Es la pregunta que no se
+        // podía contestar cuando Meta rechazó un envío diciendo que
+        // "ELEGIR_TURNO no está permitida como primera pantalla".
+        const flowId = String(cuerpo.flowId || config.flowIdReagendar || "")
+        if (!flowId) return NextResponse.json({ error: "No hay flowId" }, { status: 400 })
+
+        const assets = await assetsDelFlow(flowId, accessToken)
+        const url = assets.datos?.data?.find((a: any) => a?.asset_type === "FLOW_JSON")?.download_url
+
+        if (!url) {
+          return NextResponse.json({
+            ...assets,
+            flowIdConsultado: flowId,
+            diagnostico: "Este Flow no tiene ningún FLOW_JSON cargado. Falta el paso 3.",
+          })
+        }
+
+        const json = await descargarFlowJson(url)
+        const pantallas = Array.isArray(json.datos?.screens)
+          ? json.datos.screens.map((s: any) => s?.id)
+          : []
+
+        return NextResponse.json({
+          ok: json.ok,
+          status: json.status,
+          flowIdConsultado: flowId,
+          // Lo primero que hay que mirar: si acá dice WELCOME_SCREEN, el Flow
+          // sigue con la plantilla por defecto de Meta y nuestro JSON se subió
+          // a otro lado.
+          pantallas,
+          datos: json.datos,
+        })
       }
 
       case "crear_template": {
@@ -211,17 +269,30 @@ export async function POST(request: Request) {
           const datosDeMeta = await enviarMensajeFlow(config.phoneNumberId, accessToken, mensaje)
           return NextResponse.json({ ok: true, status: 200, datos: datosDeMeta, mensajeEnviado: mensaje })
         } catch (e: any) {
-          // Las dos causas más comunes tienen el mismo síntoma y arreglos muy
-          // distintos, así que se nombran en vez de devolver "falló el envío".
+          // 22/9/2026: acá había dos pistas fijas —la ventana de 24 h y las
+          // pantallas sin subir— que se mostraban siempre. En la primera prueba
+          // real Meta había dicho con total claridad que el problema era otro
+          // ("Specified screen X is not allowed as first screen"), y las pistas
+          // mandaron a mirar donde no era.
+          //
+          // Ahora lo que dice Meta va PRIMERO y las pistas genéricas sólo
+          // aparecen si no dijo nada específico. Un consejo que contradice al
+          // error es peor que ningún consejo.
+          const detalle = detalleDelErrorDeMeta(e?.message)
           return NextResponse.json(
             {
               ok: false,
               status: 502,
               error: e?.message || "No se pudo enviar",
-              pistas: [
-                "La ventana de 24 h tiene que estar abierta: ese número debe haberle escrito al bot hace menos de un día.",
-                "Con mode=draft el Flow no necesita estar publicado, pero sí tener las pantallas subidas (paso 3).",
-              ],
+              ...(detalle ? { loQueDiceMeta: detalle } : {}),
+              ...(detalle
+                ? {}
+                : {
+                    pistas: [
+                      "La ventana de 24 h tiene que estar abierta: ese número debe haberle escrito al bot hace menos de un día.",
+                      "Con mode=draft el Flow no necesita estar publicado, pero sí tener las pantallas subidas (paso 3).",
+                    ],
+                  }),
               mensajeEnviado: mensaje,
             },
             { status: 502 },

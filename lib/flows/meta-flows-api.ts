@@ -118,9 +118,31 @@ export function publicarFlow(flowId: string, accessToken: string): Promise<Respu
 /** Estado del Flow: DRAFT, PUBLISHED, y los errores de validación si los hay. */
 export function estadoDelFlow(flowId: string, accessToken: string): Promise<RespuestaDeMeta> {
   return llamar(
-    `https://graph.facebook.com/${GRAPH}/${flowId}?fields=id,name,status,categories,validation_errors`,
+    `https://graph.facebook.com/${GRAPH}/${flowId}?fields=id,name,status,categories,validation_errors,json_version,data_api_version,preview`,
     { method: "GET", headers: auth(accessToken) },
   )
+}
+
+/**
+ * Los assets del Flow: el Flow JSON que tiene cargado AHORA.
+ *
+ * Es el diagnóstico que faltaba. Cuando Meta rechaza un envío diciendo que la
+ * pantalla no está permitida, la pregunta es siempre la misma —¿qué pantallas
+ * tiene realmente este Flow?— y hasta ahora no había forma de contestarla sin
+ * entrar a WhatsApp Manager.
+ *
+ * La respuesta trae una URL de descarga del JSON, no el JSON en sí.
+ */
+export function assetsDelFlow(flowId: string, accessToken: string): Promise<RespuestaDeMeta> {
+  return llamar(`https://graph.facebook.com/${GRAPH}/${flowId}/assets`, {
+    method: "GET",
+    headers: auth(accessToken),
+  })
+}
+
+/** Descarga el Flow JSON desde la URL que devuelve `assetsDelFlow`. */
+export async function descargarFlowJson(url: string): Promise<RespuestaDeMeta> {
+  return llamar(url, { method: "GET" })
 }
 
 /**
