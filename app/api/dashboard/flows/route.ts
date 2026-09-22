@@ -27,6 +27,7 @@ import {
   assetsDelFlow,
   descargarFlowJson,
   borrarFlow,
+  diagnosticoDeLaCuenta,
 } from "@/lib/flows/meta-flows-api"
 import { construirFlowJson, construirDatosDeLaPantalla, VERSION_FLOW_JSON } from "@/lib/flows/flow-reagendar"
 import { construirMensajeFlow, enviarMensajeFlow } from "@/lib/flows/mensaje-flow"
@@ -51,6 +52,7 @@ type Accion =
   | "ver_json"
   | "fijar_flow"
   | "borrar_flow"
+  | "diagnostico_cuenta"
 
 /**
  * El `error_data.details` que Meta mete adentro del mensaje de error.
@@ -111,6 +113,46 @@ export async function POST(request: Request) {
     switch (accion) {
       case "listar_flows":
         return NextResponse.json(await listarFlows(wabaId, accessToken))
+
+      case "diagnostico_cuenta": {
+        const { waba, numero } = await diagnosticoDeLaCuenta(wabaId, config.phoneNumberId, accessToken)
+
+        // Se interpreta acá, pero sin ocultar nada: los campos crudos van
+        // igual. La lectura es para no tener que saberse de memoria qué
+        // significa cada enum de Meta.
+        const verificacion = waba.datos?.business_verification_status
+        const revision = waba.datos?.account_review_status
+        const calidad = numero.datos?.quality_rating
+
+        const bloqueos: string[] = []
+        if (verificacion && verificacion !== "verified") {
+          bloqueos.push(
+            `El negocio no está verificado (business_verification_status: ${verificacion}). ` +
+              "Los Flows exigen verificación de negocio. Se hace en el Centro de seguridad del Business Manager.",
+          )
+        }
+        if (revision && revision !== "APPROVED") {
+          bloqueos.push(`La cuenta de WhatsApp está en estado ${revision}, no APPROVED.`)
+        }
+        if (calidad && calidad !== "GREEN" && calidad !== "UNKNOWN") {
+          bloqueos.push(
+            `La calidad del número está en ${calidad}. Los Flows piden mantener buena calidad de mensajería.`,
+          )
+        }
+
+        return NextResponse.json({
+          ok: waba.ok && numero.ok,
+          status: 200,
+          bloqueos,
+          resumen: {
+            verificacionDelNegocio: verificacion ?? "no informado",
+            revisionDeLaCuenta: revision ?? "no informado",
+            calidadDelNumero: calidad ?? "no informado",
+            limiteDeMensajeria: waba.datos?.messaging_limit_tier ?? numero.datos?.messaging_limit_tier ?? "no informado",
+          },
+          datos: { waba: waba.datos, numero: numero.datos },
+        })
+      }
 
       case "fijar_flow": {
         // Apuntar la configuración a un Flow que ya existe, sin crear otro.

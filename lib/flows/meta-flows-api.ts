@@ -179,6 +179,41 @@ export function crearTemplate(
   })
 }
 
+/**
+ * Estado de la cuenta: verificación del negocio, revisión del WABA y calidad
+ * del número (22/9/2026).
+ *
+ * Nace del error `(#139000) Blocked by Integrity`, que Meta devuelve sin decir
+ * cuál de los requisitos falta. La guía de envío de Flows los enumera —"You
+ * will need to verify your business and maintain a high message quality"— pero
+ * el error no dice cuál de los dos, y son arreglos completamente distintos:
+ * uno es un trámite de documentación, el otro es bajar el ritmo de envíos.
+ *
+ * Son dos consultas porque la verificación vive en el WABA y la calidad en el
+ * número. Se devuelven las dos crudas.
+ */
+export async function diagnosticoDeLaCuenta(
+  wabaId: string,
+  phoneNumberId: string,
+  accessToken: string,
+): Promise<{ waba: RespuestaDeMeta; numero: RespuestaDeMeta }> {
+  const camposWaba = "id,name,account_review_status,business_verification_status,messaging_limit_tier,primary_funding_id"
+  const camposNumero = "id,display_phone_number,verified_name,quality_rating,code_verification_status,name_status,messaging_limit_tier,throughput"
+
+  const [waba, numero] = await Promise.all([
+    llamar(`https://graph.facebook.com/${GRAPH}/${wabaId}?fields=${camposWaba}`, {
+      method: "GET",
+      headers: auth(accessToken),
+    }),
+    llamar(`https://graph.facebook.com/${GRAPH}/${phoneNumberId}?fields=${camposNumero}`, {
+      method: "GET",
+      headers: auth(accessToken),
+    }),
+  ])
+
+  return { waba, numero }
+}
+
 /** Busca un template por nombre, para ver en qué estado de aprobación quedó. */
 export function buscarTemplate(
   wabaId: string,

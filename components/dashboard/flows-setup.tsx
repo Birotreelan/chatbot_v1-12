@@ -87,6 +87,7 @@ interface Resultado {
 }
 
 const PASOS = [
+  { accion: "diagnostico_cuenta", titulo: "0. Diagnóstico de la cuenta", ayuda: "Verificación del negocio, revisión de la cuenta y calidad del número. Es lo que mira Meta antes de dejar mandar un Flow." },
   { accion: "listar_flows", titulo: "1. Ver los Flows del WABA", ayuda: "Para no crear uno repetido." },
   { accion: "crear_flow", titulo: "2. Crear el Flow", ayuda: "Queda vacío y en borrador. Guarda el id en la configuración." },
   { accion: "subir_json", titulo: "3. Subir las pantallas", ayuda: "Acá se ven los errores de validación del Flow JSON." },
@@ -364,6 +365,33 @@ export function FlowsSetup({ configs }: Props) {
             {resultado.respuesta?.valido === false && (
               <p className="mb-3 text-sm text-red-500">
                 El JSON se subió pero tiene errores de validación. Mirá <code>validation_errors</code>.
+              </p>
+            )}
+            {resultado.respuesta?.resumen && (
+              <div className="mb-3 space-y-1 text-sm">
+                {Object.entries(resultado.respuesta.resumen).map(([k, v]) => (
+                  <p key={k}>
+                    <span className="text-muted-foreground">{k}:</span>{" "}
+                    <Badge variant={v === "verified" || v === "APPROVED" || v === "GREEN" ? "default" : "outline"}>
+                      {String(v)}
+                    </Badge>
+                  </p>
+                ))}
+              </div>
+            )}
+            {Array.isArray(resultado.respuesta?.bloqueos) && resultado.respuesta.bloqueos.length > 0 && (
+              <div className="mb-3 space-y-2">
+                {resultado.respuesta.bloqueos.map((b: string, i: number) => (
+                  <p key={i} className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-sm">
+                    {b}
+                  </p>
+                ))}
+              </div>
+            )}
+            {Array.isArray(resultado.respuesta?.bloqueos) && resultado.respuesta.bloqueos.length === 0 && (
+              <p className="mb-3 rounded-md border border-green-500/40 bg-green-500/5 px-3 py-2 text-sm">
+                Ningún requisito de cuenta aparece bloqueado. Si el envío igual falla por integridad,
+                hay que reclamarlo al soporte de WhatsApp.
               </p>
             )}
             {resultado.respuesta?.loQueDiceMeta && (
