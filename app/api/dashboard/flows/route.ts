@@ -25,7 +25,8 @@ import {
   crearTemplate,
   buscarTemplate,
 } from "@/lib/flows/meta-flows-api"
-import { construirFlowJson, VERSION_FLOW_JSON } from "@/lib/flows/flow-reagendar"
+import { construirFlowJson, construirDatosDeLaPantalla, VERSION_FLOW_JSON } from "@/lib/flows/flow-reagendar"
+import { construirMensajeFlow, enviarMensajeFlow } from "@/lib/flows/mensaje-flow"
 import {
   definicionDeTemplate,
   CUERPO_CON_REAGENDAR,
@@ -43,6 +44,7 @@ type Accion =
   | "estado_flow"
   | "crear_template"
   | "estado_template"
+  | "enviar_prueba"
 
 export async function POST(request: Request) {
   const { session, error } = await requireAuthFromRequest(request)
@@ -161,6 +163,70 @@ export async function POST(request: Request) {
         const nombre = String(cuerpo.nombre || config.templateRecordatorioFlows || "")
         if (!nombre) return NextResponse.json({ error: "No hay nombre de template" }, { status: 400 })
         return NextResponse.json(await buscarTemplate(wabaId, accessToken, nombre))
+      }
+
+      case "enviar_prueba": {
+        const flowId = String(cuerpo.flowId || config.flowIdReagendar || "")
+        if (!flowId) return NextResponse.json({ error: "No hay flowId" }, { status: 400 })
+
+        const destino = String(cuerpo.telefono || "").replace(/\D/g, "")
+        if (destino.length < 8) {
+          return NextResponse.json(
+            { error: "Hace falta un número de teléfono válido para la prueba" },
+            { status: 400 },
+          )
+        }
+
+        // `draft` permite probar el Flow antes de publicarlo. En un Flow ya
+        // publicado también funciona, y manda la última versión subida.
+        const modo = cuerpo.modo === "published" ? "published" : "draft"
+
+        // Turnos de ejemplo: la prueba es del Flow, no de la agenda. Cuando esto
+        // corra de verdad, los arma el webhook con la disponibilidad real.
+        const enDias = (dias: number) => {
+          const d = new Date(Date.now() + dias * 86_400_000)
+          return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`
+        }
+        const datos = construirDatosDeLaPantalla({
+          turnoActual: String(cuerpo.turnoActual || "jueves 25/09 a las 08:25"),
+          turnosDisponibles: [
+            { id: `prueba|1`, title: `${enDias(3)} · 08:25`, description: "Turno de prueba" },
+            { id: `prueba|2`, title: `${enDias(5)} · 10:00`, description: "Turno de prueba" },
+            { id: `prueba|3`, title: `${enDias(7)} · 15:30`, description: "Turno de prueba" },
+          ],
+        })
+
+        const mensaje = construirMensajeFlow({
+          to: destino,
+          flowId,
+          // `prueba_` al principio para que el webhook lo reconozca y NO intente
+          // reservar nada cuando vuelva el nfm_reply.
+          flowToken: `prueba_${Date.now()}`,
+          cuerpo: String(cuerpo.cuerpo || "Elegí un nuevo horario para tu turno."),
+          datosDeLaPantalla: datos,
+          modo,
+        })
+
+        try {
+          const datosDeMeta = await enviarMensajeFlow(config.phoneNumberId, accessToken, mensaje)
+          return NextResponse.json({ ok: true, status: 200, datos: datosDeMeta, mensajeEnviado: mensaje })
+        } catch (e: any) {
+          // Las dos causas más comunes tienen el mismo síntoma y arreglos muy
+          // distintos, así que se nombran en vez de devolver "falló el envío".
+          return NextResponse.json(
+            {
+              ok: false,
+              status: 502,
+              error: e?.message || "No se pudo enviar",
+              pistas: [
+                "La ventana de 24 h tiene que estar abierta: ese número debe haberle escrito al bot hace menos de un día.",
+                "Con mode=draft el Flow no necesita estar publicado, pero sí tener las pantallas subidas (paso 3).",
+              ],
+              mensajeEnviado: mensaje,
+            },
+            { status: 502 },
+          )
+        }
       }
 
       default:

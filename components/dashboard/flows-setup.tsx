@@ -24,9 +24,60 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import type { WhatsAppConfig } from "@/lib/types"
+import { construirFlowJson } from "@/lib/flows/flow-reagendar"
+import { previsualizarFlow, type PantallaVisible } from "@/lib/flows/previsualizacion"
 
 interface Props {
   configs: WhatsAppConfig[]
+}
+
+/**
+ * Dibuja el Flow como lo va a ver el paciente, a partir del mismo Flow JSON que
+ * se sube a Meta. No es una maqueta hecha a mano: si el JSON cambia, esto
+ * cambia — que es la única forma de que previsualizar sirva para algo.
+ */
+function Previsualizacion({ pantalla }: { pantalla: PantallaVisible }) {
+  return (
+    <div className="w-full max-w-[280px] overflow-hidden rounded-xl border bg-background">
+      <div className="border-b bg-muted/50 px-3 py-2">
+        <p className="text-xs font-medium">{pantalla.titulo}</p>
+      </div>
+      <div className="space-y-3 p-3">
+        {pantalla.componentes.map((c, i) => {
+          if (c.tipo === "parrafo") return <p key={i} className="text-xs leading-relaxed">{c.texto}</p>
+          if (c.tipo === "subtitulo") return <p key={i} className="text-xs font-medium">{c.texto}</p>
+          if (c.tipo === "opciones") {
+            return (
+              <div key={i} className="space-y-1.5">
+                {c.etiqueta && <p className="text-[10px] uppercase text-muted-foreground">{c.etiqueta}</p>}
+                {c.opciones.map((o) => (
+                  <div key={o.id} className="flex items-start gap-2 rounded-md border px-2 py-1.5">
+                    <span className="mt-0.5 h-3 w-3 shrink-0 rounded-full border" />
+                    <div className="min-w-0">
+                      <p className="text-xs">{o.title}</p>
+                      {o.description && <p className="text-[10px] text-muted-foreground">{o.description}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          }
+          if (c.tipo === "boton") {
+            return (
+              <div key={i} className="rounded-md bg-primary px-3 py-2 text-center text-xs font-medium text-primary-foreground">
+                {c.texto}
+              </div>
+            )
+          }
+          return (
+            <p key={i} className="rounded border border-dashed px-2 py-1 text-[10px] text-muted-foreground">
+              Componente no previsualizable: {c.texto}
+            </p>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 interface Resultado {
@@ -50,10 +101,12 @@ export function FlowsSetup({ configs }: Props) {
   const [nombreFlow, setNombreFlow] = useState("reagendar_turno")
   const [nombreTemplate, setNombreTemplate] = useState("confirmacion_1_turno_flows")
   const [cuerpo, setCuerpo] = useState("")
+  const [telefonoPrueba, setTelefonoPrueba] = useState("")
   const [cargando, setCargando] = useState<string | null>(null)
   const [resultado, setResultado] = useState<Resultado | null>(null)
 
   const config = configs.find((c) => c.id === configId)
+  const pantallas = previsualizarFlow(construirFlowJson())
 
   async function ejecutar(accion: string) {
     if (!configId) return
@@ -75,6 +128,7 @@ export function FlowsSetup({ configs }: Props) {
           accion,
           nombre: accion === "crear_flow" ? nombreFlow : accion.includes("template") ? nombreTemplate : undefined,
           ...(accion === "crear_template" && cuerpo.trim() ? { cuerpo: cuerpo.trim() } : {}),
+          ...(accion === "enviar_prueba" ? { telefono: telefonoPrueba } : {}),
         }),
       })
       setResultado({ accion, cuando: new Date().toLocaleTimeString("es-AR"), respuesta: await r.json() })
@@ -193,6 +247,53 @@ export function FlowsSetup({ configs }: Props) {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Así lo ve el paciente</CardTitle>
+          <CardDescription>
+            Dibujado a partir del mismo Flow JSON que se sube en el paso 3, con los datos de
+            ejemplo que el propio Flow declara. Si el JSON cambia, esto cambia. Los horarios reales
+            los arma el sistema en el momento de enviarlo.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-4">
+          {pantallas.map((p) => (
+            <Previsualizacion key={p.id} pantalla={p} />
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Probarlo en un teléfono</CardTitle>
+          <CardDescription>
+            Manda el Flow en modo borrador, así se puede ver de verdad antes de publicarlo. Dos
+            condiciones: las pantallas tienen que estar subidas (paso 3), y ese número tiene que
+            haberle escrito al bot hace menos de 24 horas — si no, WhatsApp no deja mandar mensajes
+            que no sean plantillas.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[220px] flex-1 space-y-2">
+            <Label htmlFor="telefonoPrueba">Teléfono</Label>
+            <Input
+              id="telefonoPrueba"
+              value={telefonoPrueba}
+              onChange={(e) => setTelefonoPrueba(e.target.value)}
+              placeholder="5491144175052"
+              inputMode="numeric"
+            />
+          </div>
+          <Button
+            variant="outline"
+            disabled={!configId || !config?.wabaId || telefonoPrueba.replace(/\D/g, "").length < 8 || cargando !== null}
+            onClick={() => ejecutar("enviar_prueba")}
+          >
+            {cargando === "enviar_prueba" ? "Enviando..." : "Enviar prueba"}
+          </Button>
+        </CardContent>
+      </Card>
+
       {resultado && (
         <Card>
           <CardHeader>
@@ -214,6 +315,13 @@ export function FlowsSetup({ configs }: Props) {
               <p className="mb-3 text-sm text-red-500">
                 El JSON se subió pero tiene errores de validación. Mirá <code>validation_errors</code>.
               </p>
+            )}
+            {Array.isArray(resultado.respuesta?.pistas) && (
+              <ul className="mb-3 space-y-1 text-sm text-muted-foreground">
+                {resultado.respuesta.pistas.map((p: string, i: number) => (
+                  <li key={i}>— {p}</li>
+                ))}
+              </ul>
             )}
             <pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs">
               {JSON.stringify(resultado.respuesta, null, 2)}
