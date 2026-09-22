@@ -28,6 +28,7 @@ import {
   descargarFlowJson,
   borrarFlow,
   diagnosticoDeLaCuenta,
+  numerosDelWaba,
 } from "@/lib/flows/meta-flows-api"
 import { construirFlowJson, construirDatosDeLaPantalla, VERSION_FLOW_JSON } from "@/lib/flows/flow-reagendar"
 import { construirMensajeFlow, enviarMensajeFlow } from "@/lib/flows/mensaje-flow"
@@ -116,6 +117,7 @@ export async function POST(request: Request) {
 
       case "diagnostico_cuenta": {
         const { waba, numero } = await diagnosticoDeLaCuenta(wabaId, config.phoneNumberId, accessToken)
+        const numerosDelWabaResp = await numerosDelWaba(wabaId, accessToken)
 
         // ── Lo que NO se pudo leer se dice, no se asume ────────────────────
         //
@@ -177,6 +179,21 @@ export async function POST(request: Request) {
           )
         }
 
+        // La coherencia entre WABA y número: si no coinciden, los Flows nunca
+        // van a poder enviarse aunque todo lo demás esté impecable.
+        if (numerosDelWabaResp.ok && Array.isArray(numerosDelWabaResp.datos?.data)) {
+          const lista = numerosDelWabaResp.datos.data
+          const pertenece = lista.some((n: any) => String(n?.id) === String(config.phoneNumberId))
+          if (!pertenece) {
+            bloqueos.push(
+              `El Phone Number ID de la configuración (${config.phoneNumberId}) no está entre los números de este WABA. ` +
+                "Los Flows se envían desde un número del mismo WABA donde viven, así que con esta combinación nunca va a funcionar.",
+            )
+          }
+        } else {
+          sinDatos.push("No se pudo listar los números del WABA para verificar que el que envía le pertenezca.")
+        }
+
         return NextResponse.json({
           ok: waba.ok && numero.ok,
           status: 200,
@@ -190,8 +207,10 @@ export async function POST(request: Request) {
             calidadDelNumero: calidad ?? "no se pudo leer",
             verificacionDelCodigo: verificacionDelCodigo ?? "no se pudo leer",
             limiteDeMensajeria: tier ?? "no se pudo leer",
+            wabaDeLaConfig: wabaId,
+            numeroDeLaConfig: config.phoneNumberId,
           },
-          datos: { waba: waba.datos, numero: numero.datos },
+          datos: { waba: waba.datos, numero: numero.datos, numerosDelWaba: numerosDelWabaResp.datos },
         })
       }
 
@@ -409,6 +428,33 @@ export async function POST(request: Request) {
             },
             { status: 400 },
           )
+        }
+
+        // ¿El número desde el que mandamos pertenece al WABA donde vive el Flow?
+        //
+        // Un Flow es un objeto del WABA. Si la configuración mezcla el wabaId de
+        // una cuenta con el phoneNumberId de otra, todo lo anterior funciona
+        // —listar, subir, publicar— y sólo falla el envío, con un error que
+        // habla del flow_id y manda a revisar el Flow, que está impecable.
+        const numeros = await numerosDelWaba(wabaId, accessToken)
+        if (numeros.ok && Array.isArray(numeros.datos?.data)) {
+          const pertenece = numeros.datos.data.some((n: any) => String(n?.id) === String(config.phoneNumberId))
+          if (!pertenece) {
+            return NextResponse.json(
+              {
+                ok: false,
+                status: 400,
+                error:
+                  `El número que envía (${config.phoneNumberId}) NO pertenece al WABA ${wabaId}, ` +
+                  "que es donde está el Flow. Por eso Meta dice que el flow_id no es válido: para ese número, ese Flow no existe.",
+                sugerencia:
+                  "Revisá el WABA ID y el Phone Number ID en la configuración de este cliente: tienen que ser de la misma cuenta.",
+                numerosDelWaba: numeros.datos.data,
+                phoneNumberIdDeLaConfig: config.phoneNumberId,
+              },
+              { status: 400 },
+            )
+          }
         }
 
         const estadoDelFlowActual = String(estado.datos?.status || "").toUpperCase()

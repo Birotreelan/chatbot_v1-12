@@ -192,6 +192,23 @@ export function crearTemplate(
  * Son dos consultas porque la verificación vive en el WABA y la calidad en el
  * número. Se devuelven las dos crudas.
  */
+/**
+ * Los números que cuelgan de este WABA.
+ *
+ * Sirve para una pregunta que parece obvia y no lo es: ¿el número desde el que
+ * mandamos pertenece al WABA donde está el Flow? Un Flow es un objeto del WABA,
+ * y si la configuración tiene un `wabaId` de una cuenta y un `phoneNumberId` de
+ * otra, el listado de Flows funciona perfecto y el envío falla con
+ * "flow_id is invalid" — que manda a buscar el problema en el Flow, que está
+ * bien.
+ */
+export function numerosDelWaba(wabaId: string, accessToken: string): Promise<RespuestaDeMeta> {
+  return llamar(
+    `https://graph.facebook.com/${GRAPH}/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name`,
+    { method: "GET", headers: auth(accessToken) },
+  )
+}
+
 export async function diagnosticoDeLaCuenta(
   wabaId: string,
   phoneNumberId: string,
