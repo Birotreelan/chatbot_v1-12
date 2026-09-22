@@ -114,7 +114,14 @@ export function FlowsSetup({ configs }: Props) {
     if (!configId) return
     if (accion === "publicar_flow") {
       const seguro = window.confirm(
-        "Publicar el Flow no se puede deshacer: después sólo se puede deprecar. ¿Seguir?",
+        `Vas a publicar el Flow ${flowIdManual.trim() || config?.flowIdReagendar || "(el guardado)"}.\n\n` +
+          "No se puede deshacer: después sólo se puede deprecar. ¿Seguir?",
+      )
+      if (!seguro) return
+    }
+    if (accion === "borrar_flow") {
+      const seguro = window.confirm(
+        `Vas a BORRAR el Flow ${flowIdManual.trim()}.\n\nSólo funciona si está en borrador. ¿Seguir?`,
       )
       if (!seguro) return
     }
@@ -223,6 +230,28 @@ export function FlowsSetup({ configs }: Props) {
               Si lo completás, todos los pasos apuntan a ESE Flow en vez del guardado. Sirve para
               desempatar cuando hay más de uno en el WABA: corré el paso 1, mirá los ids, y pegá el
               que corresponda.
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!flowIdManual.trim() || cargando !== null}
+                onClick={() => ejecutar("fijar_flow")}
+              >
+                {cargando === "fijar_flow" ? "..." : "Fijar este Flow"}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={!flowIdManual.trim() || cargando !== null}
+                onClick={() => ejecutar("borrar_flow")}
+              >
+                {cargando === "borrar_flow" ? "..." : "Borrar este Flow"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              <strong>Fijar</strong> guarda ese id en la configuración del cliente, sin crear nada.{" "}
+              <strong>Borrar</strong> elimina el Flow — sólo funciona si está en borrador.
             </p>
           </div>
 

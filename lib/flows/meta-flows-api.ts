@@ -140,6 +140,21 @@ export function assetsDelFlow(flowId: string, accessToken: string): Promise<Resp
   })
 }
 
+/**
+ * Borra un Flow. Sólo funciona con los que están en borrador: uno publicado se
+ * deprecia, no se borra.
+ *
+ * Existe para limpieza. Dos Flows con nombres parecidos en el mismo WABA es una
+ * confusión garantizada, y el id equivocado no falla de forma evidente — falla
+ * con un error sobre pantallas que manda a buscar el problema en otro lado.
+ */
+export function borrarFlow(flowId: string, accessToken: string): Promise<RespuestaDeMeta> {
+  return llamar(`https://graph.facebook.com/${GRAPH}/${flowId}`, {
+    method: "DELETE",
+    headers: auth(accessToken),
+  })
+}
+
 /** Descarga el Flow JSON desde la URL que devuelve `assetsDelFlow`. */
 export async function descargarFlowJson(url: string): Promise<RespuestaDeMeta> {
   return llamar(url, { method: "GET" })

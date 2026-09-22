@@ -26,6 +26,7 @@ import {
   buscarTemplate,
   assetsDelFlow,
   descargarFlowJson,
+  borrarFlow,
 } from "@/lib/flows/meta-flows-api"
 import { construirFlowJson, construirDatosDeLaPantalla, VERSION_FLOW_JSON } from "@/lib/flows/flow-reagendar"
 import { construirMensajeFlow, enviarMensajeFlow } from "@/lib/flows/mensaje-flow"
@@ -48,6 +49,8 @@ type Accion =
   | "estado_template"
   | "enviar_prueba"
   | "ver_json"
+  | "fijar_flow"
+  | "borrar_flow"
 
 /**
  * El `error_data.details` que Meta mete adentro del mensaje de error.
@@ -109,7 +112,57 @@ export async function POST(request: Request) {
       case "listar_flows":
         return NextResponse.json(await listarFlows(wabaId, accessToken))
 
+      case "fijar_flow": {
+        // Apuntar la configuración a un Flow que ya existe, sin crear otro.
+        // Hizo falta cuando quedaron tres Flows dando vueltas y el id guardado
+        // no era ninguno de los buenos.
+        const flowId = String(cuerpo.flowId || "").trim()
+        if (!flowId) return NextResponse.json({ error: "Falta el flowId a fijar" }, { status: 400 })
+
+        const estado = await estadoDelFlow(flowId, accessToken)
+        if (!estado.ok) {
+          return NextResponse.json(
+            { ...estado, error: "Ese Flow no existe o no es de este WABA. No se guardó nada." },
+            { status: 400 },
+          )
+        }
+
+        await updateWhatsAppConfig(configId, { flowIdReagendar: flowId })
+        return NextResponse.json({ ...estado, flowIdConsultado: flowId, guardado: true })
+      }
+
+      case "borrar_flow": {
+        const flowId = String(cuerpo.flowId || "").trim()
+        if (!flowId) return NextResponse.json({ error: "Falta el flowId a borrar" }, { status: 400 })
+
+        const respuesta = await borrarFlow(flowId, accessToken)
+
+        // Si borramos justo el que estaba guardado, se limpia la referencia:
+        // dejarla apuntando a algo que ya no existe es cómo se llega al error
+        // que nos costó media hora.
+        if (respuesta.ok && config.flowIdReagendar === flowId) {
+          await updateWhatsAppConfig(configId, { flowIdReagendar: "" })
+        }
+
+        return NextResponse.json({ ...respuesta, flowIdConsultado: flowId })
+      }
+
       case "crear_flow": {
+        // Crear pisa el id guardado. Si ya hay uno, se frena: ejecutar este
+        // paso dos veces fue exactamente lo que dejó la configuración apuntando
+        // a un Flow que no era ninguno de los que existían.
+        if (config.flowIdReagendar && !cuerpo.forzar) {
+          return NextResponse.json(
+            {
+              error: `Esta configuración ya tiene el Flow ${config.flowIdReagendar}. Crear otro pisaría esa referencia.`,
+              sugerencia:
+                "Si querés usar uno que ya existe, cargá su id en el campo Flow ID y usá 'Fijar este Flow'. Si de verdad querés crear otro, volvé a ejecutar con forzar.",
+              flowIdActual: config.flowIdReagendar,
+            },
+            { status: 409 },
+          )
+        }
+
         const nombre = String(cuerpo.nombre || "").trim() || "reagendar_turno"
         const respuesta = await crearFlow(wabaId, accessToken, nombre)
 
