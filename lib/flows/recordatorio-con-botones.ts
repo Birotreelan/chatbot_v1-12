@@ -39,8 +39,6 @@
  * WhatsApp Web le va a pedir que lo mire en el teléfono.
  */
 
-import { PANTALLA_ELEGIR } from "./flow-reagendar"
-
 /**
  * Etiquetas de los botones. Máximo 25 caracteres cada una (límite de Meta).
  *
@@ -49,13 +47,9 @@ import { PANTALLA_ELEGIR } from "./flow-reagendar"
  * estas constantes de forma EXACTA —no por substring— es lo que evita repetir
  * la clase de bug que veníamos arreglando.
  */
-export const BOTON_CONFIRMAR = "Confirmar asistencia"
+export const BOTON_CONFIRMAR = "Confirmar Asistencia"
 export const BOTON_CANCELAR = "Cancelar turno"
-/**
- * "Cancelar y Reagendar el turno" son 29 caracteres y el tope es 25, así que
- * va acortado. No es un detalle de estilo: Meta rechaza la creación entera.
- */
-export const BOTON_REAGENDAR = "Cancelar y reagendar"
+export const BOTON_REAGENDAR = "Reprogramar turno"
 
 /**
  * Las etiquetas del template VIEJO (`confirmacion_1_turno`), que sigue vivo.
@@ -66,8 +60,8 @@ export const BOTON_REAGENDAR = "Cancelar y reagendar"
  * dejarían de rutear y el paciente se quedaría sin respuesta.
  */
 const ETIQUETAS_VIEJAS: Record<string, AccionDelRecordatorio> = {
-  Confirmar: "confirmar",
-  Cancelar: "cancelar",
+  confirmar: "confirmar",
+  cancelar: "cancelar",
 }
 
 /**
@@ -79,6 +73,7 @@ const ETIQUETAS_VIEJAS: Record<string, AccionDelRecordatorio> = {
  */
 export const PAYLOAD_CONFIRMAR = "FLOWS_CONFIRMAR"
 export const PAYLOAD_CANCELAR = "FLOWS_CANCELAR"
+export const PAYLOAD_REAGENDAR = "FLOWS_REAGENDAR"
 
 export type AccionDelRecordatorio = "confirmar" | "cancelar" | "reagendar"
 
@@ -92,13 +87,20 @@ export type AccionDelRecordatorio = "confirmar" | "cancelar" | "reagendar"
 export function accionDelBoton(boton: { text?: string; payload?: string } | null | undefined): AccionDelRecordatorio | null {
   if (!boton) return null
 
-  const payload = (boton.payload || "").trim()
+  const payload = (boton.payload || "").trim().toUpperCase()
   if (payload === PAYLOAD_CONFIRMAR) return "confirmar"
   if (payload === PAYLOAD_CANCELAR) return "cancelar"
+  if (payload === PAYLOAD_REAGENDAR) return "reagendar"
 
-  const texto = (boton.text || "").trim()
-  if (texto === BOTON_CONFIRMAR) return "confirmar"
-  if (texto === BOTON_CANCELAR) return "cancelar"
+  // La comparación es sin distinguir mayúsculas. WhatsApp devuelve el título
+  // exactamente como se aprobó, pero la plantilla real dice "Confirmar
+  // Asistencia" con A mayúscula y en el código estaba escrito con minúscula:
+  // una diferencia invisible al leer que habría dejado el botón sin rutear.
+  const texto = (boton.text || "").trim().toLowerCase()
+  if (!texto) return null
+  if (texto === BOTON_CONFIRMAR.toLowerCase()) return "confirmar"
+  if (texto === BOTON_CANCELAR.toLowerCase()) return "cancelar"
+  if (texto === BOTON_REAGENDAR.toLowerCase()) return "reagendar"
 
   return ETIQUETAS_VIEJAS[texto] ?? null
 }
@@ -123,16 +125,22 @@ export const CUERPO_VIGENTE =
   "Por favor, confirme o cancele su asistencia.\n\n" +
   "Muchas gracias."
 
+/** Encabezado de la plantilla con Flows, tal como se aprobó. */
+export const ENCABEZADO_CON_REAGENDAR = "Recordatorio de turno"
+
 /**
- * Mismo texto con la frase final ajustada a los tres botones.
+ * El cuerpo de `confirmacion_1_flows`, la plantilla que se creó el 22/9/2026.
  *
- * Es el único cambio de redacción, y es necesario: dejar "confirme o cancele"
- * con un tercer botón visible contradice lo que el paciente está viendo.
+ * Mantiene los cinco parámetros en el mismo orden que la vigente —sede, fecha,
+ * hora, profesional, dirección— que es lo que permite reescribir el envío sin
+ * que la clínica cambie nada.
  */
 export const CUERPO_CON_REAGENDAR =
-  "Hola! Nos comunicamos desde {{1}} para recordarle que tiene un turno el día {{2}}, " +
-  "a las {{3}} horas con {{4}} en {{5}}.\n\n" +
-  "Por favor, confirme, cancele o reagende su turno con los botones de abajo.\n\n" +
+  "Estimado/a paciente:\n\n" +
+  "Nos comunicamos desde {{1}} para recordarle que tiene un turno programado para el día {{2}} " +
+  "a las {{3}} horas, con {{4}}, en {{5}}.\n\n" +
+  "Por favor, seleccione una de las siguientes opciones para confirmar su asistencia, " +
+  "cancelar el turno o solicitar una reprogramación.\n\n" +
   "Muchas gracias."
 
 /** Los ejemplos que ya tiene aprobados el template vigente. */
@@ -167,7 +175,8 @@ export function definicionDeTemplate(params: {
   cuerpo: string
   /** Un valor de ejemplo por variable, en orden. Meta los exige para aprobar. */
   ejemplos: string[]
-  flowId: string
+  /** Encabezado opcional. La plantilla vigente usa "Recordatorio de turno". */
+  encabezado?: string
 }): DefinicionDeTemplate {
   return {
     name: params.nombre,
@@ -177,6 +186,9 @@ export function definicionDeTemplate(params: {
     // es lo primero que hay que mirar en la respuesta.
     category: "UTILITY",
     components: [
+      ...(params.encabezado
+        ? [{ type: "HEADER", format: "TEXT", text: params.encabezado }]
+        : []),
       {
         type: "BODY",
         text: params.cuerpo,
@@ -184,19 +196,14 @@ export function definicionDeTemplate(params: {
       },
       {
         type: "BUTTONS",
-        // El orden importa: los quick reply van agrupados y primero. Meta
-        // rechaza "QUICK_REPLY, FLOW, QUICK_REPLY" con un error de combinación
-        // inválida.
+        // Los tres son quick reply. Sin mezclar tipos de botón, el template se
+        // ve también en WhatsApp Desktop — la restricción de Meta que lo
+        // obligaba al teléfono aplica sólo cuando se combina un quick reply con
+        // un botón de otro tipo (por ejemplo, uno de Flow).
         buttons: [
           { type: "QUICK_REPLY", text: BOTON_CONFIRMAR },
           { type: "QUICK_REPLY", text: BOTON_CANCELAR },
-          {
-            type: "FLOW",
-            text: BOTON_REAGENDAR,
-            flow_id: params.flowId,
-            navigate_screen: PANTALLA_ELEGIR,
-            flow_action: "navigate",
-          },
+          { type: "QUICK_REPLY", text: BOTON_REAGENDAR },
         ],
       },
     ],
@@ -219,9 +226,6 @@ export function agregarBotonesAlEnvio(
   bodyOriginal: unknown,
   params: {
     nombreTemplateFlows: string
-    flowToken: string
-    /** Lo que ve la primera pantalla del Flow. Ver construirDatosDeLaPantalla. */
-    datosDeLaPantalla: unknown
   },
 ): Record<string, any> | null {
   const original = normalizar(bodyOriginal)
@@ -241,27 +245,20 @@ export function agregarBotonesAlEnvio(
     template: {
       ...original.template,
       name: params.nombreTemplateFlows,
+      // Los tres son quick_reply: la plantilla real no lleva botón de Flow.
+      // El Flow se manda después, como mensaje aparte, sólo a quien toca
+      // "Reprogramar turno" — ver construirMensajeFlow en mensaje-flow.ts.
+      //
+      // El payload explícito es lo único que aportan estos componentes: sin
+      // ellos los botones se muestran igual (son parte de la plantilla
+      // aprobada), pero WhatsApp devolvería sólo el título. Rutear por un
+      // payload que definimos nosotros es más firme que rutear por un texto
+      // que cualquiera puede escribir a mano.
       components: [
         ...componentesOriginales,
         { type: "button", sub_type: "quick_reply", index: "0", parameters: [{ type: "payload", payload: PAYLOAD_CONFIRMAR }] },
         { type: "button", sub_type: "quick_reply", index: "1", parameters: [{ type: "payload", payload: PAYLOAD_CANCELAR }] },
-        {
-          type: "button",
-          sub_type: "flow",
-          index: "2",
-          parameters: [
-            {
-              type: "action",
-              action: {
-                // Identifica esta conversación cuando vuelva el nfm_reply. No
-                // puede ser adivinable: la documentación lo compara con un id
-                // de sesión web.
-                flow_token: params.flowToken,
-                flow_action_data: params.datosDeLaPantalla,
-              },
-            },
-          ],
-        },
+        { type: "button", sub_type: "quick_reply", index: "2", parameters: [{ type: "payload", payload: PAYLOAD_REAGENDAR }] },
       ],
     },
   }

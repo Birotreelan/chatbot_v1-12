@@ -29,6 +29,7 @@ import { construirFlowJson, VERSION_FLOW_JSON } from "@/lib/flows/flow-reagendar
 import {
   definicionDeTemplate,
   CUERPO_CON_REAGENDAR,
+  ENCABEZADO_CON_REAGENDAR,
   EJEMPLOS_VIGENTES,
 } from "@/lib/flows/recordatorio-con-botones"
 
@@ -128,15 +129,10 @@ export async function POST(request: Request) {
       }
 
       case "crear_template": {
-        const flowId = String(cuerpo.flowId || config.flowIdReagendar || "")
-        if (!flowId) {
-          return NextResponse.json(
-            { error: "Primero hay que crear y publicar el Flow: el template necesita su id" },
-            { status: 400 },
-          )
-        }
-
-        const nombre = String(cuerpo.nombre || "").trim() || "confirmacion_1_turno_flows"
+        // Ya no necesita el flowId: la plantilla aprobada tiene tres quick
+        // reply y ningún botón de Flow. El Flow se manda después, como mensaje
+        // aparte, sólo a quien toca "Reprogramar turno".
+        const nombre = String(cuerpo.nombre || "").trim() || "confirmacion_1_flows"
         const definicion = definicionDeTemplate({
           nombre,
           idioma: String(cuerpo.idioma || "es_AR"),
@@ -145,7 +141,7 @@ export async function POST(request: Request) {
           // mismos parámetros en el mismo orden.
           cuerpo: String(cuerpo.cuerpo || CUERPO_CON_REAGENDAR),
           ejemplos: Array.isArray(cuerpo.ejemplos) && cuerpo.ejemplos.length > 0 ? cuerpo.ejemplos : EJEMPLOS_VIGENTES,
-          flowId,
+          encabezado: String(cuerpo.encabezado ?? ENCABEZADO_CON_REAGENDAR) || undefined,
         })
 
         const respuesta = await crearTemplate(wabaId, accessToken, definicion)
@@ -157,8 +153,6 @@ export async function POST(request: Request) {
         return NextResponse.json({
           ...respuesta,
           definicionEnviada: definicion,
-          // El dato que fuimos a buscar: si Meta lo dejó en utility o lo
-          // reclasificó al ver el botón de Flow.
           categoriaAsignada: respuesta.datos?.category ?? null,
         })
       }
