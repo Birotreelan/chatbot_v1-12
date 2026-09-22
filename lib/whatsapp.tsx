@@ -2145,7 +2145,7 @@ async function offerHumanOrSendPhone(
   if (await shouldOfferHuman(config)) {
     const clinicName = config.displayName || "la clínica"
     const escalationPhone = config.escalationPhoneNumber
-    const intro = `Actualmente estás hablando con Iris, un asistente virtual de inteligencia artificial que solo está preparado para la gestión de turnos.\n\n`
+    const intro = `Actualmente estás hablando con Iris, un asistente virtual de inteligencia artificial que solo está preparado para la gestión de turnos con profesionales.\n\n`
     const cierre =
       `Por favor respondé presionando 1 o el botón aquí debajo si deseas hablar con el personal de ${clinicName}:\n\n` +
       `1. Requiero atención humana.`
