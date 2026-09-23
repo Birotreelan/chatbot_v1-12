@@ -205,13 +205,33 @@ export default async function PaginaDelPortal({
           />
         )}
 
-        {agenda.filtradoPorProfesional && agenda.profesionalNombre && (
+        {agenda.filtradoPorProfesional && agenda.profesionalNombre && dias.length > 0 && (
           <p style={{ color: "#6b7280", margin: "0 0 16px" }}>
             Horarios disponibles con {agenda.profesionalNombre}.
           </p>
         )}
 
-        <SelectorDeTurnos token={token} dias={dias} marca={marca} etiquetaConfirmar="Confirmar el cambio" />
+        {/* Pantalla vacía nunca (23/9/2026).
+            Antes, con la agenda en cero el selector se dibujaba sin nada y el
+            paciente se quedaba mirando un cuadro blanco. La compuerta de
+            `permiteReprogramarOnline` evita que se llegue acá en el caso
+            conocido, pero hay otros —la agenda se llenó entre el recordatorio
+            y el clic— y el paciente merece una frase igual.
+            Cuando el proxy explica por qué no hay turnos, se usa SU mensaje:
+            sabe cosas que nosotros no. */}
+        {dias.length === 0 && (
+          <Aviso
+            titulo="No hay horarios para reprogramar"
+            detalle={
+              mensajeSinTurnos(agenda.infoSinTurnos) ||
+              "Puede que se hayan ocupado. Escribinos por WhatsApp y te ayudamos."
+            }
+          />
+        )}
+
+        {dias.length > 0 && (
+          <SelectorDeTurnos token={token} dias={dias} marca={marca} etiquetaConfirmar="Confirmar el cambio" />
+        )}
       </>,
     )
   }
@@ -292,6 +312,39 @@ export default async function PaginaDelPortal({
       <SelectorDeTurnos token={token} dias={diasNuevos} marca={marca} etiquetaConfirmar="Confirmar mi turno" />
     </>,
   )
+}
+
+/**
+ * El "por qué no hay turnos" que manda el proxy, si lo mandó (23/9/2026).
+ *
+ * `info_sin_turnos` es la parte de la respuesta que explica un cero. En el caso
+ * que motivó esto decía: "Hay profesionales con agenda disponible pero solo se
+ * pueden reservar por teléfono". Eso es mucho mejor que cualquier texto nuestro,
+ * porque es la razón real y no una suposición.
+ *
+ * Devuelve `null` cuando no vino nada, y ahí el llamador pone su texto genérico.
+ * Lo que no se hace es inventar una causa: un "no hay turnos disponibles" a
+ * secas, cuando en realidad sí los hay pero por teléfono, es información falsa.
+ */
+function mensajeSinTurnos(info: any): string | null {
+  if (!info || typeof info !== "object") return null
+
+  const mensaje = typeof info.mensaje === "string" ? info.mensaje.trim() : ""
+  if (!mensaje) return null
+
+  const soloTelefono = Array.isArray(info.profesionales_disponibles_solo_telefono)
+    ? info.profesionales_disponibles_solo_telefono
+    : []
+
+  const nombres = soloTelefono
+    .map((p: any) => (typeof p?.nombre === "string" ? p.nombre.trim() : ""))
+    .filter(Boolean)
+
+  if (nombres.length > 0) {
+    return `${mensaje} (${nombres.join(", ")}). Escribinos por WhatsApp y te ayudamos.`
+  }
+
+  return `${mensaje} Escribinos por WhatsApp y te ayudamos.`
 }
 
 function VerTodos({

@@ -17,6 +17,8 @@
  *    respuesta— pero condiciona cualquier aviso posterior.
  */
 
+import { fraseDerivacion } from "../utils/escalation-contact"
+
 export const LIMITE_TEXTO_BOTON = 20
 export const LIMITE_ENCABEZADO = 60
 export const LIMITE_PIE = 60
@@ -126,6 +128,31 @@ export function textoParaReprogramar(turno?: { fechaFormateada?: string; horaFor
     `Para reprogramar tu turno${cuando}, entrá al enlace de abajo y elegí el horario que te quede mejor.\n\n` +
     `Si preferís que te ayudemos por acá, escribime y seguimos.`
   )
+}
+
+/**
+ * Lo que recibe el paciente cuando su turno NO se puede reprogramar solo
+ * (23/9/2026).
+ *
+ * Se le dice qué turno es y qué tiene que hacer. No se le pide disculpas por
+ * una limitación de la clínica ni se le explica el flag: "no admite
+ * reagendamiento" es vocabulario nuestro, no suyo.
+ *
+ * El teléfono sale del Número de Derivación de la config, con `fraseDerivacion`
+ * — el mismo helper que usa el resto del sistema, para que el paciente no vea
+ * dos formatos distintos del mismo número según por dónde entró.
+ */
+export function textoSoloPorTelefono(
+  turno: { fechaFormateada?: string; horaFormateada?: string; profesional?: string } | undefined,
+  escalationPhoneNumber?: string | null,
+): string {
+  let texto = "Tu turno"
+  if (turno?.profesional) texto += ` con ${turno.profesional}`
+  if (turno?.fechaFormateada) texto += ` del ${turno.fechaFormateada}`
+  if (turno?.horaFormateada) texto += ` a las ${turno.horaFormateada}`
+  texto += " no se puede reprogramar desde acá.\n\n"
+
+  return texto + fraseDerivacion("Para cambiarlo, comunicate con la clínica", escalationPhoneNumber)
 }
 
 export function textoParaTurnoNuevo(): string {

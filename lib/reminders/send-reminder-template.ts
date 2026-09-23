@@ -148,8 +148,36 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
   // otra forma, el cliente no configuró el nombre— se manda el original. Un
   // recordatorio sin el botón nuevo llega igual; uno que no llega es un
   // paciente que no se entera de su turno.
+  // ── No se ofrece un botón que no lleva a ningún lado (23/9/2026) ─────────
+  //
+  // `Chatbot_Data` trae `admite_reagendamiento` por turno. Cuando es `false`
+  // —agendas que la clínica sólo reserva por teléfono— el tercer botón no tiene
+  // destino posible: el proxy va a devolver cero turnos, con razón.
+  //
+  // Se decide acá, en el envío, y no sólo al responder. Contestar bien "eso se
+  // reprograma por teléfono" está implementado y es la red de seguridad, pero
+  // es peor experiencia y encima cuesta: el paciente toca un botón, espera, y
+  // recibe un no. Mejor no mostrárselo.
+  //
+  // La red de seguridad sigue haciendo falta igual: entre el recordatorio y el
+  // clic pasan horas, y la clínica puede cambiar la agenda en el medio.
+  let admiteReagendamiento = true
+  try {
+    const datos = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
+    const primerTurno = Array.isArray(datos?.turnos) ? datos.turnos[0] : undefined
+    // `!== false`: si el campo no viene, no sabemos, y no sabemos no es un no.
+    if (primerTurno?.admite_reagendamiento === false) admiteReagendamiento = false
+  } catch {
+    // Chatbot_Data ilegible: se sigue como si admitiera. El caso lo atrapa la
+    // compuerta de la respuesta.
+  }
+
   let bodyAEnviar = Body
-  if (config.clientePortalWeb === true && config.templateRecordatorioFlows) {
+  if (config.clientePortalWeb === true && config.templateRecordatorioFlows && !admiteReagendamiento) {
+    console.log(
+      "[REMINDERS] El turno no admite reagendamiento online; se envía el recordatorio original (sin el botón de reprogramar)",
+    )
+  } else if (config.clientePortalWeb === true && config.templateRecordatorioFlows) {
     const reescrito = agregarBotonesAlEnvio(Body, {
       nombreTemplateFlows: config.templateRecordatorioFlows,
     })

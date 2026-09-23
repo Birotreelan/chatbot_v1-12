@@ -26,9 +26,11 @@ import {
   enviarMensajeConEnlace,
   textoParaReprogramar,
   textoParaTurnoNuevo,
+  textoSoloPorTelefono,
   BOTON_REPROGRAMAR,
   BOTON_TURNO_NUEVO,
 } from "./mensaje-enlace"
+import { sendWhatsAppMessage } from "../whatsapp-api"
 import type { IntencionDelPortal, OrigenDelEnlace } from "./vigencia"
 import { saveConversationMessage } from "../conversations"
 import { presentarSiCorresponde } from "../conversation-state/presentacion-inicial"
@@ -41,6 +43,50 @@ export interface DatosDelPaciente {
   obraSocialId?: string
   sedeId?: string
   turno?: TurnoDelPortal
+  /**
+   * El turno se puede reprogramar solo, sin llamar a la clínica.
+   *
+   * Viene en el `Chatbot_Data` del recordatorio, por turno. `undefined` cuando
+   * el proxy no manda el campo: ahí se asume que sí (ver `permiteReprogramarOnline`).
+   */
+  admiteReagendamiento?: boolean
+}
+
+/**
+ * ¿Este turno se puede reprogramar desde el portal? (23/9/2026)
+ *
+ * ── El caso que obligó a escribir esto ─────────────────────────────────────
+ *
+ * Un paciente con turno con un Instrumentador Quirúrgico tocó "Reprogramar
+ * turno", recibió el enlace, y el portal le mostró una pantalla vacía. El proxy
+ * había contestado bien: `turnos_disponibles: []` más un `info_sin_turnos`
+ * explicando que ese profesional "solo se puede reservar por teléfono".
+ *
+ * El dato estaba en nuestras manos ocho minutos antes, en el `Chatbot_Data` del
+ * recordatorio: `admite_reagendamiento: false`. El resto del sistema lo mira
+ * —`buildCancellationSuccessMessage`, el filtro de `buscarConRango`, la
+ * cancelación en whatsapp.tsx— y deriva al teléfono de la clínica. La
+ * intercepción del portal se metió antes en el embudo y se salteó esa
+ * compuerta.
+ *
+ * ── Ausencia del campo no es un "no" ───────────────────────────────────────
+ *
+ * `!== false`, no `=== true`. Hay proxies que no mandan el campo, y ahí no
+ * podemos concluir que el turno no admite reagendamiento: no sabemos. Tratar la
+ * falta de información como un "no" le cortaría el portal a clientes enteros
+ * sin que nadie entienda por qué.
+ *
+ * (Nota: `whatsapp.tsx:4678` usa `=== true` para el mismo flag, en el camino de
+ * los mensajes de la clínica. Son dos criterios distintos para la misma
+ * pregunta y habría que unificarlos; queda anotado, no lo toco desde acá
+ * porque cambiaría el comportamiento de un flujo que hoy funciona.)
+ */
+export function permiteReprogramarOnline(
+  paciente: DatosDelPaciente | undefined,
+  config: { permitirReagendamiento?: boolean } | null | undefined,
+): boolean {
+  if (config?.permitirReagendamiento === false) return false
+  return paciente?.admiteReagendamiento !== false
 }
 
 /**
@@ -69,6 +115,10 @@ export function datosDesdeElContexto(contexto: any): DatosDelPaciente | undefine
     pacienteDNI: paciente?.dni || undefined,
     obraSocialId: paciente?.obra_social_id || undefined,
     sedeId: turno?.sede_id || contexto.sede_id || undefined,
+    // Se deja pasar `undefined` tal cual: distingue "el turno no admite
+    // reagendamiento" de "el proxy no manda el campo". Ver `permiteReprogramarOnline`.
+    admiteReagendamiento:
+      typeof turno?.admite_reagendamiento === "boolean" ? turno.admite_reagendamiento : undefined,
   }
 
   if (turno?.fecha || turno?.hora) {
@@ -101,10 +151,15 @@ export function usaPortal(config: { clientePortalWeb?: boolean } | null | undefi
 }
 
 /**
- * Emite el enlace y se lo manda al paciente.
+ * Atiende al paciente que pidió reprogramar o sacar turno.
  *
- * `true` si el paciente ya recibió el enlace y el llamador debe cortar ahí.
- * `false` si hay que seguir con el flujo de siempre.
+ * `true` = el paciente YA recibió una respuesta y el llamador debe cortar ahí.
+ * Ojo que eso no siempre significa "se mandó el enlace": si el turno no se
+ * puede reprogramar online, la respuesta es la derivación al teléfono, y
+ * también corta. La pregunta que contesta el valor de retorno es "¿hace falta
+ * que sigas vos?", no "¿se mandó el enlace?".
+ *
+ * `false` = no corresponde o algo falló; seguí con el flujo conversacional.
  */
 export async function derivarAlPortal(params: {
   config: any
@@ -117,6 +172,41 @@ export async function derivarAlPortal(params: {
   const { config, paciente } = params
 
   if (!usaPortal(config)) return false
+
+  // ── Compuerta: ¿este turno se puede reprogramar solo? ────────────────────
+  //
+  // Va acá adentro y no en el llamador a propósito. Los puntos desde los que se
+  // llega a "quiero reprogramar" son varios y van a ser más; si la compuerta
+  // viviera en cada uno, el próximo que agreguemos la olvida y el paciente
+  // vuelve a terminar en una pantalla vacía. Este es el embudo: se decide una
+  // vez, acá.
+  const esReprogramarUnTurno = params.intencion === "reagendar" || params.intencion === "cancelar"
+  if (esReprogramarUnTurno && !permiteReprogramarOnline(paciente, config)) {
+    try {
+      const cuerpoBase = textoSoloPorTelefono(paciente?.turno, config.escalationPhoneNumber)
+      const cuerpo = await presentarSiCorresponde(cuerpoBase, config.id, params.userPhoneNumber)
+
+      await sendWhatsAppMessage(params.phoneNumberId, config.accessToken, params.userPhoneNumber, cuerpo)
+      await saveConversationMessage({
+        id: nanoid(),
+        role: "assistant",
+        content: cuerpo,
+        timestamp: new Date().toISOString(),
+        phoneNumber: params.userPhoneNumber,
+        configId: config.id,
+      }).catch(() => {})
+
+      console.log(
+        `[PORTAL] ${params.userPhoneNumber}: el turno no admite reagendamiento online; derivado al teléfono`,
+      )
+      return true
+    } catch (error) {
+      // Si no se pudo ni mandar la derivación, que siga el flujo de siempre:
+      // cualquier respuesta es mejor que ninguna.
+      console.error("[PORTAL] No se pudo derivar al teléfono:", error)
+      return false
+    }
+  }
 
   try {
     const enlace = await emitirEnlace({
