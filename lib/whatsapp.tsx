@@ -5491,15 +5491,13 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           clienteId: config.cliente_id,
         }
 
-        // Acciones especiales del flujo de detección inicial (Sprint 9a) que necesitan clienteId
         // ====================================================================
         // PORTAL WEB: PACIENTE QUE NO RECONOCIMOS POR SU TELÉFONO (23/9/2026)
         // ====================================================================
-        // `book_appointment_intent` es el momento exacto en que el bot está por
-        // pedirle el DNI a alguien que no encontró por su número. De ahí salen
-        // nueve mensajes: DNI, apellido, nombre, obra social, sede, tipo de
-        // búsqueda, profesional, email y confirmación. El portal los reemplaza
-        // por dos pantallas.
+        // El bot está por pedirle el DNI a alguien que no encontró por su
+        // número. De ahí salen nueve mensajes: DNI, apellido, nombre, obra
+        // social, sede, tipo de búsqueda, profesional, email y confirmación.
+        // El portal los reemplaza por dos pantallas.
         //
         // No presupone que sea un paciente nuevo. Que no lo hayamos encontrado
         // por su teléfono sólo significa que ese número no estaba en su ficha
@@ -5509,7 +5507,21 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // duplicadas, que es un desastre silencioso.
         //
         // El token sale sin identidad a propósito: el portal la completa.
-        if (detectionResult?.action === 'book_appointment_intent' && usaPortal(config)) {
+        //
+        // ── Por qué es una función y no un `if` ───────────────────────────
+        //
+        // Hay DOS caminos hasta "el paciente pidió un turno", y el primer
+        // intento de esto (23/9) falló justamente por eso: se enganchó en la
+        // acción `book_appointment_intent` que devuelve el handler, sin ver
+        // que whatsapp.tsx detecta la opción del menú por su cuenta más abajo
+        // y nunca llega a llamarlo. La intercepción quedó en código muerto y
+        // el paciente siguió recibiendo las nueve preguntas.
+        //
+        // Con los dos llamadores apuntando acá no hay forma de que uno diga
+        // una cosa y el otro otra.
+        const derivarTurnoNuevoAlPortal = async (): Promise<boolean> => {
+          if (!usaPortal(config)) return false
+
           const derivado = await derivarAlPortal({
             config,
             phoneNumberId: value.metadata.phone_number_id,
@@ -5518,18 +5530,24 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             origen: 'conversacion',
           })
 
-          if (derivado) {
-            // Se cierra la detección: el paciente ya no está en una conversación
-            // con el bot, está en el portal. Dejar el flujo abierto haría que su
-            // próximo mensaje se interprete como una respuesta a una pregunta
-            // que nunca le hicimos.
-            await completePatientDetectionFlow(userPhoneNumber, config.id)
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-            return
-          }
+          if (!derivado) return false
+
+          // Se cierra la detección: el paciente ya no está en una conversación
+          // con el bot, está en el portal. Dejar el flujo abierto haría que su
+          // próximo mensaje se interprete como respuesta a una pregunta que
+          // nunca le hicimos.
+          await completePatientDetectionFlow(userPhoneNumber, config.id)
+          await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+          return true
+        }
+
+        // Camino A: el handler devolvió la intención ya resuelta.
+        if (detectionResult?.action === 'book_appointment_intent') {
+          if (await derivarTurnoNuevoAlPortal()) return
           // Si no se pudo derivar, sigue el flujo conversacional de siempre.
         }
 
+        // Acciones especiales del flujo de detección inicial (Sprint 9a) que necesitan clienteId
         if (detectionResult?.action === 'dni_disambiguation_pending') {
           // Paciente ingresó DNI para desambiguar múltiples pacientes
           const dniResult = await handleDNIForMultiplePatients(
@@ -5574,7 +5592,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
 
           if (selection === 1) {
-            // Opción 1: Solicitar turno ��� cambiar fase a awaiting_initial_response (pedir DNI)
+            // Camino B, y el que de verdad se usa: acá whatsapp.tsx detecta la
+            // opción del menú por su cuenta, sin pasar por el handler. Es el
+            // punto exacto donde el bot está por mandar "pasame tu DNI".
+            if (await derivarTurnoNuevoAlPortal()) return
+
+            // Opción 1: Solicitar turno → cambiar fase a awaiting_initial_response (pedir DNI)
             await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_initial_response')
             const turnoConfirmMessage = await import('./conversation-state/patient-detection/patient-templates').then(
               m => m.buildTurnoIntentConfirmedMessage()

@@ -30,7 +30,11 @@ export default function PortalPage() {
   const [configs, setConfigs] = useState<WhatsAppConfig[]>([])
   const [configId, setConfigId] = useState("")
   const [intencion, setIntencion] = useState<"reagendar" | "nuevo_turno">("reagendar")
-  const [demo, setDemo] = useState(true)
+  // Arranca apagado desde el 23/9/2026: el entorno es de prueba de punta a
+  // punta —sistema y WhatsApp— así que simular la reserva esconde justamente
+  // lo que hay que ver. El interruptor sigue estando para cuando esto apunte a
+  // la agenda de una clínica con pacientes de verdad.
+  const [demo, setDemo] = useState(false)
   const [dni, setDni] = useState("")
   const [telefono, setTelefono] = useState("")
   const [generando, setGenerando] = useState(false)
