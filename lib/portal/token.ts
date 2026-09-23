@@ -22,6 +22,7 @@
 
 import { randomBytes, createHash } from "crypto"
 import { getRedisClient } from "../redis"
+import type { IdentidadDelPaciente } from "./pasos"
 import {
   calcularVencimientos,
   estadoDelEnlace,
@@ -69,6 +70,23 @@ export interface ContextoDelPortal {
 
   /** El turno sobre el que se actúa. Ausente cuando se pide uno nuevo. */
   turno?: TurnoDelPortal
+
+  /**
+   * Lo que el propio portal averiguó sobre el paciente (23/9/2026).
+   *
+   * Cuando el bot no lo reconoció por su teléfono, el portal le pide el DNI,
+   * busca la ficha y —si no tiene— lo da de alta. Todo eso se guarda acá.
+   *
+   * ── Por qué en el token y no en la URL ─────────────────────────────────
+   *
+   * Los filtros de búsqueda (especialidad, profesional) viajan por query
+   * string, y está bien: son ids opacos de un catálogo público. El DNI, el
+   * nombre y el email de una persona no. La URL termina en el historial del
+   * navegador, en capturas de pantalla y en cualquier `Referer` que el
+   * navegador mande. Es la misma razón por la que el token es opaco y no un
+   * JWT con los datos adentro.
+   */
+  identidad?: IdentidadDelPaciente
 
   /**
    * Enlace de prueba (23/9/2026).
@@ -297,6 +315,36 @@ export async function consumirEnlace(
   await guardar(token, contexto)
   console.log(`[PORTAL] Enlace consumido (${contexto.intencion}) para ${contexto.phone}`)
   return true
+}
+
+/**
+ * Guarda lo que el portal averiguó del paciente (23/9/2026).
+ *
+ * Se mergea sobre lo que ya había en vez de pisarlo: el alta llega en dos
+ * pantallas (DNI primero, datos después) y la segunda no vuelve a mandar lo de
+ * la primera.
+ *
+ * NO se toca nada fuera de `identidad`. Un enlace ya gestionado tampoco se
+ * modifica: si el turno ya se reservó, cambiarle los datos al contexto sólo
+ * puede confundir a quien después lea el registro.
+ */
+export async function guardarIdentidad(
+  token: string,
+  identidad: Partial<IdentidadDelPaciente>,
+): Promise<ContextoDelPortal | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+
+  const crudo = await redis.get(clave(token))
+  if (!crudo) return null
+
+  const contexto: ContextoDelPortal = typeof crudo === "string" ? JSON.parse(crudo) : (crudo as any)
+  if (contexto.resultado) return contexto
+
+  contexto.identidad = { ...(contexto.identidad || {}), ...identidad }
+
+  await guardar(token, contexto)
+  return contexto
 }
 
 async function guardar(token: string, contexto: ContextoDelPortal): Promise<void> {

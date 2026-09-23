@@ -15,6 +15,12 @@
 import type { IntencionDelPortal } from "./vigencia"
 
 export type Paso =
+  /** No sabemos quién es. Sin DNI no se puede filtrar la agenda. */
+  | "pedir_dni"
+  /** Tiene DNI pero no tiene ficha: hay que darlo de alta. */
+  | "registrar"
+  /** Su obra social no permite turnos online. Fin del camino, con teléfono. */
+  | "derivar_obra_social"
   | "reprogramar"
   | "elegir_especialidad"
   | "elegir_profesional"
@@ -37,6 +43,41 @@ export interface FiltrosElegidos {
 }
 
 /**
+ * Lo que sabemos del paciente en este momento (23/9/2026).
+ *
+ * Cuando el bot lo reconoció por su teléfono, el token ya viene con todo y
+ * estos pasos no se ven nunca. Cuando no lo reconoció —que es el caso del
+ * paciente nuevo, y también el del que llama desde otro número— el portal lo
+ * averigua acá.
+ */
+export interface IdentidadDelPaciente {
+  dni?: string
+  /** Ya se buscó la ficha con ese DNI. Distingue "no tiene" de "todavía no busqué". */
+  fichaConsultada?: boolean
+  /** Tiene ficha en el sistema de la clínica. */
+  tieneFicha?: boolean
+  nombre?: string
+  apellido?: string
+  email?: string
+  obraSocialId?: string
+  /** `reservarTurno` lo manda como `Deudor_Nombre`, y es lo que se le muestra al paciente. */
+  obraSocialNombre?: string
+  /**
+   * La obra social no permite turnos online (`permite_turnos_online: false`).
+   *
+   * `undefined` es "no se pudo determinar", y ahí se deja pasar: ver la nota de
+   * `resolverTurnosOnline` sobre por qué el caso indeterminado NO bloquea.
+   */
+  obraSocialBloqueada?: boolean
+}
+
+/** ¿Están todos los datos que `reservarTurno` necesita para dar de alta? */
+export function altaCompleta(identidad: IdentidadDelPaciente | undefined): boolean {
+  if (!identidad) return false
+  return Boolean(identidad.dni && identidad.nombre && identidad.apellido && identidad.email)
+}
+
+/**
  * Los flags vienen de la configuración del cliente y su ausencia significa
  * permitido — es el mismo criterio que usa el menú de WhatsApp, y cambiarlo acá
  * haría que el portal ofrezca algo distinto de lo que la clínica configuró.
@@ -45,8 +86,31 @@ export function decidirPaso(
   intencion: IntencionDelPortal,
   permisos: PermisosDeBusqueda,
   filtros: FiltrosElegidos,
+  identidad: IdentidadDelPaciente = {},
 ): Paso {
   if (intencion === "reagendar" || intencion === "cancelar") return "reprogramar"
+
+  // ── La identidad va primero, y en este orden ─────────────────────────────
+  //
+  // No es preferencia de diseño: la agenda se filtra por obra social
+  // (`Deudor_Id`), y la obra social sale de la ficha, que sale del DNI. Mostrar
+  // horarios antes de saber quién es sería mostrar horarios que después pueden
+  // no corresponderle — el peor tipo de error, porque parece que funcionó.
+  //
+  // Es el mismo orden que sigue el bot por WhatsApp. No porque haya que
+  // imitarlo, sino porque la restricción que lo obliga es la misma.
+  if (!identidad.dni) return "pedir_dni"
+
+  // Ya buscamos y no tiene ficha: hay que darlo de alta antes de seguir.
+  if (identidad.fichaConsultada && !identidad.tieneFicha && !altaCompleta(identidad)) {
+    return "registrar"
+  }
+
+  // La obra social decide si hay camino. Se chequea DESPUÉS de tener los datos
+  // y ANTES de mostrar la agenda — que es exactamente donde falló el caso
+  // Zelmira: la paciente recorrió sede, profesional y especialidad completas
+  // para enterarse al final de que su obra social no sacaba turnos online.
+  if (identidad.obraSocialBloqueada === true) return "derivar_obra_social"
 
   if (filtros.sinFiltro) return "elegir_horario"
 

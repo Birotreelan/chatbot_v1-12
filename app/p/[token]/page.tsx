@@ -38,6 +38,7 @@ import { getWhatsAppConfigById } from "@/lib/db"
 import { Marco, Aviso, ResumenDelTurno } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
+import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -86,7 +87,12 @@ export default async function PaginaDelPortal({
   const { contexto, estado, dispositivoDistinto } = lectura
   const config = await getWhatsAppConfigById(contexto.configId)
   const marca = marcaDelPortal(config)
-  const nombre = contexto.pacienteNombre?.trim().split(/\s+/)[0]
+  // El nombre para saludar sale del token cuando el bot ya lo conocía, y de lo
+  // que el paciente cargó en el portal cuando no. Sólo el primero: "Hola,
+  // Nicolas" y no "Hola, Nicolas DE SANTIAGO".
+  const nombre = (contexto.pacienteNombre || contexto.identidad?.nombre)
+    ?.trim()
+    .split(/\s+/)[0]
 
   if (!permiteVerDatos(estado)) {
     return (
@@ -135,7 +141,27 @@ export default async function PaginaDelPortal({
     profesionalId: filtrosCrudos.profesionalId,
     sinFiltro: filtrosCrudos.sinFiltro === "1",
   }
-  const paso = decidirPaso(contexto.intencion, permisos, filtros)
+  // ── Quién es el paciente ─────────────────────────────────────────────────
+  //
+  // Cuando el bot lo reconoció por su teléfono, el token ya trae DNI y obra
+  // social y estos campos salen de ahí. Cuando no, `contexto.identidad` es lo
+  // que el propio portal fue averiguando: primero el DNI, después la ficha (o
+  // el alta). Se unifican acá para que el resto de la página no tenga que
+  // preguntarse de dónde vino cada dato.
+  const identidad = {
+    dni: contexto.identidad?.dni || contexto.pacienteDNI,
+    fichaConsultada: contexto.identidad?.fichaConsultada,
+    // Si el token ya traía DNI es porque el bot encontró al paciente: tiene ficha.
+    tieneFicha: contexto.identidad?.tieneFicha ?? (contexto.pacienteDNI ? true : undefined),
+    nombre: contexto.identidad?.nombre,
+    apellido: contexto.identidad?.apellido,
+    email: contexto.identidad?.email,
+    obraSocialId: contexto.identidad?.obraSocialId || contexto.obraSocialId,
+    obraSocialNombre: contexto.identidad?.obraSocialNombre,
+    obraSocialBloqueada: contexto.identidad?.obraSocialBloqueada,
+  }
+
+  const paso = decidirPaso(contexto.intencion, permisos, filtros, identidad)
   const clienteId = contexto.clienteId || ""
 
   // El aviso de prueba va arriba de todo y en todas las pantallas. Si alguien
@@ -163,6 +189,61 @@ export default async function PaginaDelPortal({
       {hijos}
     </Marco>
   )
+
+  // ── Decir quién sos ─────────────────────────────────────────────────────
+  if (paso === "pedir_dni") {
+    return marco(
+      <>
+        <p style={{ fontSize: 18, margin: "0 0 8px" }}>Para buscar tu turno, necesitamos tu DNI.</p>
+        <p style={{ color: "#6b7280", margin: "0 0 20px", fontSize: 15 }}>
+          Si ya te atendiste en la clínica, con esto alcanza: traemos tus datos solos.
+        </p>
+        <PedirDNI token={token} marca={marca} />
+      </>,
+    )
+  }
+
+  // ── No tiene ficha: alta ────────────────────────────────────────────────
+  if (paso === "registrar") {
+    return marco(
+      <>
+        <p style={{ fontSize: 18, margin: "0 0 8px" }}>Es tu primera vez con nosotros.</p>
+        <p style={{ color: "#6b7280", margin: "0 0 20px", fontSize: 15 }}>
+          Completá estos datos y seguimos con el turno.
+        </p>
+        <DarseDeAlta token={token} dni={identidad.dni} marca={marca} />
+      </>,
+    )
+  }
+
+  // ── La obra social no saca turnos online ────────────────────────────────
+  //
+  // Se corta ACÁ, antes de mostrar un solo horario. Es la lección del caso
+  // Zelmira: la paciente recorrió sede, profesional y especialidad completas
+  // para enterarse recién al final de que su obra social no podía. Hacerle
+  // elegir un turno que no va a poder sacar es peor que decírselo de entrada.
+  if (paso === "derivar_obra_social") {
+    const nombreOS = identidad.obraSocialNombre
+    return marco(
+      <>
+        <Aviso
+          titulo={
+            nombreOS
+              ? `Los turnos de ${nombreOS} se gestionan por teléfono`
+              : "Tu turno se gestiona por teléfono"
+          }
+          detalle={
+            config?.escalationPhoneNumber
+              ? `Comunicate con la clínica al ${config.escalationPhoneNumber} y te lo dan enseguida.`
+              : "Escribinos por WhatsApp y te pasamos el contacto de la clínica."
+          }
+        />
+        <p style={{ color: "#374151", fontSize: 15 }}>
+          Tus datos quedaron guardados, así que no vas a tener que repetirlos.
+        </p>
+      </>,
+    )
+  }
 
   // ── Reprogramar ─────────────────────────────────────────────────────────
   if (paso === "reprogramar") {
@@ -282,8 +363,10 @@ export default async function PaginaDelPortal({
     sedeId: contexto.sedeId,
     profesionalId: filtros.profesionalId,
     especialidadId: filtros.especialidadId,
-    pacienteDNI: contexto.pacienteDNI,
-    obraSocialId: contexto.obraSocialId,
+    // Del contexto unificado, no del token: un paciente que se identificó en
+    // el portal tiene su DNI y su obra social sólo acá.
+    pacienteDNI: identidad.dni,
+    obraSocialId: identidad.obraSocialId,
   })
 
   const conEjemplos = contexto.demo === true && agendaNueva.total === 0

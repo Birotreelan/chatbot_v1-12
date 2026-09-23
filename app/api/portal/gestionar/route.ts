@@ -106,17 +106,46 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, demo: true, texto: textoDemo, turno: datosDelTurnoElegido })
   }
 
+  // ── Los datos con los que se reserva ──────────────────────────────────────
+  //
+  // Dos orígenes posibles y una sola forma de leerlos. `contexto.identidad` es
+  // lo que el propio portal averiguó cuando el bot no reconoció al paciente;
+  // los campos sueltos del contexto son lo que el bot ya sabía. Se prefiere la
+  // identidad porque es más reciente y más completa: incluye el email y el
+  // apellido, que el bot no guarda en el token.
+  //
+  // Para un paciente nuevo, ESTE es el momento en que se crea su ficha. No se
+  // creó antes a propósito: dar de alta al completar el formulario llenaría la
+  // base de la clínica de gente que abandonó antes de elegir horario.
+  const ident = contexto.identidad
+  const datosDelPaciente = {
+    telefono: contexto.phone,
+    // El proxy exige el campo. Vacío para el paciente que ya tiene ficha —su
+    // email está en el sistema de la clínica y no queremos pisarlo con nada—,
+    // y con el que cargó cuando es un alta.
+    email: ident?.tieneFicha === false ? ident?.email || "" : "",
+    dni: ident?.dni || contexto.pacienteDNI,
+    nombre: ident?.nombre || contexto.pacienteNombre,
+    apellido: ident?.apellido,
+    deudorId: ident?.obraSocialId || contexto.obraSocialId,
+    deudorNombre: ident?.obraSocialNombre,
+  }
+
+  // Un alta sin nombre o sin DNI crearía una ficha inservible. Antes que eso,
+  // se le pide que vuelva por WhatsApp: una ficha fantasma en el sistema de la
+  // clínica es un problema que alguien va a tener que limpiar a mano.
+  if (!datosDelPaciente.dni || !datosDelPaciente.nombre) {
+    console.error(`[PORTAL] Reserva sin datos suficientes para ${contexto.phone}`)
+    return NextResponse.json(
+      { ok: false, error: "Nos faltan algunos de tus datos. Escribinos por WhatsApp y lo resolvemos." },
+      { status: 400 },
+    )
+  }
+
   // ── 1. Reservar ───────────────────────────────────────────────────────────
   let reserva: any
   try {
-    reserva = await reservarTurno(contexto.clienteId, agendaId, {
-      telefono: contexto.phone,
-      // El proxy lo exige. La identidad real sale del DNI, que es el que la
-      // clínica usa para vincular el turno con la ficha del paciente.
-      email: "",
-      dni: contexto.pacienteDNI,
-      nombre: contexto.pacienteNombre,
-    })
+    reserva = await reservarTurno(contexto.clienteId, agendaId, datosDelPaciente)
   } catch (error) {
     console.error("[PORTAL] Error reservando:", error)
     return NextResponse.json(
@@ -145,12 +174,15 @@ export async function POST(request: Request) {
   // tiene su turno nuevo, que es lo que vino a hacer. Queda registrado para
   // que la clínica lo resuelva.
   let cancelacionFallida = false
-  if (contexto.intencion === "reagendar" && contexto.turno?.fecha && contexto.pacienteDNI) {
+  // Se usa el DNI unificado, no `contexto.pacienteDNI`: si el paciente se
+  // identificó en el portal, su DNI vive en `identidad` y esta condición sería
+  // falsa — el turno anterior quedaría sin cancelar y en silencio.
+  if (contexto.intencion === "reagendar" && contexto.turno?.fecha && datosDelPaciente.dni) {
     try {
       const cancelacion = await cancelarTurno(contexto.clienteId, {
         fecha: contexto.turno.fecha,
         motivo: "Reprogramado por el paciente desde el portal",
-        paciente_datos: { dni: contexto.pacienteDNI, telefono: contexto.phone },
+        paciente_datos: { dni: datosDelPaciente.dni, telefono: contexto.phone },
       })
       if (cancelacion && cancelacion.exito === false) cancelacionFallida = true
     } catch (error) {

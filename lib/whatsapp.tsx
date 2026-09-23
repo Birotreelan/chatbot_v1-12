@@ -5492,6 +5492,44 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         }
 
         // Acciones especiales del flujo de detección inicial (Sprint 9a) que necesitan clienteId
+        // ====================================================================
+        // PORTAL WEB: PACIENTE QUE NO RECONOCIMOS POR SU TELÉFONO (23/9/2026)
+        // ====================================================================
+        // `book_appointment_intent` es el momento exacto en que el bot está por
+        // pedirle el DNI a alguien que no encontró por su número. De ahí salen
+        // nueve mensajes: DNI, apellido, nombre, obra social, sede, tipo de
+        // búsqueda, profesional, email y confirmación. El portal los reemplaza
+        // por dos pantallas.
+        //
+        // No presupone que sea un paciente nuevo. Que no lo hayamos encontrado
+        // por su teléfono sólo significa que ese número no estaba en su ficha
+        // —escribió desde el celular de un hijo, cambió de número, la clínica
+        // tiene otro cargado—. El portal le pide el DNI y RECIÉN AHÍ decide si
+        // ya existe o hay que darlo de alta. Asumir "nuevo" acá crearía fichas
+        // duplicadas, que es un desastre silencioso.
+        //
+        // El token sale sin identidad a propósito: el portal la completa.
+        if (detectionResult?.action === 'book_appointment_intent' && usaPortal(config)) {
+          const derivado = await derivarAlPortal({
+            config,
+            phoneNumberId: value.metadata.phone_number_id,
+            userPhoneNumber,
+            intencion: 'nuevo_turno',
+            origen: 'conversacion',
+          })
+
+          if (derivado) {
+            // Se cierra la detección: el paciente ya no está en una conversación
+            // con el bot, está en el portal. Dejar el flujo abierto haría que su
+            // próximo mensaje se interprete como una respuesta a una pregunta
+            // que nunca le hicimos.
+            await completePatientDetectionFlow(userPhoneNumber, config.id)
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
+          }
+          // Si no se pudo derivar, sigue el flujo conversacional de siempre.
+        }
+
         if (detectionResult?.action === 'dni_disambiguation_pending') {
           // Paciente ingresó DNI para desambiguar múltiples pacientes
           const dniResult = await handleDNIForMultiplePatients(

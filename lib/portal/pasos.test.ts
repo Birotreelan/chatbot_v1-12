@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { decidirPaso, ofreceVerTodos } from "./pasos"
+import { decidirPaso, ofreceVerTodos, altaCompleta } from "./pasos"
 
 const TODO_PERMITIDO = { porEspecialidad: true, porProfesional: true, porCualquiera: true }
 const SIN_NADA = {}
@@ -99,5 +99,95 @@ describe("siempre se llega a un horario", () => {
         expect(paso, `${porEspecialidad}/${porProfesional}`).toBe("elegir_horario")
       }
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Identidad: el paciente que el bot NO reconoció por su teléfono (23/9/2026)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CONOCIDO = { dni: "36100432", fichaConsultada: true, tieneFicha: true }
+
+describe("primero saber quién es", () => {
+  it("sin DNI se pide el DNI, aunque el cliente permita elegir especialidad", () => {
+    // La agenda se filtra por obra social, la obra social sale de la ficha y la
+    // ficha sale del DNI. Mostrar horarios antes sería mostrar horarios que
+    // después pueden no corresponderle.
+    expect(decidirPaso("nuevo_turno", {}, {}, {})).toBe("pedir_dni")
+    expect(decidirPaso("nuevo_turno", { porEspecialidad: true }, {}, {})).toBe("pedir_dni")
+  })
+
+  it("ni siquiera 'ver todos' se saltea la identidad", () => {
+    expect(decidirPaso("nuevo_turno", {}, { sinFiltro: true }, {})).toBe("pedir_dni")
+  })
+
+  it("con DNI y ficha se sigue con los filtros de siempre", () => {
+    expect(decidirPaso("nuevo_turno", {}, {}, CONOCIDO)).toBe("elegir_especialidad")
+  })
+
+  it("reprogramar nunca pide DNI: el token ya trae al paciente", () => {
+    expect(decidirPaso("reagendar", {}, {}, {})).toBe("reprogramar")
+  })
+})
+
+describe("no tiene ficha", () => {
+  const SIN_FICHA = { dni: "36100432", fichaConsultada: true, tieneFicha: false }
+
+  it("va al alta", () => {
+    expect(decidirPaso("nuevo_turno", {}, {}, SIN_FICHA)).toBe("registrar")
+  })
+
+  it("con el alta completa ya no la vuelve a pedir", () => {
+    const completo = { ...SIN_FICHA, nombre: "Ana", apellido: "Pérez", email: "a@b.com" }
+    expect(decidirPaso("nuevo_turno", {}, {}, completo)).toBe("elegir_especialidad")
+  })
+
+  it("no busca el alta si todavía no se consultó la ficha", () => {
+    // `fichaConsultada: false` es "no busqué", no "no tiene". Sin esa
+    // distinción, un DNI recién tipeado mandaría al alta a alguien que ya
+    // existe, y la clínica terminaría con dos historias clínicas de la misma
+    // persona.
+    const sinBuscar = { dni: "36100432", fichaConsultada: false }
+    expect(decidirPaso("nuevo_turno", {}, {}, sinBuscar)).not.toBe("registrar")
+  })
+})
+
+describe("obra social bloqueada", () => {
+  it("corta antes de mostrar un solo horario", () => {
+    // Caso Zelmira: recorrió sede, profesional y especialidad completas para
+    // enterarse al final de que su obra social no sacaba turnos online.
+    const bloqueada = { ...CONOCIDO, obraSocialBloqueada: true }
+    expect(decidirPaso("nuevo_turno", {}, {}, bloqueada)).toBe("derivar_obra_social")
+    expect(decidirPaso("nuevo_turno", {}, { sinFiltro: true }, bloqueada)).toBe("derivar_obra_social")
+  })
+
+  it("no bloquea cuando no se pudo determinar", () => {
+    // `undefined` es "no sé". Invertir el default frenaría a TODOS los
+    // pacientes si la API dejara de mandar el campo — ver obra-social.ts.
+    expect(decidirPaso("nuevo_turno", {}, {}, { ...CONOCIDO, obraSocialBloqueada: undefined }))
+      .toBe("elegir_especialidad")
+    expect(decidirPaso("nuevo_turno", {}, {}, { ...CONOCIDO, obraSocialBloqueada: false }))
+      .toBe("elegir_especialidad")
+  })
+
+  it("el alta va antes que el bloqueo: los datos quedan guardados igual", () => {
+    const sinFichaBloqueada = { dni: "1234567", fichaConsultada: true, tieneFicha: false, obraSocialBloqueada: true }
+    expect(decidirPaso("nuevo_turno", {}, {}, sinFichaBloqueada)).toBe("registrar")
+  })
+})
+
+describe("altaCompleta", () => {
+  it("exige los cuatro campos que usa reservarTurno", () => {
+    expect(altaCompleta({ dni: "1", nombre: "A", apellido: "B", email: "a@b.com" })).toBe(true)
+    expect(altaCompleta({ nombre: "A", apellido: "B", email: "a@b.com" })).toBe(false)
+    expect(altaCompleta({ dni: "1", apellido: "B", email: "a@b.com" })).toBe(false)
+    expect(altaCompleta({ dni: "1", nombre: "A", email: "a@b.com" })).toBe(false)
+    expect(altaCompleta({ dni: "1", nombre: "A", apellido: "B" })).toBe(false)
+    expect(altaCompleta(undefined)).toBe(false)
+  })
+
+  it("la obra social NO es obligatoria", () => {
+    // Un paciente particular no tiene. Exigirla lo dejaría afuera.
+    expect(altaCompleta({ dni: "1", nombre: "A", apellido: "B", email: "a@b.com" })).toBe(true)
   })
 })
