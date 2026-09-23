@@ -222,6 +222,25 @@ export async function getSupportSession(sessionId: string): Promise<HumanSupport
 // OPTIMIZACIÓN: usa pipeline para agrupar todos los GETs en una sola request HTTP
 // Antes: 1 zrange + N gets individuales = N+1 requests
 // Ahora: 1 zrange + 1 pipeline con N gets = 2 requests
+//
+// ── El estado manda, no la pertenencia al sorted set (23/9/2026) ───────────
+//
+// Esta función confiaba enteramente en `human_support:pending`: si el id estaba
+// en el sorted set, la sesión contaba como pendiente, sin mirarle el `status`.
+// `getAgentActiveSessions`, tres líneas más abajo, sí verifica
+// `status === "in_progress"`. Dos implementaciones de la misma pregunta que se
+// responden distinto, y el widget de notificaciones del cliente pagó la
+// diferencia: mostraba "Pendientes: 2" con el panel vacío.
+//
+// El desfasaje era real. `closeSession` no sacaba el id del sorted set, así que
+// toda sesión cerrada SIN haber sido asignada —el cierre masivo al apagar la
+// atención humana, o un admin cerrando desde la lista sin tomarla— quedaba
+// adentro como fantasma durante los 7 días del TTL de sesiones resueltas.
+//
+// Ahora el `status` es la única fuente de verdad y el sorted set es un índice:
+// si discrepan, gana el status y el índice se corrige. Se limpia acá además de
+// en `closeSession` para que los fantasmas ya colgados se vayan solos, sin
+// tener que tocar Redis a mano.
 export async function getPendingSessions(tenantId: string | null = null): Promise<HumanSupportSession[]> {
   const redis = getRedisClient()
   if (!redis) return []
@@ -239,15 +258,59 @@ export async function getPendingSessions(tenantId: string | null = null): Promis
   const results = await pipeline.exec()
 
   const sessions: HumanSupportSession[] = []
-  for (const raw of results) {
-    if (!raw) continue
+  const aLimpiar: string[] = []
+
+  // Se recorre por índice para conservar el sessionId de cada resultado: sin él
+  // no se puede limpiar la entrada que sobra.
+  for (let i = 0; i < sessionIds.length; i++) {
+    const sessionId = String(sessionIds[i])
+    const raw = results[i]
+
+    // La sesión ya no existe (venció su TTL). La entrada del índice no vence
+    // sola, así que hay que sacarla explícitamente o se acumula para siempre.
+    if (!raw) {
+      aLimpiar.push(sessionId)
+      continue
+    }
+
+    let session: HumanSupportSession | null = null
     try {
-      const session = (typeof raw === "string" ? JSON.parse(raw) : raw) as HumanSupportSession
-      if (session && (tenantId === null || session.tenantId === tenantId)) {
-        sessions.push(session)
-      }
+      session = (typeof raw === "string" ? JSON.parse(raw) : raw) as HumanSupportSession
     } catch {
-      // skip malformed session
+      aLimpiar.push(sessionId)
+      continue
+    }
+
+    if (!session) {
+      aLimpiar.push(sessionId)
+      continue
+    }
+
+    // Ya no está pendiente: asignada, resuelta o lo que sea. Fuera del índice.
+    //
+    // Se limpia sin importar el tenant. Un fantasma de otra clínica sigue
+    // siendo un fantasma, y dejarlo obligaría a que justo esa clínica consulte
+    // para que se limpie.
+    if (session.status !== "pending") {
+      aLimpiar.push(sessionId)
+      continue
+    }
+
+    if (tenantId === null || session.tenantId === tenantId) {
+      sessions.push(session)
+    }
+  }
+
+  // Best-effort: el conteo que se devuelve ya es correcto aunque esto falle.
+  // En régimen normal no hay nada para limpiar y no se escribe nada.
+  if (aLimpiar.length > 0) {
+    try {
+      await redis.zrem(SUPPORT_PENDING_SET, ...aLimpiar)
+      console.log(
+        `[HUMAN_SUPPORT] 🧹 ${aLimpiar.length} sesión(es) fantasma sacadas del índice de pendientes: ${aLimpiar.join(", ")}`,
+      )
+    } catch (error) {
+      console.error("[HUMAN_SUPPORT] No se pudo limpiar el índice de pendientes:", error)
     }
   }
 
@@ -373,6 +436,20 @@ export async function closeSession(sessionId: string, note?: string): Promise<bo
   await redis.set(sessionKey, JSON.stringify(session))
   await redis.expire(sessionKey, RESOLVED_SESSION_TTL)
   await touchSupportSessionActivity(sessionId)
+
+  // Remover del índice de pendientes (23/9/2026)
+  //
+  // Esta línea faltaba. Casi siempre no hacía falta —pendiente → asignada →
+  // cerrada, y `assignSessionToAgent` ya la había sacado— pero una sesión que
+  // se cierra SIN haber sido asignada nunca pasa por ahí: el cierre masivo al
+  // apagar la atención humana y el cierre de un admin desde la lista son los
+  // dos caminos reales. Quedaba en el índice, y el widget del cliente la
+  // seguía contando como pendiente durante una semana.
+  //
+  // Incondicional a propósito: preguntar antes por el estado sería otra
+  // oportunidad de que los dos se desfasen. Sacarla cuando ya no está es un
+  // no-op barato.
+  await redis.zrem(SUPPORT_PENDING_SET, sessionId)
 
   // Remover de sesiones activas del agente
   if (session.assignedTo) {
