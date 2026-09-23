@@ -49,6 +49,9 @@ export function DashboardNav() {
             <Link href="/dashboard/flows" className="text-foreground/60 hover:text-foreground">
               Flows
             </Link>
+            <Link href="/dashboard/portal" className="text-foreground/60 hover:text-foreground">
+              Portal
+            </Link>
             <Link
               href="/demo"
               className="text-foreground/60 hover:text-foreground"

@@ -19,6 +19,7 @@ import { trackTemplateSent } from "../appointment-stats"
 import { extractAndFormatDate } from "../utils/date-utils"
 import { saveAppointmentContext } from "../appointment-flow-state"
 import { extraerDatosDelTurno, type DatosDelTurno } from "./datos-del-turno"
+import { agregarBotonesAlEnvio } from "../flows/recordatorio-con-botones"
 
 /**
  * Extrae los datos del turno de un template que se está por enviar.
@@ -133,7 +134,34 @@ export interface SendReminderTemplateParams {
 export async function sendReminderTemplate(params: SendReminderTemplateParams): Promise<any> {
   const { config, destinationPhone, cleanPhoneNumber, Body, Chatbot_Data, Sede_Id } = params
 
-  const whatsappResponse = await sendWhatsAppTemplate(config.phoneNumberId, config.accessToken, destinationPhone, Body, config.wabaId)
+  // ── Recordatorio con tres botones (22/9/2026) ────────────────────────────
+  //
+  // El sistema de la clínica manda `confirmacion_1_turno`, que tiene dos
+  // botones: confirmar y cancelar. Cuando el cliente tiene el portal activo, lo
+  // reescribimos al template de tres —el tercero es "Reprogramar turno"— sin
+  // que la clínica cambie absolutamente nada de su integración.
+  //
+  // Los parámetros del cuerpo se copian tal cual. Es lo único que no puede
+  // fallar acá: un parámetro corrido es un paciente recibiendo la fecha de otro.
+  //
+  // Si algo no encaja —el template ya trae botones propios, el payload tiene
+  // otra forma, el cliente no configuró el nombre— se manda el original. Un
+  // recordatorio sin el botón nuevo llega igual; uno que no llega es un
+  // paciente que no se entera de su turno.
+  let bodyAEnviar = Body
+  if (config.clientePortalWeb === true && config.templateRecordatorioFlows) {
+    const reescrito = agregarBotonesAlEnvio(Body, {
+      nombreTemplateFlows: config.templateRecordatorioFlows,
+    })
+    if (reescrito) {
+      bodyAEnviar = reescrito
+      console.log(`[REMINDERS] Recordatorio reescrito a ${config.templateRecordatorioFlows} (3 botones)`)
+    } else {
+      console.warn("[REMINDERS] No se pudo reescribir el recordatorio; se envía el original")
+    }
+  }
+
+  const whatsappResponse = await sendWhatsAppTemplate(config.phoneNumberId, config.accessToken, destinationPhone, bodyAEnviar, config.wabaId)
 
   const templateContent = extractTemplateContent(Body, Chatbot_Data)
   await saveConversationMessage({

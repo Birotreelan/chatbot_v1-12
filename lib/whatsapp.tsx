@@ -15,6 +15,8 @@ import {
   mensajeDerivacionPorArchivo,
   mensajeSinAtencionHumana,
 } from "./media-entrante"
+import { usaPortal, derivarAlPortal, datosDesdeElContexto } from "./portal/derivar-al-portal"
+import { accionDelBoton } from "./flows/recordatorio-con-botones"
 import { presentarSiCorresponde } from "./conversation-state/presentacion-inicial"
 import {
   mencionaOtraConsulta,
@@ -3193,6 +3195,58 @@ export async function handleMessage(value: any) {
     }
 
     // ============================================================================
+    // PORTAL WEB: BOTÓN "REPROGRAMAR TURNO" DEL RECORDATORIO (22/9/2026)
+    // ============================================================================
+    // Cuando el cliente tiene el portal activo, este botón deja de abrir una
+    // conversación de cuatro a seis mensajes y pasa a ser uno solo con un
+    // enlace. Confirmar y cancelar siguen resolviéndose acá: ya son un toque y
+    // mandar al paciente a un sitio web para eso sería peor y más caro en
+    // abandono.
+    //
+    // Se resuelve antes que el resto del ruteo por el mismo motivo que el
+    // audio y los archivos: si el mensaje sigue bajando por el embudo, alguna
+    // capa lo interpreta como texto libre y arranca el flujo viejo.
+    //
+    // `derivarAlPortal` devuelve false ante cualquier problema —el switch
+    // apagado, Redis caído, la URL sin dominio— y entonces seguimos con el
+    // flujo conversacional de siempre. Activar el portal no puede romper nada.
+    if (
+      usaPortal(config) &&
+      (message.type === "button" || message.interactive?.type === "button_reply")
+    ) {
+      const boton =
+        message.type === "button"
+          ? { text: message.button?.text, payload: message.button?.payload }
+          : { text: message.interactive?.button_reply?.title, payload: message.interactive?.button_reply?.id }
+
+      if (accionDelBoton(boton) === "reagendar") {
+        const contextoDelTurno = await getAppointmentContext(userPhoneNumber, config.id).catch(() => null)
+
+        const derivado = await derivarAlPortal({
+          config,
+          phoneNumberId: value.metadata.phone_number_id,
+          userPhoneNumber,
+          intencion: "reagendar",
+          origen: "recordatorio",
+          paciente: datosDesdeElContexto(contextoDelTurno),
+        })
+
+        if (derivado) {
+          await saveConversationMessage({
+            id: nanoid(),
+            role: "user",
+            content: userMessage,
+            timestamp: new Date().toISOString(),
+            phoneNumber: userPhoneNumber,
+            configId: config.id,
+          })
+          await updateWhatsAppStats(config.id, { messagesReceived: 1, messagesProcessed: 1 })
+          return
+        }
+      }
+    }
+
+    // ============================================================================
     // ARCHIVO ENTRANTE (21/9/2026)
     // ============================================================================
     // El camino inverso al de los archivos que manda el panel. Se resuelve acá,
@@ -5803,6 +5857,45 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             }
 
             if (detectionResult.action === 'book_new_appointment' || detectionResult.action === 'other_inquiry') {
+              // PORTAL WEB (22/9/2026): el camino más caro de todos — siete a
+              // once mensajes hasta reservar — se reemplaza por uno solo con un
+              // enlace. Se intercepta acá, con el paciente ya identificado, para
+              // que el portal no tenga que volver a preguntarle quién es.
+              //
+              // Sólo para 'book_new_appointment': 'other_inquiry' es una
+              // consulta, y una consulta se conversa.
+              if (detectionResult.action === 'book_new_appointment' && usaPortal(config)) {
+                // `patientInfo` es una unión que TypeScript no estrecha en este
+                // punto del archivo; el código de abajo lee los mismos campos y
+                // arrastra el mismo error desde antes. Se acota acá en vez de
+                // sumar tres errores más al conteo.
+                const info = patientInfo as {
+                  patientId?: string
+                  patientName?: string
+                  patientDNI?: string
+                  obraSocialId?: string
+                }
+
+                const derivado = await derivarAlPortal({
+                  config,
+                  phoneNumberId: value.metadata.phone_number_id,
+                  userPhoneNumber,
+                  intencion: 'nuevo_turno',
+                  origen: 'conversacion',
+                  paciente: {
+                    pacienteId: info.patientId,
+                    pacienteNombre: info.patientName,
+                    pacienteDNI: info.patientDNI,
+                    obraSocialId: info.obraSocialId,
+                  },
+                })
+                if (derivado) {
+                  await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                  return
+                }
+                // Si no se pudo derivar, sigue el flujo de siempre.
+              }
+
               // Verificar si ya hay un flujo de paciente existente activo y más avanzado
               const existingPhase = await getExistingPatientFlowPhase(userPhoneNumber)
               
