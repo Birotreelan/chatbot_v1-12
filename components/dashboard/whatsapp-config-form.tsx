@@ -981,9 +981,17 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 />
                 <p className="text-sm text-muted-foreground">
                   Sitios desde donde se puede usar el widget de esta clínica. Separá varios dominios con coma, sin
-                  "https://" (ej: clinica.com, turnos.clinica.com). Si lo dejás vacío, el widget funciona desde
-                  cualquier sitio (sin restricción).
+                  &quot;https://&quot; (ej: clinica.com). Cada dominio cubre también sus subdominios y su
+                  &quot;www.&quot;, así que no hace falta listarlos aparte.
                 </p>
+
+                {!formData.widgetAllowedDomains?.trim() && (
+                  <p className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-sm">
+                    <strong>El widget de esta clínica está apagado.</strong> Desde el 24/9/2026, sin dominios
+                    cargados no se puede mostrar en ningún sitio — antes funcionaba en todos. Escribí acá el
+                    dominio de la clínica para volver a habilitarlo.
+                  </p>
+                )}
               </div>
 
               <Separator />

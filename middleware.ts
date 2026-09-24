@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
+import { dominiosPermitidosDelCliente, frameAncestors } from "@/lib/widget-dominios-edge"
 
 /**
  * Los headers que un sitio externo puede mandarnos (24/9/2026).
@@ -25,7 +26,7 @@ import type { NextRequest } from "next/server"
  */
 const HEADERS_PERMITIDOS = "Content-Type, Authorization, X-Requested-With, Cache-Control, Pragma, Expires"
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const fullUrl = request.url
   
@@ -81,8 +82,46 @@ export function middleware(request: NextRequest) {
     response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     response.headers.set("Access-Control-Allow-Headers", HEADERS_PERMITIDOS)
     response.headers.set("Access-Control-Allow-Credentials", "false")
-    response.headers.set("X-Frame-Options", "ALLOWALL")
-    response.headers.set("Content-Security-Policy", "frame-ancestors *")
+
+    // ── Quién puede embeber el widget (24/9/2026) ─────────────────────────
+    //
+    // Esto decía `frame-ancestors *` y `X-Frame-Options: ALLOWALL`, o sea
+    // "cualquier sitio puede embebernos". Con eso, copiar el snippet del embed
+    // y cambiarle el cliente_id alcanzaba para montar el widget de otra
+    // clínica en cualquier página.
+    //
+    // Ahora la lista sale de "Dominios permitidos" de cada cliente, y la hace
+    // cumplir el navegador del visitante: no depende de que el sitio que
+    // embebe se porte bien, que es lo que distingue a esta defensa de los
+    // chequeos de Origin/Referer (esos se falsifican con curl).
+    //
+    // Sólo aplica a las PÁGINAS que se embeben. Para /api/* el header no hace
+    // nada y se omite, porque `X-Frame-Options` heredado de antes bloqueaba
+    // cosas que no tenía por qué bloquear.
+    const esPaginaEmbebible = pathname.startsWith("/widget") && !pathname.startsWith("/api")
+
+    if (esPaginaEmbebible) {
+      const clienteId =
+        request.nextUrl.searchParams.get("clienteId") ||
+        request.nextUrl.searchParams.get("cliente_id") ||
+        ""
+
+      const dominios = await dominiosPermitidosDelCliente(clienteId)
+      const ancestros = frameAncestors(dominios)
+
+      // `X-Frame-Options` no entiende listas de dominios: sólo DENY,
+      // SAMEORIGIN o el ALLOW-FROM que casi ningún navegador implementó. Como
+      // los navegadores actuales le dan prioridad a `frame-ancestors` cuando
+      // están los dos, mandar ambos sólo agrega una forma de contradecirse.
+      // Se manda uno solo.
+      response.headers.set("Content-Security-Policy", `frame-ancestors ${ancestros}`)
+
+      if (ancestros === "'none'") {
+        console.warn(
+          `[MIDDLEWARE] ⛔ ${pathname}: el cliente "${clienteId}" no tiene Dominios permitidos cargados; no se puede embeber en ningún sitio`,
+        )
+      }
+    }
 
     console.log("[MIDDLEWARE] ✅ Headers CORS aplicados para:", pathname)
     return response

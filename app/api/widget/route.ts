@@ -1,13 +1,25 @@
 import { NextResponse } from "next/server"
 import { getConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
+import { isWidgetOriginAllowed } from "@/lib/widget-domain-validation"
 
-// Nota: este endpoint NO valida `widgetAllowedDomains` (a diferencia de
-// /api/widget-form y /api/chat). Es CDN-cacheado por cliente_id
-// (Cache-Control s-maxage=300) y no expone PII de pacientes — sólo datos de
-// apariencia ya pensados para ser públicos. Validar el origen acá arriesga
-// servir una respuesta cacheada de un origen a otro (el cache no varía por
-// header Origin), sin ganancia real de seguridad.
+// ── Ahora sí valida el origen (24/9/2026) ──────────────────────────────────
+//
+// Hasta hoy no lo hacía, y la nota que estaba acá daba dos razones. Una sigue
+// siendo cierta y la otra no alcanzaba:
+//
+//  - "No expone PII": correcto, sólo devuelve datos de apariencia. Pero el
+//    punto no es lo que se filtra: es que este endpoint es lo que necesita el
+//    loader para MOSTRAR el widget. Sin él no hay botón ni burbuja, así que es
+//    la puerta que hay que cerrar para que un sitio ajeno no pueda montar el
+//    widget de una clínica con su cliente_id.
+//
+//  - "El cache no varía por Origin": esa era la objeción real, y era buena.
+//    Validar sin más habría hecho que el CDN sirviera la respuesta cacheada de
+//    un origen a otro, y el chequeo no habría servido para nada. Se resuelve
+//    con `Vary: Origin` — el CDN guarda una entrada por origen— y con
+//    `no-store` en los rechazos, para que un 403 no quede cacheado y termine
+//    negándole el widget al sitio legítimo.
 export async function GET(request: Request) {
   const ip = request.headers.get("x-forwarded-for") || "unknown"
   const rateLimitResult = await rateLimit(`widget-config:ip:${ip}`, 60, 60000)
@@ -44,6 +56,22 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Widget configuration not found" }, { status: 404 })
     }
 
+    if (!isWidgetOriginAllowed(config, request)) {
+      console.warn(
+        `[WIDGET-API] ⛔ Origen no autorizado para ${cliente_id}:`,
+        request.headers.get("origin") || request.headers.get("referer") || "(sin origin ni referer)",
+      )
+      return NextResponse.json(
+        { error: "Este sitio no está autorizado para mostrar el widget" },
+        {
+          status: 403,
+          // Sin cache: un 403 cacheado le negaría el widget al sitio legítimo
+          // durante los cinco minutos siguientes.
+          headers: { "Cache-Control": "no-store", Vary: "Origin" },
+        },
+      )
+    }
+
     // SEGURIDAD (2026-07-06): devolver SOLO los campos que el widget necesita.
     // Antes se hacía `...config`, exponiendo accessToken de WhatsApp, proxy y
     // teléfono de escalación a cualquier visitante del sitio público.
@@ -69,6 +97,10 @@ export async function GET(request: Request) {
       {
         headers: {
           "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
+          // Una entrada de cache por origen. Sin esto, el CDN le serviría a un
+          // sitio la respuesta que generó para otro, y el chequeo de arriba no
+          // serviría para nada.
+          Vary: "Origin",
         },
       },
     )
