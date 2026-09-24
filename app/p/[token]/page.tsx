@@ -35,7 +35,7 @@ import { marcaDelPortal } from "@/lib/portal/marca"
 import { agendaParaReprogramar, agendaParaTurnoNuevo, turnosDeEjemplo } from "@/lib/portal/agenda"
 import { obtenerEspecialidades, obtenerTodosLosProfesionales } from "@/lib/api-tools/api-functions"
 import { getWhatsAppConfigById } from "@/lib/db"
-import { Marco, Aviso, ResumenDelTurno } from "@/components/portal/marco"
+import { Marco, Aviso, ResumenDelTurno, TituloDePaso } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
 import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
@@ -77,6 +77,7 @@ export default async function PaginaDelPortal({
     return (
       <Marco marca={marcaDelPortal(null)} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
         <Aviso
+          tono="atencion"
           titulo="Este enlace ya no está disponible"
           detalle="Puede haber vencido o haberse usado. Escribinos por WhatsApp y te mandamos uno nuevo."
         />
@@ -97,7 +98,11 @@ export default async function PaginaDelPortal({
   if (!permiteVerDatos(estado)) {
     return (
       <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
-        <Aviso titulo="Este enlace venció" detalle="Escribinos por WhatsApp y te mandamos uno nuevo." />
+        <Aviso
+          tono="atencion"
+          titulo="Este enlace venció"
+          detalle="Escribinos por WhatsApp y te mandamos uno nuevo."
+        />
       </Marco>
     )
   }
@@ -110,7 +115,7 @@ export default async function PaginaDelPortal({
       <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
         <Aviso titulo="Listo" detalle={contexto.resultado.texto} tono="exito" />
         {contexto.resultado.turno && <ResumenDelTurno turno={contexto.resultado.turno} />}
-        <p style={{ color: "#374151" }}>Te va a llegar la confirmación por WhatsApp.</p>
+        <p className="text-gray-600">Te va a llegar la confirmación por WhatsApp.</p>
       </Marco>
     )
   }
@@ -119,6 +124,7 @@ export default async function PaginaDelPortal({
     return (
       <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
         <Aviso
+          tono="atencion"
           titulo="El plazo para gestionar por acá terminó"
           detalle="Escribinos por WhatsApp y lo resolvemos."
         />
@@ -161,26 +167,28 @@ export default async function PaginaDelPortal({
     obraSocialBloqueada: contexto.identidad?.obraSocialBloqueada,
   }
 
+  // Lo que se muestra en el repaso previo a confirmar. El nombre completo, no
+  // el de pila: acá el paciente está verificando que el turno quede a nombre de
+  // quien corresponde, que es justo el caso del turno para un familiar.
+  const datosParaElResumen = {
+    nombre:
+      contexto.pacienteNombre ||
+      [identidad.nombre, identidad.apellido].filter(Boolean).join(" ") ||
+      undefined,
+    obraSocial: identidad.obraSocialNombre,
+  }
+
   const paso = decidirPaso(contexto.intencion, permisos, filtros, identidad)
   const clienteId = contexto.clienteId || ""
 
   // El aviso de prueba va arriba de todo y en todas las pantallas. Si alguien
   // abre este enlace sin saber qué es, tiene que enterarse antes de tocar nada.
   const avisoDemo = contexto.demo ? (
-    <div
-      style={{
-        border: "1px solid #d97706",
-        background: "#fffbeb",
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 16,
-      }}
-    >
-      <p style={{ margin: 0, fontWeight: 500 }}>Enlace de prueba</p>
-      <p style={{ margin: "4px 0 0", fontSize: 14, color: "#374151" }}>
-        Podés recorrer todas las pantallas. No se reserva ni se cancela ningún turno real.
-      </p>
-    </div>
+    <Aviso
+      titulo="Enlace de prueba"
+      detalle="Podés recorrer todas las pantallas. No se reserva ni se cancela ningún turno real."
+      tono="atencion"
+    />
   ) : null
 
   const marco = (hijos: React.ReactNode) => (
@@ -201,17 +209,17 @@ export default async function PaginaDelPortal({
   if (paso === "pedir_dni") {
     return marco(
       <>
-        <p style={{ fontSize: 18, margin: "0 0 8px" }}>
-          {paraFamiliar
-            ? "¿Cuál es el DNI de la persona que se va a atender?"
-            : "Para buscar tu turno, necesitamos tu DNI."}
-        </p>
-        <p style={{ color: "#6b7280", margin: "0 0 20px", fontSize: 15 }}>
-          {paraFamiliar
-            ? "Si ya se atendió en la clínica, con esto alcanza: traemos sus datos solos."
-            : "Si ya te atendiste en la clínica, con esto alcanza: traemos tus datos solos."}
-        </p>
-        <PedirDNI token={token} marca={marca} paraFamiliar={paraFamiliar} />
+        <TituloDePaso
+          tipo="dni"
+          detalle={
+            paraFamiliar
+              ? "Si ya se atendió en la clínica, con esto alcanza: traemos sus datos solos."
+              : "Si ya te atendiste en la clínica, con esto alcanza: traemos tus datos solos."
+          }
+        >
+          {paraFamiliar ? "¿Cuál es el DNI de la persona que se va a atender?" : "¿Cuál es tu DNI?"}
+        </TituloDePaso>
+        <PedirDNI token={token} paraFamiliar={paraFamiliar} />
       </>,
     )
   }
@@ -220,15 +228,17 @@ export default async function PaginaDelPortal({
   if (paso === "registrar") {
     return marco(
       <>
-        <p style={{ fontSize: 18, margin: "0 0 8px" }}>
-          {paraFamiliar ? "Es su primera vez con nosotros." : "Es tu primera vez con nosotros."}
-        </p>
-        <p style={{ color: "#6b7280", margin: "0 0 20px", fontSize: 15 }}>
-          {paraFamiliar
-            ? "Completá los datos de la persona que se va a atender y seguimos con el turno."
-            : "Completá estos datos y seguimos con el turno."}
-        </p>
-        <DarseDeAlta token={token} dni={identidad.dni} marca={marca} paraFamiliar={paraFamiliar} />
+        <TituloDePaso
+          tipo="datos"
+          detalle={
+            paraFamiliar
+              ? "Completá los datos de la persona que se va a atender y seguimos con el turno."
+              : "Completá estos datos y seguimos con el turno."
+          }
+        >
+          {paraFamiliar ? "Es su primera vez con nosotros" : "Es tu primera vez con nosotros"}
+        </TituloDePaso>
+        <DarseDeAlta token={token} dni={identidad.dni} paraFamiliar={paraFamiliar} />
       </>,
     )
   }
@@ -244,6 +254,7 @@ export default async function PaginaDelPortal({
     return marco(
       <>
         <Aviso
+          tono="atencion"
           titulo={
             nombreOS
               ? `Los turnos de ${nombreOS} se gestionan por teléfono`
@@ -255,7 +266,7 @@ export default async function PaginaDelPortal({
               : "Escribinos por WhatsApp y te pasamos el contacto de la clínica."
           }
         />
-        <p style={{ color: "#374151", fontSize: 15 }}>
+        <p className="text-[15px] text-gray-600">
           Tus datos quedaron guardados, así que no vas a tener que repetirlos.
         </p>
       </>,
@@ -286,11 +297,12 @@ export default async function PaginaDelPortal({
           <Aviso
             titulo="Horarios de ejemplo"
             detalle="La agenda real no devolvió turnos disponibles, así que estos son inventados para poder seguir probando."
+            tono="atencion"
           />
         )}
-        <p style={{ fontSize: 18, margin: "0 0 16px" }}>
-          {nombre ? `Hola, ${nombre}. ` : ""}Elegí el nuevo horario para tu turno.
-        </p>
+        <TituloDePaso tipo="agenda">
+          {nombre ? `Hola, ${nombre}. ` : ""}Elegí el nuevo horario
+        </TituloDePaso>
 
         {contexto.turno && <ResumenDelTurno turno={contexto.turno} titulo="Tu turno actual" />}
 
@@ -300,11 +312,12 @@ export default async function PaginaDelPortal({
           <Aviso
             titulo="Estos son todos los horarios de la sede"
             detalle={`No pudimos filtrar sólo por ${contexto.turno.profesional}. Mirá el profesional antes de confirmar.`}
+            tono="atencion"
           />
         )}
 
         {agenda.filtradoPorProfesional && agenda.profesionalNombre && dias.length > 0 && (
-          <p style={{ color: "#6b7280", margin: "0 0 16px" }}>
+          <p className="text-[15px] text-gray-500">
             Horarios disponibles con {agenda.profesionalNombre}.
           </p>
         )}
@@ -319,6 +332,7 @@ export default async function PaginaDelPortal({
             sabe cosas que nosotros no. */}
         {dias.length === 0 && (
           <Aviso
+            tono="atencion"
             titulo="No hay horarios para reprogramar"
             detalle={
               mensajeSinTurnos(agenda.infoSinTurnos) ||
@@ -328,7 +342,12 @@ export default async function PaginaDelPortal({
         )}
 
         {dias.length > 0 && (
-          <SelectorDeTurnos token={token} dias={dias} marca={marca} etiquetaConfirmar="Confirmar el cambio" />
+          <SelectorDeTurnos
+            token={token}
+            dias={dias}
+            paciente={datosParaElResumen}
+            etiquetaConfirmar="Confirmar el cambio"
+          />
         )}
       </>,
     )
@@ -343,10 +362,10 @@ export default async function PaginaDelPortal({
     if (opciones.length > 0) {
       return marco(
         <>
-          <p style={{ fontSize: 18, margin: "0 0 16px" }}>
+          <TituloDePaso tipo="elegir">
             {nombre ? `Hola, ${nombre}. ` : ""}¿Qué tipo de consulta necesitás?
-          </p>
-          <ElegirFiltro token={token} campo="especialidadId" opciones={opciones} marca={marca} />
+          </TituloDePaso>
+          <ElegirFiltro token={token} campo="especialidadId" opciones={opciones} />
           {ofreceVerTodos(permisos) && <VerTodos token={token} etiqueta="Ver todos los horarios" />}
         </>,
       )
@@ -361,10 +380,10 @@ export default async function PaginaDelPortal({
       const conservar = filtros.especialidadId ? { especialidadId: filtros.especialidadId } : undefined
       return marco(
         <>
-          <p style={{ fontSize: 18, margin: "0 0 16px" }}>
+          <TituloDePaso tipo="elegir">
             {nombre ? `Hola, ${nombre}. ` : ""}¿Con qué profesional querés atenderte?
-          </p>
-          <ElegirFiltro token={token} campo="profesionalId" opciones={opciones} marca={marca} conservar={conservar} />
+          </TituloDePaso>
+          <ElegirFiltro token={token} campo="profesionalId" opciones={opciones} conservar={conservar} />
           {ofreceVerTodos(permisos) && (
             <VerTodos token={token} etiqueta="Me da igual el profesional" conservar={conservar} />
           )}
@@ -395,21 +414,28 @@ export default async function PaginaDelPortal({
         <Aviso
           titulo="Horarios de ejemplo"
           detalle="La agenda real no devolvió turnos con estos filtros, así que estos son inventados para poder seguir probando."
+          tono="atencion"
         />
       )}
 
-      <p style={{ fontSize: 18, margin: "0 0 16px" }}>
-        {nombre ? `Hola, ${nombre}. ` : ""}Elegí el horario que te quede mejor.
-      </p>
+      <TituloDePaso tipo="agenda">
+        {nombre ? `Hola, ${nombre}. ` : ""}Elegí el horario que te quede mejor
+      </TituloDePaso>
 
       {agendaNueva.total === 0 && !conEjemplos && (
         <Aviso
           titulo="No encontramos horarios con esos filtros"
           detalle="Probá sin elegir profesional, o escribinos por WhatsApp."
+          tono="atencion"
         />
       )}
 
-      <SelectorDeTurnos token={token} dias={diasNuevos} marca={marca} etiquetaConfirmar="Confirmar mi turno" />
+      <SelectorDeTurnos
+        token={token}
+        dias={diasNuevos}
+        paciente={datosParaElResumen}
+        etiquetaConfirmar="Confirmar mi turno"
+      />
     </>,
   )
 }
@@ -460,17 +486,7 @@ function VerTodos({
   return (
     <a
       href={`/p/${token}?${params.toString()}`}
-      style={{
-        display: "block",
-        textAlign: "center",
-        padding: "14px 16px",
-        marginTop: 12,
-        borderRadius: 12,
-        border: "1px solid #d1d5db",
-        background: "#fff",
-        color: "#111827",
-        textDecoration: "none",
-      }}
+      className="mt-3 block min-h-[56px] rounded-xl border border-gray-300 bg-white px-4 py-4 text-center text-gray-800 no-underline"
     >
       {etiqueta}
     </a>

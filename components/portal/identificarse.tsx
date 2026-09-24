@@ -22,19 +22,13 @@
  */
 
 import { useState } from "react"
-import type { MarcaDelPortal } from "@/lib/portal/marca"
+import { Loader2 } from "lucide-react"
+import { Aviso, BotonPrimario } from "./marco"
 
-const ESTILO_CAMPO: React.CSSProperties = {
-  width: "100%",
-  minHeight: 52,
-  padding: "12px 14px",
-  borderRadius: 12,
-  border: "1px solid #d1d5db",
-  fontSize: 16, // 16px o menos hace que iOS zoomee solo al enfocar el campo.
-  background: "#fff",
-  color: "#111827",
-  boxSizing: "border-box",
-}
+// 16px o más en el campo: con menos, iOS hace zoom solo al enfocarlo y el
+// paciente queda con la pantalla corrida.
+const CLASES_CAMPO =
+  "w-full rounded-xl border border-gray-300 bg-white px-4 py-3.5 text-base text-gray-900 outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
 
 function Campo({
   etiqueta,
@@ -46,13 +40,11 @@ function Campo({
   children: React.ReactNode
 }) {
   return (
-    <label style={{ display: "block", marginBottom: 14 }}>
-      <span style={{ display: "block", fontSize: 14, color: "#374151", marginBottom: 6 }}>
-        {etiqueta}
-      </span>
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-medium text-gray-700">{etiqueta}</span>
       {children}
       {error && (
-        <span role="alert" style={{ display: "block", fontSize: 14, color: "#b91c1c", marginTop: 6 }}>
+        <span role="alert" className="mt-1.5 block text-sm text-red-700">
           {error}
         </span>
       )}
@@ -60,44 +52,20 @@ function Campo({
   )
 }
 
-function Boton({
-  marca,
-  cargando,
-  children,
-}: {
-  marca: MarcaDelPortal
-  cargando: boolean
-  children: React.ReactNode
-}) {
+function Enviando({ children }: { children: React.ReactNode }) {
   return (
-    <button
-      type="submit"
-      disabled={cargando}
-      style={{
-        width: "100%",
-        minHeight: 56,
-        borderRadius: 12,
-        border: "none",
-        background: cargando ? "#9ca3af" : marca.colorPrimario,
-        color: "#fff",
-        fontSize: 17,
-        fontWeight: 600,
-        cursor: cargando ? "default" : "pointer",
-      }}
-    >
-      {cargando ? "Un momento..." : children}
-    </button>
+    <span className="inline-flex items-center gap-2">
+      <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> {children}
+    </span>
   )
 }
 
 /** Paso 1: el DNI, solo. */
 export function PedirDNI({
   token,
-  marca,
   paraFamiliar,
 }: {
   token: string
-  marca: MarcaDelPortal
   /** El turno es para otra persona: el DNI que va es el de ella. */
   paraFamiliar?: boolean
 }) {
@@ -132,11 +100,8 @@ export function PedirDNI({
   }
 
   return (
-    <form onSubmit={enviar} noValidate>
-      <Campo
-        etiqueta={paraFamiliar ? "DNI de la persona que se atiende" : "Número de DNI"}
-        error={error || undefined}
-      >
+    <form onSubmit={enviar} noValidate className="space-y-4">
+      <Campo etiqueta={paraFamiliar ? "DNI de la persona que se atiende" : "Número de DNI"}>
         <input
           // `inputMode="numeric"` abre el teclado numérico en el teléfono sin
           // rechazar un pegado con puntos: el servidor los saca igual.
@@ -146,12 +111,15 @@ export function PedirDNI({
           value={dni}
           onChange={(e) => setDni(e.target.value)}
           placeholder="30123456"
-          style={ESTILO_CAMPO}
+          className={CLASES_CAMPO}
         />
       </Campo>
-      <Boton marca={marca} cargando={cargando}>
-        Continuar
-      </Boton>
+
+      {error && <Aviso titulo="Revisá el DNI" detalle={error} tono="error" />}
+
+      <BotonPrimario type="submit" deshabilitado={cargando}>
+        {cargando ? <Enviando>Buscando…</Enviando> : "Continuar"}
+      </BotonPrimario>
     </form>
   )
 }
@@ -166,12 +134,10 @@ interface ObraSocial {
 export function DarseDeAlta({
   token,
   dni,
-  marca,
   paraFamiliar,
 }: {
   token: string
   dni?: string
-  marca: MarcaDelPortal
   /** Los datos son de la persona que se atiende, no de quien completa. */
   paraFamiliar?: boolean
 }) {
@@ -235,14 +201,16 @@ export function DarseDeAlta({
   }
 
   return (
-    <form onSubmit={enviar} noValidate>
+    <form onSubmit={enviar} noValidate className="space-y-4">
       <Campo etiqueta={paraFamiliar ? "Apellido del paciente" : "Apellido"} error={errores.apellido}>
         <input
+          // Para un familiar el navegador NO debe autocompletar con los datos
+          // del titular del teléfono: sería exactamente el error a evitar.
           autoComplete={paraFamiliar ? "off" : "family-name"}
           autoFocus
           value={apellido}
           onChange={(e) => setApellido(e.target.value)}
-          style={ESTILO_CAMPO}
+          className={CLASES_CAMPO}
         />
       </Campo>
 
@@ -251,7 +219,7 @@ export function DarseDeAlta({
           autoComplete={paraFamiliar ? "off" : "given-name"}
           value={nombre}
           onChange={(e) => setNombre(e.target.value)}
-          style={ESTILO_CAMPO}
+          className={CLASES_CAMPO}
         />
       </Campo>
 
@@ -263,7 +231,7 @@ export function DarseDeAlta({
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="nombre@ejemplo.com"
-          style={ESTILO_CAMPO}
+          className={CLASES_CAMPO}
         />
       </Campo>
 
@@ -273,12 +241,12 @@ export function DarseDeAlta({
           value={elegida ? elegida.nombre : busquedaOS}
           onChange={(e) => buscarOS(e.target.value)}
           placeholder="Escribí las primeras letras"
-          style={ESTILO_CAMPO}
+          className={CLASES_CAMPO}
         />
       </Campo>
 
       {!elegida && opcionesOS.length > 0 && (
-        <div style={{ marginTop: -6, marginBottom: 14, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div className="-mt-2 space-y-2">
           {opcionesOS.map((os) => (
             <button
               key={os.id}
@@ -287,23 +255,14 @@ export function DarseDeAlta({
                 setElegida(os)
                 setOpcionesOS([])
               }}
-              style={{
-                textAlign: "left",
-                minHeight: 48,
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "1px solid #e5e7eb",
-                background: "#fff",
-                fontSize: 15,
-                cursor: "pointer",
-              }}
+              className="min-h-[52px] w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-left text-[15px]"
             >
               {os.nombre}
               {/* Las que no permiten turnos online se muestran igual, marcadas.
                   Ocultarlas dejaría al paciente buscando la suya sin encontrarla,
                   y terminaría eligiendo una parecida que no es la de él. */}
               {!os.permiteOnline && (
-                <span style={{ display: "block", fontSize: 13, color: "#b45309", marginTop: 2 }}>
+                <span className="mt-0.5 block text-[13px] text-amber-700">
                   Con esta obra social el turno se saca por teléfono
                 </span>
               )}
@@ -313,21 +272,18 @@ export function DarseDeAlta({
       )}
 
       {elegida && !elegida.permiteOnline && (
-        <p style={{ fontSize: 14, color: "#b45309", margin: "-6px 0 14px" }}>
-          Los turnos de {elegida.nombre} se gestionan por teléfono. Si continuás, te vamos a pasar el
-          contacto de la clínica.
-        </p>
+        <Aviso
+          titulo={`Los turnos de ${elegida.nombre} se gestionan por teléfono`}
+          detalle="Si continuás, te vamos a pasar el contacto de la clínica."
+          tono="atencion"
+        />
       )}
 
-      {errores.general && (
-        <p role="alert" style={{ color: "#b91c1c", fontSize: 14, marginBottom: 12 }}>
-          {errores.general}
-        </p>
-      )}
+      {errores.general && <Aviso titulo="No pudimos guardar tus datos" detalle={errores.general} tono="error" />}
 
-      <Boton marca={marca} cargando={cargando}>
-        Continuar
-      </Boton>
+      <BotonPrimario type="submit" deshabilitado={cargando}>
+        {cargando ? <Enviando>Guardando…</Enviando> : "Continuar"}
+      </BotonPrimario>
     </form>
   )
 }

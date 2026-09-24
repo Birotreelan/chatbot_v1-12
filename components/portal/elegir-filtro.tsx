@@ -13,58 +13,46 @@
  * El estado vive en la query string y no en el token: lo que el paciente está
  * eligiendo todavía no es una decisión, y si lo guardáramos en Redis habría que
  * limpiarlo cuando abandona a mitad de camino.
+ *
+ * Son tarjetas y no una lista con viñetas, igual que el widget: cada opción es
+ * una superficie tocable con su nombre y, si la hay, una aclaración debajo.
  */
-
-import type { MarcaDelPortal } from "@/lib/portal/marca"
 
 export function ElegirFiltro({
   token,
   campo,
   opciones,
-  marca,
   conservar,
 }: {
   token: string
   campo: "especialidadId" | "profesionalId"
-  opciones: Array<{ id: string; nombre: string }>
-  marca: MarcaDelPortal
+  opciones: Array<{ id: string; nombre: string; detalle?: string }>
   /** Lo ya elegido en pasos anteriores, para no perderlo. */
   conservar?: Record<string, string>
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div className="space-y-2">
       {opciones.map((opcion) => {
         const params = new URLSearchParams({ ...(conservar || {}), [campo]: opcion.id })
         return (
           <a
             key={opcion.id}
             href={`/p/${token}?${params.toString()}`}
-            style={{
-              // 56px: el paciente lo toca con el pulgar, parado, a veces con
-              // poca vista. Un enlace chico acá es una barrera real.
-              minHeight: 56,
-              display: "flex",
-              alignItems: "center",
-              padding: "14px 16px",
-              borderRadius: 12,
-              border: "1px solid #d1d5db",
-              background: "#fff",
-              color: "#111827",
-              textDecoration: "none",
-              fontSize: 16,
-            }}
+            // 60px: el paciente lo toca con el pulgar, parado, a veces con poca
+            // vista. Un enlace chico acá es una barrera real.
+            className="flex min-h-[60px] items-center rounded-xl border border-gray-200 bg-white px-4 py-3 text-gray-900 no-underline"
           >
             <span
               aria-hidden
-              style={{
-                width: 4,
-                alignSelf: "stretch",
-                borderRadius: 2,
-                background: marca.colorPrimario,
-                marginRight: 12,
-              }}
+              className="mr-3 w-1 self-stretch rounded-sm"
+              style={{ background: "var(--marca)" }}
             />
-            {opcion.nombre}
+            <span className="min-w-0">
+              <span className="block font-medium">{opcion.nombre}</span>
+              {opcion.detalle && (
+                <span className="mt-0.5 block text-sm text-gray-500">{opcion.detalle}</span>
+              )}
+            </span>
           </a>
         )
       })}
