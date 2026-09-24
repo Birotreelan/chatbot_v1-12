@@ -44,6 +44,7 @@ function getCacheKey(action: string, params: Record<string, any>): string {
 // Retrocompatible: las entradas viejas sin marcador se leen como JSON plano.
 // ============================================================================
 import { gzipSync, gunzipSync } from "zlib"
+import { cacheDeOrigenHabilitado } from "./cache-conmutador"
 
 const GZIP_MARKER = "gz64:"
 const COMPRESS_MIN_LENGTH = 2048 // payloads chicos no ganan con compresión
@@ -79,7 +80,10 @@ async function fetchProxyApi<T>(
   params: Record<string, any> = {},
   useCache = true,
 ): Promise<ApiResponse<T>> {
-  const shouldUseCache = useCache && !NO_CACHE_ACTIONS.includes(action)
+  // El interruptor global gana sobre el `useCache` de cada llamada: durante el
+  // desarrollo no se cachea nada del sistema de la clínica. Ver cache-conmutador.ts.
+  const shouldUseCache =
+    cacheDeOrigenHabilitado() && useCache && !NO_CACHE_ACTIONS.includes(action)
 
   // Generar clave de caché
   const cacheKey = getCacheKey(action, { clienteId, ...params })
@@ -574,7 +578,7 @@ export async function obtenerDatosSede(clienteId: string, sedeId: string): Promi
   // Caché Redis — las sedes son cuasi-estáticas, TTL 1 hora
   const redis = getRedisClient()
   const cacheKey = `${CACHE_PREFIX}get_data_sede:${clienteId}:${sedeId}`
-  if (redis) {
+  if (redis && cacheDeOrigenHabilitado()) {
     try {
       const cached = await redis.get(cacheKey)
       if (cached) {
@@ -621,7 +625,9 @@ export async function obtenerDatosSede(clienteId: string, sedeId: string): Promi
     if (data.success && data.sede) {
       // Guardar en caché
       if (redis) {
-        try { await redis.setex(cacheKey, CACHE_TTL_SEDES, compressForCache(data)) } catch { /* ignorar */ }
+        if (cacheDeOrigenHabilitado()) {
+          try { await redis.setex(cacheKey, CACHE_TTL_SEDES, compressForCache(data)) } catch { /* ignorar */ }
+        }
       }
       return data
     }
@@ -654,7 +660,7 @@ export async function obtenerTodasLasSedes(clienteId: string): Promise<SedesList
   // Caché Redis — las sedes son cuasi-estáticas, TTL 1 hora
   const redis = getRedisClient()
   const cacheKey = `${CACHE_PREFIX}get_data_sedes:${clienteId}`
-  if (redis) {
+  if (redis && cacheDeOrigenHabilitado()) {
     try {
       const cached = await redis.get(cacheKey)
       if (cached) {
@@ -704,7 +710,9 @@ export async function obtenerTodasLasSedes(clienteId: string): Promise<SedesList
       }
       // Guardar en caché
       if (redis) {
-        try { await redis.setex(cacheKey, CACHE_TTL_SEDES, compressForCache(result)) } catch { /* ignorar */ }
+        if (cacheDeOrigenHabilitado()) {
+          try { await redis.setex(cacheKey, CACHE_TTL_SEDES, compressForCache(result)) } catch { /* ignorar */ }
+        }
       }
       return result
     }

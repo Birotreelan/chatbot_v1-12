@@ -24,6 +24,7 @@
  */
 
 import { Redis } from "@upstash/redis"
+import { cacheDeOrigenHabilitado } from "./api-tools/cache-conmutador"
 
 const CONFIG_PREFIX = "whatsapp_config:"
 const CLIENTE_TO_CONFIG_PREFIX = "cliente_to_config:"
@@ -76,7 +77,12 @@ export function normalizarHost(host: string): string {
 export async function dominiosPermitidosDelCliente(clienteId: string): Promise<string[] | null> {
   if (!clienteId) return null
 
-  const enCache = CACHE.get(clienteId)
+  // El interruptor global también apaga esto: los dominios permitidos se
+  // editan en el dashboard, y esperar un minuto para ver si el cambio tomó
+  // efecto es justo la duda que el interruptor viene a eliminar.
+  const cacheActivo = cacheDeOrigenHabilitado()
+
+  const enCache = cacheActivo ? CACHE.get(clienteId) : undefined
   if (enCache && enCache.hasta > Date.now()) return enCache.dominios
 
   const r = cliente()
@@ -87,13 +93,13 @@ export async function dominiosPermitidosDelCliente(clienteId: string): Promise<s
     if (!configId) {
       // El índice no existe: puede ser un cliente_id inventado. Eso SÍ es un
       // hecho —no hay config— y se responde con la lista vacía.
-      CACHE.set(clienteId, { dominios: [], hasta: Date.now() + CACHE_MS })
+      if (cacheActivo) CACHE.set(clienteId, { dominios: [], hasta: Date.now() + CACHE_MS })
       return []
     }
 
     const crudo = await r.get(`${CONFIG_PREFIX}${configId}`)
     if (!crudo) {
-      CACHE.set(clienteId, { dominios: [], hasta: Date.now() + CACHE_MS })
+      if (cacheActivo) CACHE.set(clienteId, { dominios: [], hasta: Date.now() + CACHE_MS })
       return []
     }
 
@@ -103,7 +109,7 @@ export async function dominiosPermitidosDelCliente(clienteId: string): Promise<s
       .map(normalizarHost)
       .filter(Boolean)
 
-    CACHE.set(clienteId, { dominios, hasta: Date.now() + CACHE_MS })
+    if (cacheActivo) CACHE.set(clienteId, { dominios, hasta: Date.now() + CACHE_MS })
     return dominios
   } catch (error) {
     console.error("[WIDGET-DOMINIOS] No se pudo leer la configuración:", error)

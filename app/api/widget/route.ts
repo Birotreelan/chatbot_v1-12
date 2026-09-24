@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getConfigByClienteId } from "@/lib/db"
 import { rateLimit } from "@/lib/rate-limit"
 import { isWidgetOriginAllowed } from "@/lib/widget-domain-validation"
+import { cacheDeOrigenHabilitado } from "@/lib/api-tools/cache-conmutador"
 
 // ── Ahora sí valida el origen (24/9/2026) ──────────────────────────────────
 //
@@ -100,7 +101,13 @@ export async function GET(request: Request) {
       },
       {
         headers: {
-          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
+          // El CDN también respeta el interruptor: acá se sirve la
+          // configuración del widget, que se edita en el dashboard. Cachearla
+          // cinco minutos mientras se está ajustando el color o el título hace
+          // dudar de si el cambio se guardó.
+          "Cache-Control": cacheDeOrigenHabilitado()
+            ? "public, s-maxage=300, stale-while-revalidate=600"
+            : "no-store",
           // Una entrada de cache por origen. Sin esto, el CDN le serviría a un
           // sitio la respuesta que generó para otro, y el chequeo de arriba no
           // serviría para nada.
