@@ -1697,6 +1697,31 @@ async function requestFamiliarDni(
   config: any,
   ctxDirect: DirectResponseContext,
 ): Promise<boolean> {
+  // ── Con el portal activo, el DNI lo pide el portal (24/9/2026) ───────────
+  //
+  // Esta función es el embudo de "pedile el DNI del familiar": la llaman tres
+  // lugares del router. Poner la compuerta acá adentro —y no en cada
+  // llamador— es lo que evita que el próximo camino que se agregue se la
+  // saltee. Ya pasó dos veces con el resto de las entradas al portal.
+  //
+  // Sin datos del paciente a propósito: el familiar es otra persona, así que
+  // el portal le va a pedir SU DNI y buscar SU ficha. Mandar la identidad de
+  // quien escribe haría que el turno quede a nombre equivocado.
+  if (usaPortal(config)) {
+    const derivado = await derivarAlPortal({
+      config,
+      phoneNumberId: ctxDirect.phoneNumberId,
+      userPhoneNumber,
+      intencion: 'familiar',
+      origen: 'conversacion',
+    })
+    if (derivado) {
+      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+      return true
+    }
+    // Si no se pudo derivar, sigue pidiendo el DNI por WhatsApp.
+  }
+
   const ok = await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_familiar_dni')
   if (!ok) return false
   const { buildFamiliarDNIRequestMessage } = await import('./conversation-state/patient-detection/patient-templates')
@@ -5672,6 +5697,19 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
         // Paciente existente eligió "Solicitar turno para un familiar" (opción 2 del menú sin-turnos)
         if (detectionResult?.action === 'familiar_appointment_intent') {
+          // Camino C: el menú del paciente EXISTENTE sin turnos.
+          //
+          // Es un tercer lugar desde el que se llega a "quiero un turno para
+          // otra persona", además de los dos del menú de paciente nuevo. Este
+          // se había quedado afuera: el paciente con el portal activo tocaba
+          // "Turno para familiar" y el bot le pedía el DNI por WhatsApp, que
+          // es justo lo que el portal viene a reemplazar.
+          //
+          // Por eso las tres entradas llaman a la misma función. Cada vez que
+          // aparece una nueva hay que acordarse de esto — y ya van dos veces
+          // que me olvido de una.
+          if (await derivarTurnoNuevoAlPortal(true)) return
+
           await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_familiar_dni')
           const familiarDNIMessage = await import('./conversation-state/patient-detection/patient-templates').then(
             m => m.buildFamiliarDNIRequestMessage()
