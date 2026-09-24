@@ -25,7 +25,7 @@ export function ElegirFiltro({
   conservar,
 }: {
   token: string
-  campo: "especialidadId" | "profesionalId"
+  campo: "sedeId" | "especialidadId" | "profesionalId"
   opciones: Array<{ id: string; nombre: string; detalle?: string }>
   /** Lo ya elegido en pasos anteriores, para no perderlo. */
   conservar?: Record<string, string>

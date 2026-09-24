@@ -33,9 +33,13 @@ import { permiteGestionar, permiteVerDatos } from "@/lib/portal/vigencia"
 import { decidirPaso, ofreceVerTodos } from "@/lib/portal/pasos"
 import { marcaDelPortal } from "@/lib/portal/marca"
 import { agendaParaReprogramar, agendaParaTurnoNuevo, turnosDeEjemplo } from "@/lib/portal/agenda"
-import { obtenerEspecialidades, obtenerTodosLosProfesionales } from "@/lib/api-tools/api-functions"
+import {
+  obtenerEspecialidades,
+  obtenerTodosLosProfesionales,
+  obtenerTodasLasSedes,
+} from "@/lib/api-tools/api-functions"
 import { getWhatsAppConfigById } from "@/lib/db"
-import { Marco, Aviso, ResumenDelTurno, TituloDePaso } from "@/components/portal/marco"
+import { Marco, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
 import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
@@ -56,7 +60,12 @@ export default async function PaginaDelPortal({
   searchParams,
 }: {
   params: Promise<{ token: string }>
-  searchParams: Promise<{ especialidadId?: string; profesionalId?: string; sinFiltro?: string }>
+  searchParams: Promise<{
+    sedeId?: string
+    especialidadId?: string
+    profesionalId?: string
+    sinFiltro?: string
+  }>
 }) {
   const { token } = await params
   const filtrosCrudos = await searchParams
@@ -142,10 +151,32 @@ export default async function PaginaDelPortal({
     porProfesional: config?.enableSearchByProfessional,
     porCualquiera: config?.enableSearchByAnyDoctor,
   }
-  const filtros = {
+  const filtros: { sedeId?: string; especialidadId?: string; profesionalId?: string; sinFiltro: boolean } = {
+    // La del query gana sobre la del token: si el paciente eligió otra sede,
+    // eligió otra sede.
+    sedeId: filtrosCrudos.sedeId || contexto.sedeId,
     especialidadId: filtrosCrudos.especialidadId,
     profesionalId: filtrosCrudos.profesionalId,
     sinFiltro: filtrosCrudos.sinFiltro === "1",
+  }
+
+  /**
+   * Lo elegido hasta ahora, para arrastrarlo en los enlaces de los pasos
+   * siguientes y en el "Volver".
+   *
+   * Sólo va lo que el paciente eligió EN el portal (`filtrosCrudos`), no lo que
+   * venía en el token: si la sede la trajo el enlace, no tiene sentido
+   * repetirla en la URL de cada paso.
+   */
+  const elegido: Record<string, string> = {}
+  if (filtrosCrudos.sedeId) elegido.sedeId = filtrosCrudos.sedeId
+  if (filtrosCrudos.especialidadId) elegido.especialidadId = filtrosCrudos.especialidadId
+
+  /** La URL de este mismo portal con un subconjunto de lo ya elegido. */
+  const urlCon = (campos: Record<string, string>) => {
+    const params = new URLSearchParams(campos)
+    const query = params.toString()
+    return query ? `/p/${token}?${query}` : `/p/${token}`
   }
   // ── Quién es el paciente ─────────────────────────────────────────────────
   //
@@ -353,6 +384,37 @@ export default async function PaginaDelPortal({
     )
   }
 
+  // ── Elegir sede ─────────────────────────────────────────────────────────
+  //
+  // Con una sola sede no se pregunta: se usa y se sigue. Preguntarle a alguien
+  // entre una sola opción es hacerlo tocar por nada.
+  if (paso === "elegir_sede") {
+    const sedes = (await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes || []
+    const opciones = sedes
+      .map((sede: any) => ({
+        id: String(sede?.Id ?? ""),
+        nombre: String(sede?.Nombre_Completo ?? "").trim(),
+        detalle: [sede?.Domicilio, sede?.Localidad].filter(Boolean).join(" — ") || undefined,
+      }))
+      .filter((o) => o.id && o.nombre)
+
+    if (opciones.length > 1) {
+      return marco(
+        <>
+          <TituloDePaso tipo="elegir" detalle="Vas a ver los horarios de la sede que elijas.">
+            {nombre ? `Hola, ${nombre}. ` : ""}¿A qué sede querés ir?
+          </TituloDePaso>
+          <ElegirFiltro token={token} campo="sedeId" opciones={opciones} />
+        </>,
+      )
+    }
+
+    // Una sola sede (o ninguna que se pueda leer): se sigue sin preguntar. Que
+    // el proxy no devuelva sedes NO frena al paciente — la búsqueda sin sede
+    // es lo que hacía el portal hasta ahora y sigue funcionando.
+    if (opciones.length === 1) filtros.sedeId = opciones[0].id
+  }
+
   // ── Elegir especialidad ─────────────────────────────────────────────────
   if (paso === "elegir_especialidad") {
     const opciones = normalizarOpciones(await obtenerEspecialidades(clienteId).catch(() => null))
@@ -362,11 +424,14 @@ export default async function PaginaDelPortal({
     if (opciones.length > 0) {
       return marco(
         <>
+          {filtrosCrudos.sedeId && <Volver href={urlCon({})} />}
           <TituloDePaso tipo="elegir">
             {nombre ? `Hola, ${nombre}. ` : ""}¿Qué tipo de consulta necesitás?
           </TituloDePaso>
-          <ElegirFiltro token={token} campo="especialidadId" opciones={opciones} />
-          {ofreceVerTodos(permisos) && <VerTodos token={token} etiqueta="Ver todos los horarios" />}
+          <ElegirFiltro token={token} campo="especialidadId" opciones={opciones} conservar={elegido} />
+          {ofreceVerTodos(permisos) && (
+            <VerTodos token={token} etiqueta="Ver todos los horarios" conservar={elegido} />
+          )}
         </>,
       )
     }
@@ -377,9 +442,18 @@ export default async function PaginaDelPortal({
     const opciones = normalizarOpciones(await obtenerTodosLosProfesionales(clienteId).catch(() => null))
 
     if (opciones.length > 0) {
-      const conservar = filtros.especialidadId ? { especialidadId: filtros.especialidadId } : undefined
+      // Se conserva TODO lo elegido, no sólo la especialidad: antes la sede
+      // elegida se perdía al pasar a este paso y la agenda volvía a buscarse
+      // sin ella.
+      const conservar = elegido
+      const volverA = filtrosCrudos.especialidadId
+        ? urlCon(filtrosCrudos.sedeId ? { sedeId: filtrosCrudos.sedeId } : {})
+        : filtrosCrudos.sedeId
+          ? urlCon({})
+          : null
       return marco(
         <>
+          {volverA && <Volver href={volverA} />}
           <TituloDePaso tipo="elegir">
             {nombre ? `Hola, ${nombre}. ` : ""}¿Con qué profesional querés atenderte?
           </TituloDePaso>
@@ -418,6 +492,19 @@ export default async function PaginaDelPortal({
         />
       )}
 
+      {(filtrosCrudos.profesionalId || filtrosCrudos.especialidadId || filtrosCrudos.sedeId) && (
+        <Volver
+          href={urlCon(
+            filtrosCrudos.profesionalId
+              ? elegido
+              : filtrosCrudos.especialidadId
+                ? filtrosCrudos.sedeId
+                  ? { sedeId: filtrosCrudos.sedeId }
+                  : {}
+                : {},
+          )}
+        />
+      )}
       <TituloDePaso tipo="agenda">
         {nombre ? `Hola, ${nombre}. ` : ""}Elegí el horario que te quede mejor
       </TituloDePaso>

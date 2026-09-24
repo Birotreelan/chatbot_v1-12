@@ -22,6 +22,8 @@ export type Paso =
   /** Su obra social no permite turnos online. Fin del camino, con teléfono. */
   | "derivar_obra_social"
   | "reprogramar"
+  /** Varias sedes y todavía no sabemos en cuál se atiende. */
+  | "elegir_sede"
   | "elegir_especialidad"
   | "elegir_profesional"
   | "elegir_horario"
@@ -36,6 +38,13 @@ export interface PermisosDeBusqueda {
 }
 
 export interface FiltrosElegidos {
+  /**
+   * Sede elegida, o la que ya venía en el token.
+   *
+   * Va primero que todo lo demás: la agenda se busca por sede, así que
+   * elegir profesional antes sería elegir entre los de todas las sedes.
+   */
+  sedeId?: string
   especialidadId?: string
   profesionalId?: string
   /** El paciente tocó "ver todos": se saltean los filtros. */
@@ -111,6 +120,20 @@ export function decidirPaso(
   // Zelmira: la paciente recorrió sede, profesional y especialidad completas
   // para enterarse al final de que su obra social no sacaba turnos online.
   if (identidad.obraSocialBloqueada === true) return "derivar_obra_social"
+
+  // ── La sede, antes que el resto (24/9/2026) ──────────────────────────────
+  //
+  // Faltaba. El portal buscaba con la sede que viniera en el token y, para el
+  // paciente nuevo —que no trae ninguna— buscaba en TODAS: podía terminar con
+  // turno en la otra punta de la ciudad sin que nada se lo advirtiera. El
+  // widget la pregunta (`venue_selection`) y acá se había perdido.
+  //
+  // Va antes que "ver todos": ese atajo saltea el profesional, no el lugar
+  // donde el paciente se va a atender.
+  //
+  // La página resuelve sola el caso de una sola sede: si la lista trae una, la
+  // usa sin preguntar, igual que hace con especialidades y profesionales.
+  if (!filtros.sedeId) return "elegir_sede"
 
   if (filtros.sinFiltro) return "elegir_horario"
 

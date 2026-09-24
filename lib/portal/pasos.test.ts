@@ -191,3 +191,43 @@ describe("altaCompleta", () => {
     expect(altaCompleta({ dni: "1", nombre: "A", apellido: "B", email: "a@b.com" })).toBe(true)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// La sede (24/9/2026)
+//
+// Faltaba, y no era cosmético: el portal buscaba con la sede que viniera en el
+// token, y el paciente nuevo no trae ninguna. Buscaba en TODAS las sedes, así
+// que podía terminar con un turno en la otra punta de la ciudad sin que nada
+// se lo advirtiera. El widget la pregunta (`venue_selection`); acá se había
+// perdido.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("la sede va antes que el resto", () => {
+  const YO = { dni: "36100432", fichaConsultada: true, tieneFicha: true }
+
+  it("sin sede, se pregunta la sede", () => {
+    expect(decidirPaso("nuevo_turno", {}, {}, YO)).toBe("elegir_sede")
+  })
+
+  it("'ver todos los horarios' no la saltea", () => {
+    // Ese atajo saltea el profesional, no el lugar donde el paciente se va a
+    // atender.
+    expect(decidirPaso("nuevo_turno", {}, { sinFiltro: true }, YO)).toBe("elegir_sede")
+  })
+
+  it("con sede, sigue el orden de siempre", () => {
+    expect(decidirPaso("nuevo_turno", {}, { sedeId: "3" }, YO)).toBe("elegir_especialidad")
+    expect(decidirPaso("nuevo_turno", {}, { sedeId: "3", especialidadId: "7" }, YO)).toBe("elegir_profesional")
+    expect(decidirPaso("nuevo_turno", {}, { sedeId: "3", profesionalId: "9" }, YO)).toBe("elegir_horario")
+  })
+
+  it("pero la identidad y la obra social van antes que la sede", () => {
+    expect(decidirPaso("nuevo_turno", {}, {}, {})).toBe("pedir_dni")
+    expect(decidirPaso("nuevo_turno", {}, {}, { dni: "1", fichaConsultada: true, tieneFicha: false })).toBe("registrar")
+    expect(decidirPaso("nuevo_turno", {}, {}, { ...YO, obraSocialBloqueada: true })).toBe("derivar_obra_social")
+  })
+
+  it("reprogramar nunca pregunta la sede: el turno ya tiene una", () => {
+    expect(decidirPaso("reagendar", {}, {}, {})).toBe("reprogramar")
+  })
+})
