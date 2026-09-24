@@ -18,7 +18,7 @@
  * clínica termina con dos historias clínicas de la misma persona.
  */
 
-import { buscarPacientePorDNI, validarObraSocial } from "../api-tools/api-functions"
+import { buscarPaciente, validarObraSocial } from "../api-tools/api-functions"
 import { resolverTurnosOnline } from "../conversation-state/shared/obra-social"
 import type { IdentidadDelPaciente } from "./pasos"
 
@@ -126,9 +126,22 @@ export async function resolverPorDNI(
   clienteId: string,
   dni: string,
 ): Promise<IdentidadDelPaciente | null> {
-  let respuesta: Awaited<ReturnType<typeof buscarPacientePorDNI>>
+  let respuesta: Awaited<ReturnType<typeof buscarPaciente>>
   try {
-    respuesta = await buscarPacientePorDNI(dni, clienteId)
+    // ── Sin caché, a propósito (24/9/2026) ────────────────────────────────
+    //
+    // `buscarPacientePorDNI` cachea la respuesta cinco minutos. Para el bot
+    // está bien: consulta el mismo DNI varias veces dentro de una conversación.
+    //
+    // Acá no, porque esta respuesta decide si se CREA una ficha. El caso que
+    // lo rompe: alguien se da de alta por el portal, reserva —y con eso su
+    // ficha queda creada en el sistema de la clínica—, y vuelve a entrar a los
+    // dos minutos. El "no encontrado" cacheado lo manda al alta otra vez, y la
+    // clínica termina con dos historias clínicas de la misma persona.
+    //
+    // Es el mismo duplicado silencioso que se evita buscando antes de dar de
+    // alta; buscar contra una respuesta vieja lo reintroduce por la ventana.
+    respuesta = await buscarPaciente(clienteId, { dni }, false)
   } catch (error) {
     console.error("[PORTAL] Error buscando al paciente por DNI:", error)
     return null
