@@ -253,17 +253,51 @@ export async function agendaParaTurnoNuevo(params: {
   pacienteDNI?: string
   obraSocialId?: string
 }): Promise<AgendaDelPortal> {
+  // ── Sin Paciente_DNI, igual que el bot (24/9/2026) ───────────────────────
+  //
+  // El flujo conversacional de turno nuevo llama a `searchTurnosFull` con
+  // sede, obra social, profesional y especialidad — y NADA más. El portal
+  // además mandaba el DNI, y eso no es un detalle: hay un caso documentado
+  // (Andrea/Carmen, 26/8/2026, en whatsapp.tsx) donde mandar `Paciente_DNI` a
+  // `get_turnos` hacía que el proxy devolviera CERO turnos aunque el
+  // profesional tuviera agenda libre.
+  //
+  // La elegibilidad por obra social ya la resuelve `Deudor_Id`, que sí se
+  // manda. El DNI no agrega nada acá y puede sacar todo.
   const resultado = await searchTurnosFull(
     params.clienteId,
     {
       sedeId: params.sedeId || "",
-      pacienteDNI: params.pacienteDNI,
       obraSocialId: params.obraSocialId,
       profesionalId: params.profesionalId,
       especialidadId: params.especialidadId,
     },
     params.phone,
   )
+
+  // ── Diagnóstico del filtro por especialidad (24/9/2026) ──────────────────
+  //
+  // Reportado: elegir una especialidad no cambia los horarios. Verificado en
+  // producción: las tres especialidades y "sin filtro" devuelven exactamente
+  // los mismos días.
+  //
+  // El parámetro se manda —`searchTurnosFull` lo pasa como `Subespecialidad_Id`
+  // y el bot hace exactamente lo mismo—, así que o el proxy de este cliente lo
+  // ignora, o el id que mandamos no es el que espera. Desde el código no se
+  // puede distinguir una cosa de la otra.
+  //
+  // Esto lo deja registrado: cuántos turnos volvieron y qué especialidades
+  // declaran. Si todos traen la misma especialidad, el filtro funcionó. Si
+  // traen varias, el proxy lo ignoró. Si no traen ninguna, no hay con qué
+  // filtrar del lado nuestro tampoco, y hay que arreglarlo en el origen.
+  if (params.especialidadId && resultado.turnos?.length) {
+    const declaradas = [...new Set(resultado.turnos.map((t) => t.especialidad).filter(Boolean))]
+    console.log(
+      `[PORTAL] Filtro por especialidad "${params.especialidadId}": ` +
+        `${resultado.turnos.length} turnos | especialidades que declaran: ` +
+        `${declaradas.length ? declaradas.join(" / ") : "(ninguna — los turnos no traen el campo)"}`,
+    )
+  }
 
   if (!resultado.success || !resultado.turnos?.length) {
     return {
