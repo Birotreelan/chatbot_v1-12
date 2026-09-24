@@ -5539,11 +5539,14 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           if (!derivado) return false
 
-          // Se cierra la detección: el paciente ya no está en una conversación
-          // con el bot, está en el portal. Dejar el flujo abierto haría que su
-          // próximo mensaje se interprete como respuesta a una pregunta que
-          // nunca le hicimos.
-          await completePatientDetectionFlow(userPhoneNumber, config.id)
+          // El menú queda vivo, por el mismo motivo que en la opción 3: los
+          // botones siguen tocables en el chat y el paciente puede volver del
+          // portal y elegir otra cosa.
+          //
+          // El riesgo de dejarlo abierto —que su próximo mensaje se interprete
+          // como respuesta a una pregunta que nunca le hicimos— lo cubre el
+          // bloque `!selection`: si escribe texto libre, el menú se cierra y el
+          // mensaje sigue al pipeline.
           await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
           return true
         }
@@ -5588,17 +5591,19 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           }
 
           if (!selection) {
-            await sendDirectResponse(
-              detectionCtx,
-              'Por favor, respondé con 1, 2 o 3 según tu intención.',
-              "contact_intent_invalid"
-            )
-            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-            return
-          }
-
-
-          if (selection === 1) {
+            // No eligió una opción: escribió otra cosa.
+            //
+            // Antes esto contestaba "respondé con 1, 2 o 3" y cortaba. Con el
+            // menú vivo más tiempo (ver abajo), eso pasaría a ser el castigo
+            // habitual de quien hace una pregunta legítima justo después del
+            // saludo: "¿a qué hora abren?" → "respondé con 1, 2 o 3".
+            //
+            // Ahora se cierra el menú y el mensaje sigue su camino por el
+            // pipeline de siempre, que sabe responder preguntas. La persona
+            // preguntó algo: lo peor que podemos hacer es no escucharla.
+            await completePatientDetectionFlow(userPhoneNumber, config.id)
+            console.log('[WHATSAPP] Menú inicial: texto libre, se cierra el menú y sigue el pipeline')
+          } else if (selection === 1) {
             // Camino B, y el que de verdad se usa: acá whatsapp.tsx detecta la
             // opción del menú por su cuenta, sin pasar por el handler. Es el
             // punto exacto donde el bot está por mandar "pasame tu DNI".
@@ -5642,7 +5647,24 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               )
               await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "contact_intent_consulta")
             }
-            await completePatientDetectionFlow(userPhoneNumber, config.id)
+
+            // ── El menú NO se cierra acá (24/9/2026) ────────────────────────
+            //
+            // Antes esto llamaba a `completePatientDetectionFlow`, que borra el
+            // estado de detección. Pero los botones del menú siguen en el chat
+            // y se pueden seguir tocando: el paciente elegía "Otra consulta",
+            // leía la respuesta, tocaba "Solicitar turno médico" del MISMO
+            // mensaje… y el bot le contestaba con el saludo y el menú otra vez,
+            // como si recién llegara.
+            //
+            // El error de fondo: borrábamos lo único que sabe interpretar esos
+            // botones, mientras los botones seguían ahí. Un menú que se ve pero
+            // ya no se entiende.
+            //
+            // Ahora el estado queda en `awaiting_contact_intent`, así que tocar
+            // otra opción responde directo. Y si en vez de tocar escribe algo,
+            // el bloque `!selection` de arriba cierra el menú y deja pasar el
+            // mensaje al pipeline: las dos salidas están cubiertas.
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           }
