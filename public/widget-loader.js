@@ -52,14 +52,20 @@
       const timestamp = Date.now()
       const url = `${baseUrl}/api/widget?cliente_id=${encodeURIComponent(clienteId)}&_t=${timestamp}`
 
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          Pragma: "no-cache",
-          Expires: "0",
-        },
-      })
+      // Sin headers (24/9/2026). Antes iban Cache-Control, Pragma y Expires
+      // para evitar la caché. Hacían dos cosas mal:
+      //
+      //  1. No servían: la URL ya lleva `&_t=${timestamp}`, que es un
+      //     cache-busting completo y del lado del cliente.
+      //  2. Rompían el widget en sitios externos. Ninguno de los tres está en
+      //     la lista segura de CORS, así que el navegador dejaba de mandar el
+      //     GET directo y anteponía un preflight OPTIONS. El servidor no
+      //     declaraba esos headers como permitidos y Safari cortaba con
+      //     "Request header field Cache-Control is not allowed by
+      //     Access-Control-Allow-Headers".
+      //
+      // Sin headers no hay preflight: un viaje menos y un modo de fallar menos.
+      const response = await fetch(url, { method: "GET" })
 
       if (!response.ok) {
         console.warn("[WIDGET-LOADER] ⚠️ No se pudo obtener la configuración:", response.status)

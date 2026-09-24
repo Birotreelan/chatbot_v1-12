@@ -272,9 +272,11 @@
     try {
       const timestamp = Date.now()
       const url = `${baseUrl}/api/widget?cliente_id=${encodeURIComponent(clienteId)}&_t=${timestamp}`
-      const response = await fetch(url, {
-        headers: { "Cache-Control": "no-cache, no-store, must-revalidate", Pragma: "no-cache", Expires: "0" },
-      })
+      // Sin headers (24/9/2026), mismo motivo que en los otros dos loaders:
+      // Cache-Control, Pragma y Expires no servían —la URL ya lleva `_t`— y
+      // forzaban un preflight OPTIONS que el servidor rechazaba, rompiendo el
+      // widget en cualquier sitio externo.
+      const response = await fetch(url)
 
       if (response.ok) {
         const widgetConfig = await response.json()

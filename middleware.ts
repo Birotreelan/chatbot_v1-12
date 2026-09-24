@@ -1,6 +1,30 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
+/**
+ * Los headers que un sitio externo puede mandarnos (24/9/2026).
+ *
+ * `Cache-Control`, `Pragma` y `Expires` están acá por un caso real: los
+ * loaders del widget los mandaban en el fetch a /api/widget, y como ninguno de
+ * los tres está en la lista segura de CORS, el navegador dejaba de mandar el
+ * GET directo y anteponía un preflight. El OPTIONS contestaba sin declararlos
+ * y Safari cortaba con "Request header field Cache-Control is not allowed by
+ * Access-Control-Allow-Headers": el widget no cargaba en el sitio de la
+ * clínica.
+ *
+ * Los loaders ya no los mandan. Igual quedan declarados, y no por las dudas:
+ * el loader se cachea en el navegador de cada visitante, así que durante días
+ * va a haber copias viejas pidiendo con esos headers. Sacarlos de esta lista
+ * dejaría esas copias rotas hasta que a cada visitante se le venza la caché.
+ *
+ * ── Una sola lista, no cuatro ──────────────────────────────────────────────
+ *
+ * Este archivo tenía cuatro listas de headers permitidos, distintas entre sí
+ * según la rama. Agregar uno obligaba a acordarse de las cuatro, y basta con
+ * olvidarse de una para que el mismo fetch funcione o no según la ruta.
+ */
+const HEADERS_PERMITIDOS = "Content-Type, Authorization, X-Requested-With, Cache-Control, Pragma, Expires"
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const fullUrl = request.url
@@ -18,7 +42,7 @@ export function middleware(request: NextRequest) {
       const response = new NextResponse(null, { status: 204 })
       response.headers.set("Access-Control-Allow-Origin", origin)
       response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-      response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+      response.headers.set("Access-Control-Allow-Headers", HEADERS_PERMITIDOS)
       response.headers.set("Access-Control-Allow-Credentials", "true")
       response.headers.set("Vary", "Origin")
       return response
@@ -55,7 +79,7 @@ export function middleware(request: NextRequest) {
     // Headers CORS completos
     response.headers.set("Access-Control-Allow-Origin", "*")
     response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+    response.headers.set("Access-Control-Allow-Headers", HEADERS_PERMITIDOS)
     response.headers.set("Access-Control-Allow-Credentials", "false")
     response.headers.set("X-Frame-Options", "ALLOWALL")
     response.headers.set("Content-Security-Policy", "frame-ancestors *")
@@ -71,7 +95,7 @@ export function middleware(request: NextRequest) {
     // Headers CORS completos para permitir requests desde cualquier origen
     response.headers.set("Access-Control-Allow-Origin", "*")
     response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")
-    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    response.headers.set("Access-Control-Allow-Headers", HEADERS_PERMITIDOS)
     response.headers.set("Access-Control-Allow-Credentials", "false")
 
     console.log("[MIDDLEWARE] ✅ Headers CORS aplicados para notificaciones:", pathname)
@@ -89,7 +113,7 @@ export function middleware(request: NextRequest) {
     // Headers CORS para permitir requests desde cualquier origen
     response.headers.set("Access-Control-Allow-Origin", "*")
     response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")
-    response.headers.set("Access-Control-Allow-Headers", "Content-Type")
+    response.headers.set("Access-Control-Allow-Headers", HEADERS_PERMITIDOS)
     
     return response
   }
@@ -184,7 +208,7 @@ export function middleware(request: NextRequest) {
       if (origin) {
         response.headers.set("Access-Control-Allow-Origin", origin)
         response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Session-Id")
+        response.headers.set("Access-Control-Allow-Headers", `${HEADERS_PERMITIDOS}, X-Session-Id`)
         response.headers.set("Access-Control-Allow-Credentials", "true")
         response.headers.set("Vary", "Origin")
       }
@@ -204,7 +228,7 @@ export function middleware(request: NextRequest) {
     if (origin) {
       response.headers.set("Access-Control-Allow-Origin", origin)
       response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-      response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+      response.headers.set("Access-Control-Allow-Headers", HEADERS_PERMITIDOS)
       response.headers.set("Access-Control-Allow-Credentials", "true")
       response.headers.set("Vary", "Origin")
     }
