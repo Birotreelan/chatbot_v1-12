@@ -118,12 +118,6 @@ export function Marco({
       <main className="mx-auto max-w-[560px] space-y-4 px-4 pb-12 pt-5 text-base leading-relaxed">
         {children}
       </main>
-
-      <footer className="mx-auto max-w-[560px] px-4 pb-8">
-        <p className="text-sm text-gray-500">
-          Si algo no funciona, escribinos por WhatsApp y lo resolvemos.
-        </p>
-      </footer>
     </div>
   )
 }
