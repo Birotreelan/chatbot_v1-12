@@ -251,23 +251,30 @@ export async function agendaParaTurnoNuevo(params: {
   profesionalId?: string
   especialidadId?: string
   pacienteDNI?: string
+  /** Si no tiene ficha, el DNI no se manda. Ver la nota de abajo. */
+  tieneFicha?: boolean
   obraSocialId?: string
 }): Promise<AgendaDelPortal> {
-  // ── Sin Paciente_DNI, igual que el bot (24/9/2026) ───────────────────────
+  // ── El DNI va sólo si el paciente tiene ficha (24/9/2026) ────────────────
   //
-  // El flujo conversacional de turno nuevo llama a `searchTurnosFull` con
-  // sede, obra social, profesional y especialidad — y NADA más. El portal
-  // además mandaba el DNI, y eso no es un detalle: hay un caso documentado
-  // (Andrea/Carmen, 26/8/2026, en whatsapp.tsx) donde mandar `Paciente_DNI` a
-  // `get_turnos` hacía que el proxy devolviera CERO turnos aunque el
-  // profesional tuviera agenda libre.
+  // Los dos flujos del bot hacen cosas distintas, y con razón:
   //
-  // La elegibilidad por obra social ya la resuelve `Deudor_Id`, que sí se
-  // manda. El DNI no agrega nada acá y puede sacar todo.
+  //  - Paciente EXISTENTE: manda `Paciente_DNI`. Verificado en un log real —
+  //    `{"Paciente_DNI":"361****","Sede_Id":"...","Subespecialidad_Id":1}`
+  //    devolvió 230 turnos. Le sirve al proxy para aplicar la elegibilidad de
+  //    ese paciente.
+  //
+  //  - Paciente NUEVO: no lo manda. Todavía no existe en el sistema de la
+  //    clínica; mandarle un DNI que no conoce es pedirle que filtre por algo
+  //    que no tiene, y hay un caso documentado (Andrea/Carmen, 26/8) donde
+  //    eso devolvía cero turnos con el profesional teniendo agenda libre.
+  //
+  // El portal lo mandaba siempre. Ahora sigue la misma regla que el bot.
   const resultado = await searchTurnosFull(
     params.clienteId,
     {
       sedeId: params.sedeId || "",
+      pacienteDNI: params.tieneFicha ? params.pacienteDNI : undefined,
       obraSocialId: params.obraSocialId,
       profesionalId: params.profesionalId,
       especialidadId: params.especialidadId,

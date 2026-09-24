@@ -431,7 +431,20 @@ export async function obtenerTurnos(
   }
 
   if (subespecialidadId) {
-    params.Subespecialidad_Id = subespecialidadId
+    // ── Número, no string (24/9/2026) ──────────────────────────────────────
+    //
+    // El bot manda `"Subespecialidad_Id": 1` y el filtro funciona. El portal
+    // mandaba `"Subespecialidad_Id": "1"` —el id viaja en la query string, y
+    // de ahí sale como texto— y el proxy lo ignoraba en silencio: devolvía
+    // TODOS los turnos, de todas las especialidades, sin ningún error.
+    //
+    // Comprobado en producción: con el id como texto, las tres especialidades
+    // y "sin filtro" devolvían exactamente los mismos días.
+    //
+    // Se convierte sólo si son todos dígitos. `Sede_Id` y `Profesional_Id` son
+    // UUIDs y tienen que seguir siendo texto; convertir a ciegas los rompería.
+    const comoTexto = String(subespecialidadId).trim()
+    params.Subespecialidad_Id = /^\d+$/.test(comoTexto) ? Number(comoTexto) : subespecialidadId
   }
 
   if (deudorId) {

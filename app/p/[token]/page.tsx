@@ -608,6 +608,7 @@ export default async function PaginaDelPortal({
     // Del contexto unificado, no del token: un paciente que se identificó en
     // el portal tiene su DNI y su obra social sólo acá.
     pacienteDNI: identidad.dni,
+    tieneFicha: identidad.tieneFicha === true,
     obraSocialId: identidad.obraSocialId,
   })
 
