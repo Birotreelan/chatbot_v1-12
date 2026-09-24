@@ -29,6 +29,7 @@ import { permiteGestionar } from "@/lib/portal/vigencia"
 import { reservarTurno, cancelarTurno } from "@/lib/api-tools/api-functions"
 import { saveConversationMessage } from "@/lib/conversations"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
+import { trackAppointmentEvent, checkAndClearPendingReschedule } from "@/lib/appointment-stats"
 import { nanoid } from "nanoid"
 
 export const runtime = "nodejs"
@@ -198,14 +199,60 @@ export async function POST(request: Request) {
     }
   }
 
-  // ── 3. Cerrar el enlace y dejar rastro ────────────────────────────────────
+  // ── 3. ¿Quedó confirmado, o pendiente de la clínica? ──────────────────────
+  //
+  // `set_turno` puede devolver `confirmacion_humana`: el turno no queda
+  // otorgado hasta que la clínica lo apruebe. El flujo conversacional lo mira
+  // (confirmation-handler.ts) y avisa; el portal no lo miraba y le decía a todo
+  // el mundo "tu turno quedó para el...". A alguien que en realidad tiene una
+  // SOLICITUD pendiente, eso lo manda a la clínica el día equivocado.
+  //
+  // Default `true` —el comportamiento de siempre— cuando el proxy de esa
+  // clínica todavía no manda el campo. Es el mismo criterio que el flujo
+  // conversacional, y acá importa el sentido del default: ante la duda se
+  // avisa que puede requerir aprobación, que es el error inofensivo.
+  const confirmacionHumana =
+    (reserva?.datos as { confirmacion_humana?: boolean } | undefined)?.confirmacion_humana ?? true
+
+  // ── 4. Cerrar el enlace y dejar rastro ────────────────────────────────────
   const cuando = [datosDelTurnoElegido.fechaFormateada, datosDelTurnoElegido.horaFormateada]
     .filter(Boolean)
     .join(" a las ")
   const conQuien = datosDelTurnoElegido.profesional ? ` con ${datosDelTurnoElegido.profesional}` : ""
-  const texto = cuando
-    ? `Tu turno quedó para el ${cuando}${conQuien}.`
-    : "Tu turno quedó reservado."
+
+  const texto = confirmacionHumana
+    ? cuando
+      ? `Pedimos tu turno para el ${cuando}${conQuien}. La clínica tiene que aprobarlo y te avisamos apenas lo haga.`
+      : "Pedimos tu turno. La clínica tiene que aprobarlo y te avisamos apenas lo haga."
+    : cuando
+      ? `Tu turno quedó para el ${cuando}${conQuien}.`
+      : "Tu turno quedó reservado."
+
+  // ── Las estadísticas (24/9/2026) ──────────────────────────────────────────
+  //
+  // No es un extra. Sin esto, cada turno sacado por el portal es invisible en
+  // /dashboard/estadisticas, y la clínica ve caer sus "Nuevos turnos" justo
+  // cuando el portal empieza a funcionar: exactamente la conclusión opuesta a
+  // la realidad.
+  //
+  // Ya pasó una vez con el flujo conversacional —está documentado en
+  // confirmation-handler.ts, 19/8/2026— y esto sería repetirlo. Se usa la misma
+  // función y el mismo criterio: `checkAndClearPendingReschedule` distingue un
+  // reagendamiento de un turno nuevo genuino.
+  //
+  // Best-effort: un error acá no puede tapar una reserva que sí ocurrió.
+  try {
+    const veniaDeUnaCancelacion = await checkAndClearPendingReschedule(contexto.clienteId, contexto.phone)
+    await trackAppointmentEvent({
+      clienteId: contexto.clienteId,
+      phoneNumber: contexto.phone,
+      eventType:
+        contexto.intencion === "reagendar" || veniaDeUnaCancelacion ? "rescheduled" : "new_appointment",
+      timestamp: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.error("[PORTAL] No se pudo registrar la estadística de la reserva:", error)
+  }
 
   await consumirEnlace(token, { texto, turno: datosDelTurnoElegido })
 
@@ -231,6 +278,9 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     texto,
+    // La interfaz lo usa para no decir "Listo" cuando todavía falta que la
+    // clínica apruebe.
+    pendienteDeAprobacion: confirmacionHumana,
     turno: datosDelTurnoElegido,
     // Se informa para que la interfaz pueda sugerirle al paciente que avise,
     // en vez de dejarlo con dos turnos sin saberlo.

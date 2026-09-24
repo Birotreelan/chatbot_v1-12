@@ -79,7 +79,11 @@ export function SelectorDeTurnos({
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hayQueRecargar, setHayQueRecargar] = useState(false)
-  const [resultado, setResultado] = useState<{ texto: string; aviso?: boolean } | null>(null)
+  const [resultado, setResultado] = useState<{
+    texto: string
+    aviso?: boolean
+    pendiente?: boolean
+  } | null>(null)
 
   const fechasConAgenda = useMemo(() => new Set(dias.map((d) => d.fecha)), [dias])
   const primerDia = dias[0]?.fecha
@@ -99,7 +103,11 @@ export function SelectorDeTurnos({
       const datos = await r.json()
 
       if (datos.ok) {
-        setResultado({ texto: datos.texto, aviso: datos.avisoCancelacion })
+        setResultado({
+          texto: datos.texto,
+          aviso: datos.avisoCancelacion,
+          pendiente: datos.pendienteDeAprobacion === true,
+        })
         return
       }
 
@@ -116,7 +124,14 @@ export function SelectorDeTurnos({
   if (resultado) {
     return (
       <div className="space-y-4">
-        <Aviso titulo="Listo" detalle={resultado.texto} tono="exito" />
+        {/* "Listo" sólo cuando de verdad está listo. Si la clínica todavía
+            tiene que aprobarlo, decir "Listo" hace que el paciente se presente
+            un día que puede no tener turno. */}
+        <Aviso
+          titulo={resultado.pendiente ? "Tu solicitud fue enviada" : "Listo"}
+          detalle={resultado.texto}
+          tono={resultado.pendiente ? "neutro" : "exito"}
+        />
         {elegido && (
           <ResumenDelTurno
             turno={{
@@ -125,10 +140,14 @@ export function SelectorDeTurnos({
               profesional: elegido.profesional,
               sede: elegido.sede,
             }}
-            titulo="Tu turno"
+            titulo={resultado.pendiente ? "El turno que pediste" : "Tu turno"}
           />
         )}
-        <p className="text-[15px] text-gray-600">Te va a llegar la confirmación por WhatsApp.</p>
+        <p className="text-[15px] text-gray-600">
+          {resultado.pendiente
+            ? "Te avisamos por WhatsApp apenas la clínica la apruebe."
+            : "Te va a llegar la confirmación por WhatsApp."}
+        </p>
         {resultado.aviso && (
           <Aviso
             titulo="Revisemos tu turno anterior"
