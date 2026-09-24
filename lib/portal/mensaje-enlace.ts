@@ -18,6 +18,7 @@
  */
 
 import { fraseDerivacion } from "../utils/escalation-contact"
+import type { IntencionDelPortal } from "./vigencia"
 
 export const LIMITE_TEXTO_BOTON = 20
 export const LIMITE_ENCABEZADO = 60
@@ -113,21 +114,121 @@ export async function enviarMensajeConEnlace(
 // ─── Textos ──────────────────────────────────────────────────────────────────
 
 /**
- * Los textos viven acá y no incrustados en el webhook, por el mismo motivo que
- * los del recordatorio: lo que dicen decide si el paciente recibe el saludo
- * inicial. Ninguno puede contener "asistente virtual" ni "bienvenid", porque
- * `presentarSiCorresponde` los tomaría por mensajes que ya se identifican y no
- * antepondría la presentación.
+ * Una plantilla por flujo, y nada más que eso (24/9/2026).
+ *
+ * ── Por qué una tabla y no una función por caso ────────────────────────────
+ *
+ * Los textos anteriores eran dos funciones que armaban el mensaje con
+ * concatenaciones: para cambiar una palabra había que leer código. Y eran
+ * distintos entre sí sin motivo — uno decía "entrá al enlace de abajo" y el
+ * otro "desde el enlace de abajo".
+ *
+ * Acá cada flujo es una línea de texto. Cambiar lo que dice el bot es editar
+ * una cadena; agregar un flujo es agregar una entrada. Nadie tiene que
+ * entender el armado para tocar la redacción.
+ *
+ * ── Están escritas para continuar después del nombre ───────────────────────
+ *
+ * "para solicitar tu turno, ..." — en minúscula y sin punto inicial. Eso deja
+ * que `textoDelEnlace` arme las dos formas con la misma plantilla:
+ *
+ *   con nombre:  "Nicolas, para solicitar tu turno, utilizá el botón..."
+ *   sin nombre:  "Para solicitar tu turno, utilizá el botón..."
+ *
+ * La alternativa —dos plantillas por flujo— se desincroniza al primer cambio:
+ * alguien corrige una y se olvida de la otra.
+ *
+ * ── La restricción que no se puede romper ──────────────────────────────────
+ *
+ * Ninguna plantilla puede contener "asistente virtual" ni "bienvenid".
+ * `presentarSiCorresponde` busca justamente eso para decidir si el mensaje ya
+ * se presenta solo; si lo encuentra, no antepone la presentación y el primer
+ * mensaje del día queda sin saludo. Ya pasó una vez, con los textos de archivo
+ * entrante. Hay un test que lo verifica.
  */
-export function textoParaReprogramar(turno?: { fechaFormateada?: string; horaFormateada?: string }): string {
+export const PLANTILLAS_DEL_ENLACE: Record<IntencionDelPortal, string> = {
+  nuevo_turno: "para solicitar tu turno, utilizá el botón que aparece a continuación.",
+  familiar: "para solicitar el turno de tu familiar, utilizá el botón que aparece a continuación.",
+  reagendar: "para reagendar tu turno{cuando}, utilizá el botón que aparece a continuación.",
+  cancelar: "para gestionar tu turno{cuando}, utilizá el botón que aparece a continuación.",
+}
+
+/**
+ * El primer nombre, presentable.
+ *
+ * El sistema de la clínica manda "DE SANTIAGO, Nicolas" o "NICOLAS" según el
+ * campo, y escribirle "Hola NICOLAS" a alguien parece un grito. Se toma sólo el
+ * primer nombre —"Nicolas, para solicitar..." y no "Nicolas De Santiago,
+ * para..."— porque el nombre completo en un saludo suena a carta de un banco.
+ *
+ * Devuelve `null` si no hay nada usable, para que el llamador no tenga que
+ * distinguir entre vacío y basura.
+ */
+export function primerNombrePresentable(nombre?: string | null): string | null {
+  const limpio = String(nombre || "").trim().replace(/\s+/g, " ")
+  if (!limpio) return null
+
+  // "DE SANTIAGO, Nicolas" → el nombre está después de la coma.
+  const primero = (limpio.includes(",") ? limpio.split(",")[1] : limpio).trim().split(" ")[0]
+  if (!primero || primero.length < 2) return null
+  if (!/\p{L}/u.test(primero)) return null
+
+  return primero.charAt(0).toUpperCase() + primero.slice(1).toLowerCase()
+}
+
+export interface DatosDelTexto {
+  intencion: IntencionDelPortal
+  /** Nombre del paciente, si lo sabemos. Sin él el mensaje sigue siendo correcto. */
+  nombre?: string | null
+  /** Sólo para reagendar/cancelar: el turno del que se habla. */
+  turno?: { fechaFormateada?: string; horaFormateada?: string }
+  /**
+   * Redacción propia de este cliente, si la tiene cargada. Se usa tal cual,
+   * con los mismos marcadores que las plantillas de arriba.
+   */
+  plantilla?: string | null
+}
+
+/**
+ * Arma el mensaje que acompaña al botón.
+ *
+ * El texto es corto a propósito. El mensaje ya lleva un botón que dice qué
+ * hacer; sumarle un párrafo explicando el portal y otro ofreciendo ayuda por
+ * chat le agrega ruido a algo que se resuelve con un toque. Si el paciente
+ * prefiere escribir, escribe: no hace falta invitarlo.
+ */
+export function textoDelEnlace(datos: DatosDelTexto): string {
+  const plantilla = (datos.plantilla || "").trim() || PLANTILLAS_DEL_ENLACE[datos.intencion]
+
   const cuando =
-    turno?.fechaFormateada && turno?.horaFormateada
-      ? ` del ${turno.fechaFormateada} a las ${turno.horaFormateada}`
+    datos.turno?.fechaFormateada && datos.turno?.horaFormateada
+      ? ` del ${datos.turno.fechaFormateada} a las ${datos.turno.horaFormateada}`
       : ""
-  return (
-    `Para reprogramar tu turno${cuando}, entrá al enlace de abajo y elegí el horario que te quede mejor.\n\n` +
-    `Si preferís que te ayudemos por acá, escribime y seguimos.`
-  )
+
+  const nombre = primerNombrePresentable(datos.nombre)
+
+  const cuerpo = plantilla
+    .replace(/\{cuando\}/g, cuando)
+    // `{nombre}` se acepta por si una redacción propia lo pone en otro lugar
+    // ("Tu turno, {nombre}, ..."). Cuando no lo usa, el nombre va adelante.
+    .replace(/\{nombre\}/g, nombre || "")
+    // Un marcador que se reemplaza por nada deja el hueco y la puntuación que
+    // lo rodeaba: "Hola {nombre}: tu turno" sin nombre daba "Hola : tu turno".
+    // No es un detalle cosmético — es el mensaje que ve un paciente que ya se
+    // siente mal atendido si el bot le escribe mal.
+    .replace(/\s+([,;:.!?])/g, "$1")
+    // Y cuando el marcador estaba ENTRE signos —"Tu turno, {nombre}, se
+    // saca"— quedan los dos pegados: "Tu turno,, se saca".
+    .replace(/([,;:])\s*[,;:]/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+
+  if (nombre && !plantilla.includes("{nombre}")) {
+    return `${nombre}, ${cuerpo}`
+  }
+
+  // Sin nombre la plantilla arranca la oración, así que le toca la mayúscula.
+  return cuerpo.charAt(0).toUpperCase() + cuerpo.slice(1)
 }
 
 /**
@@ -153,17 +254,6 @@ export function textoSoloPorTelefono(
   texto += " no se puede reprogramar desde acá.\n\n"
 
   return texto + fraseDerivacion("Para cambiarlo, comunicate con la clínica", escalationPhoneNumber)
-}
-
-export function textoParaTurnoNuevo(paraFamiliar = false): string {
-  // El "para" importa: quien pidió turno para su madre tiene que entender, sin
-  // volver a preguntar, que el enlace le va a pedir los datos de ella y no los
-  // suyos. Si el mensaje dice "tu turno", carga el DNI equivocado.
-  const apertura = paraFamiliar
-    ? "Podés sacar el turno de tu familiar desde el enlace de abajo: vas a necesitar su DNI."
-    : "Podés sacar tu turno desde el enlace de abajo: elegís la sede, el profesional y el horario que te quede mejor."
-
-  return `${apertura}\n\nSi preferís que te ayudemos por acá, escribime y seguimos.`
 }
 
 export const BOTON_REPROGRAMAR = "Elegir horario"

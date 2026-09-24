@@ -24,8 +24,7 @@ import { emitirEnlace, type TurnoDelPortal } from "./token"
 import {
   construirMensajeConEnlace,
   enviarMensajeConEnlace,
-  textoParaReprogramar,
-  textoParaTurnoNuevo,
+  textoDelEnlace,
   textoSoloPorTelefono,
   BOTON_REPROGRAMAR,
   BOTON_TURNO_NUEVO,
@@ -237,9 +236,14 @@ export async function derivarAlPortal(params: {
     }
 
     const esReprogramar = params.intencion === "reagendar" || params.intencion === "cancelar"
-    const cuerpoBase = esReprogramar
-      ? textoParaReprogramar(paciente?.turno)
-      : textoParaTurnoNuevo(params.intencion === "familiar")
+
+    const cuerpoBase = textoDelEnlace({
+      intencion: params.intencion,
+      nombre: paciente?.pacienteNombre,
+      turno: paciente?.turno,
+      // Redacción propia del cliente, si la cargó en su configuración.
+      plantilla: config.textoEnlacePortal,
+    })
 
     // Por el mismo embudo que el resto: si es el primer mensaje del día, el
     // paciente tiene que saber que le está escribiendo una IA antes de que le
@@ -251,7 +255,9 @@ export async function derivarAlPortal(params: {
       cuerpo,
       url: enlace.url,
       textoDelBoton: esReprogramar ? BOTON_REPROGRAMAR : BOTON_TURNO_NUEVO,
-      pie: config.displayName || undefined,
+      // Sin pie: el nombre de la clínica ya aparece como remitente del chat, y
+      // repetirlo abajo de un mensaje de una línea lo hacía ver más largo de lo
+      // que es.
     })
 
     await enviarMensajeConEnlace(params.phoneNumberId, config.accessToken, mensaje)

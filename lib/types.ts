@@ -120,6 +120,23 @@ export interface WhatsAppConfig {
   clientePortalWeb?: boolean
 
   /**
+   * Redacción propia del mensaje que acompaña al botón del portal (24/9/2026).
+   *
+   * Vacío = se usa la plantilla que corresponde al flujo
+   * (`PLANTILLAS_DEL_ENLACE` en lib/portal/mensaje-enlace.ts).
+   *
+   * Es UNA sola redacción para todos los flujos del cliente, a propósito. Un
+   * campo por flujo serían cuatro textos que la clínica tiene que mantener
+   * sincronizados y que en la práctica van a decir casi lo mismo; el que quiera
+   * distinguir "solicitar" de "reagendar" tiene las plantillas por defecto, que
+   * ya lo hacen.
+   *
+   * Marcadores disponibles: `{nombre}` y `{cuando}`. Si no se escribe
+   * `{nombre}`, el nombre del paciente se antepone solo.
+   */
+  textoEnlacePortal?: string
+
+  /**
    * Id del Flow de reagendamiento publicado en el WABA de este cliente.
    *
    * El Flow es un objeto del WABA, no del número, así que varias clínicas que
