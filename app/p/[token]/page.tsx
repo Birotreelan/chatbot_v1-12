@@ -30,7 +30,7 @@ import { cookies } from "next/headers"
 import { randomBytes } from "crypto"
 import { leerEnlace } from "@/lib/portal/token"
 import { permiteGestionar, permiteVerDatos } from "@/lib/portal/vigencia"
-import { decidirPaso, ofreceVerTodos } from "@/lib/portal/pasos"
+import { decidirPaso, ofreceVerTodos, opcionesDeBusqueda, type TipoDeBusqueda } from "@/lib/portal/pasos"
 import { marcaDelPortal } from "@/lib/portal/marca"
 import { agendaParaReprogramar, agendaParaTurnoNuevo, turnosDeEjemplo } from "@/lib/portal/agenda"
 import {
@@ -62,6 +62,7 @@ export default async function PaginaDelPortal({
   params: Promise<{ token: string }>
   searchParams: Promise<{
     sedeId?: string
+    tipoBusqueda?: string
     especialidadId?: string
     profesionalId?: string
     sinFiltro?: string
@@ -151,10 +152,17 @@ export default async function PaginaDelPortal({
     porProfesional: config?.enableSearchByProfessional,
     porCualquiera: config?.enableSearchByAnyDoctor,
   }
-  const filtros: { sedeId?: string; especialidadId?: string; profesionalId?: string; sinFiltro: boolean } = {
+  const filtros: {
+    sedeId?: string
+    tipoBusqueda?: TipoDeBusqueda
+    especialidadId?: string
+    profesionalId?: string
+    sinFiltro: boolean
+  } = {
     // La del query gana sobre la del token: si el paciente eligió otra sede,
     // eligió otra sede.
     sedeId: filtrosCrudos.sedeId || contexto.sedeId,
+    tipoBusqueda: filtrosCrudos.tipoBusqueda as TipoDeBusqueda | undefined,
     especialidadId: filtrosCrudos.especialidadId,
     profesionalId: filtrosCrudos.profesionalId,
     sinFiltro: filtrosCrudos.sinFiltro === "1",
@@ -170,6 +178,7 @@ export default async function PaginaDelPortal({
    */
   const elegido: Record<string, string> = {}
   if (filtrosCrudos.sedeId) elegido.sedeId = filtrosCrudos.sedeId
+  if (filtrosCrudos.tipoBusqueda) elegido.tipoBusqueda = filtrosCrudos.tipoBusqueda
   if (filtrosCrudos.especialidadId) elegido.especialidadId = filtrosCrudos.especialidadId
 
   /** La URL de este mismo portal con un subconjunto de lo ya elegido. */
@@ -177,6 +186,28 @@ export default async function PaginaDelPortal({
     const params = new URLSearchParams(campos)
     const query = params.toString()
     return query ? `/p/${token}?${query}` : `/p/${token}`
+  }
+
+  /**
+   * A dónde vuelve el "Volver", quitando el último filtro elegido.
+   *
+   * Los pasos son: sede → cómo buscar → (especialidad | profesional) →
+   * horarios. Volver es sacar el último que se puso, y `decidirPaso` recalcula
+   * la pantalla sola. Escribir la cadena una vez acá evita que cada paso
+   * invente la suya — que es lo que había, y por eso dos pasos volvían a
+   * lugares distintos desde la misma situación.
+   *
+   * `null` cuando no hay a dónde volver: el primer paso del portal.
+   */
+  const volverQuitando = (): string | null => {
+    const quedan = { ...elegido }
+    for (const campo of ["profesionalId", "especialidadId", "tipoBusqueda", "sedeId"]) {
+      if (quedan[campo]) {
+        delete quedan[campo]
+        return urlCon(quedan)
+      }
+    }
+    return null
   }
   // ── Quién es el paciente ─────────────────────────────────────────────────
   //
@@ -415,6 +446,34 @@ export default async function PaginaDelPortal({
     if (opciones.length === 1) filtros.sedeId = opciones[0].id
   }
 
+  // ── Cómo querés buscar ──────────────────────────────────────────────────
+  //
+  // Las tres opciones del bot, con los mismos nombres. Son caminos
+  // alternativos: elegir una lleva directo a los horarios filtrados por ella,
+  // no a otro filtro encima.
+  if (paso === "elegir_tipo_busqueda") {
+    const opciones = opcionesDeBusqueda(permisos).map((o) => ({
+      id: o.id,
+      nombre: o.nombre,
+      detalle: o.detalle,
+    }))
+
+    return marco(
+      <>
+        {volverQuitando() && <Volver href={volverQuitando()!} />}
+        <TituloDePaso tipo="elegir">
+          {nombre ? `Hola, ${nombre}. ` : ""}¿Cómo querés buscar tu turno?
+        </TituloDePaso>
+        <ElegirFiltro
+          token={token}
+          campo="tipoBusqueda"
+          opciones={opciones}
+          conservar={filtrosCrudos.sedeId ? { sedeId: filtrosCrudos.sedeId } : undefined}
+        />
+      </>,
+    )
+  }
+
   // ── Elegir especialidad ─────────────────────────────────────────────────
   if (paso === "elegir_especialidad") {
     const opciones = normalizarOpciones(await obtenerEspecialidades(clienteId).catch(() => null))
@@ -424,7 +483,7 @@ export default async function PaginaDelPortal({
     if (opciones.length > 0) {
       return marco(
         <>
-          {filtrosCrudos.sedeId && <Volver href={urlCon({})} />}
+          {volverQuitando() && <Volver href={volverQuitando()!} />}
           <TituloDePaso tipo="elegir">
             {nombre ? `Hola, ${nombre}. ` : ""}¿Qué tipo de consulta necesitás?
           </TituloDePaso>
@@ -438,7 +497,13 @@ export default async function PaginaDelPortal({
   }
 
   // ── Elegir profesional ──────────────────────────────────────────────────
-  if (paso === "elegir_especialidad" || paso === "elegir_profesional") {
+  //
+  // Antes esta condición incluía `paso === "elegir_especialidad"`, para que
+  // cuando no hubiera especialidades se cayera acá. Con los tipos de búsqueda
+  // eso ya no corresponde: quien eligió "por especialidad" y se encuentra con
+  // que no hay ninguna cargada no quiere elegir un profesional — quiere ver
+  // los horarios. El salto ahora lo hace el bloque de especialidad.
+  if (paso === "elegir_profesional") {
     const opciones = normalizarOpciones(await obtenerTodosLosProfesionales(clienteId).catch(() => null))
 
     if (opciones.length > 0) {
@@ -446,11 +511,7 @@ export default async function PaginaDelPortal({
       // elegida se perdía al pasar a este paso y la agenda volvía a buscarse
       // sin ella.
       const conservar = elegido
-      const volverA = filtrosCrudos.especialidadId
-        ? urlCon(filtrosCrudos.sedeId ? { sedeId: filtrosCrudos.sedeId } : {})
-        : filtrosCrudos.sedeId
-          ? urlCon({})
-          : null
+      const volverA = volverQuitando()
       return marco(
         <>
           {volverA && <Volver href={volverA} />}
@@ -492,19 +553,7 @@ export default async function PaginaDelPortal({
         />
       )}
 
-      {(filtrosCrudos.profesionalId || filtrosCrudos.especialidadId || filtrosCrudos.sedeId) && (
-        <Volver
-          href={urlCon(
-            filtrosCrudos.profesionalId
-              ? elegido
-              : filtrosCrudos.especialidadId
-                ? filtrosCrudos.sedeId
-                  ? { sedeId: filtrosCrudos.sedeId }
-                  : {}
-                : {},
-          )}
-        />
-      )}
+      {volverQuitando() && <Volver href={volverQuitando()!} />}
       <TituloDePaso tipo="agenda">
         {nombre ? `Hola, ${nombre}. ` : ""}Elegí el horario que te quede mejor
       </TituloDePaso>

@@ -24,6 +24,8 @@ export type Paso =
   | "reprogramar"
   /** Varias sedes y todavía no sabemos en cuál se atiende. */
   | "elegir_sede"
+  /** Médico en particular, por especialidad, o cualquiera. */
+  | "elegir_tipo_busqueda"
   | "elegir_especialidad"
   | "elegir_profesional"
   | "elegir_horario"
@@ -47,8 +49,75 @@ export interface FiltrosElegidos {
   sedeId?: string
   especialidadId?: string
   profesionalId?: string
+  /** Cómo quiere buscar. Ver `TipoDeBusqueda`. */
+  tipoBusqueda?: TipoDeBusqueda
   /** El paciente tocó "ver todos": se saltean los filtros. */
   sinFiltro?: boolean
+}
+
+/**
+ * Las tres formas de buscar un turno (24/9/2026).
+ *
+ * Son las mismas que ofrece el bot por WhatsApp, con los mismos nombres, y NO
+ * es por imitarlo: el paciente que un día saca turno por chat y otro por el
+ * enlace tiene que encontrarse con las mismas opciones, o va a creer que el
+ * portal hace menos cosas.
+ *
+ * ── Cada una lleva a un camino distinto, no a una cadena ───────────────────
+ *
+ * El portal encadenaba especialidad Y DESPUÉS profesional, siempre. El bot no:
+ * elegir "por especialidad" muestra los turnos de esa especialidad, con el
+ * profesional de cada turno a la vista. Son caminos alternativos, no pasos
+ * sucesivos — y encadenarlos obligaba a filtrar dos veces para ver lo que se
+ * podía ver con una.
+ */
+export type TipoDeBusqueda =
+  /** Ya sabe con quién se quiere atender. */
+  | "profesional"
+  /** Sabe qué necesita, no con quién. */
+  | "especialidad"
+  /** Lo primero que haya. */
+  | "cualquiera"
+
+export interface OpcionDeBusqueda {
+  id: TipoDeBusqueda
+  nombre: string
+  detalle: string
+}
+
+/**
+ * Las opciones que este cliente habilitó.
+ *
+ * Si queda una sola no hay nada que preguntar: `decidirPaso` la aplica y sigue
+ * de largo. Preguntarle a alguien entre una sola opción es hacerlo tocar por
+ * nada, y es el mismo criterio que ya se usa con las sedes.
+ */
+export function opcionesDeBusqueda(permisos: PermisosDeBusqueda): OpcionDeBusqueda[] {
+  const opciones: OpcionDeBusqueda[] = []
+
+  if (permisos.porProfesional !== false) {
+    opciones.push({
+      id: "profesional",
+      nombre: "Médico en particular",
+      detalle: "Si ya sabés con qué profesional querés atenderte",
+    })
+  }
+  if (permisos.porEspecialidad !== false) {
+    opciones.push({
+      id: "especialidad",
+      nombre: "Por especialidad",
+      detalle: "Para elegir una especialidad y ver los horarios disponibles",
+    })
+  }
+  if (permisos.porCualquiera !== false) {
+    opciones.push({
+      id: "cualquiera",
+      nombre: "Cualquier médico",
+      detalle: "Para ver los turnos más próximos sin importar el profesional",
+    })
+  }
+
+  return opciones
 }
 
 /**
@@ -135,17 +204,26 @@ export function decidirPaso(
   // usa sin preguntar, igual que hace con especialidades y profesionales.
   if (!filtros.sedeId) return "elegir_sede"
 
-  if (filtros.sinFiltro) return "elegir_horario"
+  // Ya filtró: a los horarios. Un filtro alcanza — ver `TipoDeBusqueda`.
+  if (filtros.sinFiltro || filtros.profesionalId || filtros.especialidadId) return "elegir_horario"
 
-  // Elegir profesional implica la especialidad: no se le vuelve a preguntar.
-  if (permisos.porEspecialidad !== false && !filtros.especialidadId && !filtros.profesionalId) {
-    return "elegir_especialidad"
-  }
+  const opciones = opcionesDeBusqueda(permisos)
 
-  if (permisos.porProfesional !== false && !filtros.profesionalId) {
-    return "elegir_profesional"
-  }
+  // Sin ninguna opción habilitada, el cliente no quiere que se filtre nada.
+  if (opciones.length === 0) return "elegir_horario"
 
+  // Con una sola no se pregunta: se aplica.
+  const elegido: TipoDeBusqueda | undefined =
+    filtros.tipoBusqueda && opciones.some((o) => o.id === filtros.tipoBusqueda)
+      ? filtros.tipoBusqueda
+      : opciones.length === 1
+        ? opciones[0].id
+        : undefined
+
+  if (!elegido) return "elegir_tipo_busqueda"
+
+  if (elegido === "profesional") return "elegir_profesional"
+  if (elegido === "especialidad") return "elegir_especialidad"
   return "elegir_horario"
 }
 
