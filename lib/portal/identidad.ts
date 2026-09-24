@@ -148,14 +148,44 @@ export async function resolverPorDNI(
   }
 
   if (respuesta.exito === false) {
-    console.error("[PORTAL] La búsqueda por DNI no prosperó:", respuesta.error)
+    // ── "No lo encontré" NO es "no pude preguntar" (24/9/2026) ────────────
+    //
+    // Reportado: al ingresar un DNI que no está en el sistema, el portal
+    // mostraba "No pudimos consultar tus datos en este momento. Probá de nuevo
+    // en un minuto". O sea que el paciente nuevo —el caso principal de esta
+    // pantalla— no podía pasar de acá.
+    //
+    // La causa: yo trataba cualquier `exito: false` como una falla de
+    // consulta. Pero el proxy usa ese mismo campo para dos cosas distintas, y
+    // el `codigo` las separa:
+    //
+    //   API_ERROR       → el proxy contestó y dijo que no hay paciente.
+    //                     Eso es un HECHO: no tiene ficha, va al alta.
+    //   HTTP_*, y el
+    //   resto           → no llegamos a preguntar. Ahí sí conviene reintentar,
+    //                     porque dar de alta a ciegas crearía un duplicado de
+    //                     alguien que quizás ya existe.
+    //
+    // Es el mismo error de siempre, en su versión espejo: antes tomaba la
+    // ausencia de información como un hecho; acá tomaba un hecho como ausencia
+    // de información.
+    const codigo = respuesta.error?.codigo
+
+    if (codigo === "API_ERROR") {
+      console.log(
+        `[PORTAL] El proxy no encontró al paciente con ese DNI: ${respuesta.error?.mensaje || "(sin mensaje)"}`,
+      )
+      return { dni, fichaConsultada: true, tieneFicha: false }
+    }
+
+    console.error("[PORTAL] No se pudo consultar el DNI:", respuesta.error)
     return null
   }
 
   const p: any = respuesta.datos
 
   if (!p) {
-    // No tiene ficha. Es el camino del alta, y es un resultado válido.
+    // El proxy contestó bien y no trajo paciente. También es un hecho.
     return { dni, fichaConsultada: true, tieneFicha: false }
   }
 

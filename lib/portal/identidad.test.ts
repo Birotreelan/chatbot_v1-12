@@ -103,3 +103,46 @@ describe("validarAlta", () => {
     expect(validarAlta(BUENO).ok).toBe(true)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "No lo encontré" no es "no pude preguntar" (24/9/2026)
+//
+// Reportado con captura: al ingresar un DNI que no está en el sistema, el
+// portal respondía "No pudimos consultar tus datos en este momento". O sea que
+// el paciente nuevo —el caso principal de esa pantalla— no podía pasar.
+//
+// El proxy usa `exito: false` para las dos cosas y el `codigo` las separa. El
+// test replica esa decisión sola, porque `resolverPorDNI` sale a la red.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type RespuestaDelProxy = { exito: boolean; datos?: unknown; error?: { codigo?: string } }
+
+/** La misma regla que aplica `resolverPorDNI`. */
+function queHacerCon(respuesta: RespuestaDelProxy): "alta" | "reintentar" | "tiene_ficha" {
+  if (respuesta.exito === false) {
+    return respuesta.error?.codigo === "API_ERROR" ? "alta" : "reintentar"
+  }
+  return respuesta.datos ? "tiene_ficha" : "alta"
+}
+
+describe("qué hacer con la respuesta del proxy", () => {
+  it("el proxy contestó que no hay paciente: va al alta", () => {
+    // Es un hecho, no una falla: el proxy respondió.
+    expect(queHacerCon({ exito: false, error: { codigo: "API_ERROR" } })).toBe("alta")
+    expect(queHacerCon({ exito: true, datos: null })).toBe("alta")
+    expect(queHacerCon({ exito: true })).toBe("alta")
+  })
+
+  it("no llegamos a preguntar: se reintenta, no se da de alta", () => {
+    // Dar de alta a ciegas crearía una ficha duplicada de alguien que quizás
+    // ya existe, y eso lo tiene que limpiar alguien a mano.
+    expect(queHacerCon({ exito: false, error: { codigo: "HTTP_502" } })).toBe("reintentar")
+    expect(queHacerCon({ exito: false, error: { codigo: "HTTP_404" } })).toBe("reintentar")
+    expect(queHacerCon({ exito: false, error: { codigo: "FORMATO_INVALIDO" } })).toBe("reintentar")
+    expect(queHacerCon({ exito: false })).toBe("reintentar")
+  })
+
+  it("encontró al paciente", () => {
+    expect(queHacerCon({ exito: true, datos: { Id: "1" } })).toBe("tiene_ficha")
+  })
+})
