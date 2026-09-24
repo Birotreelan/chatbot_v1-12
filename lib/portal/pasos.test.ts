@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { decidirPaso, ofreceVerTodos, altaCompleta } from "./pasos"
+import { decidirPaso, ofreceVerTodos, altaCompleta, esPasoRevisitable } from "./pasos"
 
 const TODO_PERMITIDO = { porEspecialidad: true, porProfesional: true, porCualquiera: true }
 const SIN_NADA = {}
@@ -229,5 +229,61 @@ describe("la sede va antes que el resto", () => {
 
   it("reprogramar nunca pregunta la sede: el turno ya tiene una", () => {
     expect(decidirPaso("reagendar", {}, {}, {})).toBe("reprogramar")
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Volver a corregir (24/9/2026)
+//
+// `decidirPaso` sólo avanza: con el DNI cargado nunca vuelve a pedirlo. Eso
+// estaba bien para avanzar y era un callejón para corregir — quien se equivocó
+// un dígito al darse de alta no tenía cómo arreglarlo y el turno se reservaba
+// con el DNI equivocado.
+//
+// El widget deja volver paso a paso hasta el primero. Acá lo hace `?paso=`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("volver a un paso anterior", () => {
+  const YO = { dni: "36100432", fichaConsultada: true, tieneFicha: true }
+  const TODO = { sedeId: "3", tipoBusqueda: "profesional" as const, profesionalId: "9" }
+
+  it("con el flujo completo, se puede volver hasta el primer paso", () => {
+    expect(decidirPaso("nuevo_turno", {}, TODO, YO, "pedir_dni")).toBe("pedir_dni")
+    expect(decidirPaso("nuevo_turno", {}, TODO, YO, "elegir_sede")).toBe("elegir_sede")
+  })
+
+  it("sin pedido explícito, el flujo avanza como siempre", () => {
+    expect(decidirPaso("nuevo_turno", {}, TODO, YO)).toBe("elegir_horario")
+    expect(decidirPaso("nuevo_turno", {}, TODO, YO, "")).toBe("elegir_horario")
+  })
+
+  it("un paso inventado se ignora en vez de romper", () => {
+    // La URL la escribe cualquiera. Forzar un paso que el flujo no puede
+    // sostener dejaría al paciente en una pantalla que no sabe qué hacer con
+    // él, que es peor que ignorar el pedido.
+    for (const malo of ["elegir_horario", "derivar_obra_social", "../../etc", "<script>"]) {
+      expect(decidirPaso("nuevo_turno", {}, TODO, YO, malo), malo).toBe("elegir_horario")
+    }
+  })
+
+  it("reprogramar no se deja desviar", () => {
+    // Ese enlace es para un turno concreto: no hay identidad que corregir.
+    expect(decidirPaso("reagendar", {}, {}, YO, "pedir_dni")).toBe("reprogramar")
+  })
+})
+
+describe("esPasoRevisitable", () => {
+  it("sólo los pasos que el flujo puede sostener", () => {
+    expect(esPasoRevisitable("pedir_dni")).toBe(true)
+    expect(esPasoRevisitable("registrar")).toBe(true)
+    expect(esPasoRevisitable("elegir_sede")).toBe(true)
+    expect(esPasoRevisitable("elegir_horario")).toBe(false)
+    expect(esPasoRevisitable("derivar_obra_social")).toBe(false)
+  })
+
+  it("no se cae con lo que no es una cadena", () => {
+    for (const raro of [undefined, null, 3, {}, []]) {
+      expect(esPasoRevisitable(raro), String(raro)).toBe(false)
+    }
   })
 })

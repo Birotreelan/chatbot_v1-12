@@ -160,13 +160,44 @@ export function altaCompleta(identidad: IdentidadDelPaciente | undefined): boole
  * permitido — es el mismo criterio que usa el menú de WhatsApp, y cambiarlo acá
  * haría que el portal ofrezca algo distinto de lo que la clínica configuró.
  */
+/**
+ * Los pasos a los que el paciente puede volver a propósito (24/9/2026).
+ *
+ * `decidirPaso` avanza: con el DNI cargado nunca vuelve a pedirlo. Eso está
+ * bien para avanzar y es un callejón para corregir — quien se equivocó un
+ * dígito al darse de alta no tenía forma de arreglarlo, y el turno se iba a
+ * reservar con el DNI equivocado.
+ *
+ * El widget resuelve esto dejando volver paso a paso hasta el primero. Acá se
+ * hace con la URL: `?paso=registrar` fuerza esa pantalla, con lo ya cargado
+ * adentro para editarlo.
+ *
+ * La lista es corta a propósito. `derivar_obra_social` o `elegir_horario` no
+ * están: el primero es un final, y al segundo se llega solo cuando los filtros
+ * están puestos. Forzar un paso que el flujo no puede sostener deja al paciente
+ * en una pantalla que no sabe qué hacer con él.
+ */
+export const PASOS_REVISITABLES = ["pedir_dni", "registrar", "elegir_sede"] as const
+
+export type PasoRevisitable = (typeof PASOS_REVISITABLES)[number]
+
+export function esPasoRevisitable(valor: unknown): valor is PasoRevisitable {
+  return typeof valor === "string" && (PASOS_REVISITABLES as readonly string[]).includes(valor)
+}
+
 export function decidirPaso(
   intencion: IntencionDelPortal,
   permisos: PermisosDeBusqueda,
   filtros: FiltrosElegidos,
   identidad: IdentidadDelPaciente = {},
+  /** El paciente pidió volver a un paso concreto desde la URL. */
+  pasoForzado?: string,
 ): Paso {
   if (intencion === "reagendar" || intencion === "cancelar") return "reprogramar"
+
+  // El pedido explícito gana sobre el avance automático, pero sólo para los
+  // pasos de la lista: un `?paso=` inventado se ignora en vez de romper.
+  if (esPasoRevisitable(pasoForzado)) return pasoForzado
 
   // ── La identidad va primero, y en este orden ─────────────────────────────
   //

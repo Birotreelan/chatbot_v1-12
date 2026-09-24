@@ -45,6 +45,8 @@ interface Props {
   dias: DiaConTurnos[]
   /** Se muestran en el repaso previo a confirmar. */
   paciente?: { nombre?: string; obraSocial?: string }
+  /** URL para volver a editar los datos personales. `null` si no hay nada que editar. */
+  corregirDatosEn?: string | null
   etiquetaConfirmar?: string
 }
 
@@ -72,6 +74,7 @@ export function SelectorDeTurnos({
   token,
   dias,
   paciente,
+  corregirDatosEn,
   etiquetaConfirmar = "Confirmar este horario",
 }: Props) {
   const [diaElegido, setDiaElegido] = useState<string | null>(null)
@@ -212,6 +215,16 @@ export function SelectorDeTurnos({
             }
             tono="error"
           />
+        )}
+
+        {/* Corregir los datos, desde el único lugar donde el paciente los ve
+            todos juntos. El flujo conversacional ofrece acá "2. No, modificar";
+            sin esto, quien se equivocó un dígito del DNI al darse de alta veía
+            el error en el resumen y no tenía cómo arreglarlo. */}
+        {corregirDatosEn && !enviando && (
+          <a href={corregirDatosEn} className="block text-[15px] text-gray-500 underline">
+            Corregir mis datos
+          </a>
         )}
 
         <div className="space-y-2">

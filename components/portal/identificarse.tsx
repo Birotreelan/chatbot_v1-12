@@ -64,12 +64,20 @@ function Enviando({ children }: { children: React.ReactNode }) {
 export function PedirDNI({
   token,
   paraFamiliar,
+  valorInicial,
 }: {
   token: string
   /** El turno es para otra persona: el DNI que va es el de ella. */
   paraFamiliar?: boolean
+  /**
+   * Lo ya cargado, cuando el paciente volvió para corregirlo.
+   *
+   * Sin esto, "volver a corregir el DNI" sería volver a tipearlo entero — y el
+   * que vuelve normalmente quiere cambiar un dígito.
+   */
+  valorInicial?: string
 }) {
-  const [dni, setDni] = useState("")
+  const [dni, setDni] = useState(valorInicial || "")
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(false)
 
@@ -135,18 +143,37 @@ export function DarseDeAlta({
   token,
   dni,
   paraFamiliar,
+  valoresIniciales,
 }: {
   token: string
   dni?: string
   /** Los datos son de la persona que se atiende, no de quien completa. */
   paraFamiliar?: boolean
+  /** Lo ya cargado, cuando el paciente volvió a corregir algo. */
+  valoresIniciales?: {
+    nombre?: string
+    apellido?: string
+    email?: string
+    obraSocialId?: string
+    obraSocialNombre?: string
+  }
 }) {
-  const [nombre, setNombre] = useState("")
-  const [apellido, setApellido] = useState("")
-  const [email, setEmail] = useState("")
+  const [nombre, setNombre] = useState(valoresIniciales?.nombre || "")
+  const [apellido, setApellido] = useState(valoresIniciales?.apellido || "")
+  const [email, setEmail] = useState(valoresIniciales?.email || "")
   const [busquedaOS, setBusquedaOS] = useState("")
   const [opcionesOS, setOpcionesOS] = useState<ObraSocial[]>([])
-  const [elegida, setElegida] = useState<ObraSocial | null>(null)
+  const [elegida, setElegida] = useState<ObraSocial | null>(
+    valoresIniciales?.obraSocialId && valoresIniciales?.obraSocialNombre
+      ? {
+          id: valoresIniciales.obraSocialId,
+          nombre: valoresIniciales.obraSocialNombre,
+          // La que ya estaba guardada pasó el chequeo del servidor cuando se
+          // guardó; si estuviera bloqueada, el paciente no habría llegado acá.
+          permiteOnline: true,
+        }
+      : null,
+  )
   const [errores, setErrores] = useState<Record<string, string>>({})
   const [cargando, setCargando] = useState(false)
 

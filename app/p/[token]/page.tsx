@@ -30,7 +30,12 @@ import { cookies } from "next/headers"
 import { randomBytes } from "crypto"
 import { leerEnlace } from "@/lib/portal/token"
 import { permiteGestionar, permiteVerDatos } from "@/lib/portal/vigencia"
-import { decidirPaso, ofreceVerTodos, opcionesDeBusqueda, type TipoDeBusqueda } from "@/lib/portal/pasos"
+import {
+  decidirPaso,
+  ofreceVerTodos,
+  opcionesDeBusqueda,
+  type TipoDeBusqueda,
+} from "@/lib/portal/pasos"
 import { marcaDelPortal } from "@/lib/portal/marca"
 import { agendaParaReprogramar, agendaParaTurnoNuevo, turnosDeEjemplo } from "@/lib/portal/agenda"
 import {
@@ -61,6 +66,8 @@ export default async function PaginaDelPortal({
 }: {
   params: Promise<{ token: string }>
   searchParams: Promise<{
+    /** Volver a un paso anterior a propósito. Ver PASOS_REVISITABLES. */
+    paso?: string
     sedeId?: string
     tipoBusqueda?: string
     especialidadId?: string
@@ -207,6 +214,21 @@ export default async function PaginaDelPortal({
         return urlCon(quedan)
       }
     }
+
+    // ── Y de ahí para atrás, a los pasos de identidad ─────────────────────
+    //
+    // La cadena no terminaba acá por casualidad: `decidirPaso` sólo avanza, así
+    // que sin un pedido explícito nunca vuelve a pedir el DNI. El que se
+    // equivocó un dígito al darse de alta no tenía cómo arreglarlo y el turno
+    // se reservaba con el DNI equivocado.
+    //
+    // Sólo se ofrece cuando hay algo que corregir: si al paciente lo reconoció
+    // el bot, sus datos vienen de la ficha de la clínica y no se editan desde
+    // acá — mandarlo a una pantalla que no cambia nada sería peor que no
+    // ofrecerla.
+    if (contexto.identidad?.tieneFicha === false) return urlCon({ paso: "registrar" })
+    if (contexto.identidad?.dni) return urlCon({ paso: "pedir_dni" })
+
     return null
   }
   // ── Quién es el paciente ─────────────────────────────────────────────────
@@ -232,6 +254,19 @@ export default async function PaginaDelPortal({
   // Lo que se muestra en el repaso previo a confirmar. El nombre completo, no
   // el de pila: acá el paciente está verificando que el turno quede a nombre de
   // quien corresponde, que es justo el caso del turno para un familiar.
+  /**
+   * A dónde va "Corregir mis datos" desde la pantalla de confirmación.
+   *
+   * `null` para el paciente que reconoció el bot: sus datos salen de la ficha
+   * de la clínica y no se editan desde el portal.
+   */
+  const corregirDatosEn =
+    contexto.identidad?.tieneFicha === false
+      ? `/p/${token}?paso=registrar`
+      : contexto.identidad?.dni
+        ? `/p/${token}?paso=pedir_dni`
+        : null
+
   const datosParaElResumen = {
     nombre:
       contexto.pacienteNombre ||
@@ -240,7 +275,7 @@ export default async function PaginaDelPortal({
     obraSocial: identidad.obraSocialNombre,
   }
 
-  const paso = decidirPaso(contexto.intencion, permisos, filtros, identidad)
+  const paso = decidirPaso(contexto.intencion, permisos, filtros, identidad, filtrosCrudos.paso)
   const clienteId = contexto.clienteId || ""
 
   // El aviso de prueba va arriba de todo y en todas las pantallas. Si alguien
@@ -271,6 +306,9 @@ export default async function PaginaDelPortal({
   if (paso === "pedir_dni") {
     return marco(
       <>
+        {/* Se llegó acá a propósito, para corregir: tiene que haber salida sin
+            cambiar nada. */}
+        {filtrosCrudos.paso && <Volver href={urlCon({})} />}
         <TituloDePaso
           tipo="dni"
           detalle={
@@ -281,7 +319,7 @@ export default async function PaginaDelPortal({
         >
           {paraFamiliar ? "¿Cuál es el DNI de la persona que se va a atender?" : "¿Cuál es tu DNI?"}
         </TituloDePaso>
-        <PedirDNI token={token} paraFamiliar={paraFamiliar} />
+        <PedirDNI token={token} paraFamiliar={paraFamiliar} valorInicial={contexto.identidad?.dni} />
       </>,
     )
   }
@@ -290,6 +328,7 @@ export default async function PaginaDelPortal({
   if (paso === "registrar") {
     return marco(
       <>
+        {filtrosCrudos.paso && <Volver href={urlCon({})} />}
         <TituloDePaso
           tipo="datos"
           detalle={
@@ -300,7 +339,12 @@ export default async function PaginaDelPortal({
         >
           {paraFamiliar ? "Es su primera vez con nosotros" : "Es tu primera vez con nosotros"}
         </TituloDePaso>
-        <DarseDeAlta token={token} dni={identidad.dni} paraFamiliar={paraFamiliar} />
+        <DarseDeAlta
+          token={token}
+          dni={identidad.dni}
+          paraFamiliar={paraFamiliar}
+          valoresIniciales={contexto.identidad}
+        />
       </>,
     )
   }
@@ -408,6 +452,7 @@ export default async function PaginaDelPortal({
             token={token}
             dias={dias}
             paciente={datosParaElResumen}
+            corregirDatosEn={corregirDatosEn}
             etiquetaConfirmar="Confirmar el cambio"
           />
         )}
@@ -570,6 +615,7 @@ export default async function PaginaDelPortal({
         token={token}
         dias={diasNuevos}
         paciente={datosParaElResumen}
+        corregirDatosEn={corregirDatosEn}
         etiquetaConfirmar="Confirmar mi turno"
       />
     </>,
