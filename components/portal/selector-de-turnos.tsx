@@ -285,22 +285,66 @@ export function SelectorDeTurnos({
           //    maneja el modo oscuro de forma inconsistente y un contraste roto
           //    acá deja a alguien sin poder sacar un turno—, así que el
           //    calendario tiene que respetar esa decisión igual que el resto.
+          // ── Los días se distinguen con estilos, no con clases ───────────
+          //
+          // Acá había un bug que dejaba el calendario todo del mismo color:
+          // `day` traía `text-gray-900` y `day_disabled` traía `text-gray-300`,
+          // y las dos clases caen sobre el MISMO elemento. Cuál gana no lo
+          // decide el orden en que están escritas sino el orden en que Tailwind
+          // las emite en la hoja de estilos — y ahí `text-gray-900` va después.
+          // Resultado: los días sin turno se veían igual de negros que los
+          // disponibles, con un cartel abajo diciendo "los días con turno están
+          // resaltados".
+          //
+          // La lección: dos clases de Tailwind que pisan la misma propiedad no
+          // son una jerarquía, son un empate que resuelve el compilador.
+          //
+          // Por eso el color de cada estado va por `modifiersStyles`, que son
+          // estilos en línea y le ganan a cualquier clase sin ambigüedad.
           classNames={{
             caption_label: "text-base font-medium capitalize text-gray-900",
             head_cell: "w-11 text-xs font-normal text-gray-500",
             cell: "h-11 w-11 p-0 text-center",
-            day: "h-11 w-11 rounded-lg p-0 text-base font-normal text-gray-900 hover:bg-gray-100",
-            day_selected: "text-white hover:opacity-90",
+            // Sin color acá: lo pone el modificador que corresponda.
+            day: "h-11 w-11 rounded-lg p-0 text-base",
             // El día de hoy sin turnos no debe parecer seleccionable: sólo se
             // marca con un borde.
             day_today: "border border-gray-300",
-            day_disabled: "text-gray-300 hover:bg-transparent",
-            day_outside: "text-gray-300",
+            // Vacíos para anular los de `components/ui/calendar`, que usan
+            // tokens del tema del dashboard (`bg-primary`, `text-muted-
+            // foreground`, `opacity-50`). Esos tokens siguen el modo oscuro,
+            // que este portal no tiene a propósito, y además el `opacity-50`
+            // del deshabilitado se sumaba al gris y lo dejaba casi invisible.
+            day_selected: "",
+            day_disabled: "",
+            day_outside: "",
+          }}
+          // `disponible` excluye al día ya elegido a propósito: así los tres
+          // estados son mutuamente excluyentes y no depende del orden en que
+          // react-day-picker aplique los modificadores. Un día no puede estar
+          // disponible y elegido a la vez, ni disponible y deshabilitado.
+          modifiers={{
+            disponible: (fecha) => {
+              const iso = aISO(fecha)
+              return fechasConAgenda.has(iso) && iso !== diaElegido
+            },
           }}
           modifiersStyles={{
-            // El color de la clínica. Va por `modifiersStyles` y no por clase
-            // porque sale de la configuración de cada cliente.
-            selected: { background: "var(--marca)", color: "#fff" },
+            // Con turno: resaltado de verdad —fondo, color de la clínica y
+            // negrita—, que es lo que el texto de abajo promete.
+            disponible: {
+              background: "#eff6ff",
+              color: "var(--marca)",
+              fontWeight: 600,
+            },
+            // Sin turno: apagado y claramente no tocable.
+            disabled: {
+              color: "#d1d5db",
+              fontWeight: 400,
+              background: "transparent",
+            },
+            // El elegido, con el color de la clínica lleno.
+            selected: { background: "var(--marca)", color: "#fff", fontWeight: 600 },
           }}
         />
       </div>
