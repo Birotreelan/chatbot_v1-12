@@ -1,11 +1,53 @@
 import type { WhatsAppConfig } from "@/lib/types"
 
-// Normaliza un hostname: minúsculas y sin el prefijo "www." — así declarar
-// "clinica.com" también cubre "www.clinica.com" sin que el cliente tenga
-// que listar ambas variantes.
+/**
+ * Convierte lo que sea que haya escrito la persona en un hostname pelado.
+ *
+ * ── Por qué esto importa más de lo que parece (24/9/2026) ──────────────────
+ *
+ * Antes esta función sólo bajaba a minúsculas y sacaba "www.". Alcanzaba
+ * mientras el chequeo tenía escapes: un dominio mal escrito no matcheaba, pero
+ * el widget andaba igual porque el campo vacío o la falta de Referer dejaban
+ * pasar.
+ *
+ * Al cerrar esos escapes, un dominio mal escrito pasó a ser la diferencia
+ * entre que el widget funcione y un 403. Y la forma más natural de escribirlo
+ * —copiar la URL del navegador, "https://clinica.com/"— no matcheaba nada,
+ * porque se comparaba el texto completo contra el hostname del Origin. El
+ * campo decía lo correcto y el widget no andaba.
+ *
+ * Así que acá se acepta cualquiera de estas formas y todas dan "clinica.com":
+ *
+ *   clinica.com · www.clinica.com · https://clinica.com
+ *   https://www.clinica.com/turnos · clinica.com:443 · CLINICA.COM
+ *
+ * Es deliberado ser generoso: el campo lo completa una persona mirando la
+ * barra del navegador, no un programador leyendo una especificación.
+ */
 function normalizeHost(host: string): string {
-  return host.trim().toLowerCase().replace(/^www\./, "")
+  let valor = String(host || "").trim().toLowerCase()
+  if (!valor) return ""
+
+  // Esquema, con o sin "//": https://, http://, //clinica.com
+  valor = valor.replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/^\/\//, "")
+
+  // Usuario:clave@ — raro, pero si alguien pegó una URL completa está ahí.
+  valor = valor.replace(/^[^/@]*@/, "")
+
+  // Todo lo que venga después del host: path, query o fragmento.
+  valor = valor.split(/[/?#]/)[0]
+
+  // Puerto.
+  valor = valor.split(":")[0]
+
+  // Punto final del FQDN ("clinica.com.") y el "www." de siempre.
+  valor = valor.replace(/\.$/, "").replace(/^www\./, "")
+
+  return valor
 }
+
+/** Se exporta sólo para los tests: es donde se cuelan los errores de tipeo. */
+export { normalizeHost as normalizarDominio }
 
 function extractHost(url: string): string | null {
   try {

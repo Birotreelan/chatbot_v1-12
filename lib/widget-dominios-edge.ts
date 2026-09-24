@@ -50,9 +50,20 @@ function cliente(): Redis | null {
   }
 }
 
-/** Minúsculas y sin "www.", igual que `widget-domain-validation.ts`. */
+/**
+ * Misma normalización que `widget-domain-validation.ts`, y por el mismo motivo:
+ * el campo lo completa una persona copiando la barra del navegador, así que
+ * "https://clinica.com/" tiene que valer igual que "clinica.com". Antes no
+ * valía, y el resultado era un 403 con el dominio correcto cargado.
+ */
 export function normalizarHost(host: string): string {
-  return host.trim().toLowerCase().replace(/^www\./, "")
+  let valor = String(host || "").trim().toLowerCase()
+  if (!valor) return ""
+  valor = valor.replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/^\/\//, "")
+  valor = valor.replace(/^[^/@]*@/, "")
+  valor = valor.split(/[/?#]/)[0]
+  valor = valor.split(":")[0]
+  return valor.replace(/\.$/, "").replace(/^www\./, "")
 }
 
 /**

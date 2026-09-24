@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { isWidgetOriginAllowed } from "./widget-domain-validation"
+import { isWidgetOriginAllowed, normalizarDominio } from "./widget-domain-validation"
 
 const NUESTRO = "https://treelan-bot.vercel.app/api/widget?cliente_id=x"
 
@@ -91,5 +91,53 @@ describe("nuestro propio dominio", () => {
     expect(
       isWidgetOriginAllowed({ widgetAllowedDomains: "" }, pedido("https://treelan-bot.vercel.app")),
     ).toBe(true)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cómo escribe el dominio una persona (24/9/2026)
+//
+// Caso real: se cargó el dominio correcto y el widget devolvía 403. Estaba
+// escrito como URL completa —copiada de la barra del navegador— y se comparaba
+// ese texto entero contra el hostname del Origin. El campo decía lo correcto y
+// no matcheaba nada.
+//
+// Mientras el chequeo tenía escapes esto era inofensivo: un dominio mal escrito
+// no matcheaba, pero el widget andaba igual. Al cerrarlos, pasó a ser la
+// diferencia entre funcionar y un 403.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("el dominio se acepta como lo escriba la persona", () => {
+  it("todas estas formas son el mismo dominio", () => {
+    for (const escrito of [
+      "clinica.com",
+      "https://clinica.com",
+      "http://clinica.com",
+      "https://clinica.com/",
+      "https://www.clinica.com/turnos?x=1",
+      "  HTTPS://Clinica.COM  ",
+      "www.clinica.com",
+      "clinica.com:443",
+      "//clinica.com",
+      "clinica.com.",
+    ]) {
+      expect(normalizarDominio(escrito), escrito).toBe("clinica.com")
+    }
+  })
+
+  it("y todas dejan entrar al sitio", () => {
+    for (const escrito of ["clinica.com", "https://clinica.com/", " https://www.clinica.com/turnos "]) {
+      expect(
+        isWidgetOriginAllowed({ widgetAllowedDomains: escrito }, pedido("https://clinica.com")),
+        escrito,
+      ).toBe(true)
+    }
+  })
+
+  it("ser generoso al leer no afloja el chequeo", () => {
+    const config = { widgetAllowedDomains: "https://clinica.com/" }
+    expect(isWidgetOriginAllowed(config, pedido("https://sitio-ajeno.com"))).toBe(false)
+    expect(isWidgetOriginAllowed(config, pedido("https://noesclinica.com"))).toBe(false)
+    expect(isWidgetOriginAllowed(config, pedido(null))).toBe(false)
   })
 })

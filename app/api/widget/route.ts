@@ -57,9 +57,13 @@ export async function GET(request: Request) {
     }
 
     if (!isWidgetOriginAllowed(config, request)) {
+      // Se loguea lo que se comparó, no sólo que falló. La primera vez que
+      // esto rechazó en producción fue con el dominio bien cargado —estaba
+      // escrito como URL completa y no matcheaba— y sin este log fue adivinar.
       console.warn(
-        `[WIDGET-API] ⛔ Origen no autorizado para ${cliente_id}:`,
-        request.headers.get("origin") || request.headers.get("referer") || "(sin origin ni referer)",
+        `[WIDGET-API] ⛔ Origen no autorizado para ${cliente_id}` +
+          ` | viene de: ${request.headers.get("origin") || request.headers.get("referer") || "(sin origin ni referer)"}` +
+          ` | dominios cargados: ${config.widgetAllowedDomains?.trim() || "(ninguno)"}`,
       )
       return NextResponse.json(
         { error: "Este sitio no está autorizado para mostrar el widget" },
