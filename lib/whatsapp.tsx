@@ -5519,14 +5519,21 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         //
         // Con los dos llamadores apuntando acá no hay forma de que uno diga
         // una cosa y el otro otra.
-        const derivarTurnoNuevoAlPortal = async (): Promise<boolean> => {
+        //
+        // Sirve para las opciones 1 y 2 del menú. La 2 —"Solicitar turno para
+        // un familiar"— recorre exactamente el mismo camino: pedir un DNI,
+        // buscarlo, y dar de alta si no aparece. Lo único que cambia es de
+        // quién es ese DNI, y eso viaja en la intención para que los textos
+        // hablen de la persona correcta. La opción 3 no pasa por acá: una
+        // consulta se conversa.
+        const derivarTurnoNuevoAlPortal = async (paraFamiliar = false): Promise<boolean> => {
           if (!usaPortal(config)) return false
 
           const derivado = await derivarAlPortal({
             config,
             phoneNumberId: value.metadata.phone_number_id,
             userPhoneNumber,
-            intencion: 'nuevo_turno',
+            intencion: paraFamiliar ? 'familiar' : 'nuevo_turno',
             origen: 'conversacion',
           })
 
@@ -5606,6 +5613,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
             return
           } else if (selection === 2) {
+            // Opción 2 al portal, con la marca de que el turno es para otro.
+            if (await derivarTurnoNuevoAlPortal(true)) return
+
             // Opción 2: Turno para un familiar → pedir DNI del familiar
             await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_familiar_dni')
             const familiarDNIMessage = await import('./conversation-state/patient-detection/patient-templates').then(

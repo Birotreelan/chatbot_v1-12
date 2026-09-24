@@ -155,11 +155,15 @@ export function textoSoloPorTelefono(
   return texto + fraseDerivacion("Para cambiarlo, comunicate con la clínica", escalationPhoneNumber)
 }
 
-export function textoParaTurnoNuevo(): string {
-  return (
-    "Podés sacar tu turno desde el enlace de abajo: elegís la sede, el profesional y el horario que te quede mejor.\n\n" +
-    "Si preferís que te ayudemos por acá, escribime y seguimos."
-  )
+export function textoParaTurnoNuevo(paraFamiliar = false): string {
+  // El "para" importa: quien pidió turno para su madre tiene que entender, sin
+  // volver a preguntar, que el enlace le va a pedir los datos de ella y no los
+  // suyos. Si el mensaje dice "tu turno", carga el DNI equivocado.
+  const apertura = paraFamiliar
+    ? "Podés sacar el turno de tu familiar desde el enlace de abajo: vas a necesitar su DNI."
+    : "Podés sacar tu turno desde el enlace de abajo: elegís la sede, el profesional y el horario que te quede mejor."
+
+  return `${apertura}\n\nSi preferís que te ayudemos por acá, escribime y seguimos.`
 }
 
 export const BOTON_REPROGRAMAR = "Elegir horario"

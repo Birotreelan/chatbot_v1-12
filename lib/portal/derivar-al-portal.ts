@@ -237,7 +237,9 @@ export async function derivarAlPortal(params: {
     }
 
     const esReprogramar = params.intencion === "reagendar" || params.intencion === "cancelar"
-    const cuerpoBase = esReprogramar ? textoParaReprogramar(paciente?.turno) : textoParaTurnoNuevo()
+    const cuerpoBase = esReprogramar
+      ? textoParaReprogramar(paciente?.turno)
+      : textoParaTurnoNuevo(params.intencion === "familiar")
 
     // Por el mismo embudo que el resto: si es el primer mensaje del día, el
     // paciente tiene que saber que le está escribiendo una IA antes de que le

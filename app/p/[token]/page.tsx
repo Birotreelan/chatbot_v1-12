@@ -190,15 +190,28 @@ export default async function PaginaDelPortal({
     </Marco>
   )
 
+  // El turno puede no ser para quien abrió el enlace: la opción 2 del menú es
+  // "Solicitar turno para un familiar". Todo lo que se pida de acá en adelante
+  // es de la persona que se va a atender, y los textos tienen que decirlo — si
+  // dicen "tu DNI", el paciente carga el suyo y el turno queda a nombre
+  // equivocado.
+  const paraFamiliar = contexto.intencion === "familiar"
+
   // ── Decir quién sos ─────────────────────────────────────────────────────
   if (paso === "pedir_dni") {
     return marco(
       <>
-        <p style={{ fontSize: 18, margin: "0 0 8px" }}>Para buscar tu turno, necesitamos tu DNI.</p>
-        <p style={{ color: "#6b7280", margin: "0 0 20px", fontSize: 15 }}>
-          Si ya te atendiste en la clínica, con esto alcanza: traemos tus datos solos.
+        <p style={{ fontSize: 18, margin: "0 0 8px" }}>
+          {paraFamiliar
+            ? "¿Cuál es el DNI de la persona que se va a atender?"
+            : "Para buscar tu turno, necesitamos tu DNI."}
         </p>
-        <PedirDNI token={token} marca={marca} />
+        <p style={{ color: "#6b7280", margin: "0 0 20px", fontSize: 15 }}>
+          {paraFamiliar
+            ? "Si ya se atendió en la clínica, con esto alcanza: traemos sus datos solos."
+            : "Si ya te atendiste en la clínica, con esto alcanza: traemos tus datos solos."}
+        </p>
+        <PedirDNI token={token} marca={marca} paraFamiliar={paraFamiliar} />
       </>,
     )
   }
@@ -207,11 +220,15 @@ export default async function PaginaDelPortal({
   if (paso === "registrar") {
     return marco(
       <>
-        <p style={{ fontSize: 18, margin: "0 0 8px" }}>Es tu primera vez con nosotros.</p>
-        <p style={{ color: "#6b7280", margin: "0 0 20px", fontSize: 15 }}>
-          Completá estos datos y seguimos con el turno.
+        <p style={{ fontSize: 18, margin: "0 0 8px" }}>
+          {paraFamiliar ? "Es su primera vez con nosotros." : "Es tu primera vez con nosotros."}
         </p>
-        <DarseDeAlta token={token} dni={identidad.dni} marca={marca} />
+        <p style={{ color: "#6b7280", margin: "0 0 20px", fontSize: 15 }}>
+          {paraFamiliar
+            ? "Completá los datos de la persona que se va a atender y seguimos con el turno."
+            : "Completá estos datos y seguimos con el turno."}
+        </p>
+        <DarseDeAlta token={token} dni={identidad.dni} marca={marca} paraFamiliar={paraFamiliar} />
       </>,
     )
   }

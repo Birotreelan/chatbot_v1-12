@@ -91,7 +91,16 @@ function Boton({
 }
 
 /** Paso 1: el DNI, solo. */
-export function PedirDNI({ token, marca }: { token: string; marca: MarcaDelPortal }) {
+export function PedirDNI({
+  token,
+  marca,
+  paraFamiliar,
+}: {
+  token: string
+  marca: MarcaDelPortal
+  /** El turno es para otra persona: el DNI que va es el de ella. */
+  paraFamiliar?: boolean
+}) {
   const [dni, setDni] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(false)
@@ -124,7 +133,10 @@ export function PedirDNI({ token, marca }: { token: string; marca: MarcaDelPorta
 
   return (
     <form onSubmit={enviar} noValidate>
-      <Campo etiqueta="Número de DNI" error={error || undefined}>
+      <Campo
+        etiqueta={paraFamiliar ? "DNI de la persona que se atiende" : "Número de DNI"}
+        error={error || undefined}
+      >
         <input
           // `inputMode="numeric"` abre el teclado numérico en el teléfono sin
           // rechazar un pegado con puntos: el servidor los saca igual.
@@ -155,10 +167,13 @@ export function DarseDeAlta({
   token,
   dni,
   marca,
+  paraFamiliar,
 }: {
   token: string
   dni?: string
   marca: MarcaDelPortal
+  /** Los datos son de la persona que se atiende, no de quien completa. */
+  paraFamiliar?: boolean
 }) {
   const [nombre, setNombre] = useState("")
   const [apellido, setApellido] = useState("")
@@ -221,9 +236,9 @@ export function DarseDeAlta({
 
   return (
     <form onSubmit={enviar} noValidate>
-      <Campo etiqueta="Apellido" error={errores.apellido}>
+      <Campo etiqueta={paraFamiliar ? "Apellido del paciente" : "Apellido"} error={errores.apellido}>
         <input
-          autoComplete="family-name"
+          autoComplete={paraFamiliar ? "off" : "family-name"}
           autoFocus
           value={apellido}
           onChange={(e) => setApellido(e.target.value)}
@@ -231,20 +246,20 @@ export function DarseDeAlta({
         />
       </Campo>
 
-      <Campo etiqueta="Nombre" error={errores.nombre}>
+      <Campo etiqueta={paraFamiliar ? "Nombre del paciente" : "Nombre"} error={errores.nombre}>
         <input
-          autoComplete="given-name"
+          autoComplete={paraFamiliar ? "off" : "given-name"}
           value={nombre}
           onChange={(e) => setNombre(e.target.value)}
           style={ESTILO_CAMPO}
         />
       </Campo>
 
-      <Campo etiqueta="Email" error={errores.email}>
+      <Campo etiqueta={paraFamiliar ? "Email de contacto" : "Email"} error={errores.email}>
         <input
           type="email"
           inputMode="email"
-          autoComplete="email"
+          autoComplete={paraFamiliar ? "off" : "email"}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="nombre@ejemplo.com"
@@ -252,7 +267,7 @@ export function DarseDeAlta({
         />
       </Campo>
 
-      <Campo etiqueta="Obra social (opcional)">
+      <Campo etiqueta={paraFamiliar ? "Obra social del paciente (opcional)" : "Obra social (opcional)"}>
         <input
           autoComplete="off"
           value={elegida ? elegida.nombre : busquedaOS}
