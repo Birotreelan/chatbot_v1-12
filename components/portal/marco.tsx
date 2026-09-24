@@ -235,15 +235,11 @@ export function FilaDeResumen({ etiqueta, valor }: { etiqueta: string; valor: st
 export function ResumenDelTurno({
   turno,
   titulo,
-  extras,
 }: {
   turno: TurnoDelPortal
   titulo?: string
-  /** Filas que no salen del turno: paciente, obra social. */
-  extras?: Array<[string, string | undefined]>
 }) {
   const filas: Array<[string, string | undefined]> = [
-    ...(extras || []),
     ["Fecha", turno.fechaFormateada || turno.fecha],
     ["Hora", turno.horaFormateada || turno.hora],
     ["Profesional", turno.profesional],
@@ -314,5 +310,95 @@ export function BotonSecundario({
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * El repaso previo a confirmar, con los mismos datos que muestra el bot
+ * (24/9/2026).
+ *
+ * ── Por qué dos bloques y no una lista ────────────────────────────────────
+ *
+ * Es la forma que ya tiene `buildConfirmationMessage` en
+ * `conversation-state/shared/confirmation-handler.ts`: DATOS DEL PACIENTE y
+ * DATOS DEL TURNO. Son dos preguntas distintas —"¿este soy yo?" y "¿este es
+ * el turno que quiero?"— y separarlas hace que el paciente revise las dos en
+ * vez de pasar los ojos por una lista de nueve renglones.
+ *
+ * ── Lo que no está, no se inventa ─────────────────────────────────────────
+ *
+ * Cuando al paciente lo reconoció el bot tenemos su nombre completo en una
+ * sola cadena, sin saber dónde termina el nombre y empieza el apellido.
+ * Partirlo por el primer espacio daría "DE" y "SANTIAGO, Nicolas" en la mitad
+ * de los casos. Ahí se muestra un solo renglón "Paciente" con el nombre tal
+ * como vino, y listo.
+ */
+export function ResumenDeConfirmacion({
+  paciente,
+  turno,
+}: {
+  paciente: {
+    nombre?: string
+    apellido?: string
+    dni?: string
+    obraSocial?: string
+  }
+  turno: {
+    fechaFormateada?: string
+    horaFormateada?: string
+    profesional?: string
+    sede?: string
+    agendaId?: string
+  }
+}) {
+  const tieneNombreYApellido = Boolean(paciente.nombre && paciente.apellido)
+
+  const datosDelPaciente: Array<[string, string | undefined]> = tieneNombreYApellido
+    ? [
+        ["Apellido", paciente.apellido],
+        ["Nombre", paciente.nombre],
+        ["DNI", paciente.dni],
+        ["Obra social", paciente.obraSocial],
+      ]
+    : [
+        ["Paciente", paciente.nombre],
+        ["DNI", paciente.dni],
+        ["Obra social", paciente.obraSocial],
+      ]
+
+  const datosDelTurno: Array<[string, string | undefined]> = [
+    ["Fecha", turno.fechaFormateada],
+    ["Hora", turno.horaFormateada],
+    // Sin "Dr." adelante, a diferencia del bot: ese prefijo se agrega sin
+    // saber si corresponde, y la agenda tiene instrumentadores quirúrgicos y
+    // otros profesionales que no son médicos. Poner un título que puede estar
+    // mal es peor que no poner ninguno.
+    ["Profesional", turno.profesional],
+    ["Sede", turno.sede],
+    // El bot lo muestra como "Id Turno" y sirve: es lo que el paciente le dice
+    // a la clínica por teléfono si algo no cierra.
+    ["N° de turno", turno.agendaId],
+  ]
+
+  const visibles = (filas: Array<[string, string | undefined]>) =>
+    filas.filter(([, valor]) => !!valor) as Array<[string, string]>
+
+  const bloque = (titulo: string, filas: Array<[string, string]>) =>
+    filas.length === 0 ? null : (
+      <div>
+        <p className="mb-2 text-sm font-medium uppercase tracking-wide text-gray-500">{titulo}</p>
+        <div className="space-y-2 text-[15px]">
+          {filas.map(([etiqueta, valor]) => (
+            <FilaDeResumen key={etiqueta} etiqueta={etiqueta} valor={valor} />
+          ))}
+        </div>
+      </div>
+    )
+
+  return (
+    <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+      {bloque("Datos del paciente", visibles(datosDelPaciente))}
+      {bloque("Datos del turno", visibles(datosDelTurno))}
+    </div>
   )
 }

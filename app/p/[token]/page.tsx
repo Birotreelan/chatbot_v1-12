@@ -268,11 +268,16 @@ export default async function PaginaDelPortal({
         ? `/p/${token}?paso=pedir_dni`
         : null
 
+  // Los mismos datos que muestra el bot antes de confirmar.
+  //
+  // Nombre y apellido van separados SÓLO cuando los tenemos separados —el
+  // paciente que se dio de alta acá—. Cuando al paciente lo reconoció el bot
+  // tenemos su nombre completo en una sola cadena y no se parte: "DE SANTIAGO,
+  // Nicolas" partido por el primer espacio daría "DE" como apellido.
   const datosParaElResumen = {
-    nombre:
-      contexto.pacienteNombre ||
-      [identidad.nombre, identidad.apellido].filter(Boolean).join(" ") ||
-      undefined,
+    nombre: identidad.nombre || contexto.pacienteNombre || undefined,
+    apellido: identidad.apellido,
+    dni: identidad.dni,
     obraSocial: identidad.obraSocialNombre,
   }
 

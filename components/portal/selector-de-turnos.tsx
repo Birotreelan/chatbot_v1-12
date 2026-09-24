@@ -38,13 +38,20 @@ import { Calendar } from "@/components/ui/calendar"
 import { es } from "date-fns/locale"
 import { Loader2 } from "lucide-react"
 import type { DiaConTurnos } from "@/lib/portal/agenda"
-import { Aviso, BotonPrimario, BotonSecundario, ResumenDelTurno, TituloDePaso } from "./marco"
+import {
+  Aviso,
+  BotonPrimario,
+  BotonSecundario,
+  ResumenDeConfirmacion,
+  ResumenDelTurno,
+  TituloDePaso,
+} from "./marco"
 
 interface Props {
   token: string
   dias: DiaConTurnos[]
   /** Se muestran en el repaso previo a confirmar. */
-  paciente?: { nombre?: string; obraSocial?: string }
+  paciente?: { nombre?: string; apellido?: string; dni?: string; obraSocial?: string }
   /** URL para volver a editar los datos personales. `null` si no hay nada que editar. */
   corregirDatosEn?: string | null
   etiquetaConfirmar?: string
@@ -183,17 +190,20 @@ export function SelectorDeTurnos({
       <div className="space-y-4">
         <TituloDePaso tipo="confirmar">Repasá y confirmá</TituloDePaso>
 
-        <ResumenDelTurno
+        <ResumenDeConfirmacion
+          paciente={{
+            nombre: paciente?.nombre,
+            apellido: paciente?.apellido,
+            dni: paciente?.dni,
+            obraSocial: paciente?.obraSocial,
+          }}
           turno={{
             fechaFormateada: elegido.fechaFormateada,
             horaFormateada: elegido.hora,
             profesional: elegido.profesional,
             sede: elegido.sede,
+            agendaId: elegido.agendaId,
           }}
-          extras={[
-            ["Paciente", paciente?.nombre],
-            ["Obra social", paciente?.obraSocial],
-          ]}
         />
 
         {error && (
