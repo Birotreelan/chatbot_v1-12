@@ -47,6 +47,14 @@ export interface FiltrosElegidos {
    * elegir profesional antes sería elegir entre los de todas las sedes.
    */
   sedeId?: string
+  /**
+   * Ya se resolvió la cuestión de la sede, aunque haya terminado en ninguna.
+   *
+   * Existe porque "no hay sede elegida" y "esta clínica no tiene sedes que
+   * elegir" son cosas distintas y sin esto se confundían: la página preguntaba
+   * eternamente, o —peor— seguía de largo con el paso equivocado.
+   */
+  sedeResuelta?: boolean
   especialidadId?: string
   profesionalId?: string
   /** Cómo quiere buscar. Ver `TipoDeBusqueda`. */
@@ -233,7 +241,7 @@ export function decidirPaso(
   //
   // La página resuelve sola el caso de una sola sede: si la lista trae una, la
   // usa sin preguntar, igual que hace con especialidades y profesionales.
-  if (!filtros.sedeId) return "elegir_sede"
+  if (!filtros.sedeId && !filtros.sedeResuelta) return "elegir_sede"
 
   // Ya filtró: a los horarios. Un filtro alcanza — ver `TipoDeBusqueda`.
   if (filtros.sinFiltro || filtros.profesionalId || filtros.especialidadId) return "elegir_horario"

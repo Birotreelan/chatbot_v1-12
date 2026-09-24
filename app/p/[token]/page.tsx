@@ -161,6 +161,7 @@ export default async function PaginaDelPortal({
   }
   const filtros: {
     sedeId?: string
+    sedeResuelta?: boolean
     tipoBusqueda?: TipoDeBusqueda
     especialidadId?: string
     profesionalId?: string
@@ -275,8 +276,44 @@ export default async function PaginaDelPortal({
     obraSocial: identidad.obraSocialNombre,
   }
 
-  const paso = decidirPaso(contexto.intencion, permisos, filtros, identidad, filtrosCrudos.paso)
   const clienteId = contexto.clienteId || ""
+
+  // ── La sede se resuelve antes de decidir el paso (24/9/2026) ─────────────
+  //
+  // El bug que esto arregla: el bloque de la sede se resolvía DESPUÉS, y
+  // cuando la clínica tenía una sola sede (o el proxy no devolvía ninguna) no
+  // renderizaba nada y dejaba seguir. Pero `paso` ya valía "elegir_sede", así
+  // que los `if` de tipo de búsqueda, especialidad y profesional —todos
+  // comparados contra `paso`— daban falso, y la ejecución caía hasta el bloque
+  // de horarios del final.
+  //
+  // Resultado: del DNI a elegir horario de una, salteando tres pasos. Lo que
+  // falló no fue la lógica de `decidirPaso` sino calcularla con información
+  // que todavía no estaba: hay que preguntarle a la clínica cuántas sedes
+  // tiene antes de saber si hay algo que preguntar.
+  let sedesParaElegir: Array<{ id: string; nombre: string; detalle?: string }> = []
+
+  if (decidirPaso(contexto.intencion, permisos, filtros, identidad, filtrosCrudos.paso) === "elegir_sede") {
+    const sedes = (await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes || []
+    sedesParaElegir = sedes
+      .map((sede: any) => ({
+        id: String(sede?.Id ?? ""),
+        nombre: String(sede?.Nombre_Completo ?? "").trim(),
+        detalle: [sede?.Domicilio, sede?.Localidad].filter(Boolean).join(" — ") || undefined,
+      }))
+      .filter((o) => o.id && o.nombre)
+
+    // Con una sola no se pregunta: se usa. Con ninguna tampoco, y se sigue sin
+    // filtrar por sede — es lo que hacía el portal antes de este paso.
+    if (sedesParaElegir.length === 1) {
+      filtros.sedeId = sedesParaElegir[0].id
+      filtros.sedeResuelta = true
+    } else if (sedesParaElegir.length === 0) {
+      filtros.sedeResuelta = true
+    }
+  }
+
+  const paso = decidirPaso(contexto.intencion, permisos, filtros, identidad, filtrosCrudos.paso)
 
   // El aviso de prueba va arriba de todo y en todas las pantallas. Si alguien
   // abre este enlace sin saber qué es, tiene que enterarse antes de tocar nada.
@@ -462,33 +499,19 @@ export default async function PaginaDelPortal({
 
   // ── Elegir sede ─────────────────────────────────────────────────────────
   //
-  // Con una sola sede no se pregunta: se usa y se sigue. Preguntarle a alguien
-  // entre una sola opción es hacerlo tocar por nada.
+  // La lista ya se trajo más arriba: acá sólo se muestra. Separar "averiguar"
+  // de "mostrar" es lo que evita el bug de calcular el paso con datos que
+  // todavía no existían.
   if (paso === "elegir_sede") {
-    const sedes = (await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes || []
-    const opciones = sedes
-      .map((sede: any) => ({
-        id: String(sede?.Id ?? ""),
-        nombre: String(sede?.Nombre_Completo ?? "").trim(),
-        detalle: [sede?.Domicilio, sede?.Localidad].filter(Boolean).join(" — ") || undefined,
-      }))
-      .filter((o) => o.id && o.nombre)
-
-    if (opciones.length > 1) {
-      return marco(
-        <>
-          <TituloDePaso tipo="elegir" detalle="Vas a ver los horarios de la sede que elijas.">
-            {nombre ? `Hola, ${nombre}. ` : ""}¿A qué sede querés ir?
-          </TituloDePaso>
-          <ElegirFiltro token={token} campo="sedeId" opciones={opciones} />
-        </>,
-      )
-    }
-
-    // Una sola sede (o ninguna que se pueda leer): se sigue sin preguntar. Que
-    // el proxy no devuelva sedes NO frena al paciente — la búsqueda sin sede
-    // es lo que hacía el portal hasta ahora y sigue funcionando.
-    if (opciones.length === 1) filtros.sedeId = opciones[0].id
+    return marco(
+      <>
+        {volverQuitando() && <Volver href={volverQuitando()!} />}
+        <TituloDePaso tipo="elegir" detalle="Vas a ver los horarios de la sede que elijas.">
+          {nombre ? `Hola, ${nombre}. ` : ""}¿A qué sede querés ir?
+        </TituloDePaso>
+        <ElegirFiltro token={token} campo="sedeId" opciones={sedesParaElegir} />
+      </>,
+    )
   }
 
   // ── Cómo querés buscar ──────────────────────────────────────────────────
@@ -576,7 +599,10 @@ export default async function PaginaDelPortal({
   const agendaNueva = await agendaParaTurnoNuevo({
     clienteId,
     phone: contexto.phone,
-    sedeId: contexto.sedeId,
+    // La sede ELEGIDA, no la del token. Esto decía `contexto.sedeId`: el
+    // paciente elegía una sede y la búsqueda salía con otra (o con ninguna).
+    // El paso se veía y no servía para nada.
+    sedeId: filtros.sedeId,
     profesionalId: filtros.profesionalId,
     especialidadId: filtros.especialidadId,
     // Del contexto unificado, no del token: un paciente que se identificó en

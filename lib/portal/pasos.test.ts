@@ -287,3 +287,52 @@ describe("esPasoRevisitable", () => {
     }
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// El recorrido completo, paso por paso (24/9/2026)
+//
+// Reportado: del DNI se iba directo a elegir horario, salteando sede, tipo de
+// búsqueda y especialidad.
+//
+// La causa no estaba acá sino en la página: resolvía la sede DESPUÉS de
+// calcular el paso. Con una sola sede no renderizaba nada y dejaba seguir, pero
+// `paso` ya valía "elegir_sede", así que todos los `if` posteriores —comparados
+// contra `paso`— daban falso y la ejecución caía hasta el bloque de horarios.
+//
+// `sedeResuelta` es lo que permite distinguir "todavía no sé nada de la sede"
+// de "ya lo resolví, aunque haya terminado en ninguna".
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("el recorrido completo de un turno nuevo", () => {
+  const YO = { dni: "36100432", fichaConsultada: true, tieneFicha: true }
+  const paso = (filtros: Parameters<typeof decidirPaso>[2]) => decidirPaso("nuevo_turno", {}, filtros, YO)
+
+  it("clínica con varias sedes: los cuatro pasos, en orden", () => {
+    expect(paso({})).toBe("elegir_sede")
+    expect(paso({ sedeId: "3" })).toBe("elegir_tipo_busqueda")
+    expect(paso({ sedeId: "3", tipoBusqueda: "especialidad" })).toBe("elegir_especialidad")
+    expect(paso({ sedeId: "3", tipoBusqueda: "especialidad", especialidadId: "7" })).toBe("elegir_horario")
+  })
+
+  it("clínica con UNA sola sede: no se saltea el resto", () => {
+    // Éste es el caso reportado. La página resuelve la sede sola y marca
+    // `sedeResuelta`; lo que NO puede pasar es caer directo al horario.
+    expect(paso({ sedeId: "3", sedeResuelta: true })).toBe("elegir_tipo_busqueda")
+  })
+
+  it("clínica sin sedes listables: tampoco se saltea", () => {
+    expect(paso({ sedeResuelta: true })).toBe("elegir_tipo_busqueda")
+    expect(paso({ sedeResuelta: true, tipoBusqueda: "especialidad" })).toBe("elegir_especialidad")
+  })
+
+  it("sin resolver la sede, se la sigue pidiendo", () => {
+    // Sin esta distinción, "no hay sede elegida" y "esta clínica no tiene
+    // sedes" se confundían.
+    expect(paso({ tipoBusqueda: "cualquiera" })).toBe("elegir_sede")
+  })
+
+  it("cada tipo de búsqueda lleva a su rama, no a una cadena", () => {
+    expect(paso({ sedeId: "3", tipoBusqueda: "profesional" })).toBe("elegir_profesional")
+    expect(paso({ sedeId: "3", tipoBusqueda: "cualquiera" })).toBe("elegir_horario")
+  })
+})
