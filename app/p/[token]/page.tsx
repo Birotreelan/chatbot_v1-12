@@ -544,7 +544,7 @@ export default async function PaginaDelPortal({
 
   // ── Elegir especialidad ─────────────────────────────────────────────────
   if (paso === "elegir_especialidad") {
-    const opciones = normalizarOpciones(await obtenerEspecialidades(clienteId).catch(() => null))
+    const opciones = normalizarOpciones(await obtenerEspecialidades(clienteId).catch(() => null), "especialidades")
 
     // Sin especialidades no se frena al paciente en una pantalla vacía: se
     // salta al paso siguiente con un enlace que ya trae el `sinFiltro`.
@@ -572,7 +572,7 @@ export default async function PaginaDelPortal({
   // que no hay ninguna cargada no quiere elegir un profesional — quiere ver
   // los horarios. El salto ahora lo hace el bloque de especialidad.
   if (paso === "elegir_profesional") {
-    const opciones = normalizarOpciones(await obtenerTodosLosProfesionales(clienteId).catch(() => null))
+    const opciones = normalizarOpciones(await obtenerTodosLosProfesionales(clienteId).catch(() => null), "profesionales")
 
     if (opciones.length > 0) {
       // Se conserva TODO lo elegido, no sólo la especialidad: antes la sede
@@ -706,15 +706,97 @@ function VerTodos({
  * clínica. Se aceptan las variantes conocidas y se descarta lo que no tenga id
  * y nombre, en vez de mostrar opciones vacías que no llevan a ningún lado.
  */
-function normalizarOpciones(respuesta: any): Array<{ id: string; nombre: string }> {
+/**
+ * El primer valor no vacío de una lista de nombres de campo posibles.
+ *
+ * La API devuelve el mismo dato con distinto nombre según el endpoint y la
+ * clínica: `Id`, `id`, `Codigo`, `Subespecialidad_Id`… Probar varios es más
+ * barato que normalizar el proxy de cada cliente.
+ */
+function primerCampo(item: any, campos: string[]): string {
+  for (const campo of campos) {
+    const valor = item?.[campo]
+    if (valor !== undefined && valor !== null && String(valor).trim() !== "") {
+      return String(valor).trim()
+    }
+  }
+  return ""
+}
+
+const CAMPOS_ID = [
+  "id",
+  "Id",
+  "ID",
+  "codigo",
+  "Codigo",
+  "Subespecialidad_Id",
+  "Especialidad_Id",
+  "Profesional_Id",
+  "Sede_Id",
+]
+
+const CAMPOS_NOMBRE = [
+  "nombre",
+  "Nombre",
+  "descripcion",
+  "Descripcion",
+  "Nombre_Completo",
+  "nombre_completo",
+  "Detalle",
+  "detalle",
+  "Subespecialidad",
+  "Especialidad",
+]
+
+/**
+ * Normaliza las listas del proxy (especialidades, profesionales) al par que
+ * necesita el selector.
+ *
+ * ── Lo que se descarta, se dice (24/9/2026) ────────────────────────────────
+ *
+ * Reportado: la lista de subespecialidades del portal traía menos ítems que la
+ * misma request en Postman.
+ *
+ * La versión anterior probaba tres nombres de campo y filtraba en silencio lo
+ * que no encajaba. Un ítem cuyo nombre viniera como `Descripcion` o cuyo id
+ * fuera `Subespecialidad_Id` desaparecía sin dejar rastro: el paciente veía
+ * una lista más corta y nadie se enteraba, porque una lista corta parece una
+ * lista.
+ *
+ * Es el mismo error de siempre con otra ropa — tratar "no supe leerlo" como
+ * "no existe". Ahora se prueban más nombres Y se loguea lo que igual queda
+ * afuera, con las claves del ítem, así la próxima vez el log dice qué campo
+ * falta en vez de que haya que adivinarlo.
+ */
+function normalizarOpciones(respuesta: any, queEs = "opciones"): Array<{ id: string; nombre: string }> {
   const datos = respuesta?.datos ?? respuesta
-  const lista = Array.isArray(datos) ? datos : datos?.especialidades || datos?.profesionales || []
+  const lista = Array.isArray(datos)
+    ? datos
+    : datos?.especialidades || datos?.subespecialidades || datos?.profesionales || []
   if (!Array.isArray(lista)) return []
 
-  return lista
-    .map((item: any) => ({
-      id: String(item?.id ?? item?.Id ?? item?.codigo ?? ""),
-      nombre: String(item?.nombre ?? item?.Nombre ?? item?.descripcion ?? "").trim(),
-    }))
-    .filter((o) => o.id && o.nombre)
+  const opciones: Array<{ id: string; nombre: string }> = []
+  const descartados: string[] = []
+
+  for (const item of lista) {
+    const id = primerCampo(item, CAMPOS_ID)
+    const nombre = primerCampo(item, CAMPOS_NOMBRE)
+
+    if (id && nombre) {
+      opciones.push({ id, nombre })
+    } else {
+      descartados.push(
+        `{${Object.keys(item || {}).join(", ")}}${id ? "" : " ← sin id"}${nombre ? "" : " ← sin nombre"}`,
+      )
+    }
+  }
+
+  if (descartados.length > 0) {
+    console.warn(
+      `[PORTAL] ⚠️ ${descartados.length} de ${lista.length} ${queEs} quedaron afuera por no encontrarles id o nombre. ` +
+        `Claves de los descartados: ${descartados.slice(0, 5).join(" | ")}`,
+    )
+  }
+
+  return opciones
 }
