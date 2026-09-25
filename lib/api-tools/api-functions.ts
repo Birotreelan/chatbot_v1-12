@@ -257,6 +257,30 @@ async function fetchProxyApi<T>(
 }
 
 // Función para buscar paciente por DNI o teléfono
+/**
+ * Un id como lo espera el proxy (24/9/2026).
+ *
+ * ── Por qué existe ─────────────────────────────────────────────────────────
+ *
+ * El proxy es sensible al tipo y no avisa. Con `"Subespecialidad_Id": "1"` en
+ * vez de `1` ignoraba el filtro y devolvía TODOS los turnos; con
+ * `"Agenda_Id": "47"` en vez de `47` no encontraba la agenda y la reserva
+ * fallaba con "ese horario ya no está disponible". Ninguno de los dos da
+ * error: uno devuelve de más y el otro de menos.
+ *
+ * El bot nunca tuvo el problema porque pasa los valores crudos de la API, que
+ * ya vienen como números. El portal los hace pasar por la query string o por
+ * JSON y los convierte en texto por el camino.
+ *
+ * Sólo se convierte si son todos dígitos: `Sede_Id` y `Profesional_Id` son
+ * UUIDs y tienen que seguir siendo texto. Convertirlos a ciegas cambiaría "no
+ * filtra" por "no encuentra nada", que es peor.
+ */
+function idParaElProxy(valor: string | number): string | number {
+  const comoTexto = String(valor).trim()
+  return /^\d+$/.test(comoTexto) ? Number(comoTexto) : valor
+}
+
 export async function buscarPaciente(
   clienteId: string,
   params: { dni?: string; telefono?: string },
@@ -443,8 +467,7 @@ export async function obtenerTurnos(
     //
     // Se convierte sólo si son todos dígitos. `Sede_Id` y `Profesional_Id` son
     // UUIDs y tienen que seguir siendo texto; convertir a ciegas los rompería.
-    const comoTexto = String(subespecialidadId).trim()
-    params.Subespecialidad_Id = /^\d+$/.test(comoTexto) ? Number(comoTexto) : subespecialidadId
+    params.Subespecialidad_Id = idParaElProxy(subespecialidadId)
   }
 
   if (deudorId) {
@@ -514,7 +537,10 @@ export async function reservarTurno(
   useCache = false, // Reservar turno no debería cachearse
 ): Promise<ApiResponse<any>> {
   const params: Record<string, any> = {
-    Agenda_Id: agendaId,
+    // Mismo motivo que Subespecialidad_Id: el portal lo manda como texto y el
+    // proxy no encuentra la agenda, así que la reserva falla con "ese horario
+    // ya no está disponible" cuando en realidad sí lo estaba.
+    Agenda_Id: idParaElProxy(agendaId),
     Paciente_Telefono: pacienteData.telefono,
     Paciente_Email: pacienteData.email,
   }

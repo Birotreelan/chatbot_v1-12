@@ -26,6 +26,7 @@
 import { NextResponse } from "next/server"
 import { leerEnlace, consumirEnlace, type TurnoDelPortal } from "@/lib/portal/token"
 import { permiteGestionar } from "@/lib/portal/vigencia"
+import { resolverPorDNI } from "@/lib/portal/identidad"
 import { reservarTurno, cancelarTurno } from "@/lib/api-tools/api-functions"
 import { saveConversationMessage } from "@/lib/conversations"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
@@ -118,14 +119,42 @@ export async function POST(request: Request) {
   // Para un paciente nuevo, ESTE es el momento en que se crea su ficha. No se
   // creó antes a propósito: dar de alta al completar el formulario llenaría la
   // base de la clínica de gente que abandonó antes de elegir horario.
-  const ident = contexto.identidad
+  let ident = contexto.identidad
+
+  // ── El apellido tiene que ir aparte (25/9/2026) ───────────────────────────
+  //
+  // `set_turno` responde "Debe proporcionar Nombre, Apellido, DNI y al menos
+  // un medio de contacto" si falta el apellido. El portal mandaba
+  // `Paciente_Nombre: "Nicolas DE SANTIAGO"` —el nombre completo en un solo
+  // campo— y ningún apellido, así que toda reserva de un paciente que el BOT
+  // había identificado fallaba. El token del bot trae `pacienteNombre` entero;
+  // nombre y apellido separados sólo los tiene el portal cuando él mismo buscó
+  // la ficha.
+  //
+  // Se resuelve preguntándole a quien sabe, no partiendo la cadena: "DE
+  // SANTIAGO, Nicolas" y "Nicolas DE SANTIAGO" conviven en la misma base, y
+  // cualquier regla para partirlas se equivoca en la mitad de los casos. La
+  // ficha ya tiene los dos campos separados y la buscamos por DNI, que lo
+  // tenemos.
+  const dniParaReservar = ident?.dni || contexto.pacienteDNI
+  if (!ident?.apellido && dniParaReservar) {
+    const ficha = await resolverPorDNI(contexto.clienteId, dniParaReservar)
+    if (ficha?.tieneFicha) {
+      // La ficha completa los huecos; lo que el paciente haya cargado en el
+      // portal manda por encima, porque es más reciente.
+      ident = { ...ficha, ...(contexto.identidad || {}) }
+    } else {
+      console.warn(`[PORTAL] No se pudo traer la ficha de ${contexto.phone} para completar el apellido`)
+    }
+  }
+
   const datosDelPaciente = {
     telefono: contexto.phone,
-    // El proxy exige el campo. Vacío para el paciente que ya tiene ficha —su
-    // email está en el sistema de la clínica y no queremos pisarlo con nada—,
-    // y con el que cargó cuando es un alta.
-    email: ident?.tieneFicha === false ? ident?.email || "" : "",
-    dni: ident?.dni || contexto.pacienteDNI,
+    // El de la ficha cuando lo hay, y el que cargó el paciente cuando es un
+    // alta. El proxy pide "teléfono o email" y el teléfono siempre va, pero
+    // mandar el email real es mejor dato para la clínica.
+    email: ident?.email || "",
+    dni: dniParaReservar,
     nombre: ident?.nombre || contexto.pacienteNombre,
     apellido: ident?.apellido,
     deudorId: ident?.obraSocialId || contexto.obraSocialId,
