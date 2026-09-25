@@ -14,6 +14,10 @@ import {
   primerNombrePresentable,
   PLANTILLAS_DEL_ENLACE,
   PLANTILLA_SIN_TURNO,
+  BOTONES_DEL_ENLACE,
+  botonDelEnlace,
+  fechaPresentable,
+  LIMITE_TEXTO_BOTON,
 } from "./mensaje-enlace"
 
 describe("cada flujo dice lo suyo", () => {
@@ -36,10 +40,11 @@ describe("cada flujo dice lo suyo", () => {
       textoDelEnlace({
         intencion: "reagendar",
         nombre: "NICOLAS",
-        turno: { fechaFormateada: "24/09/2026", horaFormateada: "09:00" },
+        turno: { fecha: "2026-09-24", fechaFormateada: "24/09/2026", horaFormateada: "09:00" },
       }),
     ).toBe(
-      "Nicolas, para reagendar tu turno del 24/09/2026 a las 09:00, utilizá el botón que aparece a continuación.",
+      "Nicolas, para reagendar tu turno del jueves, 24 de septiembre de 2026 a las 09:00, " +
+        "utilizá el botón que aparece a continuación.",
     )
   })
 
@@ -155,5 +160,100 @@ describe("cuando ya no hay turno que reprogramar", () => {
 
   it("no suprimiría el saludo inicial", () => {
     expect(PLANTILLA_SIN_TURNO).not.toMatch(/asistente virtual|bienvenid/i)
+  })
+})
+
+describe("el mensaje de cancelación", () => {
+  const TURNO = {
+    fecha: "2026-09-26",
+    fechaFormateada: "26/09/2026",
+    horaFormateada: "05:00",
+    profesional: "GARAY, Matías - MP: 12336",
+    sede: "Rafael Lozada 212 esq. Arzobispo Castellanos",
+  }
+
+  it("responde al gesto, nombra el turno entero y pide el segundo toque", () => {
+    const t = textoDelEnlace({ intencion: "cancelar", nombre: "DE SANTIAGO, Nicolas", turno: TURNO })
+    expect(t).toContain("Nicolas, recibimos tu pedido de cancelar el turno")
+    expect(t).toContain("sábado, 26 de septiembre de 2026 a las 05:00")
+    expect(t).toContain("con GARAY, Matías - MP: 12336")
+    expect(t).toContain("en la sede Rafael Lozada 212 esq. Arzobispo Castellanos")
+    expect(t).toContain("Para evitar cancelaciones accidentales")
+  })
+
+  it("NO dice que el turno ya está cancelado", () => {
+    // El peor final posible: el paciente lee "cancelado", no abre el enlace, y
+    // falta sin avisar —o se presenta a un turno que cree cancelado—.
+    const t = textoDelEnlace({ intencion: "cancelar", nombre: "Nicolas", turno: TURNO }).toLowerCase()
+    expect(t).not.toMatch(/\b(cancelamos|quedó cancelado|fue cancelado|ya está cancelado)\b/)
+  })
+
+  it("ofrece reagendar, pero después de responder lo que pidió", () => {
+    const t = textoDelEnlace({ intencion: "cancelar", nombre: "Nicolas", turno: TURNO })
+    expect(t).toContain("reagendar")
+    expect(t.indexOf("cancelar el turno")).toBeLessThan(t.indexOf("reagendar"))
+  })
+
+  it("conserva los párrafos", () => {
+    // La limpieza de espacios colapsaba los "\n\n" y dejaba un bloque corrido.
+    const t = textoDelEnlace({ intencion: "cancelar", nombre: "Nicolas", turno: TURNO })
+    expect(t.split("\n\n")).toHaveLength(3)
+  })
+
+  it("sin profesional ni sede sigue siendo una oración correcta", () => {
+    const t = textoDelEnlace({
+      intencion: "cancelar",
+      nombre: "Nicolas",
+      turno: { fecha: "2026-09-26", horaFormateada: "05:00" },
+    })
+    expect(t).toContain("el turno del sábado, 26 de septiembre de 2026 a las 05:00.")
+    expect(t).not.toContain("en la sede")
+  })
+
+  it("sin turno no inventa datos ni deja huecos", () => {
+    const t = textoDelEnlace({ intencion: "cancelar" })
+    expect(t).toContain("Recibimos tu pedido de cancelar el turno.")
+    expect(t).not.toContain("{")
+  })
+})
+
+describe("el botón", () => {
+  it("el texto nombra el botón que realmente se estampa", () => {
+    // Si se decidieran por separado, el mensaje podría pedirle al paciente que
+    // apriete un botón que dice otra cosa.
+    for (const intencion of Object.keys(PLANTILLAS_DEL_ENLACE) as (keyof typeof PLANTILLAS_DEL_ENLACE)[]) {
+      const t = textoDelEnlace({ intencion, nombre: "Nicolas" })
+      if (PLANTILLAS_DEL_ENLACE[intencion].includes("{boton}")) {
+        expect(t, intencion).toContain(`«${botonDelEnlace(intencion)}»`)
+      }
+    }
+  })
+
+  it("ninguna etiqueta pasa de 20 caracteres", () => {
+    // WhatsApp corta `display_text` en 20 y el mensaje repetiría el corte:
+    // "presionando el botón «Confirmar cancelació…»".
+    for (const [flujo, etiqueta] of Object.entries(BOTONES_DEL_ENLACE)) {
+      expect(etiqueta.length, `${flujo}: "${etiqueta}"`).toBeLessThanOrEqual(LIMITE_TEXTO_BOTON)
+    }
+  })
+})
+
+describe("la fecha del turno", () => {
+  it("prefiere la cruda", () => {
+    expect(fechaPresentable({ fecha: "2026-09-26", fechaFormateada: "cualquier cosa" })).toBe(
+      "sábado, 26 de septiembre de 2026",
+    )
+  })
+
+  it("entiende dd/mm/aaaa sin cambiar el mes por el día", () => {
+    // `new Date("26/09/2026")` es inválido, y "09/10/2026" se leería como
+    // 9 de octubre. Por eso se reordena antes de formatear.
+    expect(fechaPresentable({ fechaFormateada: "26/09/2026" })).toBe("sábado, 26 de septiembre de 2026")
+    expect(fechaPresentable({ fechaFormateada: "09/10/2026" })).toContain("9 de octubre")
+  })
+
+  it("si no puede formatear, devuelve lo que haya en vez de un hueco", () => {
+    expect(fechaPresentable({ fechaFormateada: "el jueves" })).toBe("el jueves")
+    expect(fechaPresentable({})).toBe("")
   })
 })

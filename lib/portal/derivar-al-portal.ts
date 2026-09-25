@@ -26,9 +26,7 @@ import {
   enviarMensajeConEnlace,
   textoDelEnlace,
   textoSoloPorTelefono,
-  BOTON_REPROGRAMAR,
-  BOTON_GESTIONAR,
-  BOTON_TURNO_NUEVO,
+  botonDelEnlace,
 } from "./mensaje-enlace"
 import { sendWhatsAppMessage } from "../whatsapp-api"
 import type { IntencionDelPortal, OrigenDelEnlace } from "./vigencia"
@@ -271,8 +269,6 @@ export async function derivarAlPortal(params: {
       return false
     }
 
-    const esReprogramar = params.intencion === "reagendar" || params.intencion === "cancelar"
-
     const cuerpoBase = textoDelEnlace({
       intencion: params.intencion,
       nombre: paciente?.pacienteNombre,
@@ -291,12 +287,10 @@ export async function derivarAlPortal(params: {
       to: params.userPhoneNumber,
       cuerpo,
       url: enlace.url,
-      textoDelBoton:
-        params.intencion === "cancelar"
-          ? BOTON_GESTIONAR
-          : esReprogramar
-            ? BOTON_REPROGRAMAR
-            : BOTON_TURNO_NUEVO,
+      // La etiqueta sale de la misma tabla que la nombra dentro del texto
+      // ("presionando el botón «Cancelar mi turno»"). Decidirla acá otra vez
+      // era pedirle al paciente que apriete un botón que dice otra cosa.
+      textoDelBoton: botonDelEnlace(params.intencion),
       // Sin pie: el nombre de la clínica ya aparece como remitente del chat, y
       // repetirlo abajo de un mensaje de una línea lo hacía ver más largo de lo
       // que es.

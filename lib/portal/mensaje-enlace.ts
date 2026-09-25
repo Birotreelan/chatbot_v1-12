@@ -18,6 +18,7 @@
  */
 
 import { fraseDerivacion } from "../utils/escalation-contact"
+import { formatDateWithDayOfWeek } from "../utils/date-utils"
 import type { IntencionDelPortal } from "./vigencia"
 
 export const LIMITE_TEXTO_BOTON = 20
@@ -152,15 +153,53 @@ export const PLANTILLAS_DEL_ENLACE: Record<IntencionDelPortal, string> = {
   reagendar: "para reagendar tu turno{cuando}, utilizá el botón que aparece a continuación.",
   // ── El texto más delicado de los cuatro (25/9/2026) ──────────────────────
   //
-  // Antes, tocar "Cancelar turno" traía un "confirmá tu decisión" que dejaba
-  // clarísimo que todavía no había pasado nada. Con un enlace, el riesgo es
-  // que el paciente lo lea como "listo, cancelado", no lo abra, y falte sin
-  // avisar — o peor, se presente a un turno que cree cancelado.
+  // Tocar "Cancelar" en el recordatorio no cancela nada: abre el portal. El
+  // riesgo es que el paciente lea la respuesta como "listo, cancelado", no la
+  // abra, y falte sin avisar — o al revés, se presente a un turno que cree
+  // cancelado.
   //
-  // Por eso el mensaje abre diciendo que el turno SIGUE ACTIVO, antes de
-  // mencionar el botón. El orden importa: si la aclaración va al final,
-  // compite con el botón, que es lo que el ojo busca primero.
-  cancelar: "tu turno{cuando} sigue activo. Para cancelarlo o cambiarlo de horario, usá el botón de acá abajo.",
+  // Por eso el mensaje responde al gesto que el paciente acaba de hacer
+  // ("recibimos tu pedido de cancelar"), repite el turno completo para que
+  // vea cuál es, y recién después pide el segundo toque. Decir "tu turno
+  // sigue activo" —como decía antes— era cierto pero sonaba a que no lo
+  // habíamos escuchado.
+  //
+  // El reagendamiento se nombra último y como alternativa. Primero se
+  // responde lo que pidió; ofrecerle otra cosa antes es no escucharlo.
+  cancelar:
+    "recibimos tu pedido de cancelar el turno{cuando}{profesional}{sede}.\n\n" +
+    "Para evitar cancelaciones accidentales, necesitamos que confirmes tu decisión " +
+    "presionando el botón «{boton}» que aparece a continuación.\n\n" +
+    "Al presionar el botón vas a poder confirmar la cancelación. También vas a tener la " +
+    "opción de consultar los horarios disponibles y elegir un turno nuevo, si preferís " +
+    "reagendar tu consulta en lugar de cancelarla.",
+}
+
+/**
+ * El texto del botón, por flujo (25/9/2026).
+ *
+ * ── Por qué vive acá y no en el llamador ───────────────────────────────────
+ *
+ * El texto del mensaje NOMBRA al botón: «presionando el botón «Cancelar mi
+ * turno»». Si la etiqueta se decidiera en `derivar-al-portal` y el texto la
+ * escribiera a mano, alcanzaría con que alguien cambie una de las dos para que
+ * el mensaje le pida al paciente apretar un botón que no existe.
+ *
+ * Con esta tabla hay una sola decisión: `textoDelEnlace` reemplaza `{boton}`
+ * por lo mismo que `construirMensajeConEnlace` va a estampar en el botón.
+ *
+ * ── El límite de 20 caracteres no es negociable ────────────────────────────
+ *
+ * `display_text` de un CTA URL admite 20. "Confirmar cancelación" tiene 21 y
+ * llegaría cortado —"Confirmar cancelació…"—, y el texto del mensaje lo
+ * repetiría cortado también. Por eso la etiqueta dice "Cancelar mi turno": es
+ * lo mismo en menos letras. Hay un test que verifica el largo de todas.
+ */
+export const BOTONES_DEL_ENLACE: Record<IntencionDelPortal, string> = {
+  nuevo_turno: "Sacar turno",
+  familiar: "Sacar turno",
+  reagendar: "Elegir horario",
+  cancelar: "Cancelar mi turno",
 }
 
 /**
@@ -206,7 +245,15 @@ export interface DatosDelTexto {
   /** Nombre del paciente, si lo sabemos. Sin él el mensaje sigue siendo correcto. */
   nombre?: string | null
   /** Sólo para reagendar/cancelar: el turno del que se habla. */
-  turno?: { fechaFormateada?: string; horaFormateada?: string }
+  turno?: {
+    /** Cruda ("2026-09-26"). Es la que se formatea; las otras son el respaldo. */
+    fecha?: string
+    fechaFormateada?: string
+    horaFormateada?: string
+    profesional?: string
+    sede?: string
+    direccion?: string
+  }
   /**
    * Redacción propia de este cliente, si la tiene cargada. Se usa tal cual,
    * con los mismos marcadores que las plantillas de arriba.
@@ -225,15 +272,28 @@ export interface DatosDelTexto {
 export function textoDelEnlace(datos: DatosDelTexto): string {
   const plantilla = (datos.plantilla || "").trim() || PLANTILLAS_DEL_ENLACE[datos.intencion]
 
+  const fechaLarga = fechaPresentable(datos.turno)
   const cuando =
-    datos.turno?.fechaFormateada && datos.turno?.horaFormateada
-      ? ` del ${datos.turno.fechaFormateada} a las ${datos.turno.horaFormateada}`
+    fechaLarga && datos.turno?.horaFormateada
+      ? ` del ${fechaLarga} a las ${datos.turno.horaFormateada}`
       : ""
+
+  // Cada uno trae su preposición adentro. Si el dato no vino, el marcador se
+  // reemplaza por nada y la frase cierra igual: "el turno del sábado… a las
+  // 05:00." sin profesional ni sede sigue siendo una oración correcta.
+  const profesional = datos.turno?.profesional ? ` con ${datos.turno.profesional}` : ""
+  const lugar = datos.turno?.sede || datos.turno?.direccion
+  const sede = lugar ? ` en la sede ${lugar}` : ""
 
   const nombre = primerNombrePresentable(datos.nombre)
 
   const cuerpo = plantilla
     .replace(/\{cuando\}/g, cuando)
+    .replace(/\{profesional\}/g, profesional)
+    .replace(/\{sede\}/g, sede)
+    // El botón se nombra desde la misma tabla que lo estampa, para que el
+    // mensaje no pueda pedir que aprieten uno que dice otra cosa.
+    .replace(/\{boton\}/g, botonDelEnlace(datos.intencion))
     // `{nombre}` se acepta por si una redacción propia lo pone en otro lugar
     // ("Tu turno, {nombre}, ..."). Cuando no lo usa, el nombre va adelante.
     .replace(/\{nombre\}/g, nombre || "")
@@ -245,7 +305,11 @@ export function textoDelEnlace(datos: DatosDelTexto): string {
     // Y cuando el marcador estaba ENTRE signos —"Tu turno, {nombre}, se
     // saca"— quedan los dos pegados: "Tu turno,, se saca".
     .replace(/([,;:])\s*[,;:]/g, "$1")
-    .replace(/\s{2,}/g, " ")
+    // Los espacios de más se colapsan; los saltos de línea NO. La plantilla de
+    // cancelación son tres párrafos separados por "\n\n": un `\s{2,}` común los
+    // convertía en un solo bloque de texto corrido.
+    .replace(/[^\S\n]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
     .trim()
 
   if (nombre && !plantilla.includes("{nombre}")) {
@@ -281,7 +345,48 @@ export function textoSoloPorTelefono(
   return texto + fraseDerivacion("Para cambiarlo, comunicate con la clínica", escalationPhoneNumber)
 }
 
-export const BOTON_REPROGRAMAR = "Elegir horario"
-/** Máximo 20 caracteres, como todos los CTA. */
+/**
+ * La etiqueta del botón para este flujo.
+ *
+ * Una sola función para las dos necesidades —estampar el botón y nombrarlo
+ * dentro del texto— porque son la misma pregunta hecha dos veces.
+ */
+export function botonDelEnlace(intencion: IntencionDelPortal): string {
+  return BOTONES_DEL_ENLACE[intencion] || BOTON_GESTIONAR
+}
+
+/**
+ * La fecha del turno, en la forma larga que usa el resto del sistema:
+ * "sábado, 26 de septiembre de 2026".
+ *
+ * Se prefiere `fecha` cruda ("2026-09-26") porque es la que el formateador
+ * sabe leer. `fecha_formateada` llega como "26/09/2026" y se convierte acá
+ * antes de pasarla: si se la diera cruda a `new Date`, en Argentina saldría
+ * el mes cambiado por el día.
+ *
+ * Si nada se puede formatear, devuelve lo que haya. Un paciente prefiere
+ * "26/09/2026" antes que un hueco donde iba la fecha de su turno.
+ */
+export function fechaPresentable(turno?: { fecha?: string; fechaFormateada?: string }): string {
+  const cruda = (turno?.fecha || "").trim()
+  const mostrada = (turno?.fechaFormateada || "").trim()
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cruda)) return formatDateWithDayOfWeek(cruda)
+
+  const ddmmaaaa = mostrada.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
+  if (ddmmaaaa) {
+    const [, d, m, a] = ddmmaaaa
+    return formatDateWithDayOfWeek(`${a}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`)
+  }
+
+  return mostrada || cruda
+}
+
+/**
+ * El respaldo de `botonDelEnlace` para una intención que no esté en la tabla.
+ *
+ * Es el único que sobrevive de las tres constantes sueltas que había: las
+ * otras dos duplicaban entradas de `BOTONES_DEL_ENLACE` y ya nadie las usaba.
+ * Máximo 20 caracteres, como todos los CTA.
+ */
 export const BOTON_GESTIONAR = "Gestionar mi turno"
-export const BOTON_TURNO_NUEVO = "Sacar turno"
