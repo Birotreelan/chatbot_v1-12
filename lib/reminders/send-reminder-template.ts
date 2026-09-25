@@ -148,42 +148,28 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
   // otra forma, el cliente no configuró el nombre— se manda el original. Un
   // recordatorio sin el botón nuevo llega igual; uno que no llega es un
   // paciente que no se entera de su turno.
-  // ── No se ofrece un botón que no lleva a ningún lado (23/9/2026) ─────────
+  // ── Por qué ya no se mira `admite_reagendamiento` acá (25/9/2026) ───────
   //
-  // `Chatbot_Data` trae `admite_reagendamiento` por turno. Cuando es `false`
-  // —agendas que la clínica sólo reserva por teléfono— el tercer botón no tiene
-  // destino posible: el proxy va a devolver cero turnos, con razón.
+  // Hasta hoy, un turno con `admite_reagendamiento: false` hacía que este
+  // envío NO se reescribiera: el recordatorio tenía un tercer botón
+  // "Reprogramar turno" que, en esas agendas, no llevaba a ningún lado.
+  // No mostrar un botón sin destino era lo correcto.
   //
-  // Se decide acá, en el envío, y no sólo al responder. Contestar bien "eso se
-  // reprograma por teléfono" está implementado y es la red de seguridad, pero
-  // es peor experiencia y encima cuesta: el paciente toca un botón, espera, y
-  // recibe un no. Mejor no mostrárselo.
+  // Ese botón ya no existe. El recordatorio tiene "Confirmar" y "Cancelar",
+  // y cancelar se puede siempre — el reagendamiento se ofrece después,
+  // dentro del portal, donde `permiteReprogramarOnline` decide si mostrarlo.
   //
-  // La red de seguridad sigue haciendo falta igual: entre el recordatorio y el
-  // clic pasan horas, y la clínica puede cambiar la agenda en el medio.
-  let admiteReagendamiento = true
-  try {
-    const datos = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
-    const primerTurno = Array.isArray(datos?.turnos) ? datos.turnos[0] : undefined
-    // `!== false`: si el campo no viene, no sabemos, y no sabemos no es un no.
-    if (primerTurno?.admite_reagendamiento === false) admiteReagendamiento = false
-  } catch {
-    // Chatbot_Data ilegible: se sigue como si admitiera. El caso lo atrapa la
-    // compuerta de la respuesta.
-  }
-
+  // Dejar la compuerta como estaba sería ahora el error inverso: a esos
+  // pacientes les sacaríamos también la cancelación por portal, que sí
+  // funciona, y volverían a gastar cuatro mensajes en el chat.
   let bodyAEnviar = Body
-  if (config.clientePortalWeb === true && config.templateRecordatorioFlows && !admiteReagendamiento) {
-    console.log(
-      "[REMINDERS] El turno no admite reagendamiento online; se envía el recordatorio original (sin el botón de reprogramar)",
-    )
-  } else if (config.clientePortalWeb === true && config.templateRecordatorioFlows) {
+  if (config.clientePortalWeb === true && config.templateRecordatorioFlows) {
     const reescrito = agregarBotonesAlEnvio(Body, {
       nombreTemplateFlows: config.templateRecordatorioFlows,
     })
     if (reescrito) {
       bodyAEnviar = reescrito
-      console.log(`[REMINDERS] Recordatorio reescrito a ${config.templateRecordatorioFlows} (3 botones)`)
+      console.log(`[REMINDERS] Recordatorio reescrito a ${config.templateRecordatorioFlows} (Confirmar + Cancelar)`)
     } else {
       console.warn("[REMINDERS] No se pudo reescribir el recordatorio; se envía el original")
     }

@@ -21,8 +21,8 @@ import {
   PAYLOAD_CANCELAR,
   PAYLOAD_REAGENDAR,
   CUERPO_VIGENTE,
-  CUERPO_CON_REAGENDAR,
-  ENCABEZADO_CON_REAGENDAR,
+  CUERPO_CON_BOTONES,
+  ENCABEZADO_CON_BOTONES,
   EJEMPLOS_VIGENTES,
 } from "./recordatorio-con-botones"
 import {
@@ -86,23 +86,33 @@ describe("los botones que se agregan", () => {
     expect(r.template.name).toBe("confirmacion_1_flows")
   })
 
-  it("agrega los tres payloads con sus índices", () => {
+  it("agrega los dos payloads con sus índices", () => {
     const r = agregarBotonesAlEnvio(BODY_DE_LA_CLINICA, PARAMS)!
     const botones = r.template.components.filter((c: any) => c.type === "button")
-    expect(botones).toHaveLength(3)
-    expect(botones.map((b: any) => b.index)).toEqual(["0", "1", "2"])
-    expect(botones.map((b: any) => b.parameters[0].payload)).toEqual([
-      PAYLOAD_CONFIRMAR,
-      PAYLOAD_CANCELAR,
-      PAYLOAD_REAGENDAR,
-    ])
+    expect(botones).toHaveLength(2)
+    expect(botones.map((b: any) => b.index)).toEqual(["0", "1"])
+    expect(botones.map((b: any) => b.parameters[0].payload)).toEqual([PAYLOAD_CONFIRMAR, PAYLOAD_CANCELAR])
   })
 
-  it("los tres son quick_reply: la plantilla no lleva botón de Flow", () => {
+  it("NUNCA manda un componente en el índice 2", () => {
+    // Éste es el test que importa. La plantilla aprobada tiene dos botones:
+    // un componente en el índice 2 hace que Meta rechace el envío entero y
+    // ese día ningún paciente del cliente recibe su recordatorio.
+    //
+    // Mandar de menos no rompe: el botón se muestra igual y al tocarlo
+    // WhatsApp devuelve su título, que `accionDelBoton` sabe rutear. Por eso
+    // la afirmación es "nunca 2" y no "siempre 0 y 1".
+    const r = agregarBotonesAlEnvio(BODY_DE_LA_CLINICA, PARAMS)!
+    const indices = r.template.components.filter((c: any) => c.type === "button").map((b: any) => String(b.index))
+    expect(indices).not.toContain("2")
+    expect(JSON.stringify(r)).not.toContain(PAYLOAD_REAGENDAR)
+  })
+
+  it("los dos son quick_reply: la plantilla no lleva botón de Flow", () => {
     // Sin mezclar tipos, el recordatorio también se ve en WhatsApp Desktop.
     const r = agregarBotonesAlEnvio(BODY_DE_LA_CLINICA, PARAMS)!
     const subtipos = r.template.components.filter((c: any) => c.type === "button").map((b: any) => b.sub_type)
-    expect(subtipos).toEqual(["quick_reply", "quick_reply", "quick_reply"])
+    expect(subtipos).toEqual(["quick_reply", "quick_reply"])
     expect(JSON.stringify(r)).not.toContain("flow_token")
   })
 })
@@ -178,7 +188,7 @@ describe("las etiquetas entran en el límite de Meta", () => {
 
 describe("el cuerpo del template", () => {
   it("conserva los cinco parámetros del template vigente", () => {
-    for (const cuerpo of [CUERPO_VIGENTE, CUERPO_CON_REAGENDAR]) {
+    for (const cuerpo of [CUERPO_VIGENTE, CUERPO_CON_BOTONES]) {
       for (let i = 1; i <= 5; i++) {
         expect(cuerpo, `{{${i}}}`).toContain(`{{${i}}}`)
       }
@@ -195,9 +205,9 @@ describe("definicionDeTemplate", () => {
   const DEF = definicionDeTemplate({
     nombre: "confirmacion_1_flows",
     idioma: "es_AR",
-    cuerpo: CUERPO_CON_REAGENDAR,
+    cuerpo: CUERPO_CON_BOTONES,
     ejemplos: EJEMPLOS_VIGENTES,
-    encabezado: ENCABEZADO_CON_REAGENDAR,
+    encabezado: ENCABEZADO_CON_BOTONES,
   })
 
   it("pide categoría utility", () => {
@@ -207,7 +217,7 @@ describe("definicionDeTemplate", () => {
   it("incluye el encabezado cuando se lo pasan", () => {
     const header: any = DEF.components.find((c: any) => c.type === "HEADER")
     expect(header.format).toBe("TEXT")
-    expect(header.text).toBe(ENCABEZADO_CON_REAGENDAR)
+    expect(header.text).toBe(ENCABEZADO_CON_BOTONES)
   })
 
   it("lo omite cuando no", () => {
@@ -217,10 +227,16 @@ describe("definicionDeTemplate", () => {
     expect(sin.components.some((c: any) => c.type === "HEADER")).toBe(false)
   })
 
-  it("los tres botones son quick reply", () => {
+  it("los dos botones son quick reply", () => {
     const botones: any = DEF.components.find((c: any) => c.type === "BUTTONS")
-    expect(botones.buttons.map((b: any) => b.type)).toEqual(["QUICK_REPLY", "QUICK_REPLY", "QUICK_REPLY"])
-    expect(botones.buttons.map((b: any) => b.text)).toEqual([BOTON_CONFIRMAR, BOTON_CANCELAR, BOTON_REAGENDAR])
+    expect(botones.buttons.map((b: any) => b.type)).toEqual(["QUICK_REPLY", "QUICK_REPLY"])
+    expect(botones.buttons.map((b: any) => b.text)).toEqual([BOTON_CONFIRMAR, BOTON_CANCELAR])
+  })
+
+  it("el cuerpo no promete una opción que no está entre los botones", () => {
+    // Si el texto ofrece reprogramar y el botón no existe, el paciente busca
+    // algo que no está. El reagendamiento se ofrece dentro del portal.
+    expect(CUERPO_CON_BOTONES.toLowerCase()).not.toContain("reprogram")
   })
 })
 

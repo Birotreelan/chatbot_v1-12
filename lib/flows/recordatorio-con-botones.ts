@@ -117,7 +117,8 @@ export function accionDelBoton(boton: { text?: string; payload?: string } | null
  * parámetro corrido acá es un paciente recibiendo la fecha de otro.
  *
  * La única diferencia con el aprobado: dice "confirme o cancele su asistencia"
- * y ahora hay una tercera opción. Ver CUERPO_CON_REAGENDAR.
+ * y la plantilla con botones dice lo mismo con otras palabras. Ver
+ * CUERPO_CON_BOTONES.
  */
 export const CUERPO_VIGENTE =
   "Hola! Nos comunicamos desde {{1}} para recordarle que tiene un turno el día {{2}}, " +
@@ -125,22 +126,27 @@ export const CUERPO_VIGENTE =
   "Por favor, confirme o cancele su asistencia.\n\n" +
   "Muchas gracias."
 
-/** Encabezado de la plantilla con Flows, tal como se aprobó. */
-export const ENCABEZADO_CON_REAGENDAR = "Recordatorio de turno"
+/** Encabezado de la plantilla con botones, tal como se aprobó. */
+export const ENCABEZADO_CON_BOTONES = "Recordatorio de turno"
 
 /**
- * El cuerpo de `confirmacion_1_flows`, la plantilla que se creó el 22/9/2026.
+ * El cuerpo de la plantilla con botones (creada el 22/9/2026, reducida a dos
+ * botones el 25/9/2026).
  *
  * Mantiene los cinco parámetros en el mismo orden que la vigente —sede, fecha,
  * hora, profesional, dirección— que es lo que permite reescribir el envío sin
  * que la clínica cambie nada.
+ *
+ * El texto no ofrece reprogramar aunque el sistema lo permita: se ofrece
+ * dentro del portal, después de "Cancelar". Prometer acá una opción que no
+ * está entre los botones es peor que no nombrarla.
  */
-export const CUERPO_CON_REAGENDAR =
+export const CUERPO_CON_BOTONES =
   "Estimado/a paciente:\n\n" +
   "Nos comunicamos desde {{1}} para recordarle que tiene un turno programado para el día {{2}} " +
   "a las {{3}} horas, con {{4}}, en {{5}}.\n\n" +
-  "Por favor, seleccione una de las siguientes opciones para confirmar su asistencia, " +
-  "cancelar el turno o solicitar una reprogramación.\n\n" +
+  "Por favor, seleccione una de las siguientes opciones para confirmar su asistencia " +
+  "o cancelar el turno.\n\n" +
   "Muchas gracias."
 
 /** Los ejemplos que ya tiene aprobados el template vigente. */
@@ -196,14 +202,13 @@ export function definicionDeTemplate(params: {
       },
       {
         type: "BUTTONS",
-        // Los tres son quick reply. Sin mezclar tipos de botón, el template se
+        // Los dos son quick reply. Sin mezclar tipos de botón, el template se
         // ve también en WhatsApp Desktop — la restricción de Meta que lo
         // obligaba al teléfono aplica sólo cuando se combina un quick reply con
         // un botón de otro tipo (por ejemplo, uno de Flow).
         buttons: [
           { type: "QUICK_REPLY", text: BOTON_CONFIRMAR },
           { type: "QUICK_REPLY", text: BOTON_CANCELAR },
-          { type: "QUICK_REPLY", text: BOTON_REAGENDAR },
         ],
       },
     ],
@@ -245,20 +250,34 @@ export function agregarBotonesAlEnvio(
     template: {
       ...original.template,
       name: params.nombreTemplateFlows,
-      // Los tres son quick_reply: la plantilla real no lleva botón de Flow.
-      // El Flow se manda después, como mensaje aparte, sólo a quien toca
-      // "Reprogramar turno" — ver construirMensajeFlow en mensaje-flow.ts.
+      // Los dos son quick_reply: la plantilla no lleva botón de Flow.
       //
       // El payload explícito es lo único que aportan estos componentes: sin
       // ellos los botones se muestran igual (son parte de la plantilla
       // aprobada), pero WhatsApp devolvería sólo el título. Rutear por un
       // payload que definimos nosotros es más firme que rutear por un texto
       // que cualquiera puede escribir a mano.
+      //
+      // ── Por qué DOS y no tres (25/9/2026) ───────────────────────────────
+      //
+      // La plantilla pasó a tener dos botones: "Confirmar" y "Cancelar". El
+      // reagendamiento ya no es un botón del recordatorio; se ofrece dentro
+      // del portal, después de tocar "Cancelar".
+      //
+      // La cantidad importa en una sola dirección. Un componente con un
+      // `index` que la plantilla no tiene hace que Meta rechace el envío
+      // entero: cada paciente de ese cliente se quedaría sin recordatorio.
+      // Mandar MENOS componentes que botones, en cambio, no rompe nada:
+      // el botón sobrante se muestra igual y al tocarlo WhatsApp devuelve su
+      // título, que `accionDelBoton` sabe rutear.
+      //
+      // Por eso quedan dos y no se agrega un tercero aunque algún cliente
+      // siga teniendo la plantilla vieja de tres: dos funciona con las dos
+      // plantillas, tres sólo con una.
       components: [
         ...componentesOriginales,
         { type: "button", sub_type: "quick_reply", index: "0", parameters: [{ type: "payload", payload: PAYLOAD_CONFIRMAR }] },
         { type: "button", sub_type: "quick_reply", index: "1", parameters: [{ type: "payload", payload: PAYLOAD_CANCELAR }] },
-        { type: "button", sub_type: "quick_reply", index: "2", parameters: [{ type: "payload", payload: PAYLOAD_REAGENDAR }] },
       ],
     },
   }

@@ -34,8 +34,8 @@ import { construirFlowJson, construirDatosDeLaPantalla, VERSION_FLOW_JSON } from
 import { construirMensajeFlow, enviarMensajeFlow } from "@/lib/flows/mensaje-flow"
 import {
   definicionDeTemplate,
-  CUERPO_CON_REAGENDAR,
-  ENCABEZADO_CON_REAGENDAR,
+  CUERPO_CON_BOTONES,
+  ENCABEZADO_CON_BOTONES,
   EJEMPLOS_VIGENTES,
 } from "@/lib/flows/recordatorio-con-botones"
 
@@ -347,16 +347,16 @@ export async function POST(request: Request) {
         // Ya no necesita el flowId: la plantilla aprobada tiene tres quick
         // reply y ningún botón de Flow. El Flow se manda después, como mensaje
         // aparte, sólo a quien toca "Reprogramar turno".
-        const nombre = String(cuerpo.nombre || "").trim() || "confirmacion_1_flows"
+        const nombre = String(cuerpo.nombre || "").trim() || "confirmacion_1_turno"
         const definicion = definicionDeTemplate({
           nombre,
           idioma: String(cuerpo.idioma || "es_AR"),
           // Se puede pisar desde la interfaz: cada clínica puede tener su
           // propio texto aprobado, y el template nuevo tiene que aceptar los
           // mismos parámetros en el mismo orden.
-          cuerpo: String(cuerpo.cuerpo || CUERPO_CON_REAGENDAR),
+          cuerpo: String(cuerpo.cuerpo || CUERPO_CON_BOTONES),
           ejemplos: Array.isArray(cuerpo.ejemplos) && cuerpo.ejemplos.length > 0 ? cuerpo.ejemplos : EJEMPLOS_VIGENTES,
-          encabezado: String(cuerpo.encabezado ?? ENCABEZADO_CON_REAGENDAR) || undefined,
+          encabezado: String(cuerpo.encabezado ?? ENCABEZADO_CON_BOTONES) || undefined,
         })
 
         const respuesta = await crearTemplate(wabaId, accessToken, definicion)
