@@ -32,6 +32,7 @@ import {
 } from './patient-templates'
 import { detectFamiliarIntent } from './familiar-intent-detector'
 import { classifyTurnoEstado } from './turno-estado'
+import { seOfreceConfirmarAsistencia } from './opciones-del-turno'
 import { extractDNI, extractAllDNIs } from '../dni-handler'
 import { resolverTurnosOnline } from '../shared/obra-social'
 import { recordDiag, DIAG } from '@/lib/diagnostics'
@@ -90,7 +91,13 @@ export async function initializePatientDetection(
   /** WhatsAppConfig.permitirCancelacion del cliente (default true). */
   permitirCancelacion?: boolean,
   /** WhatsAppConfig.escalationPhoneNumber — para los mensajes de derivación cuando no queda ninguna gestión disponible. */
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  /**
+   * WhatsAppConfig.clientePortalWeb (25/9/2026). Saca "Confirmar asistencia"
+   * del menú —la confirmación vive en el botón del recordatorio— y, con ella,
+   * la frase del saludo que la nombraba. Ver `seOfreceConfirmarAsistencia`.
+   */
+  usaPortalWeb?: boolean
 ): Promise<PatientDetectionResult> {
   const logger = createConversationLogger(phoneNumber, configId, 'initial_detection_pending')
   logger.info('Initializing patient detection', {})
@@ -158,7 +165,7 @@ export async function initializePatientDetection(
       }
     }
 
-    const detectionResult = await startPatientDetectionFlow(phoneNumber, configId, clienteId, permitirNuevoTurno, permitirCancelacion, escalationPhoneNumber)
+    const detectionResult = await startPatientDetectionFlow(phoneNumber, configId, clienteId, permitirNuevoTurno, permitirCancelacion, escalationPhoneNumber, usaPortalWeb)
     console.log(`[v0] [INIT_DETECTION] startPatientDetectionFlow result: isNewPatient=${detectionResult.isNewPatient} error=${detectionResult.error} multiplePatients=${detectionResult.multiplePatients?.length}`)
 
     if (detectionResult.error) {
@@ -407,7 +414,8 @@ export async function initializePatientDetection(
       permitirNuevoTurno,
       permitirCancelacion,
       escalationPhoneNumber,
-      obraSocialBloqueada
+      obraSocialBloqueada,
+      usaPortalWeb
     )
 
     // Único turno, sin posibilidad de confirmar (no hubo recordatorio) ni de
@@ -420,7 +428,14 @@ export async function initializePatientDetection(
       : null
     const singleTurnoSoloCancelar =
       !!singleTurno &&
-      !(classifyTurnoEstado(singleTurno) === 'no_confirmado' && hasReminder) &&
+      // Mismo predicado que el saludo y que el action map. Con el portal,
+      // `puedeConfirmar` es false aunque el turno esté sin confirmar, y este
+      // cálculo tiene que verlo igual o los botones dejan de coincidir con el
+      // texto —que es el bug del caso Liliana—.
+      !seOfreceConfirmarAsistencia({
+        estadoAdmiteConfirmar: classifyTurnoEstado(singleTurno) === 'no_confirmado' && hasReminder,
+        usaPortalWeb,
+      }) &&
       permitirCancelacion !== false &&
       permitirNuevoTurno === false
 

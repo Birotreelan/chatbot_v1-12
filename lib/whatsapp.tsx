@@ -2366,7 +2366,7 @@ async function runPrimaryDispatcherNoFlow(
       // Se pasa el mensaje del paciente como `firstMessage`: permite resolver
       // la desambiguación cuando el DNI ya venía en ese primer mensaje, sin
       // volver a pedírselo (ver patient-flow-integration.ts, caso Luis 28/8/2026).
-      const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber)
+      const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
       // Antes devolvía `true` (mensaje "manejado") incondicionalmente, aunque
       // detResult.handled fuera false (flag directPatientDetection OFF) — el
       // caller cortaba con `if (handled) return` sin haber enviado nada al
@@ -2727,7 +2727,7 @@ async function runInterjectionInActiveFlow(
       let menuMsg = await returnPatientToMenu(userPhoneNumber)
       let menuButtons: Array<{ id: string; title: string }> | undefined
       if (!menuMsg) {
-        const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber)
+        const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
         menuMsg = det?.handled && det.message ? det.message : null
         menuButtons = (det as any)?.buttons
       }
@@ -2788,6 +2788,7 @@ async function runInterjectionInActiveFlow(
         const det = await initializePatientDetection(
           userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined,
           config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber,
+          config.clientePortalWeb,
         )
         menuMsg = det?.handled && det.message ? det.message : null
         menuButtons = (det as any)?.buttons
@@ -5472,7 +5473,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
           const detectionTemplateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
           const detectionHasReminder = detectionTemplateSentAt !== null
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, detectionHasReminder, isWidgetPresetMessage, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber)
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, detectionHasReminder, isWidgetPresetMessage, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
 
           console.log("[v0] [SPRINT9A] initializePatientDetection result:", JSON.stringify({ handled: detectionResult.handled, action: detectionResult.action, shouldCallOpenAI: detectionResult.shouldCallOpenAI }))
           
@@ -5508,7 +5509,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           const rehydrationTemplateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
           const rehydrationHasReminder = rehydrationTemplateSentAt !== null
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, rehydrationHasReminder, isWidgetPresetMessage, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber)
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, rehydrationHasReminder, isWidgetPresetMessage, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
 
           if (detectionResult.handled && detectionResult.message) {
             const detectionCtx: DirectResponseContext = {
@@ -5806,6 +5807,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             config.permitirNuevoTurno,
             config.permitirCancelacion,
             config.escalationPhoneNumber
+          ,
+            config.clientePortalWeb
           )
           if (backMenuResult?.handled && backMenuResult.message) {
             await sendDirectResponse(detectionCtx, backMenuResult.message, "familiar_back_to_main_menu")
@@ -5832,7 +5835,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               config.permitirNuevoTurno,
               config.permitirCancelacion,
               config.escalationPhoneNumber
-            )
+            ,
+            config.clientePortalWeb
+          )
             if (mainMenuResult?.handled && mainMenuResult.message) {
               await sendDirectResponse(detectionCtx, mainMenuResult.message, "familiar_back_to_main_menu")
             } else {
@@ -6003,6 +6008,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             config.permitirNuevoTurno,
             config.permitirCancelacion,
             config.escalationPhoneNumber
+          ,
+            config.clientePortalWeb
           )
           if (mainMenuResult?.handled && mainMenuResult.message) {
             await sendDirectResponse(detectionCtx, mainMenuResult.message, "back_to_main_menu")
@@ -6259,6 +6266,36 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   // Un solo turno, cancelación (o cancelar+solicitar nuevo): mostrar doble confirmación
                   const wantsBookNew = detectionResult.action === 'cancel_and_book_new_appointment'
 
+                  // ── "Cancelar y solicitar uno nuevo" se hace en el portal ──────
+                  //
+                  // Es el flujo más caro del chat: doble confirmación, cancelación,
+                  // "¿querés reagendar?", y después todo el armado del turno nuevo
+                  // —sede, especialidad, profesional, día, horario—. Cada paso es un
+                  // mensaje que se paga desde el 1/10.
+                  //
+                  // En el portal es una pantalla. Y la cancelación del turno viejo no
+                  // se pierde: `gestionar` la hace al reservar, porque el enlace se
+                  // emite con intención `cancelar` y `reemplazaElTurnoPrevio` la
+                  // cubre.
+                  //
+                  // Si la derivación falla —sin APP_URL, sin Redis, sin switch— sigue
+                  // el camino conversacional de abajo. Un paciente atendido por el
+                  // camino caro es mucho mejor que un paciente sin respuesta.
+                  if (wantsBookNew && usaPortal(config)) {
+                    const derivadoAlPortal = await derivarAlPortal({
+                      config,
+                      phoneNumberId: value.metadata.phone_number_id,
+                      userPhoneNumber,
+                      intencion: 'cancelar',
+                      origen: 'conversacion',
+                      paciente: datosDesdeElContexto(chatbotData),
+                    })
+                    if (derivadoAlPortal) {
+                      await completePatientDetectionFlow(userPhoneNumber, config.id)
+                      return
+                    }
+                  }
+
                   // Setear estado de flujo para esperar confirmación.
                   // Si el paciente eligió "cancelar y solicitar uno nuevo", marcamos postCancelAction
                   // para que tras la cancelaci��n exitosa se inicie el flujo de reserva nueva.
@@ -6268,6 +6305,40 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     turnoIndex: 0,
                     ...(wantsBookNew ? { postCancelAction: 'book_new' as const } : {}),
                   })
+
+                  // ── Clientes del portal: cancelar sin preguntar dos veces ──────
+                  //
+                  // La doble confirmación existe para que nadie cancele un turno sin
+                  // querer. Cuesta dos mensajes: el "¿estás seguro?" y la respuesta.
+                  // Desde el 1/10 los dos se pagan.
+                  //
+                  // En estos clientes la protección vive en otro lado: el botón
+                  // "Cancelar" del recordatorio no cancela, abre el portal, y ahí la
+                  // confirmación es una pantalla y no cuesta nada. Quien llega hasta
+                  // acá escribió un número en un menú que dice "Cancelar el turno
+                  // médico": es un acto deliberado, no un dedo que resbaló.
+                  //
+                  // Se reusa `handlePendingFlowResponse` con la respuesta afirmativa
+                  // en vez de copiar la cancelación. Ese camino hace bastante más que
+                  // llamar al proxy —estadísticas, limpieza selectiva del contexto,
+                  // nota al historial para que el bot deje de ver el turno como
+                  // vigente, vuelta al menú—, y una copia se olvida de la mitad y se
+                  // desactualiza con el primer cambio.
+                  if (!wantsBookNew && usaPortal(config)) {
+                    const cancelada = await handlePendingFlowResponse(
+                      "1",
+                      userPhoneNumber,
+                      config,
+                      value.metadata.phone_number_id,
+                      value,
+                    )
+                    if (cancelada) {
+                      await completePatientDetectionFlow(userPhoneNumber, config.id)
+                      return
+                    }
+                    // No se pudo: se sigue con la doble confirmación de siempre, que
+                    // deja al paciente con una salida en vez de un silencio.
+                  }
 
                   // Construir y enviar mensaje de doble confirmación
                   const doubleConfirmMsg = buildCancelDoubleConfirmMessage(
@@ -6734,7 +6805,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             if (action.type === 'init_patient_detection') {
               const detResult = await initializePatientDetection(
                 userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
-              )
+              ,
+            config.clientePortalWeb
+          )
               // Bug (6/8/2026): el return era incondicional, así que cuando el
               // flag directPatientDetection está OFF (detResult.handled=false,
               // shouldCallOpenAI=true) el mensaje se marcaba como procesado sin
@@ -6806,7 +6879,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               // Reserva para un familiar → pedir DNI del familiar si hay detección activa.
               if (await requestFamiliarDni(userPhoneNumber, config, dispatcherCtxDirect)) return
               // Sin detección activa → menú normal (el paciente puede elegir "2").
-              const detFam = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber)
+              const detFam = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
               if (detFam?.handled) {
                 if (detFam.message) {
                   await sendDirectResponse(dispatcherCtxDirect, detFam.message, "ai-dispatcher-familiar")
@@ -6825,7 +6898,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               // derivará automáticamente al flujo de paciente nuevo.
               const detResult = await initializePatientDetection(
                 userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
-              )
+              ,
+            config.clientePortalWeb
+          )
               if (detResult?.handled) {
                 if (detResult.message) {
                   await sendDirectResponse(dispatcherCtxDirect, detResult.message, "ai-dispatcher-new-patient")
@@ -6915,7 +6990,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               if (!cedeALaCascada) {
                 const noFlowResult = await initializePatientDetection(
                   userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
-                )
+                ,
+            config.clientePortalWeb
+          )
                 if (noFlowResult?.handled) {
                   if (noFlowResult.message) {
                     await sendDirectResponse(dispatcherCtxDirect, noFlowResult.message, "ai-dispatcher-no-flow-menu")
@@ -6935,7 +7012,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 .info('[Dispatcher] Passthrough — mostrando menú principal')
               const passthroughResult = await initializePatientDetection(
                 userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
-              )
+              ,
+            config.clientePortalWeb
+          )
               if (passthroughResult?.handled) {
                 if (passthroughResult.message) {
                   await sendDirectResponse(dispatcherCtxDirect, passthroughResult.message, "ai-dispatcher-passthrough-menu")
@@ -6959,7 +7038,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             }
             const errorResult = await initializePatientDetection(
               userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
-            )
+            ,
+            config.clientePortalWeb
+          )
             if (errorResult?.handled) {
               if (errorResult.message) {
                 await sendDirectResponse(errorCtxDirect, errorResult.message, "ai-dispatcher-error-menu")
@@ -7027,7 +7108,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             let menuMsg: string | null = await returnPatientToMenu(userPhoneNumber)
             let menuButtons: Array<{ id: string; title: string }> | undefined
             if (!menuMsg) {
-              const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber)
+              const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
               menuMsg = det?.handled && det.message ? det.message : null
               menuButtons = (det as any)?.buttons
             }
@@ -7050,7 +7131,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await sendDirectResponse(ctxFallback, fbMsg, "router-fallback-resume", btns || undefined)
             return
           } else {
-            const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber)
+            const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
             if (det?.handled && det.message) {
               await sendDirectResponse(ctxFallback, det.message, "router-fallback-menu", (det as any).buttons)
             }

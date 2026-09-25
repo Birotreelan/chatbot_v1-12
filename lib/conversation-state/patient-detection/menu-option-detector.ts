@@ -130,12 +130,23 @@ export const EXISTING_PATIENT_SINGLE_TURNO_MENU: MenuOption[] = [
 ]
 
 /**
- * Opciones del menú para pacientes con UN turno PENDIENTE DE APROBACIÓN por la clínica.
- * La confirmación de asistencia NO está disponible mientras la clínica no apruebe el turno,
- * por eso esta variante omite la opción "Confirmar asistencia" y renumera el resto.
- * (El estado "No confirmado" SÍ permite confirmar y usa EXISTING_PATIENT_SINGLE_TURNO_MENU.)
+ * Opciones del menú para UN turno cuando NO se ofrece confirmar asistencia.
+ *
+ * Dos motivos distintos llevan al mismo menú y por eso la lista es una sola:
+ *
+ *  1. El turno está PENDIENTE DE APROBACIÓN por la clínica. No se puede
+ *     confirmar asistencia a algo que todavía no fue otorgado. (El estado
+ *     "No confirmado" sí permite confirmar y usa el menú completo.)
+ *
+ *  2. El cliente usa el portal web (25/9/2026). Ahí la confirmación se hace
+ *     con el botón del recordatorio, que no cuesta un mensaje nuevo.
+ *
+ * Quién decide es `seOfreceConfirmarAsistencia`, el mismo predicado que arma
+ * el texto del menú y el action map. Los tres tienen que ver lo mismo: si esta
+ * lista tuviera cuatro opciones y el texto tres, el clasificador de texto libre
+ * devolvería un índice corrido y el paciente terminaría en otra acción.
  */
-export const EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU: MenuOption[] = [
+export const EXISTING_PATIENT_SINGLE_TURNO_SIN_CONFIRMAR_MENU: MenuOption[] = [
   {
     index: 1,
     label: 'Cancelar turno médico',
@@ -152,6 +163,19 @@ export const EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU: MenuOption[] = [
     keywords: ['consulta', 'pregunta', 'información', 'duda', 'ayuda', 'otra consulta', 'otro tema'],
   },
 ]
+
+/**
+ * Igual que el de varios turnos, sin "Confirmar asistencia".
+ *
+ * Se deriva del otro en vez de escribirse a mano: así no puede quedar con un
+ * "Cancelar un turno" distinto del que ve el paciente. Renumerar es parte de
+ * la derivación, no algo que alguien tenga que acordarse de hacer.
+ */
+export function sinConfirmarAsistencia(menu: MenuOption[]): MenuOption[] {
+  return menu
+    .filter((o) => !/confirmar asistencia/i.test(o.label))
+    .map((o, i) => ({ ...o, index: i + 1 }))
+}
 
 /**
  * Opciones del menú para pacientes con múltiples turnos

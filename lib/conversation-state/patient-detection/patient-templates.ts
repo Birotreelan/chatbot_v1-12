@@ -10,6 +10,7 @@
  */
 
 import { classifyTurnoEstado } from './turno-estado'
+import { seOfreceConfirmarAsistencia } from './opciones-del-turno'
 // El campo de derivación puede tener varias líneas (31/8/2026). fraseDerivacion
 // arma la frase completa: una línea → "... al *0800*."; varias → dos puntos y el
 // bloque debajo. Ver lib/utils/escalation-contact.ts.
@@ -124,6 +125,9 @@ export function buildExistingPatientGreeting(
   permitirCancelacion?: boolean,
   escalationPhoneNumber?: string,
   obraSocialBloqueada?: ObraSocialBloqueada
+,
+  /** WhatsAppConfig.clientePortalWeb. Ver seOfreceConfirmarAsistencia. */
+  usaPortalWeb?: boolean
 ): string {
   const firstName = getFirstName(patientName)
   const hasTurnos = turnos && turnos.length > 0
@@ -143,9 +147,9 @@ export function buildExistingPatientGreeting(
   // Construir el saludo médico base y agregar sección de cirugías si corresponde
   let mensaje: string
   if (turnos.length === 1) {
-    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName, hasReminder, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber, obraSocialBloqueada)
+    mensaje = buildSingleTurnoGreeting(firstName, turnos[0], clinicName, hasReminder, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber, obraSocialBloqueada, usaPortalWeb)
   } else {
-    mensaje = buildMultipleTurnosGreeting(firstName, turnos, clinicName, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber, obraSocialBloqueada)
+    mensaje = buildMultipleTurnosGreeting(firstName, turnos, clinicName, permitirCancelacion, permitirNuevoTurno, escalationPhoneNumber, obraSocialBloqueada, usaPortalWeb)
   }
 
   // Si además hay cirugías, insertar bloque informativo antes del pie del menú
@@ -389,6 +393,8 @@ function buildSingleTurnoGreeting(
   permitirNuevoTurno?: boolean,
   escalationPhoneNumber?: string,
   obraSocialBloqueada?: ObraSocialBloqueada
+,
+  usaPortalWeb?: boolean
 ): string {
   const fecha = formatearFecha(turno.Fecha || turno.fecha)
   const hora = formatearHora(turno.Hora || turno.hora || '')
@@ -401,7 +407,10 @@ function buildSingleTurnoGreeting(
   // Comportamiento original (sin cambios respecto a producción): "Confirmar" se
   // ofrece cuando hay recordatorio enviado y el turno todavía no fue confirmado.
   // No depende de ningún toggle nuevo.
-  const puedeConfirmar = categoria === 'no_confirmado' && hasReminder
+  const puedeConfirmar = seOfreceConfirmarAsistencia({
+    estadoAdmiteConfirmar: categoria === 'no_confirmado' && hasReminder,
+    usaPortalWeb,
+  })
   const puedeCancelar = permitirCancelacion !== false
   // Con obra social sin turnos online se cae "cancelar y solicitar uno nuevo",
   // pero confirmar y cancelar siguen siendo gestiones válidas para este paciente.
@@ -412,7 +421,10 @@ function buildSingleTurnoGreeting(
 
   if (categoria === 'confirmado') {
     mensaje += `*Tu asistencia al turno del ${fecha} a las ${hora} con ${profesional} en la sede ${sede} ya está confirmada.*\n\n`
-  } else if (categoria === 'no_confirmado' && hasReminder) {
+  } else if (puedeConfirmar) {
+    // La frase va atada a `puedeConfirmar`, no al estado del turno: si el menú
+    // no ofrece confirmar —clientes del portal—, nombrar que falta la
+    // confirmación deja al paciente buscando una opción que no existe.
     mensaje += `*Veo que tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}, pero todavía no confirmaste tu asistencia.*\n\n`
   } else if (categoria === 'no_confirmado') {
     mensaje += `*Veo que tenés un turno médico agendado para el ${fecha} a las ${hora} con ${profesional} en la sede ${sede}.*\n\n`
@@ -473,6 +485,8 @@ function buildMultipleTurnosGreeting(
   permitirNuevoTurno?: boolean,
   escalationPhoneNumber?: string,
   obraSocialBloqueada?: ObraSocialBloqueada
+,
+  usaPortalWeb?: boolean
 ): string {
   let mensaje = `*${firstName}, ¡bienvenido de nuevo a ${clinicName}!*\n\n`
   mensaje += `Soy Iris, tu asistente virtual de inteligencia artificial. Por este canal podrás consultar, confirmar asistencia o cancelar turnos médicos.\n\n`
@@ -504,7 +518,12 @@ function buildMultipleTurnosGreeting(
   // inhabilita la parte de "solicitar uno nuevo".
   const puedeCancelarYNuevo = permitirCancelacion !== false && permitirNuevoTurno !== false && !obraSocialBloqueada
 
-  const opciones: string[] = ['Confirmar asistencia a un turno']
+  // Con varios turnos, confirmar se ofrecía siempre (no depende de hasReminder,
+  // así era en producción). El portal es la única condición nueva.
+  const opciones: string[] = []
+  if (seOfreceConfirmarAsistencia({ estadoAdmiteConfirmar: true, usaPortalWeb })) {
+    opciones.push('Confirmar asistencia a un turno')
+  }
   if (puedeCancelar) opciones.push('Cancelar un turno')
   if (puedeCancelarYNuevo) opciones.push('Cancelar un turno y solicitar uno nuevo')
 
@@ -718,6 +737,8 @@ export function buildPostActionMenu(
   permitirNuevoTurno?: boolean,
   escalationPhoneNumber?: string,
   obraSocialBloqueada?: ObraSocialBloqueada
+,
+  usaPortalWeb?: boolean
 ): string {
   const hasTurnos = turnos && turnos.length > 0
   const puedeCancelar = permitirCancelacion !== false
@@ -775,7 +796,7 @@ export function buildPostActionMenu(
       // Menú mínimo: confirmar si el turno lo requiere Y hay recordatorio enviado
       // (mismo criterio que shouldOfferConfirmation), o solo consulta / menú completo.
       // No depende de los toggles nuevos (no ofrece cancelar ni solicitar turno nuevo).
-      if (cat === 'no_confirmado' && hasReminder) {
+      if (seOfreceConfirmarAsistencia({ estadoAdmiteConfirmar: cat === 'no_confirmado' && hasReminder, usaPortalWeb })) {
         msg += `Recordá que tenés un turno *pendiente de confirmar*: ${fecha} a las ${hora} con ${prof} en ${sede}.\n\n`
         msg += `1- Confirmar asistencia al turno médico\n`
         msg += `2- Realizar otra consulta\n`
@@ -795,7 +816,10 @@ export function buildPostActionMenu(
       // quedar gateados por los toggles del cliente (mismo criterio que el actionMap
       // de processPatientDetectionMessage, con el que este texto debe mantenerse en
       // sincronía).
-      const puedeConfirmar = cat === 'no_confirmado' && hasReminder
+      const puedeConfirmar = seOfreceConfirmarAsistencia({
+        estadoAdmiteConfirmar: cat === 'no_confirmado' && hasReminder,
+        usaPortalWeb,
+      })
       const esNoConfirmado = cat === 'no_confirmado'
 
       if (puedeConfirmar) {
@@ -865,14 +889,21 @@ export function buildPostActionMenu(
     if (postActionContext === 'just_cancelled') {
       // Acaba de cancelar un turno — no ofrecer cancelación nuevamente de inmediato.
       // No depende de los toggles nuevos.
-      msg += `1- Confirmar asistencia a un turno\n`
-      msg += `2- Realizar otra consulta\n`
+      if (seOfreceConfirmarAsistencia({ estadoAdmiteConfirmar: true, usaPortalWeb })) {
+        msg += `1- Confirmar asistencia a un turno\n`
+        msg += `2- Realizar otra consulta\n`
+      } else {
+        msg += `1- Realizar otra consulta\n`
+      }
       msg += `0- Volver al menú anterior\n\n`
     } else {
       // "Confirmar" siempre se ofrece acá (comportamiento pre-existente con múltiples
       // turnos, no depende de hasReminder ni de los toggles). Cancelar / cancelar-y-nuevo
       // sí quedan gateados por los toggles del cliente.
-      const opciones: string[] = ['Confirmar asistencia a un turno']
+      const opciones: string[] = []
+      if (seOfreceConfirmarAsistencia({ estadoAdmiteConfirmar: true, usaPortalWeb })) {
+        opciones.push('Confirmar asistencia a un turno')
+      }
       if (puedeCancelar) opciones.push('Cancelar un turno')
       if (puedeCancelarYNuevo) opciones.push('Cancelar un turno y solicitar uno nuevo')
       opciones.push('Realizar otra consulta')

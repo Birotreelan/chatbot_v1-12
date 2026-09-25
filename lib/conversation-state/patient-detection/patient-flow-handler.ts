@@ -8,10 +8,12 @@ import {
   EXISTING_PATIENT_NO_TURNOS_MENU,
   EXISTING_PATIENT_NO_TURNOS_OS_BLOQUEADA_MENU,
   EXISTING_PATIENT_SINGLE_TURNO_MENU,
-  EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU,
+  EXISTING_PATIENT_SINGLE_TURNO_SIN_CONFIRMAR_MENU,
+  sinConfirmarAsistencia,
   EXISTING_PATIENT_MULTIPLE_TURNOS_MENU,
 } from './menu-option-detector'
 import { shouldOfferConfirmation } from './turno-estado'
+import { seOfreceConfirmarAsistencia } from './opciones-del-turno'
 import { buildPostActionMenu, buildTurnoInfoResponse } from './patient-templates'
 import { parseOptionNumber } from '../selection-extractor'
 
@@ -120,6 +122,16 @@ interface PatientDetectionState {
   permitirCancelacion?: boolean
   /** WhatsAppConfig.escalationPhoneNumber del cliente, para mensajes de derivación cuando no queda ninguna gestión disponible. */
   escalationPhoneNumber?: string
+  /**
+   * WhatsAppConfig.clientePortalWeb (25/9/2026).
+   *
+   * Se persiste, y no se lee de la config cuando hace falta, por el mismo
+   * motivo que `obraSocialBloqueada`: el menú que el paciente tiene en
+   * pantalla se armó con el valor de ESE momento. Si alguien apaga el switch
+   * entre el saludo y la respuesta, el action map tiene que seguir
+   * interpretando los números como los muestra el mensaje que está mirando.
+   */
+  usaPortalWeb?: boolean
   detectedAt: number
   attempts: number
 }
@@ -135,7 +147,8 @@ export async function startPatientDetectionFlow(
   clienteId: string,
   permitirNuevoTurno?: boolean,
   permitirCancelacion?: boolean,
-  escalationPhoneNumber?: string
+  escalationPhoneNumber?: string,
+  usaPortalWeb?: boolean
 ): Promise<{
   isNewPatient: boolean
   multiplePatients?: any[]
@@ -172,6 +185,7 @@ export async function startPatientDetectionFlow(
         permitirNuevoTurno,
         permitirCancelacion,
         escalationPhoneNumber,
+        usaPortalWeb,
         detectedAt: Date.now(),
         attempts: 1,
       }
@@ -253,6 +267,7 @@ export async function startPatientDetectionFlow(
         permitirNuevoTurno,
         permitirCancelacion,
         escalationPhoneNumber,
+        usaPortalWeb,
         detectedAt: Date.now(),
         attempts: 1,
       }
@@ -330,6 +345,7 @@ export async function startPatientDetectionFlow(
       permitirNuevoTurno,
       permitirCancelacion,
       escalationPhoneNumber,
+      usaPortalWeb,
       detectedAt: Date.now(),
       attempts: 0,
     }
@@ -923,7 +939,8 @@ export async function processPatientDetectionMessage(
             state.escalationPhoneNumber,
             state.obraSocialBloqueada && state.obraSocialNombre
               ? { nombre: state.obraSocialNombre, telefonoDerivacion: state.escalationPhoneNumber }
-              : undefined
+              : undefined,
+            state.usaPortalWeb
           )
           return {
             handled: true,
@@ -957,7 +974,10 @@ export async function processPatientDetectionMessage(
         // se ofrece (comportamiento pre-existente, no depende de hasReminder). Ninguno de
         // los dos depende de los toggles nuevos.
         const isSingleTurno = state.turnos!.length === 1
-        const puedeConfirmar = isSingleTurno ? !singleTurnoSinConfirmacion : true
+        const puedeConfirmar = seOfreceConfirmarAsistencia({
+          estadoAdmiteConfirmar: isSingleTurno ? !singleTurnoSinConfirmacion : true,
+          usaPortalWeb: state.usaPortalWeb,
+        })
         const puedeCancelar = state.permitirCancelacion !== false
         // La obra social bloqueada inhabilita solo la parte de "solicitar uno nuevo".
         const puedeCancelarYNuevo =
@@ -1061,12 +1081,21 @@ export async function processPatientDetectionMessage(
       menuOptions = NEW_PATIENT_MENU
     } else if (state.phase === 'awaiting_action_selection') {
       const hasTurnos = state.turnos && state.turnos.length > 0
+      // El MISMO predicado que arma el texto del menú y el action map. Si esta
+      // lista ofreciera confirmar y el texto no, el clasificador de texto libre
+      // devolvería un índice corrido: "cancelo" mapearía a la opción 2 de una
+      // lista de cuatro cuando el paciente está mirando una de tres.
       if (hasTurnos && state.turnos!.length === 1) {
-        menuOptions = shouldOfferConfirmation(state.turnos![0], state.hasReminder ?? false)
+        menuOptions = seOfreceConfirmarAsistencia({
+          estadoAdmiteConfirmar: shouldOfferConfirmation(state.turnos![0], state.hasReminder ?? false),
+          usaPortalWeb: state.usaPortalWeb,
+        })
           ? EXISTING_PATIENT_SINGLE_TURNO_MENU
-          : EXISTING_PATIENT_SINGLE_TURNO_PENDIENTE_MENU
+          : EXISTING_PATIENT_SINGLE_TURNO_SIN_CONFIRMAR_MENU
       } else if (hasTurnos && state.turnos!.length > 1) {
-        menuOptions = EXISTING_PATIENT_MULTIPLE_TURNOS_MENU
+        menuOptions = seOfreceConfirmarAsistencia({ estadoAdmiteConfirmar: true, usaPortalWeb: state.usaPortalWeb })
+          ? EXISTING_PATIENT_MULTIPLE_TURNOS_MENU
+          : sinConfirmarAsistencia(EXISTING_PATIENT_MULTIPLE_TURNOS_MENU)
       } else if (state.obraSocialBloqueada === true) {
         // Menú sin la opción de turno propio (ver el action map más abajo).
         menuOptions = EXISTING_PATIENT_NO_TURNOS_OS_BLOQUEADA_MENU
@@ -1131,7 +1160,10 @@ export async function processPatientDetectionMessage(
 
         if (hasTurnos) {
           const isSingleTurno = state.turnos!.length === 1
-          const puedeConfirmar = isSingleTurno ? !singleTurnoSinConfirmacion : true
+          const puedeConfirmar = seOfreceConfirmarAsistencia({
+            estadoAdmiteConfirmar: isSingleTurno ? !singleTurnoSinConfirmacion : true,
+            usaPortalWeb: state.usaPortalWeb,
+          })
           const puedeCancelar = state.permitirCancelacion !== false
           // Ver comentario equivalente en el action map de arriba: la obra social
           // bloqueada inhabilita solo la parte de "solicitar uno nuevo".
@@ -1473,7 +1505,8 @@ export async function returnPatientToMenu(
     state.escalationPhoneNumber,
     state.obraSocialBloqueada && state.obraSocialNombre
       ? { nombre: state.obraSocialNombre, telefonoDerivacion: state.escalationPhoneNumber }
-      : undefined
+      : undefined,
+    state.usaPortalWeb
   )
 }
 
