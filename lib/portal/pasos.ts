@@ -22,6 +22,14 @@ export type Paso =
   /** Su obra social no permite turnos online. Fin del camino, con teléfono. */
   | "derivar_obra_social"
   | "reprogramar"
+  /**
+   * El paciente tocó "Cancelar turno" en el recordatorio.
+   *
+   * Muestra las tres salidas juntas —cambiar de horario, cancelar, mantener—
+   * para que arrepentirse a mitad de camino no cueste otro mensaje de
+   * WhatsApp. Ver la nota en `decidirPaso`.
+   */
+  | "gestionar_turno"
   /** Varias sedes y todavía no sabemos en cuál se atiende. */
   | "elegir_sede"
   /** Médico en particular, por especialidad, o cualquiera. */
@@ -61,6 +69,13 @@ export interface FiltrosElegidos {
   tipoBusqueda?: TipoDeBusqueda
   /** El paciente tocó "ver todos": se saltean los filtros. */
   sinFiltro?: boolean
+  /**
+   * Qué eligió en la pantalla de gestión del turno.
+   *
+   * Sólo se usa con la intención `cancelar`: es lo que distingue "vengo a
+   * cancelar" de "vengo a cancelar pero elegí cambiar el horario".
+   */
+  accion?: string
 }
 
 /**
@@ -201,6 +216,23 @@ export function decidirPaso(
   /** El paciente pidió volver a un paso concreto desde la URL. */
   pasoForzado?: string,
 ): Paso {
+  // ── La cancelación entra por su propia puerta (25/9/2026) ────────────────
+  //
+  // Antes `cancelar` caía en "reprogramar" y el paciente que quería cancelar
+  // terminaba mirando un calendario.
+  //
+  // Ahora abre la pantalla de las tres opciones. El motivo es de costo, no de
+  // diseño: con el cobro por mensaje, la cancelación por chat sale cuatro
+  // mensajes —recordatorio, "confirmá tu decisión", "cancelado, ¿reagendás?" y
+  // el flujo de turnos—. Mover la confirmación a una pantalla la vuelve
+  // gratis, y ofrecer las tres salidas juntas evita que arrepentirse cueste
+  // otra ronda.
+  //
+  // `accion=reagendar` en la URL es cómo esa pantalla manda al calendario sin
+  // cambiar la intención del token: el enlace se emitió para gestionar ESE
+  // turno, y reagendar es una de las formas de gestionarlo.
+  if (intencion === "cancelar" && filtros.accion !== "reagendar") return "gestionar_turno"
+
   if (intencion === "reagendar" || intencion === "cancelar") return "reprogramar"
 
   // El pedido explícito gana sobre el avance automático, pero sólo para los

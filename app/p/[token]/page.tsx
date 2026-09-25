@@ -48,6 +48,7 @@ import { Marco, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/component
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
 import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
+import { GestionarTurno } from "@/components/portal/gestionar-turno"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -68,6 +69,8 @@ export default async function PaginaDelPortal({
   searchParams: Promise<{
     /** Volver a un paso anterior a propósito. Ver PASOS_REVISITABLES. */
     paso?: string
+    /** Lo elegido en la pantalla de gestión del turno. */
+    accion?: string
     sedeId?: string
     tipoBusqueda?: string
     especialidadId?: string
@@ -160,6 +163,7 @@ export default async function PaginaDelPortal({
     porCualquiera: config?.enableSearchByAnyDoctor,
   }
   const filtros: {
+    accion?: string
     sedeId?: string
     sedeResuelta?: boolean
     tipoBusqueda?: TipoDeBusqueda
@@ -169,6 +173,7 @@ export default async function PaginaDelPortal({
   } = {
     // La del query gana sobre la del token: si el paciente eligió otra sede,
     // eligió otra sede.
+    accion: filtrosCrudos.accion,
     sedeId: filtrosCrudos.sedeId || contexto.sedeId,
     tipoBusqueda: filtrosCrudos.tipoBusqueda as TipoDeBusqueda | undefined,
     especialidadId: filtrosCrudos.especialidadId,
@@ -420,6 +425,21 @@ export default async function PaginaDelPortal({
           Tus datos quedaron guardados, así que no vas a tener que repetirlos.
         </p>
       </>,
+    )
+  }
+
+  // ── Qué hacer con el turno ──────────────────────────────────────────────
+  //
+  // Las tres salidas juntas. Ver la nota de `GestionarTurno` sobre por qué
+  // están en una sola pantalla y no en tres mensajes de WhatsApp.
+  if (paso === "gestionar_turno") {
+    return marco(
+      <GestionarTurno
+        token={token}
+        turno={contexto.turno}
+        nombre={nombre}
+        urlParaReagendar={urlCon({ accion: "reagendar" })}
+      />,
     )
   }
 

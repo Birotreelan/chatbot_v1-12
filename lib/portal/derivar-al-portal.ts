@@ -27,6 +27,7 @@ import {
   textoDelEnlace,
   textoSoloPorTelefono,
   BOTON_REPROGRAMAR,
+  BOTON_GESTIONAR,
   BOTON_TURNO_NUEVO,
 } from "./mensaje-enlace"
 import { sendWhatsAppMessage } from "../whatsapp-api"
@@ -201,8 +202,10 @@ export async function derivarAlPortal(params: {
   // viviera en cada uno, el próximo que agreguemos la olvida y el paciente
   // vuelve a terminar en una pantalla vacía. Este es el embudo: se decide una
   // vez, acá.
-  const esReprogramarUnTurno = params.intencion === "reagendar" || params.intencion === "cancelar"
-  if (esReprogramarUnTurno && !permiteReprogramarOnline(paciente, config)) {
+  // Sólo aplica a reagendar. Un turno que la clínica no deja mover online
+  // igual se puede CANCELAR: bloquear eso obligaría a llamar por teléfono para
+  // liberar un horario, que es justo lo que la clínica quiere que pase.
+  if (params.intencion === "reagendar" && !permiteReprogramarOnline(paciente, config)) {
     try {
       const cuerpoBase = textoSoloPorTelefono(paciente?.turno, config.escalationPhoneNumber)
       const cuerpo = await presentarSiCorresponde(cuerpoBase, config.id, params.userPhoneNumber)
@@ -279,7 +282,12 @@ export async function derivarAlPortal(params: {
       to: params.userPhoneNumber,
       cuerpo,
       url: enlace.url,
-      textoDelBoton: esReprogramar ? BOTON_REPROGRAMAR : BOTON_TURNO_NUEVO,
+      textoDelBoton:
+        params.intencion === "cancelar"
+          ? BOTON_GESTIONAR
+          : esReprogramar
+            ? BOTON_REPROGRAMAR
+            : BOTON_TURNO_NUEVO,
       // Sin pie: el nombre de la clínica ya aparece como remitente del chat, y
       // repetirlo abajo de un mensaje de una línea lo hacía ver más largo de lo
       // que es.

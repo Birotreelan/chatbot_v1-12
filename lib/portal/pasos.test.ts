@@ -336,3 +336,46 @@ describe("el recorrido completo de un turno nuevo", () => {
     expect(paso({ sedeId: "3", tipoBusqueda: "cualquiera" })).toBe("elegir_horario")
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// La cancelación en dos mensajes (25/9/2026)
+//
+// Por chat, cancelar cuesta cuatro mensajes de la clínica: el recordatorio, el
+// "confirmá tu decisión", el "cancelado, ¿querés reagendar?" y el flujo de
+// turnos si dice que sí. Con el cobro por mensaje eso se paga entero.
+//
+// El paso de confirmación no desaparece: se muda a una pantalla, donde es
+// gratis. Y las tres salidas se ofrecen juntas para que arrepentirse a mitad
+// de camino no cueste otra ronda.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("cancelar un turno", () => {
+  const YO = { dni: "36100432", fichaConsultada: true, tieneFicha: true }
+
+  it("el botón del recordatorio abre la pantalla de las tres opciones", () => {
+    // Antes caía en "reprogramar" y el paciente que quería cancelar terminaba
+    // mirando un calendario.
+    expect(decidirPaso("cancelar", {}, {}, YO)).toBe("gestionar_turno")
+  })
+
+  it("no depende de tener la identidad resuelta", () => {
+    // El enlace se emitió para un turno concreto: quién es ya lo sabemos.
+    expect(decidirPaso("cancelar", {}, {}, {})).toBe("gestionar_turno")
+  })
+
+  it("desde ahí, cambiar de horario lleva al calendario", () => {
+    expect(decidirPaso("cancelar", {}, { accion: "reagendar" }, YO)).toBe("reprogramar")
+  })
+
+  it("un accion= inventado no desvía la cancelación", () => {
+    // La URL la escribe cualquiera. Sólo "reagendar" cambia el destino.
+    for (const malo of ["cancelar", "borrar", "<script>", ""]) {
+      expect(decidirPaso("cancelar", {}, { accion: malo }, YO), malo).toBe("gestionar_turno")
+    }
+  })
+
+  it("el botón de reagendar sigue yendo directo al calendario", () => {
+    expect(decidirPaso("reagendar", {}, {}, YO)).toBe("reprogramar")
+    expect(decidirPaso("reagendar", {}, { accion: "reagendar" }, YO)).toBe("reprogramar")
+  })
+})

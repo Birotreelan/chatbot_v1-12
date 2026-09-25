@@ -150,7 +150,17 @@ export const PLANTILLAS_DEL_ENLACE: Record<IntencionDelPortal, string> = {
   nuevo_turno: "para solicitar tu turno, utilizá el botón que aparece a continuación.",
   familiar: "para solicitar el turno de tu familiar, utilizá el botón que aparece a continuación.",
   reagendar: "para reagendar tu turno{cuando}, utilizá el botón que aparece a continuación.",
-  cancelar: "para gestionar tu turno{cuando}, utilizá el botón que aparece a continuación.",
+  // ── El texto más delicado de los cuatro (25/9/2026) ──────────────────────
+  //
+  // Antes, tocar "Cancelar turno" traía un "confirmá tu decisión" que dejaba
+  // clarísimo que todavía no había pasado nada. Con un enlace, el riesgo es
+  // que el paciente lo lea como "listo, cancelado", no lo abra, y falte sin
+  // avisar — o peor, se presente a un turno que cree cancelado.
+  //
+  // Por eso el mensaje abre diciendo que el turno SIGUE ACTIVO, antes de
+  // mencionar el botón. El orden importa: si la aclaración va al final,
+  // compite con el botón, que es lo que el ojo busca primero.
+  cancelar: "tu turno{cuando} sigue activo. Para cancelarlo o cambiarlo de horario, usá el botón de acá abajo.",
 }
 
 /**
@@ -257,4 +267,6 @@ export function textoSoloPorTelefono(
 }
 
 export const BOTON_REPROGRAMAR = "Elegir horario"
+/** Máximo 20 caracteres, como todos los CTA. */
+export const BOTON_GESTIONAR = "Gestionar mi turno"
 export const BOTON_TURNO_NUEVO = "Sacar turno"

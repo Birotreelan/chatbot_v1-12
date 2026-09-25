@@ -3244,14 +3244,25 @@ export async function handleMessage(value: any) {
           ? { text: message.button?.text, payload: message.button?.payload }
           : { text: message.interactive?.button_reply?.title, payload: message.interactive?.button_reply?.id }
 
-      if (accionDelBoton(boton) === "reagendar") {
+      // ── Reagendar Y cancelar (25/9/2026) ────────────────────────────────
+      //
+      // La cancelación también va al portal. No es prolijidad: por chat cuesta
+      // cuatro mensajes —recordatorio, "confirmá tu decisión", "cancelado,
+      // ¿reagendás?" y el flujo de turnos— y con el cobro por mensaje eso se
+      // paga entero. Con el enlace son dos, y el paciente ve "cambiar de
+      // horario" ANTES de cancelar, no después.
+      //
+      // "Confirmar asistencia" NO entra acá: ya se resuelve en un mensaje, y
+      // mandarlo a una web sería agregarle un paso a lo más simple que hace.
+      const accionDelRecordatorio = accionDelBoton(boton)
+      if (accionDelRecordatorio === "reagendar" || accionDelRecordatorio === "cancelar") {
         const contextoDelTurno = await getAppointmentContext(userPhoneNumber, config.id).catch(() => null)
 
         const derivado = await derivarAlPortal({
           config,
           phoneNumberId: value.metadata.phone_number_id,
           userPhoneNumber,
-          intencion: "reagendar",
+          intencion: accionDelRecordatorio === "cancelar" ? "cancelar" : "reagendar",
           origen: "recordatorio",
           paciente: datosDesdeElContexto(contextoDelTurno),
         })
