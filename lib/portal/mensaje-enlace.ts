@@ -186,6 +186,21 @@ export function primerNombrePresentable(nombre?: string | null): string | null {
   return primero.charAt(0).toUpperCase() + primero.slice(1).toLowerCase()
 }
 
+/**
+ * Cuando el paciente tocó un botón del recordatorio pero ya no hay turno
+ * (25/9/2026).
+ *
+ * Pasa cuando canceló y después toca "Reprogramar". Mandarle el texto normal
+ * de turno nuevo —"para solicitar tu turno, utilizá el botón"— lo dejaría sin
+ * entender por qué le contestan otra cosa de la que pidió.
+ *
+ * Primero se explica qué pasó, después se ofrece la salida. No al revés: quien
+ * lee "sacá un turno" sin la explicación previa cree que el bot no lo entendió.
+ */
+export const PLANTILLA_SIN_TURNO =
+  "no encontramos un turno activo para reprogramar; puede que ya lo hayas cancelado. " +
+  "Si querés sacar uno nuevo, usá el botón de acá abajo."
+
 export interface DatosDelTexto {
   intencion: IntencionDelPortal
   /** Nombre del paciente, si lo sabemos. Sin él el mensaje sigue siendo correcto. */

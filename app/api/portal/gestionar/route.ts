@@ -31,6 +31,7 @@ import { reservarTurno, cancelarTurno } from "@/lib/api-tools/api-functions"
 import { saveConversationMessage } from "@/lib/conversations"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
 import { trackAppointmentEvent, checkAndClearPendingReschedule } from "@/lib/appointment-stats"
+import { olvidarCancelacion } from "@/lib/portal/cancelacion-reciente"
 import { nanoid } from "nanoid"
 
 export const runtime = "nodejs"
@@ -302,6 +303,11 @@ export async function POST(request: Request) {
   }
 
   await consumirEnlace(token, { texto, turno: datosDelTurnoElegido })
+
+  // Volvió a tener turno: el rastro de la cancelación anterior ya no aplica, y
+  // dejarlo haría que el bot le diga "tu turno fue cancelado" cuando acaba de
+  // sacar uno.
+  await olvidarCancelacion(contexto.configId, contexto.phone)
 
   // El bot y el panel tienen que enterarse. Sin esto, un agente abre la
   // conversación y ve que el paciente recibió un enlace y desapareció; y si el

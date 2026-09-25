@@ -9,7 +9,12 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { textoDelEnlace, primerNombrePresentable, PLANTILLAS_DEL_ENLACE } from "./mensaje-enlace"
+import {
+  textoDelEnlace,
+  primerNombrePresentable,
+  PLANTILLAS_DEL_ENLACE,
+  PLANTILLA_SIN_TURNO,
+} from "./mensaje-enlace"
 
 describe("cada flujo dice lo suyo", () => {
   it("solicitar un turno", () => {
@@ -116,5 +121,39 @@ describe("la restricción que no se puede romper", () => {
     for (const [flujo, plantilla] of Object.entries(PLANTILLAS_DEL_ENLACE)) {
       expect(plantilla.charAt(0), flujo).toBe(plantilla.charAt(0).toLowerCase())
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tocó un botón del recordatorio y el turno ya no existe (25/9/2026)
+//
+// Reportado: el paciente cancela desde el portal y después toca "Reprogramar
+// turno" en el mismo mensaje —los botones siguen tocables—. Se le mandaba un
+// enlace de turno nuevo con el texto de turno nuevo, así que leía "para
+// solicitar tu turno" después de haber pedido reprogramar uno.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("cuando ya no hay turno que reprogramar", () => {
+  it("explica qué pasó antes de ofrecer la salida", () => {
+    const t = textoDelEnlace({
+      intencion: "nuevo_turno",
+      nombre: "Nicolas DE SANTIAGO",
+      plantilla: PLANTILLA_SIN_TURNO,
+    })
+    // El orden importa: quien lee "sacá un turno" sin la explicación previa
+    // cree que el bot no lo entendió.
+    expect(t.indexOf("no encontramos un turno activo")).toBeLessThan(t.indexOf("sacar uno nuevo"))
+    expect(t.startsWith("Nicolas, ")).toBe(true)
+  })
+
+  it("funciona sin nombre, como el resto", () => {
+    expect(textoDelEnlace({ intencion: "nuevo_turno", plantilla: PLANTILLA_SIN_TURNO })).toBe(
+      "No encontramos un turno activo para reprogramar; puede que ya lo hayas cancelado. " +
+        "Si querés sacar uno nuevo, usá el botón de acá abajo.",
+    )
+  })
+
+  it("no suprimiría el saludo inicial", () => {
+    expect(PLANTILLA_SIN_TURNO).not.toMatch(/asistente virtual|bienvenid/i)
   })
 })

@@ -27,6 +27,7 @@ import { cancelarTurno, confirmarTurno } from "@/lib/api-tools/api-functions"
 import { saveConversationMessage } from "@/lib/conversations"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
 import { trackAppointmentEvent } from "@/lib/appointment-stats"
+import { marcarCancelacion } from "@/lib/portal/cancelacion-reciente"
 import { nanoid } from "nanoid"
 
 export const runtime = "nodejs"
@@ -136,6 +137,18 @@ export async function POST(request: Request) {
       : `Confirmamos tu asistencia${cuando ? ` al turno del ${cuando}` : ""}.`
 
   await consumirEnlace(token, { texto, turno: contexto.turno })
+
+  // ── El rastro de la cancelación ───────────────────────────────────────────
+  //
+  // Los botones del recordatorio siguen tocables. Sin esto, tocar "Confirmar
+  // asistencia" después de cancelar devolvía "Hubo un problema, intentá de
+  // nuevo" — un callejón sin salida, porque el turno no va a volver.
+  if (accion === "cancelar") {
+    await marcarCancelacion(contexto.configId, contexto.phone, {
+      fecha: contexto.turno?.fecha,
+      cuando,
+    })
+  }
 
   // Las estadísticas, con el mismo criterio que el resto del sistema: sin
   // esto, las cancelaciones hechas por el portal no existirían en

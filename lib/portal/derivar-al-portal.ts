@@ -190,6 +190,14 @@ export async function derivarAlPortal(params: {
   intencion: IntencionDelPortal
   origen: OrigenDelEnlace
   paciente?: DatosDelPaciente
+  /**
+   * Texto propio para este envío puntual.
+   *
+   * Pisa incluso la redacción que el cliente haya cargado en su configuración,
+   * y está bien que así sea: se usa para casos excepcionales —"ya no hay turno
+   * que reprogramar"— donde el texto general diría algo que no corresponde.
+   */
+  plantilla?: string
 }): Promise<boolean> {
   const { config, paciente } = params
 
@@ -269,8 +277,9 @@ export async function derivarAlPortal(params: {
       intencion: params.intencion,
       nombre: paciente?.pacienteNombre,
       turno: paciente?.turno,
-      // Redacción propia del cliente, si la cargó en su configuración.
-      plantilla: config.textoEnlacePortal,
+      // El texto puntual gana sobre la redacción del cliente, y ésta sobre la
+      // plantilla por defecto del flujo.
+      plantilla: params.plantilla || config.textoEnlacePortal,
     })
 
     // Por el mismo embudo que el resto: si es el primer mensaje del día, el

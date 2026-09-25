@@ -16,6 +16,8 @@ import {
   mensajeSinAtencionHumana,
 } from "./media-entrante"
 import { usaPortal, derivarAlPortal, datosDesdeElContexto } from "./portal/derivar-al-portal"
+import { cancelacionReciente, mensajeYaCancelado } from "./portal/cancelacion-reciente"
+import { PLANTILLA_SIN_TURNO } from "./portal/mensaje-enlace"
 import { accionDelBoton } from "./flows/recordatorio-con-botones"
 import { presentarSiCorresponde } from "./conversation-state/presentacion-inicial"
 import {
@@ -3257,14 +3259,47 @@ export async function handleMessage(value: any) {
       const accionDelRecordatorio = accionDelBoton(boton)
       if (accionDelRecordatorio === "reagendar" || accionDelRecordatorio === "cancelar") {
         const contextoDelTurno = await getAppointmentContext(userPhoneNumber, config.id).catch(() => null)
+        const datosDelPaciente = datosDesdeElContexto(contextoDelTurno)
+
+        // ── Sin turno no hay nada que reprogramar ni cancelar (25/9/2026) ──
+        //
+        // Reportado: el paciente cancela desde el portal y después toca
+        // "Reprogramar turno" en el mismo recordatorio. Al cancelar se borra el
+        // contexto, así que el enlace salía SIN identidad; el portal lo llevaba
+        // al calendario igual —para reagendar nunca pide el DNI, asume que el
+        // token lo trae— y al confirmar el horario fallaba con "Nos faltan
+        // algunos de tus datos".
+        //
+        // El error de fondo: dar por hecho que un enlace de reagendar siempre
+        // viene con un turno atrás. Si no hay contexto no sabemos DE QUÉ turno
+        // habla, y reprogramar "el turno" deja de tener sentido.
+        //
+        // Se convierte en un pedido de turno nuevo, que es lo que la persona
+        // quiere de todos modos y el único flujo que sabe arrancar sin saber
+        // quién es: pide el DNI, busca la ficha y sigue.
+        const sinTurnoQueGestionar = !datosDelPaciente?.pacienteDNI
+        const intencion = sinTurnoQueGestionar
+          ? "nuevo_turno"
+          : accionDelRecordatorio === "cancelar"
+            ? "cancelar"
+            : "reagendar"
+
+        if (sinTurnoQueGestionar) {
+          console.log(
+            `[PORTAL] ${userPhoneNumber} tocó "${accionDelRecordatorio}" sin contexto de turno; se ofrece sacar uno nuevo`,
+          )
+        }
 
         const derivado = await derivarAlPortal({
           config,
           phoneNumberId: value.metadata.phone_number_id,
           userPhoneNumber,
-          intencion: accionDelRecordatorio === "cancelar" ? "cancelar" : "reagendar",
+          intencion,
           origen: "recordatorio",
-          paciente: datosDesdeElContexto(contextoDelTurno),
+          paciente: datosDelPaciente,
+          // Explica por qué le llega un enlace de turno nuevo cuando pidió
+          // reprogramar. Sin esto parecería que el bot no lo entendió.
+          plantilla: sinTurnoQueGestionar ? PLANTILLA_SIN_TURNO : undefined,
         })
 
         if (derivado) {
@@ -3757,6 +3792,34 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return // Salir, no pasar a OpenAI
             }
+          }
+        }
+
+        // ── ¿Ya lo había cancelado? (25/9/2026) ──────────────────────────
+        //
+        // Reportado: el paciente cancela desde el portal y después toca
+        // "Confirmar asistencia" en el mismo mensaje del recordatorio —los
+        // botones siguen tocables— y recibía "Hubo un problema al confirmar tu
+        // turno, intentá de nuevo en unos momentos".
+        //
+        // Ese mensaje es el de `falla_tecnica`, que es el valor inicial de
+        // `motivoFalloBtn` y queda así cuando NO hay contexto guardado: al
+        // cancelar se borra, así que el proxy ni siquiera se consulta. O sea
+        // que "no tengo el contexto" y "falló el sistema" terminaban en la
+        // misma respuesta, y encima en la peor de las dos: por más que
+        // reintente, el turno no va a volver.
+        //
+        // El rastro de la cancelación permite decir lo que pasó de verdad.
+        if (!chatbotDataConfirmBtn) {
+          const cancelado = await cancelacionReciente(config.id, userPhoneNumber)
+          if (cancelado) {
+            await sendDirectResponse(
+              ctxConfirmBtn,
+              mensajeYaCancelado(cancelado),
+              "button_confirm_ya_cancelado",
+            )
+            await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+            return
           }
         }
 
