@@ -25,7 +25,7 @@
 
 import { NextResponse } from "next/server"
 import { leerEnlace, consumirEnlace, type TurnoDelPortal } from "@/lib/portal/token"
-import { permiteGestionar } from "@/lib/portal/vigencia"
+import { permiteGestionar, reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
 import { resolverPorDNI } from "@/lib/portal/identidad"
 import { reservarTurno, cancelarTurno } from "@/lib/api-tools/api-functions"
 import { saveConversationMessage } from "@/lib/conversations"
@@ -223,10 +223,11 @@ export async function POST(request: Request) {
   // tiene su turno nuevo, que es lo que vino a hacer. Queda registrado para
   // que la clínica lo resuelva.
   let cancelacionFallida = false
+  let seCancelóElAnterior = false
   // Se usa el DNI unificado, no `contexto.pacienteDNI`: si el paciente se
   // identificó en el portal, su DNI vive en `identidad` y esta condición sería
   // falsa — el turno anterior quedaría sin cancelar y en silencio.
-  if (contexto.intencion === "reagendar" && contexto.turno?.fecha && datosDelPaciente.dni) {
+  if (reemplazaElTurnoPrevio(contexto.intencion) && contexto.turno?.fecha && datosDelPaciente.dni) {
     try {
       const cancelacion = await cancelarTurno(contexto.clienteId, {
         fecha: contexto.turno.fecha,
@@ -234,6 +235,7 @@ export async function POST(request: Request) {
         paciente_datos: { dni: datosDelPaciente.dni, telefono: contexto.phone },
       })
       if (cancelacion && cancelacion.exito === false) cancelacionFallida = true
+      else seCancelóElAnterior = true
     } catch (error) {
       cancelacionFallida = true
       console.error("[PORTAL] Error cancelando el turno anterior:", error)
@@ -268,13 +270,32 @@ export async function POST(request: Request) {
     .join(" a las ")
   const conQuien = datosDelTurnoElegido.profesional ? ` con ${datosDelTurnoElegido.profesional}` : ""
 
-  const texto = confirmacionHumana
+  const textoDelTurnoNuevo = confirmacionHumana
     ? cuando
       ? `Pedimos tu turno para el ${cuando}${conQuien}. La clínica tiene que aprobarlo y te avisamos apenas lo haga.`
       : "Pedimos tu turno. La clínica tiene que aprobarlo y te avisamos apenas lo haga."
     : cuando
       ? `Tu turno quedó para el ${cuando}${conQuien}.`
       : "Tu turno quedó reservado."
+
+  // ── Decir que el anterior se canceló (25/9/2026) ──────────────────────────
+  //
+  // El mensaje hablaba sólo del turno nuevo. Quien reagenda se queda sin saber
+  // qué pasó con el que tenía, y cuando el nuevo además queda pendiente de
+  // aprobación, la duda es peor: ¿me guardan el viejo mientras tanto?
+  //
+  // Se dice explícitamente. Es la mitad de la operación que el paciente pidió
+  // y es la mitad que no puede ver en ningún lado.
+  const fechaAnterior =
+    contexto.turno?.fechaFormateada || contexto.turno?.fecha
+      ? [contexto.turno?.fechaFormateada || contexto.turno?.fecha, contexto.turno?.horaFormateada]
+          .filter(Boolean)
+          .join(" a las ")
+      : ""
+
+  const texto = seCancelóElAnterior
+    ? `${textoDelTurnoNuevo} Cancelamos el turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"}.`
+    : textoDelTurnoNuevo
 
   // ── Las estadísticas (24/9/2026) ──────────────────────────────────────────
   //
@@ -295,7 +316,9 @@ export async function POST(request: Request) {
       clienteId: contexto.clienteId,
       phoneNumber: contexto.phone,
       eventType:
-        contexto.intencion === "reagendar" || veniaDeUnaCancelacion ? "rescheduled" : "new_appointment",
+        reemplazaElTurnoPrevio(contexto.intencion) || veniaDeUnaCancelacion
+          ? "rescheduled"
+          : "new_appointment",
       timestamp: new Date().toISOString(),
     })
   } catch (error) {

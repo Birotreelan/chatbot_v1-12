@@ -37,6 +37,39 @@
 
 export type IntencionDelPortal = "reagendar" | "cancelar" | "nuevo_turno" | "familiar"
 
+/**
+ * ¿Si este enlace termina en una reserva, el turno del token hay que cancelarlo?
+ * (25/9/2026)
+ *
+ * ── El caso que la rompió ──────────────────────────────────────────────────
+ *
+ * Desde que el recordatorio tiene dos botones, el reagendamiento entra por
+ * "Cancelar": el paciente toca ese botón, el enlace se emite con intención
+ * `cancelar`, y dentro del portal elige "Cambiarlo de horario". Reserva el
+ * turno nuevo y se va contento.
+ *
+ * `gestionar` preguntaba `intencion === "reagendar"` para decidir si cancelar
+ * el anterior. Con un token de `cancelar` la respuesta era no, así que el
+ * paciente quedaba con DOS turnos y la clínica con una hora ocupada de más.
+ *
+ * El problema de fondo: la misma pregunta —"¿esto reemplaza un turno?"— se
+ * respondía con `filtros.accion` en `decidirPaso` y con `contexto.intencion`
+ * acá. Dos implementaciones que se contradecían.
+ *
+ * ── Por qué la intención alcanza, y `turno` no ─────────────────────────────
+ *
+ * La tentación era simplificar a "si el token trae un turno, cancelalo". No
+ * sirve: un enlace de `nuevo_turno` para alguien que YA tiene un turno
+ * también lo trae —`datosDesdeElContexto` lo copia siempre— y cancelarlo le
+ * borraría el turno que tenía a quien vino a sacar uno más.
+ *
+ * `reagendar` y `cancelar` son las dos intenciones donde el paciente vino a
+ * sacarse de encima ese turno. Si además reservó, es un cambio de horario.
+ */
+export function reemplazaElTurnoPrevio(intencion: IntencionDelPortal): boolean {
+  return intencion === "reagendar" || intencion === "cancelar"
+}
+
 /** De dónde salió el enlace. Define cuánto dura la ventana para gestionar. */
 export type OrigenDelEnlace = "recordatorio" | "conversacion"
 

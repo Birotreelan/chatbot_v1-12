@@ -16,6 +16,7 @@ import {
   estadoDelEnlace,
   permiteGestionar,
   permiteVerDatos,
+  reemplazaElTurnoPrevio,
   VENTANA_CONVERSACION_MS,
   TOPE_RECORDATORIO_MS,
 } from "./vigencia"
@@ -138,5 +139,28 @@ describe("datos rotos no habilitan nada", () => {
   it("una fecha de turno inválida no rompe el cálculo", () => {
     const v = calcularVencimientos({ origen: "recordatorio", fechaDelTurno: "cualquier cosa", ahora: AHORA })
     expect(ms(v.venceAccion) - AHORA).toBe(TOPE_RECORDATORIO_MS)
+  })
+})
+
+describe("¿el enlace reemplaza el turno que trae?", () => {
+  it("reagendar y cancelar sí", () => {
+    // Con el recordatorio de dos botones, el reagendamiento entra por
+    // "Cancelar": el token dice `cancelar` y el paciente igual termina
+    // reservando. Si sólo se mirara `reagendar`, ese paciente quedaría con
+    // dos turnos —que es exactamente lo que pasó en producción el 25/9—.
+    expect(reemplazaElTurnoPrevio("reagendar")).toBe(true)
+    expect(reemplazaElTurnoPrevio("cancelar")).toBe(true)
+  })
+
+  it("sacar un turno nuevo NO cancela el que ya tenía", () => {
+    // El token de `nuevo_turno` también trae el turno vigente del paciente
+    // (`datosDesdeElContexto` lo copia siempre). Tratarlo como reemplazo le
+    // borraría el turno que tenía a quien vino a sacar uno más.
+    expect(reemplazaElTurnoPrevio("nuevo_turno")).toBe(false)
+  })
+
+  it("el turno de un familiar tampoco", () => {
+    // El turno del token es del titular del teléfono, no del familiar.
+    expect(reemplazaElTurnoPrevio("familiar")).toBe(false)
   })
 })
