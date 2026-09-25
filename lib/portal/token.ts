@@ -63,7 +63,20 @@ export interface ContextoDelPortal {
 
   /** Identidad ya resuelta, para no volver a preguntarla en el portal. */
   pacienteId?: string
+  /**
+   * Nombre completo, para saludar.
+   *
+   * Para RESERVAR no alcanza: `set_turno` exige `Paciente_Nombre` y
+   * `Paciente_Apellido` por separado. Por eso están también los dos campos de
+   * abajo — ver la nota de `datosDesdeElContexto`.
+   */
   pacienteNombre?: string
+  /** Sólo los nombres de pila, como los manda la clínica en `Chatbot_Data`. */
+  pacienteNombres?: string
+  /** Sólo el apellido, como lo manda la clínica. */
+  pacienteApellido?: string
+  /** El email de la ficha, si la clínica lo mandó. */
+  pacienteEmail?: string
   pacienteDNI?: string
   obraSocialId?: string
   sedeId?: string
@@ -184,6 +197,9 @@ export async function emitirEnlace(params: {
   origen: OrigenDelEnlace
   pacienteId?: string
   pacienteNombre?: string
+  pacienteNombres?: string
+  pacienteApellido?: string
+  pacienteEmail?: string
   pacienteDNI?: string
   obraSocialId?: string
   sedeId?: string
@@ -207,6 +223,9 @@ export async function emitirEnlace(params: {
     origen: params.origen,
     pacienteId: params.pacienteId,
     pacienteNombre: params.pacienteNombre,
+    pacienteNombres: params.pacienteNombres,
+    pacienteApellido: params.pacienteApellido,
+    pacienteEmail: params.pacienteEmail,
     pacienteDNI: params.pacienteDNI,
     obraSocialId: params.obraSocialId,
     sedeId: params.sedeId,

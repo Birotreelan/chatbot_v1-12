@@ -275,8 +275,10 @@ export default async function PaginaDelPortal({
   // tenemos su nombre completo en una sola cadena y no se parte: "DE SANTIAGO,
   // Nicolas" partido por el primer espacio daría "DE" como apellido.
   const datosParaElResumen = {
-    nombre: identidad.nombre || contexto.pacienteNombre || undefined,
-    apellido: identidad.apellido,
+    // Los nombres de pila cuando los tenemos separados —del alta o del
+    // `Chatbot_Data`—; el nombre completo sólo como último recurso.
+    nombre: identidad.nombre || contexto.pacienteNombres || contexto.pacienteNombre || undefined,
+    apellido: identidad.apellido || contexto.pacienteApellido,
     dni: identidad.dni,
     obraSocial: identidad.obraSocialNombre,
   }

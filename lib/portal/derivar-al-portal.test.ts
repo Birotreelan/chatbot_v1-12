@@ -196,3 +196,42 @@ describe("el texto que recibe el paciente en vez del enlace", () => {
     expect(t).not.toMatch(/asistente virtual|bienvenid/i)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Nombre y apellido separados (25/9/2026)
+//
+// `set_turno` respondió "Debe proporcionar Nombre, Apellido, DNI y al menos un
+// medio de contacto" y fallaba TODA reserva de un paciente identificado por el
+// bot. El portal mandaba `Paciente_Nombre: "Nicolas DE SANTIAGO"` y ningún
+// apellido.
+//
+// La causa estaba acá: el Chatbot_Data ya los trae aparte y este puente los
+// unía en una sola cadena. El dato estaba en la mano y se tiraba.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("el nombre no se une antes de tiempo", () => {
+  it("conserva nombres y apellido por separado", () => {
+    const d = datosDesdeElContexto(TURNO_GARAY)
+    expect(d?.pacienteNombres).toBe("Nicolas")
+    expect(d?.pacienteApellido).toBe("DE SANTIAGO")
+  })
+
+  it("y además el completo, que es el que sirve para saludar", () => {
+    expect(datosDesdeElContexto(TURNO_GARAY)?.pacienteNombre).toBe("Nicolas DE SANTIAGO")
+  })
+
+  it("lleva el email de la ficha cuando la clínica lo manda", () => {
+    const con = {
+      ...TURNO_GARAY,
+      paciente: { ...TURNO_GARAY.paciente, mail: "nicolas@ejemplo.com" },
+    }
+    expect(datosDesdeElContexto(con)?.pacienteEmail).toBe("nicolas@ejemplo.com")
+  })
+
+  it("sin paciente no inventa campos", () => {
+    const d = datosDesdeElContexto({ turnos: [] })
+    expect(d?.pacienteNombres).toBeUndefined()
+    expect(d?.pacienteApellido).toBeUndefined()
+    expect(d?.pacienteEmail).toBeUndefined()
+  })
+})

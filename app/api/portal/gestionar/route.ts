@@ -137,7 +137,16 @@ export async function POST(request: Request) {
   // ficha ya tiene los dos campos separados y la buscamos por DNI, que lo
   // tenemos.
   const dniParaReservar = ident?.dni || contexto.pacienteDNI
-  if (!ident?.apellido && dniParaReservar) {
+
+  // Primero, lo que ya vino en el token: la clínica manda nombre y apellido
+  // separados en el `Chatbot_Data` del recordatorio, así que para el paciente
+  // que identificó el bot no hace falta preguntar nada.
+  const apellidoConocido = ident?.apellido || contexto.pacienteApellido
+
+  // Sólo si NO lo tenemos se va a buscar la ficha. Es el respaldo para los
+  // enlaces emitidos antes de este arreglo y para los casos donde la clínica
+  // no manda `Chatbot_Data`.
+  if (!apellidoConocido && dniParaReservar) {
     const ficha = await resolverPorDNI(contexto.clienteId, dniParaReservar)
     if (ficha?.tieneFicha) {
       // La ficha completa los huecos; lo que el paciente haya cargado en el
@@ -148,15 +157,24 @@ export async function POST(request: Request) {
     }
   }
 
+  // ── Los mismos campos que manda el bot ────────────────────────────────────
+  //
+  // `reschedule-flow-integration.ts` arma `{ dni, nombre: paciente.nombres,
+  // apellido: paciente.apellido, telefono, obra_social_id }`. Esto es lo
+  // mismo, con el email de yapa cuando lo hay.
+  //
+  // El orden de preferencia en cada campo: lo que el paciente cargó en el
+  // portal (más reciente), después lo que vino en el token, y por último lo
+  // que se haya traído de la ficha.
   const datosDelPaciente = {
     telefono: contexto.phone,
-    // El de la ficha cuando lo hay, y el que cargó el paciente cuando es un
-    // alta. El proxy pide "teléfono o email" y el teléfono siempre va, pero
-    // mandar el email real es mejor dato para la clínica.
-    email: ident?.email || "",
+    email: ident?.email || contexto.pacienteEmail || "",
     dni: dniParaReservar,
-    nombre: ident?.nombre || contexto.pacienteNombre,
-    apellido: ident?.apellido,
+    // `pacienteNombres` son los nombres de pila. `pacienteNombre` es el
+    // completo y sólo se usa si no hay nada mejor: mandarlo como
+    // `Paciente_Nombre` junto a un apellido vacío es justo lo que fallaba.
+    nombre: ident?.nombre || contexto.pacienteNombres || contexto.pacienteNombre,
+    apellido: ident?.apellido || contexto.pacienteApellido,
     deudorId: ident?.obraSocialId || contexto.obraSocialId,
     deudorNombre: ident?.obraSocialNombre,
   }

@@ -38,6 +38,10 @@ import { nanoid } from "nanoid"
 export interface DatosDelPaciente {
   pacienteId?: string
   pacienteNombre?: string
+  /** Nombres de pila y apellido por separado: `set_turno` los pide así. */
+  pacienteNombres?: string
+  pacienteApellido?: string
+  pacienteEmail?: string
   pacienteDNI?: string
   obraSocialId?: string
   sedeId?: string
@@ -107,10 +111,28 @@ export function datosDesdeElContexto(contexto: any): DatosDelPaciente | undefine
   const paciente = contexto.paciente
   const turno = Array.isArray(contexto.turnos) ? contexto.turnos[0] : contexto.turnos || contexto
 
+  // ── Nombre y apellido viajan SEPARADOS (25/9/2026) ─────────────────────
+  //
+  // El `Chatbot_Data` que manda la clínica ya los trae aparte:
+  //
+  //     "paciente": { "nombres": "Nicolas", "apellido": "DE SANTIAGO", ... }
+  //
+  // Acá se los unía en una sola cadena para saludar, y el apellido se perdía.
+  // Después, al reservar, `set_turno` respondía "Debe proporcionar Nombre,
+  // Apellido, DNI..." y fallaba TODA reserva de un paciente identificado por
+  // el bot.
+  //
+  // El nombre completo se sigue guardando para el saludo, pero los dos campos
+  // originales van también. Es el mismo criterio que usa el flujo de
+  // reagendamiento del bot (reschedule-flow-integration.ts), que arma
+  // `{ nombre: st.paciente.nombres, apellido: st.paciente.apellido }`.
   const nombre = [paciente?.nombres, paciente?.apellido].filter(Boolean).join(" ").trim()
 
   const datos: DatosDelPaciente = {
     pacienteNombre: nombre || undefined,
+    pacienteNombres: paciente?.nombres || undefined,
+    pacienteApellido: paciente?.apellido || undefined,
+    pacienteEmail: paciente?.mail || paciente?.email || undefined,
     pacienteDNI: paciente?.dni || undefined,
     obraSocialId: paciente?.obra_social_id || undefined,
     sedeId: turno?.sede_id || contexto.sede_id || undefined,
@@ -216,6 +238,9 @@ export async function derivarAlPortal(params: {
       origen: params.origen,
       pacienteId: paciente?.pacienteId,
       pacienteNombre: paciente?.pacienteNombre,
+      pacienteNombres: paciente?.pacienteNombres,
+      pacienteApellido: paciente?.pacienteApellido,
+      pacienteEmail: paciente?.pacienteEmail,
       pacienteDNI: paciente?.pacienteDNI,
       obraSocialId: paciente?.obraSocialId,
       sedeId: paciente?.sedeId,
