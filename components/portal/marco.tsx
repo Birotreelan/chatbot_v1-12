@@ -267,6 +267,9 @@ export function ResumenDelTurno({
     ["Profesional", turno.profesional],
     ["Sede", turno.sede],
     ["Dirección", turno.direccion],
+    // Es lo que el paciente le dice a la clínica por teléfono si algo no
+    // cierra. En la pantalla final vale más que en ninguna otra.
+    ["N° de turno", turno.agendaId],
   ]
 
   const visibles = filas.filter(([, valor]) => !!valor) as Array<[string, string]>
@@ -377,6 +380,7 @@ export function ResumenDeConfirmacion({
     horaFormateada?: string
     profesional?: string
     sede?: string
+    direccion?: string
     agendaId?: string
   }
   /** "Nuevo turno" cuando se está reemplazando uno; si no, "Datos del turno". */
@@ -415,6 +419,9 @@ export function ResumenDeConfirmacion({
     // mal es peor que no poner ninguno.
     ["Profesional", turno.profesional],
     ["Sede", turno.sede],
+    // Sede y dirección son una unidad cuando la institución tiene varias: el
+    // nombre solo no le dice al paciente a dónde tiene que ir.
+    ["Dirección", turno.direccion],
     // El bot lo muestra como "Id Turno" y sirve: es lo que el paciente le dice
     // a la clínica por teléfono si algo no cierra.
     ["N° de turno", turno.agendaId],

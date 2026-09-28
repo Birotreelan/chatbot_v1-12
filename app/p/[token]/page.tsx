@@ -509,6 +509,7 @@ export default async function PaginaDelPortal({
     // escondería justamente el dato de que la agenda no contestó.
     const usaEjemplos = contexto.demo === true && agenda.total === 0
     const dias = usaEjemplos ? turnosDeEjemplo() : agenda.dias
+    const direcciones = dias.length > 0 ? await direccionesDeLasSedes(clienteId) : {}
 
     return marco(
       <>
@@ -547,6 +548,7 @@ export default async function PaginaDelPortal({
             etiquetaConfirmar="Confirmar el cambio"
             accion="cambiar"
             reemplazaA={contexto.turno}
+            direccionesPorSede={direcciones}
             // Va adentro y no acá arriba porque tiene que irse cuando el
             // paciente pasa al repaso: el turno viejo y "elegí el nuevo
             // horario" son de ESTA pantalla, no de las tres.
@@ -612,7 +614,7 @@ export default async function PaginaDelPortal({
       <>
         {volverQuitando() && <Volver href={volverQuitando()!} />}
         <TituloDePaso tipo="elegir" detalle="Vas a ver los horarios de la sede que elijas.">
-          {nombre ? `Hola, ${nombre}. ` : ""}¿A qué sede querés ir?
+          ¿A qué sede querés ir?
         </TituloDePaso>
         <ElegirFiltro token={token} campo="sedeId" opciones={sedesParaElegir} />
       </>,
@@ -634,8 +636,11 @@ export default async function PaginaDelPortal({
     return marco(
       <>
         {volverQuitando() && <Volver href={volverQuitando()!} />}
-        <TituloDePaso tipo="elegir">
-          {nombre ? `Hola, ${nombre}. ` : ""}¿Cómo querés buscar tu turno?
+        {/* El saludo va una sola vez, en la banda de arriba con el nombre de
+            la clínica. Repetirlo en cada título hacía que todas las pantallas
+            parecieran la primera. */}
+        <TituloDePaso tipo="elegir" detalle="Elegí una opción para encontrar el horario que buscás.">
+          ¿Cómo querés buscar tu turno?
         </TituloDePaso>
         <ElegirFiltro
           token={token}
@@ -657,8 +662,11 @@ export default async function PaginaDelPortal({
       return marco(
         <>
           {volverQuitando() && <Volver href={volverQuitando()!} />}
-          <TituloDePaso tipo="elegir">
-            {nombre ? `Hola, ${nombre}. ` : ""}¿Qué tipo de consulta necesitás?
+          <TituloDePaso
+            tipo="elegir"
+            detalle="Seleccioná una especialidad para ver los horarios disponibles."
+          >
+            ¿Qué especialidad necesitás?
           </TituloDePaso>
           <ElegirFiltro token={token} campo="especialidadId" opciones={opciones} conservar={elegido} />
           {ofreceVerTodos(permisos) && (
@@ -688,12 +696,24 @@ export default async function PaginaDelPortal({
       return marco(
         <>
           {volverA && <Volver href={volverA} />}
-          <TituloDePaso tipo="elegir">
-            {nombre ? `Hola, ${nombre}. ` : ""}¿Con qué profesional querés atenderte?
+          <TituloDePaso
+            tipo="elegir"
+            detalle="Seleccioná un profesional para ver sus horarios disponibles."
+          >
+            ¿Con qué profesional querés atenderte?
           </TituloDePaso>
           <ElegirFiltro token={token} campo="profesionalId" opciones={opciones} conservar={conservar} />
+          {/* "Cualquier profesional" y no "Me da igual el profesional": es la
+              misma opción que la del paso anterior y tiene que llamarse igual,
+              y además "me da igual" suena a resignación cuando en realidad es
+              la vía más rápida al turno más próximo. */}
           {ofreceVerTodos(permisos) && (
-            <VerTodos token={token} etiqueta="Me da igual el profesional" conservar={conservar} />
+            <VerTodos
+              token={token}
+              etiqueta="Cualquier profesional"
+              detalle="Para ver los turnos más próximos disponibles"
+              conservar={conservar}
+            />
           )}
         </>,
       )
@@ -719,6 +739,7 @@ export default async function PaginaDelPortal({
 
   const conEjemplos = contexto.demo === true && agendaNueva.total === 0
   const diasNuevos = conEjemplos ? turnosDeEjemplo() : agendaNueva.dias
+  const direccionesNuevo = diasNuevos.length > 0 ? await direccionesDeLasSedes(clienteId) : {}
 
   return marco(
     <>
@@ -744,6 +765,7 @@ export default async function PaginaDelPortal({
         paciente={datosParaElResumen}
         corregirDatosEn={corregirDatosEn}
         etiquetaConfirmar="Confirmar mi turno"
+        direccionesPorSede={direccionesNuevo}
         // El "Volver" va adentro por el mismo motivo que el título: en el
         // repaso el paso atrás es "Elegir otro horario", y dos formas de
         // volver que hacen cosas distintas en la misma pantalla es cómo se
@@ -751,14 +773,52 @@ export default async function PaginaDelPortal({
         encabezado={
           <>
             {volverQuitando() && <Volver href={volverQuitando()!} />}
-            <TituloDePaso tipo="agenda">
-              {nombre ? `Hola, ${nombre}. ` : ""}Elegí el horario que te quede mejor
+            <TituloDePaso
+              tipo="agenda"
+              detalle="Seleccioná una fecha y después un horario disponible."
+            >
+              Elegí un día y horario
             </TituloDePaso>
+
+            {/* Con quién son estos horarios, o que son de todos. Es lo que
+                decide si el nombre del profesional hace falta al lado de cada
+                horario, así que conviene que el paciente lo lea antes. */}
+            <p className="text-[15px] text-muted-foreground">
+              {agendaNueva.profesionalNombre
+                ? `Horarios disponibles con ${agendaNueva.profesionalNombre}.`
+                : "Horarios disponibles."}
+            </p>
           </>
         }
       />
     </>,
   )
+}
+
+/**
+ * La dirección de cada sede, por id (28/9/2026).
+ *
+ * El paciente confirma un turno mirando "Sede: OFTALMO Medicina Ocular". Con
+ * una sola sede alcanza; con varias de la misma institución, sede y dirección
+ * son una unidad y el nombre solo no le dice a dónde tiene que ir.
+ *
+ * Sale de la misma llamada que arma la lista de sedes, que ya devuelve el
+ * domicilio. Se resuelve por el `sedeId` del turno ELEGIDO y no por el filtro:
+ * quien buscó sin filtrar por sede puede terminar eligiendo un horario de
+ * cualquiera de ellas.
+ *
+ * Si la llamada falla se devuelve un mapa vacío y la fila no se muestra. Una
+ * dirección equivocada es peor que ninguna: manda a alguien a otro lado.
+ */
+async function direccionesDeLasSedes(clienteId: string): Promise<Record<string, string>> {
+  const sedes = (await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes || []
+  const mapa: Record<string, string> = {}
+  for (const sede of sedes) {
+    const id = String((sede as any)?.Id ?? "")
+    const domicilio = String((sede as any)?.Domicilio ?? "").trim()
+    if (id && domicilio) mapa[id] = domicilio
+  }
+  return mapa
 }
 
 /**
@@ -797,19 +857,23 @@ function mensajeSinTurnos(info: any): string | null {
 function VerTodos({
   token,
   etiqueta,
+  detalle,
   conservar,
 }: {
   token: string
   etiqueta: string
+  /** La línea de abajo, igual que en las opciones de la lista. */
+  detalle?: string
   conservar?: Record<string, string>
 }) {
   const params = new URLSearchParams({ ...(conservar || {}), sinFiltro: "1" })
   return (
     <a
       href={`/p/${token}?${params.toString()}`}
-      className="mt-3 block min-h-[56px] rounded-xl border bg-card px-4 py-4 text-center text-card-foreground no-underline hover:bg-accent"
+      className="mt-3 block min-h-[56px] rounded-xl border bg-card px-4 py-3 text-center text-card-foreground no-underline hover:bg-accent"
     >
-      {etiqueta}
+      <span className="block font-medium">{etiqueta}</span>
+      {detalle && <span className="mt-0.5 block text-sm text-muted-foreground">{detalle}</span>}
     </a>
   )
 }

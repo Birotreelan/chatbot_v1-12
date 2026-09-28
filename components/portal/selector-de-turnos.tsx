@@ -95,6 +95,16 @@ interface Props {
    * moverlo.
    */
   reemplazaA?: { fechaFormateada?: string; fecha?: string; horaFormateada?: string; hora?: string }
+  /**
+   * Dirección de cada sede, por id.
+   *
+   * La agenda devuelve el nombre de la sede pero no su domicilio, y con varias
+   * sedes de la misma institución el nombre solo no dice a dónde ir. Se
+   * resuelve por el `sedeId` del turno que el paciente eligió —no por el
+   * filtro— porque quien buscó sin elegir sede puede terminar en cualquiera.
+   * Sin entrada para esa sede, la fila no se muestra.
+   */
+  direccionesPorSede?: Record<string, string>
 }
 
 interface Elegido {
@@ -104,6 +114,7 @@ interface Elegido {
   hora: string
   profesional?: string
   sede?: string
+  direccion?: string
 }
 
 function aFecha(iso: string): Date {
@@ -126,6 +137,7 @@ export function SelectorDeTurnos({
   encabezado,
   accion = "reservar",
   reemplazaA,
+  direccionesPorSede,
 }: Props) {
   const [diaElegido, setDiaElegido] = useState<string | null>(null)
   const [elegido, setElegido] = useState<Elegido | null>(null)
@@ -197,7 +209,7 @@ export function SelectorDeTurnos({
               : "¡Turno reagendado!"
             : resultado.pendiente
               ? "Pedimos tu turno"
-              : "¡Turno confirmado!"}
+              : "¡Tu turno está confirmado!"}
         </TituloDePaso>
 
         {/* "Listo" sólo cuando de verdad está listo. Si la clínica todavía
@@ -211,22 +223,22 @@ export function SelectorDeTurnos({
               horaFormateada: elegido.hora,
               profesional: elegido.profesional,
               sede: elegido.sede,
+              direccion: elegido.direccion,
+              agendaId: elegido.agendaId,
             }}
             titulo={
-              accion === "cambiar"
-                ? resultado.pendiente
-                  ? "El turno que pediste"
-                  : "Tu turno nuevo"
-                : resultado.pendiente
-                  ? "El turno que pediste"
-                  : "Tu turno"
+              resultado.pendiente
+                ? "El turno que pediste"
+                : accion === "cambiar"
+                  ? "Tu turno nuevo"
+                  : "Los datos de tu turno"
             }
           />
         )}
         <p className="text-[15px] text-muted-foreground">
           {resultado.pendiente
             ? "Te avisamos por WhatsApp apenas la clínica la apruebe."
-            : "Te va a llegar la confirmación por WhatsApp."}
+            : "Te va a llegar la confirmación por WhatsApp. Guardá estos datos para tu próxima visita."}
         </p>
         {resultado.aviso && (
           <Aviso
@@ -281,6 +293,7 @@ export function SelectorDeTurnos({
             horaFormateada: elegido.hora,
             profesional: elegido.profesional,
             sede: elegido.sede,
+            direccion: elegido.direccion,
             agendaId: elegido.agendaId,
           }}
           tituloDelTurno={accion === "cambiar" ? "Nuevo turno" : "Datos del turno"}
@@ -466,6 +479,7 @@ export function SelectorDeTurnos({
                     hora: turno.hora,
                     profesional: turno.profesionalNombre,
                     sede: turno.sedeNombre,
+                    direccion: turno.sedeId ? direccionesPorSede?.[turno.sedeId] : undefined,
                   })
                 }
                 // 56px de alto: lo toca con el pulgar alguien parado, y este

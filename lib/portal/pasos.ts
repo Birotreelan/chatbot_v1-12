@@ -118,25 +118,39 @@ export interface OpcionDeBusqueda {
 export function opcionesDeBusqueda(permisos: PermisosDeBusqueda): OpcionDeBusqueda[] {
   const opciones: OpcionDeBusqueda[] = []
 
+  // ── "Profesional", no "médico" (28/9/2026) ────────────────────────────────
+  //
+  // Decía "Médico en particular" y "Cualquier médico", y dos pantallas después
+  // "¿Con qué profesional querés atenderte?". Son la misma persona nombrada de
+  // dos formas en el mismo flujo.
+  //
+  // Gana "profesional" y no "médico" por un motivo que no es de estilo: la
+  // agenda tiene instrumentadores quirúrgicos y otros profesionales que no son
+  // médicos. Llamarlos médicos es incorrecto, y el paciente que busca a su
+  // instrumentador no lo encuentra en una lista que dice "médicos".
+  //
+  // Los detalles arrancan todos igual —una frase corta que completa el
+  // nombre— para que se lean en paralelo y no haya que comparar tres
+  // estructuras distintas.
   if (permisos.porProfesional !== false) {
     opciones.push({
       id: "profesional",
-      nombre: "Médico en particular",
-      detalle: "Si ya sabés con qué profesional querés atenderte",
+      nombre: "Un profesional en particular",
+      detalle: "Si ya sabés con quién querés atenderte",
     })
   }
   if (permisos.porEspecialidad !== false) {
     opciones.push({
       id: "especialidad",
       nombre: "Por especialidad",
-      detalle: "Para elegir una especialidad y ver los horarios disponibles",
+      detalle: "Elegí una especialidad y mirá los horarios disponibles",
     })
   }
   if (permisos.porCualquiera !== false) {
     opciones.push({
       id: "cualquiera",
-      nombre: "Cualquier médico",
-      detalle: "Para ver los turnos más próximos sin importar el profesional",
+      nombre: "Cualquier profesional",
+      detalle: "Mostramos los turnos más próximos, sin importar con quién",
     })
   }
 
