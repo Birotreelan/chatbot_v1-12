@@ -36,7 +36,7 @@
 import { useMemo, useState } from "react"
 import { Calendar } from "@/components/ui/calendar"
 import { es } from "date-fns/locale"
-import { Loader2 } from "lucide-react"
+import { LoadingState } from "@/components/ui/loading-state"
 import type { DiaConTurnos } from "@/lib/portal/agenda"
 import {
   Aviso,
@@ -157,7 +157,7 @@ export function SelectorDeTurnos({
             titulo={resultado.pendiente ? "El turno que pediste" : "Tu turno"}
           />
         )}
-        <p className="text-[15px] text-gray-600">
+        <p className="text-[15px] text-muted-foreground">
           {resultado.pendiente
             ? "Te avisamos por WhatsApp apenas la clínica la apruebe."
             : "Te va a llegar la confirmación por WhatsApp."}
@@ -241,20 +241,14 @@ export function SelectorDeTurnos({
             sin esto, quien se equivocó un dígito del DNI al darse de alta veía
             el error en el resumen y no tenía cómo arreglarlo. */}
         {corregirDatosEn && !enviando && (
-          <a href={corregirDatosEn} className="block text-[15px] text-gray-500 underline">
+          <a href={corregirDatosEn} className="block text-[15px] text-muted-foreground underline">
             Corregir mis datos
           </a>
         )}
 
         <div className="space-y-2">
           <BotonPrimario onClick={confirmar} deshabilitado={enviando}>
-            {enviando ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> Reservando…
-              </span>
-            ) : (
-              etiquetaConfirmar
-            )}
+            {enviando ? <LoadingState inline label="Reservando…" /> : etiquetaConfirmar}
           </BotonPrimario>
           {!enviando && (
             <BotonSecundario onClick={() => setElegido(null)}>Elegir otro horario</BotonSecundario>
@@ -267,7 +261,7 @@ export function SelectorDeTurnos({
   // ── Elegir día y hora ────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-      <div className="flex justify-center rounded-xl border border-gray-200 bg-white p-1">
+      <div className="flex justify-center rounded-xl border bg-card p-1">
         <Calendar
           mode="single"
           locale={es}
@@ -311,14 +305,14 @@ export function SelectorDeTurnos({
           // Por eso el color de cada estado va por `modifiersStyles`, que son
           // estilos en línea y le ganan a cualquier clase sin ambigüedad.
           classNames={{
-            caption_label: "text-base font-medium capitalize text-gray-900",
-            head_cell: "w-11 text-xs font-normal text-gray-500",
+            caption_label: "text-base font-medium capitalize text-foreground",
+            head_cell: "w-11 text-xs font-normal text-muted-foreground",
             cell: "h-11 w-11 p-0 text-center",
             // Sin color acá: lo pone el modificador que corresponda.
             day: "h-11 w-11 rounded-lg p-0 text-base",
             // El día de hoy sin turnos no debe parecer seleccionable: sólo se
             // marca con un borde.
-            day_today: "border border-gray-300",
+            day_today: "border border-input",
             // Vacíos para anular los de `components/ui/calendar`, que usan
             // tokens del tema del dashboard (`bg-primary`, `text-muted-
             // foreground`, `opacity-50`). Esos tokens siguen el modo oscuro,
@@ -341,32 +335,40 @@ export function SelectorDeTurnos({
           modifiersStyles={{
             // Con turno: resaltado de verdad —fondo, color de la clínica y
             // negrita—, que es lo que el texto de abajo promete.
+            // Los tres van con `hsl(var(--token))` y no con hexadecimales:
+            // react-day-picker pide estilos en línea acá, pero las variables
+            // son las mismas que usa el resto del portal, así que el día
+            // resaltado no puede quedar de un azul distinto al de los botones.
             disponible: {
-              background: "#eff6ff",
-              color: "var(--marca)",
+              background: "hsl(var(--primary) / 0.08)",
+              color: "hsl(var(--primary))",
               fontWeight: 600,
             },
             // Sin turno: apagado y claramente no tocable.
             disabled: {
-              color: "#d1d5db",
+              color: "hsl(var(--muted-foreground) / 0.45)",
               fontWeight: 400,
               background: "transparent",
             },
-            // El elegido, con el color de la clínica lleno.
-            selected: { background: "var(--marca)", color: "#fff", fontWeight: 600 },
+            // El elegido, lleno.
+            selected: {
+              background: "hsl(var(--primary))",
+              color: "hsl(var(--primary-foreground))",
+              fontWeight: 600,
+            },
           }}
         />
       </div>
 
       {!diaElegido && (
-        <p className="text-[15px] text-gray-500">
+        <p className="text-[15px] text-muted-foreground">
           Los días con turno están resaltados. Tocá uno para ver los horarios.
         </p>
       )}
 
       {diaElegido && (
         <div className="space-y-2">
-          <p className="font-medium capitalize text-gray-700">
+          <p className="font-medium capitalize text-foreground">
             {dias.find((d) => d.fecha === diaElegido)?.etiqueta}
           </p>
           <div className="grid grid-cols-3 gap-2">
@@ -386,11 +388,11 @@ export function SelectorDeTurnos({
                 }
                 // 56px de alto: lo toca con el pulgar alguien parado, y este
                 // portal lo usan pacientes mayores.
-                className="min-h-[56px] rounded-xl border border-gray-200 bg-white px-1 py-2 text-base font-medium text-gray-800"
+                className="min-h-[56px] rounded-xl border bg-card px-1 py-2 text-base font-medium text-card-foreground hover:bg-accent"
               >
                 {turno.hora}
                 {turno.profesionalNombre && turno.profesionalNombre !== "Sin asignar" && (
-                  <span className="block break-words text-xs font-normal leading-tight text-gray-500">
+                  <span className="block break-words text-xs font-normal leading-tight text-muted-foreground">
                     {turno.profesionalNombre}
                   </span>
                 )}

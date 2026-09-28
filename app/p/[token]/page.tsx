@@ -135,7 +135,7 @@ export default async function PaginaDelPortal({
       <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
         <Aviso titulo="Listo" detalle={contexto.resultado.texto} tono="exito" />
         {contexto.resultado.turno && <ResumenDelTurno turno={contexto.resultado.turno} />}
-        <p className="text-gray-600">Te va a llegar la confirmación por WhatsApp.</p>
+        <p className="text-muted-foreground">Te va a llegar la confirmación por WhatsApp.</p>
       </Marco>
     )
   }
@@ -421,7 +421,7 @@ export default async function PaginaDelPortal({
               : "Escribinos por WhatsApp y te pasamos el contacto de la clínica."
           }
         />
-        <p className="text-[15px] text-gray-600">
+        <p className="text-[15px] text-muted-foreground">
           Tus datos quedaron guardados, así que no vas a tener que repetirlos.
         </p>
       </>,
@@ -487,7 +487,7 @@ export default async function PaginaDelPortal({
         )}
 
         {agenda.filtradoPorProfesional && agenda.profesionalNombre && dias.length > 0 && (
-          <p className="text-[15px] text-gray-500">
+          <p className="text-[15px] text-muted-foreground">
             Horarios disponibles con {agenda.profesionalNombre}.
           </p>
         )}
@@ -722,7 +722,7 @@ function VerTodos({
   return (
     <a
       href={`/p/${token}?${params.toString()}`}
-      className="mt-3 block min-h-[56px] rounded-xl border border-gray-300 bg-white px-4 py-4 text-center text-gray-800 no-underline"
+      className="mt-3 block min-h-[56px] rounded-xl border bg-card px-4 py-4 text-center text-card-foreground no-underline hover:bg-accent"
     >
       {etiqueta}
     </a>

@@ -11,6 +11,17 @@ const alertVariants = cva(
         default: "bg-background text-foreground",
         destructive:
           "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
+        // Las tres de abajo no vienen con shadcn. Siguen el mismo patrón que
+        // `destructive` —borde al 50%, texto y svg al token— para que un aviso
+        // se distinga por su color y no por tener otra forma.
+        //
+        // `warning` es el estado que no es error ni éxito: un turno que la obra
+        // social no cubre, un plazo por vencer. Sin este escalón, todo lo que
+        // no era éxito terminaba en rojo y el paciente leía "algo salió mal"
+        // donde decía "prestá atención a esto".
+        warning: "border-warning/50 text-warning dark:border-warning [&>svg]:text-warning",
+        success: "border-secondary/50 text-secondary dark:border-secondary [&>svg]:text-secondary",
+        info: "border-primary/50 text-primary dark:border-primary [&>svg]:text-primary",
       },
     },
     defaultVariants: {

@@ -20,16 +20,34 @@
  * de la clínica, un ícono en círculo que anuncia de qué se trata el paso, y
  * una sola acción primaria a ancho completo abajo.
  *
- * ── El color es de cada clínica, no nuestro ────────────────────────────────
+ * ── El color: del sistema, no de cada clínica (28/9/2026) ──────────────────
  *
- * El widget tiene `sky-600` fijo en las clases. Acá no se puede: cada clínica
- * trae el suyo desde su configuración. Por eso el color viaja en una variable
- * CSS (`--marca`) que se declara una vez en el contenedor y de la que toman
- * todos los hijos. Tailwind para la estructura, la variable para la marca: ni
- * una clase de color inventada por cliente, ni una hoja de estilos por clínica.
+ * Hasta hoy el portal se pintaba con el color que cada clínica había cargado
+ * para su widget, en una variable `--marca`. Se cambió por el token `primary`
+ * del sistema de diseño, que es el mismo de todas las pantallas.
+ *
+ * Lo que se gana: los colores del pliego pasaron una auditoría de contraste
+ * WCAG AA; un hexadecimal cargado a mano en un formulario no pasó ninguna, y
+ * un celeste claro sobre blanco dejaba texto ilegible justo en el público que
+ * peor ve. Lo que se pierde: el paciente ya no reconoce los colores de su
+ * clínica. Eso queda cubierto por el nombre de la clínica, que sigue en la
+ * banda de arriba, que era de donde venía la mayor parte de la confianza.
+ *
+ * `widgetPrimaryColor` sigue existiendo y sigue mandando en el widget web. Acá
+ * ya no se lee.
+ *
+ * ── Los tokens están acotados al portal ────────────────────────────────────
+ *
+ * La clase `.portal` del contenedor declara la paleta del pliego —otro azul y
+ * otro radio de borde que los del dashboard— y todo lo que cuelga de ahí,
+ * incluidos los componentes de shadcn, la toma. Ver `app/globals.css`.
  */
 
 import type { ReactNode } from "react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+
 import type { MarcaDelPortal } from "@/lib/portal/marca"
 import type { TurnoDelPortal } from "@/lib/portal/token"
 import {
@@ -78,13 +96,8 @@ export function Marco({
   nombreCookie?: string
 }) {
   return (
-    <div
-      className="min-h-screen bg-gray-50 text-gray-900"
-      // `--marca` la leen los hijos con style={{ background: "var(--marca)" }}.
-      // Declararla acá arriba es lo que evita tener que pasar el color por prop
-      // a cada botón del árbol.
-      style={{ ["--marca" as string]: marca.colorPrimario }}
-    >
+    // `portal` trae la paleta del pliego; el resto de la app conserva la suya.
+    <div className="portal min-h-screen bg-background text-foreground">
       {/* La cookie se escribe desde el cliente y no con Set-Cookie porque esta
           página se renderiza como Server Component sin acceso a la respuesta.
           Es un secreto de reconocimiento, no una credencial: si el navegador la
@@ -100,9 +113,8 @@ export function Marco({
       )}
 
       <header
-        className="flex items-center gap-3 px-4 py-4 text-white"
+        className="sticky top-0 z-10 flex items-center gap-3 bg-primary/95 px-4 py-4 text-primary-foreground backdrop-blur supports-[backdrop-filter]:bg-primary/90"
         style={{
-          background: "var(--marca)",
           // En un iPhone el navegador de WhatsApp mete la barra de estado
           // encima del contenido; sin esto el nombre de la clínica queda tapado.
           paddingTop: "max(env(safe-area-inset-top), 16px)",
@@ -143,15 +155,12 @@ export function TituloDePaso({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2.5">
-        <span
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white"
-          style={{ background: "var(--marca)" }}
-        >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
           <Icono className="h-[18px] w-[18px]" aria-hidden />
         </span>
-        <p className="text-lg font-medium text-gray-900">{children}</p>
+        <p className="text-lg font-medium text-foreground">{children}</p>
       </div>
-      {detalle && <p className="text-[15px] text-gray-500">{detalle}</p>}
+      {detalle && <p className="text-[15px] text-muted-foreground">{detalle}</p>}
     </div>
   )
 }
@@ -161,18 +170,31 @@ export function Volver({ href }: { href: string }) {
   return (
     <a
       href={href}
-      className="-ml-1 inline-flex items-center gap-1 py-1 text-sm text-gray-500"
+      className="-ml-1 inline-flex min-h-[44px] items-center gap-1 py-1 text-sm text-muted-foreground hover:text-foreground"
     >
       <ChevronLeft className="h-4 w-4" aria-hidden /> Volver
     </a>
   )
 }
 
+/**
+ * Cada tono, con la variante del `Alert` que le corresponde y su ícono.
+ *
+ * Los nombres de acá son los del portal —`atencion`, `exito`— y los de allá
+ * los de shadcn —`warning`, `success`—. La tabla traduce y nada más: renombrar
+ * las llamadas en cinco pantallas para que coincidan sería mucho ruido, y
+ * dejar dos vocabularios sueltos sin un lugar donde se toquen es cómo se
+ * termina con `bg-amber-50` escrito a mano en la sexta.
+ *
+ * `fondo` existe porque las variantes de shadcn pintan borde y texto pero
+ * dejan el fondo transparente, y estos avisos se leen mejor con un fondo
+ * suave. Sale del mismo token, así que no puede desafinar.
+ */
 const TONOS = {
-  neutro: { caja: "border-sky-200 bg-sky-50", texto: "text-sky-900", Icono: Info },
-  atencion: { caja: "border-amber-200 bg-amber-50", texto: "text-amber-900", Icono: AlertTriangle },
-  error: { caja: "border-red-200 bg-red-50", texto: "text-red-900", Icono: AlertCircle },
-  exito: { caja: "border-green-200 bg-green-50", texto: "text-green-900", Icono: CheckCircle2 },
+  neutro: { variante: "info", fondo: "bg-primary/5", Icono: Info },
+  atencion: { variante: "warning", fondo: "bg-warning/10", Icono: AlertTriangle },
+  error: { variante: "destructive", fondo: "bg-destructive/5", Icono: AlertCircle },
+  exito: { variante: "success", fondo: "bg-secondary/5", Icono: CheckCircle2 },
 } as const
 
 export type TonoDeAviso = keyof typeof TONOS
@@ -195,16 +217,19 @@ export function Aviso({
   detalle?: ReactNode
   tono?: TonoDeAviso
 }) {
-  const { caja, texto, Icono } = TONOS[tono]
+  const { variante, fondo, Icono } = TONOS[tono]
 
+  // El ícono va como hijo DIRECTO y los textos como hermanos, que es la forma
+  // que espera `Alert`: sus selectores `[&>svg]` lo posicionan en absoluto y
+  // le dan el margen izquierdo a lo que viene después. Envolver el título y el
+  // detalle en un div rompía las dos cosas —el ícono quedaba flotando sobre el
+  // texto— y el flex que yo había puesto peleaba con ese `position: absolute`.
   return (
-    <div className={`flex items-start gap-2.5 rounded-xl border p-4 ${caja} ${texto}`}>
-      <Icono className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
-      <div className="min-w-0">
-        <p className="font-medium">{titulo}</p>
-        {detalle && <p className="mt-1 text-[15px] opacity-90">{detalle}</p>}
-      </div>
-    </div>
+    <Alert variant={variante} className={fondo}>
+      <Icono className="h-5 w-5" aria-hidden />
+      <AlertTitle className="font-medium">{titulo}</AlertTitle>
+      {detalle && <AlertDescription className="text-[15px]">{detalle}</AlertDescription>}
+    </Alert>
   )
 }
 
@@ -212,8 +237,8 @@ export function Aviso({
 export function FilaDeResumen({ etiqueta, valor }: { etiqueta: string; valor: string }) {
   return (
     <div className="flex justify-between gap-3">
-      <span className="shrink-0 text-gray-500">{etiqueta}</span>
-      <span className="text-right font-medium text-gray-800">{valor}</span>
+      <span className="shrink-0 text-muted-foreground">{etiqueta}</span>
+      <span className="text-right font-medium text-foreground">{valor}</span>
     </div>
   )
 }
@@ -245,14 +270,14 @@ export function ResumenDelTurno({
   if (visibles.length === 0) return null
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
+    <Card className="p-4 shadow-none">
       {titulo && <p className="mb-3 font-medium">{titulo}</p>}
       <div className="space-y-2 text-[15px]">
         {visibles.map(([etiqueta, valor]) => (
           <FilaDeResumen key={etiqueta} etiqueta={etiqueta} valor={valor} />
         ))}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -260,9 +285,13 @@ export function ResumenDelTurno({
  * El botón primario, uno por pantalla.
  *
  * 56px de alto y ancho completo: lo toca con el pulgar alguien parado en una
- * sala de espera. Deshabilitado se pone gris y NO conserva el color de la
- * clínica — que un botón apagado se vea igual que uno activo es la forma más
- * rápida de que alguien lo toque cuatro veces.
+ * sala de espera. Bastante más que los 44px del mínimo táctil, y a propósito.
+ *
+ * Envuelve al `Button` de shadcn en vez de reemplazarlo: así el foco, el
+ * disabled y los colores salen del mismo lugar que en el resto del sistema, y
+ * acá sólo queda lo que es propio del portal —el alto y el ancho completo—.
+ * El estado deshabilitado lo resuelve `Button` bajando la opacidad, que es lo
+ * que hace en todas las pantallas.
  */
 export function BotonPrimario({
   children,
@@ -276,15 +305,14 @@ export function BotonPrimario({
   type?: "button" | "submit"
 }) {
   return (
-    <button
+    <Button
       type={type}
       onClick={onClick}
       disabled={deshabilitado}
-      className="w-full rounded-xl py-4 text-[17px] font-medium text-white transition-opacity disabled:cursor-default"
-      style={{ background: deshabilitado ? "#9ca3af" : "var(--marca)" }}
+      className="h-auto w-full py-4 text-[17px] font-medium"
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -297,13 +325,14 @@ export function BotonSecundario({
   onClick?: () => void
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onClick}
-      className="w-full rounded-xl border border-gray-300 bg-white py-4 text-[17px] font-medium text-gray-700"
+      className="h-auto w-full py-4 text-[17px] font-medium"
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -380,7 +409,7 @@ export function ResumenDeConfirmacion({
   const bloque = (titulo: string, filas: Array<[string, string]>) =>
     filas.length === 0 ? null : (
       <div>
-        <p className="mb-2 text-sm font-medium uppercase tracking-wide text-gray-500">{titulo}</p>
+        <p className="mb-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">{titulo}</p>
         <div className="space-y-2 text-[15px]">
           {filas.map(([etiqueta, valor]) => (
             <FilaDeResumen key={etiqueta} etiqueta={etiqueta} valor={valor} />
@@ -390,9 +419,9 @@ export function ResumenDeConfirmacion({
     )
 
   return (
-    <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+    <Card className="space-y-4 p-4 shadow-none">
       {bloque("Datos del paciente", visibles(datosDelPaciente))}
       {bloque("Datos del turno", visibles(datosDelTurno))}
-    </div>
+    </Card>
   )
 }

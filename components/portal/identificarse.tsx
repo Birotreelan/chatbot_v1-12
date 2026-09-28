@@ -21,14 +21,14 @@
  * tipear cuatro campos que la clínica ya tiene.
  */
 
+import { LoadingState } from "@/components/ui/loading-state"
 import { useState } from "react"
-import { Loader2 } from "lucide-react"
 import { Aviso, BotonPrimario } from "./marco"
 
 // 16px o más en el campo: con menos, iOS hace zoom solo al enfocarlo y el
 // paciente queda con la pantalla corrida.
 const CLASES_CAMPO =
-  "w-full rounded-xl border border-gray-300 bg-white px-4 py-3.5 text-base text-gray-900 outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
+  "w-full rounded-xl border border-input bg-background px-4 py-3.5 text-base text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
 function Campo({
   etiqueta,
@@ -41,10 +41,10 @@ function Campo({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-gray-700">{etiqueta}</span>
+      <span className="mb-1.5 block text-sm font-medium text-foreground">{etiqueta}</span>
       {children}
       {error && (
-        <span role="alert" className="mt-1.5 block text-sm text-red-700">
+        <span role="alert" className="mt-1.5 block text-sm text-destructive">
           {error}
         </span>
       )}
@@ -53,11 +53,7 @@ function Campo({
 }
 
 function Enviando({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> {children}
-    </span>
-  )
+  return <LoadingState inline label={typeof children === "string" ? children : undefined} />
 }
 
 /** Paso 1: el DNI, solo. */
@@ -282,14 +278,14 @@ export function DarseDeAlta({
                 setElegida(os)
                 setOpcionesOS([])
               }}
-              className="min-h-[52px] w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-left text-[15px]"
+              className="min-h-[52px] w-full rounded-xl border bg-card px-4 py-3 text-left text-[15px] hover:bg-accent"
             >
               {os.nombre}
               {/* Las que no permiten turnos online se muestran igual, marcadas.
                   Ocultarlas dejaría al paciente buscando la suya sin encontrarla,
                   y terminaría eligiendo una parecida que no es la de él. */}
               {!os.permiteOnline && (
-                <span className="mt-0.5 block text-[13px] text-amber-700">
+                <span className="mt-0.5 block text-[13px] text-warning">
                   Con esta obra social el turno se saca por teléfono
                 </span>
               )}

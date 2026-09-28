@@ -40,17 +40,16 @@ export function ElegirFiltro({
             href={`/p/${token}?${params.toString()}`}
             // 60px: el paciente lo toca con el pulgar, parado, a veces con poca
             // vista. Un enlace chico acá es una barrera real.
-            className="flex min-h-[60px] items-center rounded-xl border border-gray-200 bg-white px-4 py-3 text-gray-900 no-underline"
+            className="flex min-h-[60px] items-center rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline"
           >
             <span
               aria-hidden
-              className="mr-3 w-1 self-stretch rounded-sm"
-              style={{ background: "var(--marca)" }}
+              className="mr-3 w-1 self-stretch rounded-sm bg-primary"
             />
             <span className="min-w-0">
               <span className="block font-medium">{opcion.nombre}</span>
               {opcion.detalle && (
-                <span className="mt-0.5 block text-sm text-gray-500">{opcion.detalle}</span>
+                <span className="mt-0.5 block text-sm text-muted-foreground">{opcion.detalle}</span>
               )}
             </span>
           </a>

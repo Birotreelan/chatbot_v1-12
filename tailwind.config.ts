@@ -41,6 +41,15 @@ const config: Config = {
   				DEFAULT: 'hsl(var(--destructive))',
   				foreground: 'hsl(var(--destructive-foreground))'
   			},
+  			// No es un token estandar de shadcn. Se agrega para los avisos que no
+  			// son error ni exito —un turno que la obra social no cubre, por
+  			// ejemplo—, que antes se pintaban con amarillos sueltos de Tailwind y
+  			// quedaban distintos en cada pantalla. Hoy solo lo define el portal;
+  			// en el resto de la app la variable no existe y el token no se usa.
+  			warning: {
+  				DEFAULT: 'hsl(var(--warning))',
+  				foreground: 'hsl(var(--warning-foreground))'
+  			},
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))',

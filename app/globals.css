@@ -81,3 +81,94 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Los tokens del portal de pacientes (28/9/2026)
+
+   Van en una clase y no en `:root` a propósito. El pliego de diseño describe
+   una paleta distinta de la que tiene el dashboard —otro azul, otro radio de
+   borde— y pisarla en `:root` repintaría todas las pantallas del panel de una
+   sola vez, incluidas las que nadie está mirando ahora.
+
+   `Marco` pone `.portal` en su contenedor, así que todo lo que cuelga de ahí
+   —los componentes de shadcn incluidos, que leen estas mismas variables— toma
+   estos valores, y el resto de la app sigue con los suyos.
+
+   Cuando el dashboard migre, esto se muda a `:root` y la clase se borra.
+
+   ── No "aclarar" los colores marcados ──────────────────────────────────────
+
+   Varios de estos valores salieron de una auditoría de contraste WCAG AA, no
+   de una preferencia estética. Los comentarios dicen cuáles y por qué. Subir
+   la luminosidad de cualquiera de ellos rompe el mínimo de 4.5:1 para texto.
+   ──────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  .portal {
+    --background: 210 25% 97%;
+    --foreground: 220 30% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 30% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 30% 12%;
+    --primary: 220 72% 40%;
+    --primary-foreground: 0 0% 100%;
+    /* L=33 (antes 42): a 42% el texto blanco sobre el fondo secundario (badges,
+       botones "secondary") quedaba en ~3.5:1, por debajo del minimo AA de 4.5:1. */
+    --secondary: 168 42% 33%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 214 20% 94%;
+    /* L=42 (antes 50): a 50% el par muted-foreground/background quedaba en
+       ~4.0:1, por debajo del minimo AA de 4.5:1 para texto — se usa en casi
+       toda la app como texto real (subtitulos, descripciones), no solo UI. */
+    --muted-foreground: 220 12% 42%;
+    --accent: 214 20% 94%;
+    --accent-foreground: 220 30% 12%;
+    /* L=48 (antes 52): a 52% el texto "text-destructive" sobre el fondo
+       quedaba en ~4.45:1, justo por debajo del minimo AA. */
+    --destructive: 0 68% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --warning: 38 92% 32%;
+    --warning-foreground: 0 0% 100%;
+    --border: 216 16% 90%;
+    --input: 216 16% 90%;
+    --ring: 220 72% 40%;
+    --chart-1: 220 72% 45%;
+    --chart-2: 168 42% 42%;
+    --chart-3: 200 65% 50%;
+    --chart-4: 155 38% 55%;
+    --chart-5: 230 60% 50%;
+    --radius: 0.625rem;
+  }
+
+  .dark .portal,
+  .portal.dark {
+    --background: 222 30% 7%;
+    --foreground: 210 25% 96%;
+    --card: 222 25% 11%;
+    --card-foreground: 210 25% 96%;
+    --popover: 222 25% 11%;
+    --popover-foreground: 210 25% 96%;
+    --primary: 220 72% 60%;
+    --primary-foreground: 222 30% 7%;
+    --secondary: 168 42% 48%;
+    --secondary-foreground: 222 30% 7%;
+    --muted: 222 20% 16%;
+    --muted-foreground: 216 15% 60%;
+    --accent: 222 20% 16%;
+    --accent-foreground: 210 25% 96%;
+    --destructive: 0 68% 52%;
+    /* Blanco puro (antes 210 25% 96%): el texto casi-blanco sobre el boton
+       destructivo quedaba en ~4.35:1 en modo oscuro, por debajo del minimo AA. */
+    --destructive-foreground: 0 0% 100%;
+    --warning: 38 92% 65%;
+    --warning-foreground: 222 30% 7%;
+    --border: 222 16% 20%;
+    --input: 222 16% 20%;
+    --ring: 220 72% 60%;
+    --chart-1: 220 72% 60%;
+    --chart-2: 168 42% 48%;
+    --chart-3: 200 65% 55%;
+    --chart-4: 155 38% 60%;
+    --chart-5: 230 60% 55%;
+  }
+}

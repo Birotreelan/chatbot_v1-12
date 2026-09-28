@@ -24,7 +24,7 @@
  */
 
 import { useState } from "react"
-import { Loader2 } from "lucide-react"
+import { LoadingState } from "@/components/ui/loading-state"
 import { Aviso, ResumenDelTurno, TituloDePaso } from "./marco"
 import type { TurnoDelPortal } from "@/lib/portal/token"
 
@@ -83,7 +83,7 @@ export function GestionarTurno({
           tono={cancelado ? "neutro" : "exito"}
         />
         {turno && <ResumenDelTurno turno={turno} titulo="El turno" />}
-        <p className="text-[15px] text-gray-600">
+        <p className="text-[15px] text-muted-foreground">
           {cancelado
             ? "Si más adelante querés sacar otro turno, escribinos por WhatsApp."
             : "Te esperamos. Si algo cambia, escribinos por WhatsApp."}
@@ -111,10 +111,10 @@ export function GestionarTurno({
             recién después. */}
         <a
           href={urlParaReagendar}
-          className="block min-h-[64px] rounded-xl border border-gray-200 bg-white px-4 py-3 text-gray-900 no-underline"
+          className="block min-h-[64px] rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline"
         >
           <span className="block font-medium">Cambiarlo de horario</span>
-          <span className="mt-0.5 block text-sm text-gray-500">
+          <span className="mt-0.5 block text-sm text-muted-foreground">
             Elegís otro y este queda libre
           </span>
         </a>
@@ -123,10 +123,10 @@ export function GestionarTurno({
           type="button"
           onClick={() => decidir("confirmar")}
           disabled={enviando}
-          className="block min-h-[64px] w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-left"
+          className="block min-h-[64px] w-full rounded-xl border bg-card px-4 py-3 text-left"
         >
-          <span className="block font-medium text-gray-900">Mantenerlo, voy a ir</span>
-          <span className="mt-0.5 block text-sm text-gray-500">Confirmás tu asistencia</span>
+          <span className="block font-medium text-card-foreground">Mantenerlo, voy a ir</span>
+          <span className="mt-0.5 block text-sm text-muted-foreground">Confirmás tu asistencia</span>
         </button>
 
         {/* Separado del resto y en rojo: es la única acción de esta pantalla
@@ -136,19 +136,13 @@ export function GestionarTurno({
             type="button"
             onClick={() => decidir("cancelar")}
             disabled={enviando}
-            className="block min-h-[64px] w-full rounded-xl border border-red-200 bg-white px-4 py-3 text-left"
+            className="block min-h-[64px] w-full rounded-xl border border-destructive/50 bg-card px-4 py-3 text-left hover:bg-destructive/5"
           >
-            <span className="block font-medium text-red-700">
-              {enviando ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> Un momento…
-                </span>
-              ) : (
-                "Cancelar el turno"
-              )}
+            <span className="block font-medium text-destructive">
+              {enviando ? <LoadingState inline label="Un momento…" /> : "Cancelar el turno"}
             </span>
             {!enviando && (
-              <span className="mt-0.5 block text-sm text-gray-500">No voy a poder asistir</span>
+              <span className="mt-0.5 block text-sm text-muted-foreground">No voy a poder asistir</span>
             )}
           </button>
         </div>
