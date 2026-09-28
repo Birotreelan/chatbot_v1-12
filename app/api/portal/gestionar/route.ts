@@ -222,12 +222,56 @@ export async function POST(request: Request) {
   // Sólo si había uno. Si falla, NO se revierte la reserva: el paciente ya
   // tiene su turno nuevo, que es lo que vino a hacer. Queda registrado para
   // que la clínica lo resuelva.
+  // ── El turno nuevo cae el MISMO día que el viejo (28/9/2026) ─────────────
+  //
+  // `cancelar_turno` identifica el turno por FECHA y DNI. No lleva hora ni id.
+  // O sea que cancelar "el turno del 29/09" cancela TODOS los turnos que ese
+  // paciente tenga ese día.
+  //
+  // Cuando el paciente mueve su turno de las 07:00 a las 09:30 del mismo día,
+  // el orden "reservar y después cancelar" se vuelve en contra: reservamos el
+  // de las 09:30 y acto seguido le pedimos al proxy que cancele el 29/09, que
+  // se lleva puestos los dos. El paciente queda SIN turno, y la pantalla le
+  // dice que su solicitud fue enviada. Es el caso de Norma otra vez, entrando
+  // por otra puerta — y esta vez ni siquiera queda rastro para la clínica.
+  //
+  // Así que no se cancela. Queda un turno de más, que es visible y se
+  // arregla; un turno de menos, no. Es el mismo criterio que ordena reservar
+  // antes de cancelar, aplicado al único caso donde ese orden no alcanza.
+  //
+  // El arreglo de fondo es que `cancelar_turno` acepte la hora o el id del
+  // turno. Mientras no lo acepte, esto es lo más seguro que se puede hacer.
+  const mismoDia = esElMismoDia(contexto.turno?.fecha, datosDelTurnoElegido.fecha)
+
   let cancelacionFallida = false
   let seCancelóElAnterior = false
+  let quedoElAnteriorSinCancelar = false
+
+  if (mismoDia === true) {
+    quedoElAnteriorSinCancelar = true
+    console.error(
+      `[PORTAL] ⚠️ ATENCIÓN: ${contexto.phone} reservó en el mismo día que su turno anterior ` +
+        `(${contexto.turno?.fecha}). No se cancela el anterior porque la cancelación es por fecha ` +
+        `y se llevaría puesto el turno nuevo. Hay que cancelarlo a mano.`,
+    )
+  } else if (mismoDia === null && contexto.turno?.fecha) {
+    // No se pudieron comparar las fechas. Se sigue cancelando —es lo que se
+    // hacía— pero queda anotado: si esto aparece seguido, el formato de alguna
+    // de las dos cambió y el chequeo de arriba dejó de proteger.
+    console.warn(
+      `[PORTAL] No se pudieron comparar las fechas del turno viejo (${contexto.turno?.fecha}) ` +
+        `y el nuevo (${datosDelTurnoElegido.fecha}); se cancela igual`,
+    )
+  }
   // Se usa el DNI unificado, no `contexto.pacienteDNI`: si el paciente se
   // identificó en el portal, su DNI vive en `identidad` y esta condición sería
   // falsa — el turno anterior quedaría sin cancelar y en silencio.
-  if (reemplazaElTurnoPrevio(contexto.intencion) && contexto.turno?.fecha && datosDelPaciente.dni) {
+  if (
+    reemplazaElTurnoPrevio(contexto.intencion) &&
+    contexto.turno?.fecha &&
+    datosDelPaciente.dni &&
+    mismoDia !== true
+  ) {
     try {
       const cancelacion = await cancelarTurno(contexto.clienteId, {
         fecha: contexto.turno.fecha,
@@ -293,9 +337,16 @@ export async function POST(request: Request) {
           .join(" a las ")
       : ""
 
+  // Lo que se le dice del turno viejo tiene que coincidir con lo que pasó. El
+  // caso del mismo día es el que más importa: el paciente cree que cambió de
+  // horario y en realidad le quedaron los dos, así que se lo decimos con lo
+  // que tiene que hacer.
   const texto = seCancelóElAnterior
     ? `${textoDelTurnoNuevo} Cancelamos el turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"}.`
-    : textoDelTurnoNuevo
+    : quedoElAnteriorSinCancelar || cancelacionFallida
+      ? `${textoDelTurnoNuevo} Tu turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"} sigue activo: ` +
+        `escribinos por WhatsApp para que lo cancelemos.`
+      : textoDelTurnoNuevo
 
   // ── Las estadísticas (24/9/2026) ──────────────────────────────────────────
   //
@@ -362,4 +413,34 @@ export async function POST(request: Request) {
     // en vez de dejarlo con dos turnos sin saberlo.
     ...(cancelacionFallida ? { avisoCancelacion: true } : {}),
   })
+}
+
+/**
+ * ¿Las dos fechas son el mismo día?
+ *
+ * Devuelve `null` cuando no se puede saber, y el llamador distingue los tres
+ * casos. Un `false` por no haber podido leer una fecha sería peor que no
+ * responder: significaría "son días distintos, cancelá tranquilo" sin haberlo
+ * verificado, que es justo la cancelación que borra el turno nuevo.
+ *
+ * Acepta las dos formas que circulan: la cruda del portal ("2026-09-29") y la
+ * formateada que manda la clínica ("29/09/2026").
+ */
+function esElMismoDia(a?: string, b?: string): boolean | null {
+  const uno = aISO(a)
+  const otro = aISO(b)
+  if (!uno || !otro) return null
+  return uno === otro
+}
+
+function aISO(fecha?: string): string | null {
+  const texto = (fecha || "").trim()
+  if (!texto) return null
+  if (/^\d{4}-\d{2}-\d{2}/.test(texto)) return texto.slice(0, 10)
+  const ddmmaaaa = texto.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
+  if (ddmmaaaa) {
+    const [, d, m, y] = ddmmaaaa
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
+  }
+  return null
 }
