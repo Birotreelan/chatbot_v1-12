@@ -96,7 +96,11 @@ export async function POST(request: Request) {
       accion === "cancelar"
         ? `Cancelamos tu turno${cuando ? ` del ${cuando}` : ""}.`
         : `Confirmamos tu asistencia${cuando ? ` al turno del ${cuando}` : ""}.`
-    await consumirEnlace(token, { texto: textoDemo, turno: contexto.turno })
+    await consumirEnlace(token, {
+      texto: textoDemo,
+      turno: contexto.turno,
+      tipo: accion === "cancelar" ? "cancelacion" : "confirmacion",
+    })
     console.log(`[PORTAL] Enlace de PRUEBA: ${accion} simulado, no se tocó ninguna agenda (${contexto.phone})`)
     return NextResponse.json({ ok: true, demo: true, accion, texto: textoDemo })
   }
@@ -136,7 +140,11 @@ export async function POST(request: Request) {
       ? `Cancelamos tu turno${cuando ? ` del ${cuando}` : ""}.`
       : `Confirmamos tu asistencia${cuando ? ` al turno del ${cuando}` : ""}.`
 
-  await consumirEnlace(token, { texto, turno: contexto.turno })
+  await consumirEnlace(token, {
+    texto,
+    turno: contexto.turno,
+    tipo: accion === "cancelar" ? "cancelacion" : "confirmacion",
+  })
 
   // ── El rastro de la cancelación ───────────────────────────────────────────
   //

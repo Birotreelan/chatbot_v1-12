@@ -33,7 +33,7 @@
  * interfaz es por comodidad; la del servidor es la que cuenta.
  */
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { Calendar } from "@/components/ui/calendar"
 import { es } from "date-fns/locale"
 import { LoadingState } from "@/components/ui/loading-state"
@@ -55,6 +55,46 @@ interface Props {
   /** URL para volver a editar los datos personales. `null` si no hay nada que editar. */
   corregirDatosEn?: string | null
   etiquetaConfirmar?: string
+  /**
+   * El título y el contexto de la pantalla de elegir horario (28/9/2026).
+   *
+   * ── Por qué lo recibe en vez de que lo ponga la página ────────────────────
+   *
+   * Esto tiene tres pantallas —elegir, repasar, listo— y las tres viven dentro
+   * del mismo componente, porque el cambio entre ellas es estado del cliente y
+   * no una navegación. La página, que se renderiza en el servidor, dibujaba su
+   * encabezado arriba y ya no se enteraba de nada.
+   *
+   * El resultado lo vio el paciente: al llegar al repaso seguía leyendo "Elegí
+   * el nuevo horario" con la tarjeta de su turno viejo y la línea "Horarios
+   * disponibles con...", y abajo de todo eso aparecía "Repasá y confirmá". Dos
+   * títulos contradictorios en la misma pantalla, y el de arriba —el que el ojo
+   * lee primero— era el equivocado.
+   *
+   * Pasándolo como prop, el encabezado es parte de UNA de las tres pantallas y
+   * desaparece con ella. Quien decide qué se ve en cada momento es el que sabe
+   * en qué momento está.
+   */
+  encabezado?: ReactNode
+  /**
+   * Qué está haciendo el paciente, para que la pantalla final lo diga bien.
+   *
+   * "Tu turno quedó reservado" después de un cambio de horario no es falso,
+   * pero no es lo que pasó: lo que pasó es que su turno se movió. El
+   * componente no puede deducirlo —las dos pantallas se ven iguales— así que
+   * lo dice quien lo usa.
+   */
+  accion?: "reservar" | "cambiar"
+  /**
+   * El turno que este cambio reemplaza (28/9/2026).
+   *
+   * En el repaso desaparece la tarjeta "Tu turno actual" —es de la pantalla
+   * anterior— y el paciente se queda mirando sólo el turno nuevo justo en el
+   * momento en que aprieta el botón que cancela el viejo. Una línea que diga
+   * cuál se va evita que confirme creyendo que suma un turno en vez de
+   * moverlo.
+   */
+  reemplazaA?: { fechaFormateada?: string; fecha?: string; horaFormateada?: string; hora?: string }
 }
 
 interface Elegido {
@@ -83,6 +123,9 @@ export function SelectorDeTurnos({
   paciente,
   corregirDatosEn,
   etiquetaConfirmar = "Confirmar este horario",
+  encabezado,
+  accion = "reservar",
+  reemplazaA,
 }: Props) {
   const [diaElegido, setDiaElegido] = useState<string | null>(null)
   const [elegido, setElegido] = useState<Elegido | null>(null)
@@ -138,14 +181,24 @@ export function SelectorDeTurnos({
   if (resultado) {
     return (
       <div className="space-y-4">
+        {/* El título dice en qué terminó todo, igual que el aviso de abajo.
+            Sin esto la pantalla final quedaba sin encabezado —el de la página
+            se fue con el paso anterior— y el paciente pasaba de un título que
+            le pedía algo a una pantalla sin ninguno. */}
+        <TituloDePaso tipo="listo">
+          {accion === "cambiar"
+            ? resultado.pendiente
+              ? "Pedimos el cambio"
+              : "Tu turno cambió"
+            : resultado.pendiente
+              ? "Pedimos tu turno"
+              : "Tu turno quedó reservado"}
+        </TituloDePaso>
+
         {/* "Listo" sólo cuando de verdad está listo. Si la clínica todavía
             tiene que aprobarlo, decir "Listo" hace que el paciente se presente
             un día que puede no tener turno. */}
-        <Aviso
-          titulo={resultado.pendiente ? "Tu solicitud fue enviada" : "Listo"}
-          detalle={resultado.texto}
-          tono={resultado.pendiente ? "neutro" : "exito"}
-        />
+        <Aviso titulo={resultado.texto} tono={resultado.pendiente ? "neutro" : "exito"} />
         {elegido && (
           <ResumenDelTurno
             turno={{
@@ -154,7 +207,15 @@ export function SelectorDeTurnos({
               profesional: elegido.profesional,
               sede: elegido.sede,
             }}
-            titulo={resultado.pendiente ? "El turno que pediste" : "Tu turno"}
+            titulo={
+              accion === "cambiar"
+                ? resultado.pendiente
+                  ? "El turno que pediste"
+                  : "Tu turno nuevo"
+                : resultado.pendiente
+                  ? "El turno que pediste"
+                  : "Tu turno"
+            }
           />
         )}
         <p className="text-[15px] text-muted-foreground">
@@ -189,6 +250,13 @@ export function SelectorDeTurnos({
   // irreversible para el paciente: que lo último que vea antes de confirmar sea
   // la hora suelta que tocó, sin el profesional ni la sede, es pedirle que
   // confirme a ciegas.
+  const cuandoElViejo = [
+    reemplazaA?.fechaFormateada || reemplazaA?.fecha,
+    reemplazaA?.horaFormateada || reemplazaA?.hora,
+  ]
+    .filter(Boolean)
+    .join(" a las ")
+
   if (elegido) {
     return (
       <div className="space-y-4">
@@ -209,6 +277,15 @@ export function SelectorDeTurnos({
             agendaId: elegido.agendaId,
           }}
         />
+
+        {/* Qué turno se va. Es lo único de la pantalla anterior que sigue
+            haciendo falta acá: el resto era contexto para elegir, esto es
+            contexto para decidir. */}
+        {accion === "cambiar" && cuandoElViejo && (
+          <p className="text-[15px] text-muted-foreground">
+            Reemplaza tu turno del {cuandoElViejo}, que vamos a cancelar.
+          </p>
+        )}
 
         {error && (
           <Aviso
@@ -261,6 +338,7 @@ export function SelectorDeTurnos({
   // ── Elegir día y hora ────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
+      {encabezado}
       <div className="flex justify-center rounded-xl border bg-card p-1">
         <Calendar
           mode="single"

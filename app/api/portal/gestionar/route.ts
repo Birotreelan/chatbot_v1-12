@@ -119,7 +119,13 @@ export async function POST(request: Request) {
       ? `Tu turno quedó para el ${cuandoDemo}.`
       : "Tu turno quedó reservado."
 
-    await consumirEnlace(token, { texto: textoDemo, turno: datosDelTurnoElegido })
+    await consumirEnlace(token, {
+      texto: textoDemo,
+      turno: datosDelTurnoElegido,
+      // En la demo no se llamó a nadie, así que no hay "se canceló" que
+      // mirar: alcanza con para qué se emitió el enlace.
+      tipo: reemplazaElTurnoPrevio(contexto.intencion) && contexto.turno?.fecha ? "cambio" : "reserva",
+    })
     console.log(`[PORTAL] Enlace de PRUEBA consumido; no se tocó ninguna agenda (${contexto.phone})`)
 
     return NextResponse.json({ ok: true, demo: true, texto: textoDemo, turno: datosDelTurnoElegido })
@@ -410,7 +416,12 @@ export async function POST(request: Request) {
     console.error("[PORTAL] No se pudo registrar la estadística de la reserva:", error)
   }
 
-  await consumirEnlace(token, { texto, turno: datosDelTurnoElegido })
+  await consumirEnlace(token, {
+    texto,
+    turno: datosDelTurnoElegido,
+    tipo: seCancelóElAnterior || cancelacionFallida ? "cambio" : "reserva",
+    pendiente: confirmacionHumana,
+  })
 
   // Volvió a tener turno: el rastro de la cancelación anterior ya no aplica, y
   // dejarlo haría que el bot le diga "tu turno fue cancelado" cuando acaba de

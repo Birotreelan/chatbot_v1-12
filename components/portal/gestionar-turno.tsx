@@ -77,11 +77,14 @@ export function GestionarTurno({
     const cancelado = resultado.accion === "cancelar"
     return (
       <div className="space-y-4">
-        <Aviso
-          titulo={cancelado ? "Turno cancelado" : "Asistencia confirmada"}
-          detalle={resultado.texto}
-          tono={cancelado ? "neutro" : "exito"}
-        />
+        {/* La pantalla final también lleva título. Sin él, el paciente pasa de
+            una que le preguntaba algo a una sin encabezado y tiene que leer el
+            aviso para saber qué pasó. */}
+        <TituloDePaso tipo="listo">
+          {cancelado ? "Cancelamos tu turno" : "Confirmamos tu asistencia"}
+        </TituloDePaso>
+
+        <Aviso titulo={resultado.texto} tono={cancelado ? "neutro" : "exito"} />
         {turno && <ResumenDelTurno turno={turno} titulo="El turno" />}
         <p className="text-[15px] text-muted-foreground">
           {cancelado

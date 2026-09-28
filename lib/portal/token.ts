@@ -128,6 +128,22 @@ export interface ContextoDelPortal {
     texto: string
     cuando: string
     turno?: TurnoDelPortal
+    /**
+     * Qué terminó pasando (28/9/2026).
+     *
+     * El `texto` ya lo cuenta, pero la pantalla que se ve al volver a abrir el
+     * enlace necesita además un título y un pie, y sin esto los tenía fijos:
+     * decía "Listo" y "Te va a llegar la confirmación por WhatsApp" incluso a
+     * quien había CANCELADO su turno, o a quien tenía una solicitud pendiente
+     * de aprobación. El texto decía una cosa y el título la contraria.
+     *
+     * No se deduce del `texto` a propósito: una búsqueda de la palabra
+     * "cancelamos" adentro de una frase funciona hasta que alguien le cambia
+     * la redacción, y entonces falla en silencio.
+     */
+    tipo?: "reserva" | "cambio" | "cancelacion" | "confirmacion"
+    /** La clínica todavía tiene que aprobarlo. Sólo aplica a reserva y cambio. */
+    pendiente?: boolean
   }
 
   /**
@@ -312,7 +328,12 @@ export async function leerEnlace(
  */
 export async function consumirEnlace(
   token: string,
-  resultado: { texto: string; turno?: TurnoDelPortal },
+  resultado: {
+    texto: string
+    turno?: TurnoDelPortal
+    tipo?: "reserva" | "cambio" | "cancelacion" | "confirmacion"
+    pendiente?: boolean
+  },
 ): Promise<boolean> {
   const redis = getRedisClient()
   if (!redis) return false
@@ -329,6 +350,8 @@ export async function consumirEnlace(
     texto: resultado.texto,
     cuando: new Date().toISOString(),
     turno: resultado.turno,
+    tipo: resultado.tipo,
+    pendiente: resultado.pendiente,
   }
 
   await guardar(token, contexto)

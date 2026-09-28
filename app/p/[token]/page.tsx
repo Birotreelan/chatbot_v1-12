@@ -131,11 +131,60 @@ export default async function PaginaDelPortal({
   // abrir el enlace para chequear, y encontrarse un error lo mandaría a
   // preguntarle al bot — un mensaje que pagamos y que no debería existir.
   if (estado === "gestionado" && contexto.resultado) {
+    // ── El título tiene que decir lo mismo que el texto (28/9/2026) ────────
+    //
+    // Acá había tres frases fijas: "Listo", tono de éxito, y "te va a llegar
+    // la confirmación por WhatsApp". Las tres eran ciertas sólo para una
+    // reserva confirmada. A quien había CANCELADO su turno, esta pantalla le
+    // decía "Listo ✓ — te va a llegar la confirmación": el `detalle` decía
+    // "cancelamos tu turno" y el encabezado celebraba lo contrario.
+    //
+    // Y a quien tenía una solicitud pendiente de aprobación le decía "Listo",
+    // que es exactamente lo que la pantalla del selector se cuida de no decir
+    // para que nadie se presente un día que no tiene turno.
+    //
+    // `tipo` y `pendiente` los guarda `consumirEnlace` en el momento en que
+    // pasó. `tipo` puede faltar en enlaces emitidos antes de este cambio: en
+    // ese caso se cae al texto neutro, que no afirma de más.
+    const { tipo, pendiente } = contexto.resultado
+
+    const titulo = pendiente
+      ? "Tu solicitud fue enviada"
+      : tipo === "cancelacion"
+        ? "Turno cancelado"
+        : tipo === "confirmacion"
+          ? "Asistencia confirmada"
+          : tipo === "cambio"
+            ? "Tu turno cambió"
+            : "Listo"
+
+    const pie = pendiente
+      ? "Te avisamos por WhatsApp apenas la clínica la apruebe."
+      : tipo === "cancelacion"
+        ? "Si más adelante querés sacar otro turno, escribinos por WhatsApp."
+        : tipo === "confirmacion"
+          ? "Te esperamos. Si algo cambia, escribinos por WhatsApp."
+          : "Te va a llegar la confirmación por WhatsApp."
+
     return (
       <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
-        <Aviso titulo="Listo" detalle={contexto.resultado.texto} tono="exito" />
-        {contexto.resultado.turno && <ResumenDelTurno turno={contexto.resultado.turno} />}
-        <p className="text-muted-foreground">Te va a llegar la confirmación por WhatsApp.</p>
+        <TituloDePaso tipo="listo">{titulo}</TituloDePaso>
+        {/* Sin `detalle`: el título de arriba ya encabeza, así que el aviso
+            lleva la frase concreta y nada más. Repetir "Turno cancelado" dos
+            veces seguidas no agrega nada y empuja el dato real más abajo. */}
+        <Aviso
+          titulo={contexto.resultado.texto}
+          // Cancelar salió bien, pero no es una buena noticia: el verde le
+          // pone una celebración encima a alguien que perdió su turno.
+          tono={pendiente || tipo === "cancelacion" ? "neutro" : "exito"}
+        />
+        {contexto.resultado.turno && (
+          <ResumenDelTurno
+            turno={contexto.resultado.turno}
+            titulo={tipo === "cancelacion" ? "El turno que cancelaste" : undefined}
+          />
+        )}
+        <p className="text-muted-foreground">{pie}</p>
       </Marco>
     )
   }
@@ -470,28 +519,6 @@ export default async function PaginaDelPortal({
             tono="atencion"
           />
         )}
-        <TituloDePaso tipo="agenda">
-          {nombre ? `Hola, ${nombre}. ` : ""}Elegí el nuevo horario
-        </TituloDePaso>
-
-        {contexto.turno && <ResumenDelTurno turno={contexto.turno} titulo="Tu turno actual" />}
-
-        {/* Si no se pudo identificar al profesional se ofrecen turnos de la
-            sede, y hay que decirlo: el paciente asume que ve los de su médico. */}
-        {!agenda.filtradoPorProfesional && agenda.total > 0 && contexto.turno?.profesional && (
-          <Aviso
-            titulo="Estos son todos los horarios de la sede"
-            detalle={`No pudimos filtrar sólo por ${contexto.turno.profesional}. Mirá el profesional antes de confirmar.`}
-            tono="atencion"
-          />
-        )}
-
-        {agenda.filtradoPorProfesional && agenda.profesionalNombre && dias.length > 0 && (
-          <p className="text-[15px] text-muted-foreground">
-            Horarios disponibles con {agenda.profesionalNombre}.
-          </p>
-        )}
-
         {/* Pantalla vacía nunca (23/9/2026).
             Antes, con la agenda en cero el selector se dibujaba sin nada y el
             paciente se quedaba mirando un cuadro blanco. La compuerta de
@@ -518,6 +545,39 @@ export default async function PaginaDelPortal({
             paciente={datosParaElResumen}
             corregirDatosEn={corregirDatosEn}
             etiquetaConfirmar="Confirmar el cambio"
+            accion="cambiar"
+            reemplazaA={contexto.turno}
+            // Va adentro y no acá arriba porque tiene que irse cuando el
+            // paciente pasa al repaso: el turno viejo y "elegí el nuevo
+            // horario" son de ESTA pantalla, no de las tres.
+            encabezado={
+              <>
+                <TituloDePaso tipo="agenda">
+                  {nombre ? `Hola, ${nombre}. ` : ""}Elegí el nuevo horario
+                </TituloDePaso>
+
+                {contexto.turno && (
+                  <ResumenDelTurno turno={contexto.turno} titulo="Tu turno actual" />
+                )}
+
+                {/* Si no se pudo identificar al profesional se ofrecen turnos
+                    de la sede, y hay que decirlo: el paciente asume que ve los
+                    de su médico. */}
+                {!agenda.filtradoPorProfesional && agenda.total > 0 && contexto.turno?.profesional && (
+                  <Aviso
+                    titulo="Estos son todos los horarios de la sede"
+                    detalle={`No pudimos filtrar sólo por ${contexto.turno.profesional}. Mirá el profesional antes de confirmar.`}
+                    tono="atencion"
+                  />
+                )}
+
+                {agenda.filtradoPorProfesional && agenda.profesionalNombre && (
+                  <p className="text-[15px] text-muted-foreground">
+                    Horarios disponibles con {agenda.profesionalNombre}.
+                  </p>
+                )}
+              </>
+            }
           />
         )}
       </>,
@@ -652,11 +712,6 @@ export default async function PaginaDelPortal({
         />
       )}
 
-      {volverQuitando() && <Volver href={volverQuitando()!} />}
-      <TituloDePaso tipo="agenda">
-        {nombre ? `Hola, ${nombre}. ` : ""}Elegí el horario que te quede mejor
-      </TituloDePaso>
-
       {agendaNueva.total === 0 && !conEjemplos && (
         <Aviso
           titulo="No encontramos horarios con esos filtros"
@@ -671,6 +726,18 @@ export default async function PaginaDelPortal({
         paciente={datosParaElResumen}
         corregirDatosEn={corregirDatosEn}
         etiquetaConfirmar="Confirmar mi turno"
+        // El "Volver" va adentro por el mismo motivo que el título: en el
+        // repaso el paso atrás es "Elegir otro horario", y dos formas de
+        // volver que hacen cosas distintas en la misma pantalla es cómo se
+        // pierde el turno que ya se eligió.
+        encabezado={
+          <>
+            {volverQuitando() && <Volver href={volverQuitando()!} />}
+            <TituloDePaso tipo="agenda">
+              {nombre ? `Hola, ${nombre}. ` : ""}Elegí el horario que te quede mejor
+            </TituloDePaso>
+          </>
+        }
       />
     </>,
   )
