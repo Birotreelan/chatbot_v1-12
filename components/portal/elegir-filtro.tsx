@@ -10,6 +10,19 @@
  *    paso anterior. Con estado en memoria, lo sacaría del portal.
  *  - Cada paso tiene su propia URL, así que recargar no pierde lo elegido.
  *
+ * ── `Link` y no `<a>` (28/9/2026) ─────────────────────────────────────────
+ *
+ * Con `<a>` cada paso era una recarga completa: pantalla en blanco, la banda
+ * de la clínica desapareciendo y volviendo a aparecer, el desplazamiento
+ * perdido. En un recorrido de cinco pasos eso son cinco parpadeos, y cada uno
+ * es una oportunidad de que alguien que ya salió de WhatsApp para sacar un
+ * turno crea que algo se rompió y cierre.
+ *
+ * `Link` navega del lado del cliente: la página se reemplaza sin recargar el
+ * documento. Las tres propiedades de arriba se conservan —sigue siendo un
+ * ancla real, con su `href`, que funciona con JavaScript apagado y que el
+ * botón "atrás" entiende—.
+ *
  * El estado vive en la query string y no en el token: lo que el paciente está
  * eligiendo todavía no es una decisión, y si lo guardáramos en Redis habría que
  * limpiarlo cuando abandona a mitad de camino.
@@ -17,6 +30,8 @@
  * Son tarjetas y no una lista con viñetas, igual que el widget: cada opción es
  * una superficie tocable con su nombre y, si la hay, una aclaración debajo.
  */
+
+import Link from "next/link"
 
 export function ElegirFiltro({
   token,
@@ -35,12 +50,12 @@ export function ElegirFiltro({
       {opciones.map((opcion) => {
         const params = new URLSearchParams({ ...(conservar || {}), [campo]: opcion.id })
         return (
-          <a
+          <Link
             key={opcion.id}
             href={`/p/${token}?${params.toString()}`}
             // 60px: el paciente lo toca con el pulgar, parado, a veces con poca
             // vista. Un enlace chico acá es una barrera real.
-            className="flex min-h-[60px] items-center rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline"
+            className="flex min-h-[60px] items-center rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline transition-colors hover:bg-accent active:bg-accent"
           >
             <span
               aria-hidden
@@ -52,7 +67,7 @@ export function ElegirFiltro({
                 <span className="mt-0.5 block text-sm text-muted-foreground">{opcion.detalle}</span>
               )}
             </span>
-          </a>
+          </Link>
         )
       })}
     </div>

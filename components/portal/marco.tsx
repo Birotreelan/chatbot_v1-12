@@ -44,6 +44,7 @@
  */
 
 import type { ReactNode } from "react"
+import Link from "next/link"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -228,15 +229,19 @@ export function TituloDePaso({
  * Ahora es visiblemente un control: borde, fondo de tarjeta y el azul del
  * sistema, que es el color de todo lo tocable. Sigue sin competir con la
  * acción primaria —que es sólida, a ancho completo y está abajo— pero se ve.
+ *
+ * `Link` y no `<a>`: con `<a>` volver un paso recargaba el documento entero
+ * —pantalla en blanco y la banda de la clínica parpadeando— cuando lo único
+ * que cambia es el contenido. Ver `elegir-filtro.tsx`.
  */
 export function Volver({ href }: { href: string }) {
   return (
-    <a
+    <Link
       href={href}
       className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border bg-card px-3 py-2 text-[15px] font-medium text-primary no-underline hover:bg-accent"
     >
       <ChevronLeft className="h-5 w-5" aria-hidden /> Volver
-    </a>
+    </Link>
   )
 }
 

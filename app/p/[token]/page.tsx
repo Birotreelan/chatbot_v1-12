@@ -44,6 +44,7 @@ import {
   obtenerTodasLasSedes,
 } from "@/lib/api-tools/api-functions"
 import { getWhatsAppConfigById } from "@/lib/db"
+import Link from "next/link"
 import { Marco, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
@@ -868,13 +869,13 @@ function VerTodos({
 }) {
   const params = new URLSearchParams({ ...(conservar || {}), sinFiltro: "1" })
   return (
-    <a
+    <Link
       href={`/p/${token}?${params.toString()}`}
       className="mt-3 block min-h-[56px] rounded-xl border bg-card px-4 py-3 text-center text-card-foreground no-underline hover:bg-accent"
     >
       <span className="block font-medium">{etiqueta}</span>
       {detalle && <span className="mt-0.5 block text-sm text-muted-foreground">{detalle}</span>}
-    </a>
+    </Link>
   )
 }
 

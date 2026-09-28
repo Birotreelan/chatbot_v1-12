@@ -21,6 +21,7 @@
  * tipear cuatro campos que la clínica ya tiene.
  */
 
+import { useRouter } from "next/navigation"
 import { LoadingState } from "@/components/ui/loading-state"
 import { useState } from "react"
 import { Aviso, BotonPrimario } from "./marco"
@@ -74,6 +75,7 @@ export function PedirDNI({
   valorInicial?: string
 }) {
   const [dni, setDni] = useState(valorInicial || "")
+  const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(false)
 
@@ -89,10 +91,18 @@ export function PedirDNI({
       })
       const data = await r.json()
       if (data.ok) {
-        // Recarga la página, que vuelve a decidir el paso con la identidad ya
-        // guardada. Así la lógica de "qué sigue" vive en un solo lugar
-        // (`decidirPaso`) y no se duplica acá.
-        window.location.href = `/p/${token}`
+        // La página vuelve a decidir el paso con la identidad ya guardada, así
+        // la lógica de "qué sigue" vive en un solo lugar (`decidirPaso`) y no
+        // se duplica acá.
+        //
+        // `replace` + `refresh` y no `window.location.href` (28/9/2026): lo
+        // segundo recargaba el documento entero. `replace` limpia los
+        // parámetros de la URL —el `?paso=` con el que se llegó a corregir— y
+        // `refresh` vuelve a pedir la página al servidor sin parpadeo. Van los
+        // dos: si la URL ya estaba limpia, `replace` no hace nada y sin el
+        // `refresh` la pantalla se quedaría igual.
+        router.replace(`/p/${token}`)
+        router.refresh()
         return
       }
       setError(data.errores?.dni || data.error || "No pudimos validar el DNI.")
@@ -170,6 +180,7 @@ export function DarseDeAlta({
         }
       : null,
   )
+  const router = useRouter()
   const [errores, setErrores] = useState<Record<string, string>>({})
   const [cargando, setCargando] = useState(false)
 
@@ -212,7 +223,9 @@ export function DarseDeAlta({
       })
       const data = await r.json()
       if (data.ok) {
-        window.location.href = `/p/${token}`
+        // Ver el comentario en PedirDNI: navegación del lado del cliente.
+        router.replace(`/p/${token}`)
+        router.refresh()
         return
       }
       setErrores(data.errores || { general: data.error || "Revisá los datos." })

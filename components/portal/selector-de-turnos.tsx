@@ -34,6 +34,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Calendar } from "@/components/ui/calendar"
 import { es } from "date-fns/locale"
 import { LoadingState } from "@/components/ui/loading-state"
@@ -139,6 +141,7 @@ export function SelectorDeTurnos({
   reemplazaA,
   direccionesPorSede,
 }: Props) {
+  const router = useRouter()
   const [diaElegido, setDiaElegido] = useState<string | null>(null)
   const horariosRef = useRef<HTMLDivElement | null>(null)
   const [elegido, setElegido] = useState<Elegido | null>(null)
@@ -337,7 +340,10 @@ export function SelectorDeTurnos({
                 {hayQueRecargar && (
                   <button
                     type="button"
-                    onClick={() => window.location.reload()}
+                    // `refresh` y no `reload`: vuelve a pedirle los horarios
+                    // al servidor sin recargar el documento, así el paciente
+                    // no pierde la pantalla ni el desplazamiento.
+                    onClick={() => router.refresh()}
                     className="mt-2 block underline"
                   >
                     Ver los horarios actualizados
@@ -359,9 +365,9 @@ export function SelectorDeTurnos({
             sin esto, quien se equivocó un dígito del DNI al darse de alta veía
             el error en el resumen y no tenía cómo arreglarlo. */}
         {corregirDatosEn && !enviando && (
-          <a href={corregirDatosEn} className="block text-[15px] text-muted-foreground underline">
+          <Link href={corregirDatosEn} className="block text-[15px] text-muted-foreground underline">
             Corregir mis datos
-          </a>
+          </Link>
         )}
 
         <div className="space-y-2">
