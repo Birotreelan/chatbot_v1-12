@@ -83,6 +83,14 @@ export const ICONOS_DE_PASO = {
 
 export type TipoDePaso = keyof typeof ICONOS_DE_PASO
 
+/**
+ * El prefijo de los archivos de `public/`.
+ *
+ * Vacío cuando el sitio se sirve en la raíz del dominio, que es el caso hoy.
+ * Se deja igual para no tener que acordarse el día que deje de serlo.
+ */
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || ""
+
 export function Marco({
   marca,
   children,
@@ -96,8 +104,13 @@ export function Marco({
   nombreCookie?: string
 }) {
   return (
+    // `flex flex-col` + `main flex-1`: el pie queda abajo de la ventana aunque
+    // la pantalla tenga tres renglones, sin `position: fixed` —que en el
+    // navegador interno de WhatsApp pelea con la barra del teclado y termina
+    // tapando el botón de confirmar—.
+    //
     // `portal` trae la paleta del pliego; el resto de la app conserva la suya.
-    <div className="portal min-h-screen bg-background text-foreground">
+    <div className="portal flex min-h-screen flex-col bg-background text-foreground">
       {/* La cookie se escribe desde el cliente y no con Set-Cookie porque esta
           página se renderiza como Server Component sin acceso a la respuesta.
           Es un secreto de reconocimiento, no una credencial: si el navegador la
@@ -127,9 +140,43 @@ export function Marco({
         </div>
       </header>
 
-      <main className="mx-auto max-w-[560px] space-y-4 px-4 pb-12 pt-5 text-base leading-relaxed">
+      <main
+        className="mx-auto w-full max-w-[560px] flex-1 space-y-4 px-4 pb-12 pt-5 text-base leading-relaxed"
+        role="main"
+      >
         {children}
       </main>
+
+      {/* ── El pie ───────────────────────────────────────────────────────────
+          Una línea de atribución y nada más. Sin enlaces, sin columnas, sin
+          redes: esto es una herramienta para sacar un turno, no un sitio
+          institucional, y cualquier cosa tocable acá abajo compite con el
+          botón que el paciente vino a apretar.
+
+          El ancho es el del contenido (560px) y no el `max-w-6xl` del pliego:
+          ese número está escrito para una app de escritorio, y el motivo que
+          lo acompaña —"que la línea no quede desalineada respecto del
+          contenido"— acá se cumple con el ancho de acá.
+
+          Es un <img> y no `next/image` a propósito: sobre un archivo estático
+          de 9 KB el componente no aporta nada y agrega una forma más de
+          romper el build. El `src` lleva el prefijo del basePath porque los
+          archivos de `public/` no los reescribe el router: sin eso, servido
+          desde una subcarpeta, da 404. Con el sitio en la raíz la variable
+          queda vacía y el prefijo no molesta. */}
+      <footer className="border-t py-6">
+        <div className="mx-auto flex max-w-[560px] items-center justify-center gap-2 px-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`${BASE_PATH}/treelan-logo.jpg`}
+            alt="Treelan"
+            className="h-4 w-4 rounded-sm object-contain"
+          />
+          <p className="text-center text-xs text-muted-foreground">
+            Powered by Treelan S.A. 2026. Todos los derechos reservados.
+          </p>
+        </div>
+      </footer>
     </div>
   )
 }
