@@ -1,19 +1,35 @@
 /**
  * La única ruta del portal que toca turnos de verdad (22/9/2026).
  *
- * ── Primero reservar, después cancelar ─────────────────────────────────────
+ * ── Primero cancelar, después reservar (28/9/2026) ─────────────────────────
  *
- * El orden no es indiferente y es la decisión más importante de este archivo.
+ * El orden es la decisión más importante de este archivo, y hasta el 28/9 era
+ * el inverso. Vale la pena dejar por qué cambió, porque el argumento viejo
+ * sigue siendo bueno y se puede querer volver atrás sin ver lo que faltaba.
  *
- * Si cancelamos primero y la reserva falla, el paciente queda SIN turno y
- * creyendo que lo cambió. Es exactamente el caso de Norma: la paciente que
- * creyó haber reagendado y se quedó sin nada, y nadie se enteró hasta que se
- * presentó en la clínica.
+ * El argumento viejo: si se cancela primero y la reserva falla, el paciente
+ * queda SIN turno creyendo que lo cambió — el caso de Norma, que se enteró
+ * cuando se presentó en la clínica. Reservando primero, el fallo deja DOS
+ * turnos: un problema visible, que la clínica ve en su agenda y se arregla.
+ * Un turno de más se cancela; un turno de menos se pierde.
  *
- * Si reservamos primero y la cancelación falla, el paciente queda con DOS
- * turnos. Es un problema, pero es visible: la clínica lo ve en su agenda, el
- * paciente recibe dos confirmaciones, y se arregla. Un turno de más se
- * cancela; un turno de menos se pierde.
+ * Lo que faltaba: `cancelar_turno` identifica el turno por FECHA y DNI, sin
+ * hora ni id, así que cancela todos los turnos de ese paciente ese día.
+ * Reservando primero, un cambio de horario DENTRO DEL MISMO DÍA terminaba con
+ * la cancelación llevándose también el turno recién creado. El paciente
+ * quedaba sin nada y sin rastro: el orden "seguro" producía el caso de Norma,
+ * en silencio, en el flujo más común de todos.
+ *
+ * Cancelando primero, ese caso desaparece: cuando llega la reserva, el viejo
+ * ya no está y no hay nada que la cancelación pueda arrastrar. Vuelve el
+ * riesgo de Norma, pero acotado a que la reserva falle —el horario se ocupó,
+ * el proxy no responde— y, sobre todo, deja de ser silencioso: el paciente ve
+ * que su turno anterior se canceló y que tiene que elegir otro horario, el
+ * enlace sigue vivo para que lo haga, y queda anotado en la conversación para
+ * que un agente lo levante si abandona.
+ *
+ * Mientras `cancelar_turno` no acepte hora o id de turno, éste es el orden con
+ * menos formas de terminar mal.
  *
  * ── La autorización es el token ────────────────────────────────────────────
  *
@@ -191,90 +207,38 @@ export async function POST(request: Request) {
     )
   }
 
-  // ── 1. Reservar ───────────────────────────────────────────────────────────
-  let reserva: any
-  try {
-    reserva = await reservarTurno(contexto.clienteId, agendaId, datosDelPaciente)
-  } catch (error) {
-    console.error("[PORTAL] Error reservando:", error)
-    return NextResponse.json(
-      { ok: false, error: "No pudimos reservar ese horario. Probá con otro o escribinos por WhatsApp." },
-      { status: 502 },
-    )
-  }
-
-  if (!reserva?.exito) {
-    // La causa habitual: alguien más tomó ese horario mientras el paciente
-    // elegía. Se lo decimos así, no como un error del sistema.
-    console.warn("[PORTAL] La reserva no prosperó:", JSON.stringify(reserva)?.slice(0, 400))
-    return NextResponse.json(
-      {
-        ok: false,
-        recargar: true,
-        error: "Ese horario ya no está disponible. Elegí otro de la lista.",
-      },
-      { status: 409 },
-    )
-  }
-
-  // ── 2. Cancelar el anterior ───────────────────────────────────────────────
+  // ── 1. Cancelar el turno anterior ─────────────────────────────────────────
   //
-  // Sólo si había uno. Si falla, NO se revierte la reserva: el paciente ya
-  // tiene su turno nuevo, que es lo que vino a hacer. Queda registrado para
-  // que la clínica lo resuelva.
-  // ── El turno nuevo cae el MISMO día que el viejo (28/9/2026) ─────────────
+  // ── Por qué se cancela ANTES de reservar (28/9/2026) ─────────────────────
   //
-  // `cancelar_turno` identifica el turno por FECHA y DNI. No lleva hora ni id.
-  // O sea que cancelar "el turno del 29/09" cancela TODOS los turnos que ese
-  // paciente tenga ese día.
+  // Hasta hoy era al revés, y la cabecera de este archivo explica por qué: si
+  // se cancela primero y la reserva falla, el paciente queda sin nada. Es el
+  // caso de Norma.
   //
-  // Cuando el paciente mueve su turno de las 07:00 a las 09:30 del mismo día,
-  // el orden "reservar y después cancelar" se vuelve en contra: reservamos el
-  // de las 09:30 y acto seguido le pedimos al proxy que cancele el 29/09, que
-  // se lleva puestos los dos. El paciente queda SIN turno, y la pantalla le
-  // dice que su solicitud fue enviada. Es el caso de Norma otra vez, entrando
-  // por otra puerta — y esta vez ni siquiera queda rastro para la clínica.
+  // Lo que ese orden no previó: `cancelar_turno` identifica el turno por
+  // FECHA y DNI, sin hora ni id. Cancelar "el turno del 29/09" cancela TODOS
+  // los turnos de ese paciente ese día. Cuando alguien mueve su turno de las
+  // 07:00 a las 09:30 del mismo día, reservábamos el nuevo y la cancelación
+  // que venía después se llevaba los dos: el paciente quedaba sin turno, la
+  // pantalla le decía "tu solicitud fue enviada", y en el sistema de la
+  // clínica no quedaba nada. El orden seguro producía justo el resultado que
+  // ese orden existía para evitar.
   //
-  // Así que no se cancela. Queda un turno de más, que es visible y se
-  // arregla; un turno de menos, no. Es el mismo criterio que ordena reservar
-  // antes de cancelar, aplicado al único caso donde ese orden no alcanza.
+  // Cancelar primero elimina ese caso: cuando llega la reserva, el viejo ya
+  // no está y no hay nada que la cancelación pueda arrastrar.
   //
-  // El arreglo de fondo es que `cancelar_turno` acepte la hora o el id del
-  // turno. Mientras no lo acepte, esto es lo más seguro que se puede hacer.
-  const mismoDia = esElMismoDia(contexto.turno?.fecha, datosDelTurnoElegido.fecha)
-
+  // El riesgo que vuelve —reserva fallida con el turno ya cancelado— no se
+  // deja en silencio, que es lo que lo hacía grave. Ver el bloque 2.
   let cancelacionFallida = false
   let seCancelóElAnterior = false
-  let quedoElAnteriorSinCancelar = false
 
-  if (mismoDia === true) {
-    quedoElAnteriorSinCancelar = true
-    console.error(
-      `[PORTAL] ⚠️ ATENCIÓN: ${contexto.phone} reservó en el mismo día que su turno anterior ` +
-        `(${contexto.turno?.fecha}). No se cancela el anterior porque la cancelación es por fecha ` +
-        `y se llevaría puesto el turno nuevo. Hay que cancelarlo a mano.`,
-    )
-  } else if (mismoDia === null && contexto.turno?.fecha) {
-    // No se pudieron comparar las fechas. Se sigue cancelando —es lo que se
-    // hacía— pero queda anotado: si esto aparece seguido, el formato de alguna
-    // de las dos cambió y el chequeo de arriba dejó de proteger.
-    console.warn(
-      `[PORTAL] No se pudieron comparar las fechas del turno viejo (${contexto.turno?.fecha}) ` +
-        `y el nuevo (${datosDelTurnoElegido.fecha}); se cancela igual`,
-    )
-  }
-  // Se usa el DNI unificado, no `contexto.pacienteDNI`: si el paciente se
-  // identificó en el portal, su DNI vive en `identidad` y esta condición sería
-  // falsa — el turno anterior quedaría sin cancelar y en silencio.
-  if (
-    reemplazaElTurnoPrevio(contexto.intencion) &&
-    contexto.turno?.fecha &&
-    datosDelPaciente.dni &&
-    mismoDia !== true
-  ) {
+  const hayQueCancelarElAnterior =
+    reemplazaElTurnoPrevio(contexto.intencion) && !!contexto.turno?.fecha && !!datosDelPaciente.dni
+
+  if (hayQueCancelarElAnterior) {
     try {
       const cancelacion = await cancelarTurno(contexto.clienteId, {
-        fecha: contexto.turno.fecha,
+        fecha: contexto.turno!.fecha!,
         motivo: "Reprogramado por el paciente desde el portal",
         paciente_datos: { dni: datosDelPaciente.dni, telefono: contexto.phone },
       })
@@ -285,12 +249,83 @@ export async function POST(request: Request) {
       console.error("[PORTAL] Error cancelando el turno anterior:", error)
     }
 
+    // Si la cancelación falla se sigue igual y se reserva. El paciente vino a
+    // cambiar de horario: dejarlo sin turno nuevo porque no pudimos sacarle el
+    // viejo sería castigarlo por un problema nuestro. Queda anotado.
     if (cancelacionFallida) {
       console.error(
-        `[PORTAL] ⚠️ ATENCIÓN: ${contexto.phone} quedó con DOS turnos. ` +
-          `Nuevo: ${agendaId}. Anterior sin cancelar: ${contexto.turno.fecha}.`,
+        `[PORTAL] ⚠️ ATENCIÓN: no se pudo cancelar el turno de ${contexto.phone} ` +
+          `(${contexto.turno?.fecha}). Si la reserva prospera va a quedar con DOS turnos.`,
       )
     }
+  }
+
+  // ── 2. Reservar ───────────────────────────────────────────────────────────
+  let reserva: any
+  let falloLaLlamada = false
+  try {
+    reserva = await reservarTurno(contexto.clienteId, agendaId, datosDelPaciente)
+  } catch (error) {
+    falloLaLlamada = true
+    console.error("[PORTAL] Error reservando:", error)
+  }
+
+  if (falloLaLlamada || !reserva?.exito) {
+    if (!falloLaLlamada) {
+      // La causa habitual: alguien más tomó ese horario mientras el paciente
+      // elegía. Se lo decimos así, no como un error del sistema.
+      console.warn("[PORTAL] La reserva no prosperó:", JSON.stringify(reserva)?.slice(0, 400))
+    }
+
+    // ── El paciente se quedó sin turno ──────────────────────────────────────
+    //
+    // Cancelamos el viejo y no conseguimos el nuevo. Es exactamente el momento
+    // en que se perdió el turno de Norma, con una diferencia: acá no pasa
+    // inadvertido.
+    //
+    // El enlace NO se consume: el paciente puede elegir otro horario en la
+    // misma pantalla y `recargar` le trae la lista al día. Esa es la salida
+    // buena y hay que dejarla abierta.
+    //
+    // Pero puede cerrar la pestaña. Por eso además queda en la conversación,
+    // donde un agente lo ve, y en el log con el teléfono y la fecha.
+    if (seCancelóElAnterior) {
+      const cuandoViejo = [
+        contexto.turno?.fechaFormateada || contexto.turno?.fecha,
+        contexto.turno?.horaFormateada,
+      ]
+        .filter(Boolean)
+        .join(" a las ")
+
+      console.error(
+        `[PORTAL] ⚠️ SIN TURNO: ${contexto.phone} canceló ${cuandoViejo} y la reserva del nuevo falló. ` +
+          `Agenda intentada: ${agendaId}.`,
+      )
+
+      await saveConversationMessage({
+        id: nanoid(),
+        role: "assistant",
+        content:
+          `[Portal] Se canceló el turno${cuandoViejo ? ` del ${cuandoViejo}` : ""} pero la reserva del nuevo ` +
+          `falló. El paciente quedó SIN turno y puede no haber vuelto a intentar.`,
+        timestamp: new Date().toISOString(),
+        phoneNumber: contexto.phone,
+        configId: contexto.configId,
+        messageType: "portal",
+      }).catch(() => {})
+    }
+
+    return NextResponse.json(
+      {
+        ok: false,
+        recargar: true,
+        sinTurno: seCancelóElAnterior,
+        error: seCancelóElAnterior
+          ? "Ya cancelamos tu turno anterior, pero ese horario se ocupó. Elegí otro de la lista para no quedarte sin turno."
+          : "Ese horario ya no está disponible. Elegí otro de la lista.",
+      },
+      { status: 409 },
+    )
   }
 
   // ── 3. ¿Quedó confirmado, o pendiente de la clínica? ──────────────────────
@@ -337,13 +372,12 @@ export async function POST(request: Request) {
           .join(" a las ")
       : ""
 
-  // Lo que se le dice del turno viejo tiene que coincidir con lo que pasó. El
-  // caso del mismo día es el que más importa: el paciente cree que cambió de
-  // horario y en realidad le quedaron los dos, así que se lo decimos con lo
-  // que tiene que hacer.
+  // Lo que se le dice del turno viejo tiene que coincidir con lo que pasó: si
+  // la cancelación falló, el paciente tiene dos turnos y no lo sabe. Enterarse
+  // por el mensaje es mucho mejor que enterarse en la clínica.
   const texto = seCancelóElAnterior
     ? `${textoDelTurnoNuevo} Cancelamos el turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"}.`
-    : quedoElAnteriorSinCancelar || cancelacionFallida
+    : cancelacionFallida
       ? `${textoDelTurnoNuevo} Tu turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"} sigue activo: ` +
         `escribinos por WhatsApp para que lo cancelemos.`
       : textoDelTurnoNuevo
@@ -413,34 +447,4 @@ export async function POST(request: Request) {
     // en vez de dejarlo con dos turnos sin saberlo.
     ...(cancelacionFallida ? { avisoCancelacion: true } : {}),
   })
-}
-
-/**
- * ¿Las dos fechas son el mismo día?
- *
- * Devuelve `null` cuando no se puede saber, y el llamador distingue los tres
- * casos. Un `false` por no haber podido leer una fecha sería peor que no
- * responder: significaría "son días distintos, cancelá tranquilo" sin haberlo
- * verificado, que es justo la cancelación que borra el turno nuevo.
- *
- * Acepta las dos formas que circulan: la cruda del portal ("2026-09-29") y la
- * formateada que manda la clínica ("29/09/2026").
- */
-function esElMismoDia(a?: string, b?: string): boolean | null {
-  const uno = aISO(a)
-  const otro = aISO(b)
-  if (!uno || !otro) return null
-  return uno === otro
-}
-
-function aISO(fecha?: string): string | null {
-  const texto = (fecha || "").trim()
-  if (!texto) return null
-  if (/^\d{4}-\d{2}-\d{2}/.test(texto)) return texto.slice(0, 10)
-  const ddmmaaaa = texto.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
-  if (ddmmaaaa) {
-    const [, d, m, y] = ddmmaaaa
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
-  }
-  return null
 }

@@ -89,6 +89,9 @@ export function SelectorDeTurnos({
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hayQueRecargar, setHayQueRecargar] = useState(false)
+  // El turno anterior ya se canceló y el nuevo no salió. El paciente está sin
+  // turno AHORA, y el título "No pudimos reservarlo" le suena a "no pasó nada".
+  const [sinTurno, setSinTurno] = useState(false)
   const [resultado, setResultado] = useState<{
     texto: string
     aviso?: boolean
@@ -123,6 +126,7 @@ export function SelectorDeTurnos({
 
       setError(datos.error || "No pudimos completar la gestión.")
       if (datos.recargar) setHayQueRecargar(true)
+      if (datos.sinTurno) setSinTurno(true)
     } catch {
       setError("Se cortó la conexión. Revisá tu señal y probá de nuevo.")
     } finally {
@@ -208,7 +212,7 @@ export function SelectorDeTurnos({
 
         {error && (
           <Aviso
-            titulo="No pudimos reservarlo"
+            titulo={sinTurno ? "Quedaste sin turno: elegí otro horario" : "No pudimos reservarlo"}
             detalle={
               <>
                 {error}
@@ -220,6 +224,11 @@ export function SelectorDeTurnos({
                   >
                     Ver los horarios actualizados
                   </button>
+                )}
+                {sinTurno && (
+                  <span className="mt-2 block">
+                    Si preferís resolverlo con alguien, escribinos por WhatsApp.
+                  </span>
                 )}
               </>
             }
