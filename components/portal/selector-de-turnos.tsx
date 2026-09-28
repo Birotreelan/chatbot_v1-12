@@ -33,7 +33,7 @@
  * interfaz es por comodidad; la del servidor es la que cuenta.
  */
 
-import { useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Calendar } from "@/components/ui/calendar"
 import { es } from "date-fns/locale"
 import { LoadingState } from "@/components/ui/loading-state"
@@ -140,6 +140,7 @@ export function SelectorDeTurnos({
   direccionesPorSede,
 }: Props) {
   const [diaElegido, setDiaElegido] = useState<string | null>(null)
+  const horariosRef = useRef<HTMLDivElement | null>(null)
   const [elegido, setElegido] = useState<Elegido | null>(null)
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -161,6 +162,33 @@ export function SelectorDeTurnos({
   // de un solo profesional y el siguiente de tres.
   const variosProfesionales =
     new Set(turnosDelDia.map((t) => t.profesionalNombre).filter(Boolean)).size > 1
+
+  // ── Llevar la pantalla a los horarios al elegir un día (28/9/2026) ────────
+  //
+  // El calendario ocupa casi toda la pantalla de un teléfono. Al tocar un día,
+  // los horarios aparecen DEBAJO del pliegue: el paciente ve que el día quedó
+  // marcado, no pasa nada más a la vista, y se queda esperando o vuelve a
+  // tocar. La grilla estaba ahí todo el tiempo, abajo.
+  //
+  // `scroll-mt-24` en el contenedor y no un cálculo de posición: el
+  // encabezado es `sticky`, así que sin ese margen el título del día queda
+  // tapado justo por la banda azul y el paciente aterriza en una grilla de
+  // horas sin saber de qué día son.
+  //
+  // `prefers-reduced-motion` se respeta: un desplazamiento animado le revuelve
+  // el estómago a quien tiene sensibilidad vestibular, y el salto instantáneo
+  // cumple la misma función.
+  useEffect(() => {
+    if (!diaElegido) return
+    const destino = horariosRef.current
+    if (!destino) return
+
+    const sinAnimacion =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+
+    destino.scrollIntoView({ behavior: sinAnimacion ? "auto" : "smooth", block: "start" })
+  }, [diaElegido])
 
   async function confirmar() {
     if (!elegido || enviando) return
@@ -458,7 +486,7 @@ export function SelectorDeTurnos({
       )}
 
       {diaElegido && (
-        <div className="space-y-2">
+        <div ref={horariosRef} className="scroll-mt-24 space-y-2">
           {/* `capitalize` de Tailwind pone en mayúscula CADA palabra, y la
               etiqueta es una frase: "miércoles 30 de septiembre" salía
               "Miércoles 30 De Septiembre". Sólo la primera letra. */}

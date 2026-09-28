@@ -212,14 +212,30 @@ export function TituloDePaso({
   )
 }
 
-/** El "Volver" del widget: discreto, arriba, sin competir con la acción. */
+/**
+ * El paso atrás.
+ *
+ * ── Era demasiado discreto (28/9/2026) ────────────────────────────────────
+ *
+ * Estaba pensado como en el widget: gris, chico, sin competir con la acción
+ * principal. En el portal no funciona igual. Acá el paciente atraviesa hasta
+ * cinco filtros encadenados —sede, tipo de búsqueda, especialidad,
+ * profesional, horario— y equivocarse en uno es normal; volver no es una
+ * salida de emergencia, es parte del camino. Un texto gris del tamaño de una
+ * nota al pie no se lee como algo que se puede tocar, y menos en el público
+ * de este portal.
+ *
+ * Ahora es visiblemente un control: borde, fondo de tarjeta y el azul del
+ * sistema, que es el color de todo lo tocable. Sigue sin competir con la
+ * acción primaria —que es sólida, a ancho completo y está abajo— pero se ve.
+ */
 export function Volver({ href }: { href: string }) {
   return (
     <a
       href={href}
-      className="-ml-1 inline-flex min-h-[44px] items-center gap-1 py-1 text-sm text-muted-foreground hover:text-foreground"
+      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border bg-card px-3 py-2 text-[15px] font-medium text-primary no-underline hover:bg-accent"
     >
-      <ChevronLeft className="h-4 w-4" aria-hidden /> Volver
+      <ChevronLeft className="h-5 w-5" aria-hidden /> Volver
     </a>
   )
 }
