@@ -145,6 +145,11 @@ export function SelectorDeTurnos({
   const primerDia = dias[0]?.fecha
   const turnosDelDia = dias.find((d) => d.fecha === diaElegido)?.turnos || []
 
+  // Se mira el día que se está mostrando, no toda la agenda: un día puede ser
+  // de un solo profesional y el siguiente de tres.
+  const variosProfesionales =
+    new Set(turnosDelDia.map((t) => t.profesionalNombre).filter(Boolean)).size > 1
+
   async function confirmar() {
     if (!elegido || enviando) return
     setEnviando(true)
@@ -189,10 +194,10 @@ export function SelectorDeTurnos({
           {accion === "cambiar"
             ? resultado.pendiente
               ? "Pedimos el cambio"
-              : "Tu turno cambió"
+              : "¡Turno reagendado!"
             : resultado.pendiente
               ? "Pedimos tu turno"
-              : "Tu turno quedó reservado"}
+              : "¡Turno confirmado!"}
         </TituloDePaso>
 
         {/* "Listo" sólo cuando de verdad está listo. Si la clínica todavía
@@ -260,7 +265,9 @@ export function SelectorDeTurnos({
   if (elegido) {
     return (
       <div className="space-y-4">
-        <TituloDePaso tipo="confirmar">Repasá y confirmá</TituloDePaso>
+        <TituloDePaso tipo="confirmar">
+          {accion === "cambiar" ? "Revisá y confirmá el cambio" : "Revisá y confirmá tu turno"}
+        </TituloDePaso>
 
         <ResumenDeConfirmacion
           paciente={{
@@ -276,16 +283,9 @@ export function SelectorDeTurnos({
             sede: elegido.sede,
             agendaId: elegido.agendaId,
           }}
+          tituloDelTurno={accion === "cambiar" ? "Nuevo turno" : "Datos del turno"}
+          reemplaza={accion === "cambiar" ? { cuando: cuandoElViejo } : undefined}
         />
-
-        {/* Qué turno se va. Es lo único de la pantalla anterior que sigue
-            haciendo falta acá: el resto era contexto para elegir, esto es
-            contexto para decidir. */}
-        {accion === "cambiar" && cuandoElViejo && (
-          <p className="text-[15px] text-muted-foreground">
-            Reemplaza tu turno del {cuandoElViejo}, que vamos a cancelar.
-          </p>
-        )}
 
         {error && (
           <Aviso
@@ -452,6 +452,7 @@ export function SelectorDeTurnos({
           <p className="font-medium text-foreground first-letter:uppercase">
             {dias.find((d) => d.fecha === diaElegido)?.etiqueta}
           </p>
+          <p className="text-[15px] text-muted-foreground">Seleccioná un horario disponible:</p>
           <div className="grid grid-cols-3 gap-2">
             {turnosDelDia.map((turno) => (
               <button
@@ -472,11 +473,19 @@ export function SelectorDeTurnos({
                 className="min-h-[56px] rounded-xl border bg-card px-1 py-2 text-base font-medium text-card-foreground hover:bg-accent"
               >
                 {turno.hora}
-                {turno.profesionalNombre && turno.profesionalNombre !== "Sin asignar" && (
-                  <span className="block break-words text-xs font-normal leading-tight text-muted-foreground">
-                    {turno.profesionalNombre}
-                  </span>
-                )}
+                {/* El nombre sólo cuando los horarios del día son de
+                    profesionales DISTINTOS. Si son todos del mismo, ya está
+                    dicho arriba y repetirlo ocho veces hace que la grilla se
+                    lea como un bloque de texto en vez de como ocho horarios.
+                    Cuando difieren, en cambio, es el dato que decide cuál
+                    tocar. */}
+                {variosProfesionales &&
+                  turno.profesionalNombre &&
+                  turno.profesionalNombre !== "Sin asignar" && (
+                    <span className="block break-words text-xs font-normal leading-tight text-muted-foreground">
+                      {turno.profesionalNombre}
+                    </span>
+                  )}
               </button>
             ))}
           </div>

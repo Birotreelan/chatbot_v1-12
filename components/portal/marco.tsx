@@ -254,9 +254,12 @@ export function FilaDeResumen({ etiqueta, valor }: { etiqueta: string; valor: st
 export function ResumenDelTurno({
   turno,
   titulo,
+  detalle,
 }: {
   turno: TurnoDelPortal
   titulo?: string
+  /** La línea gris debajo del título: para qué está esta tarjeta acá. */
+  detalle?: string
 }) {
   const filas: Array<[string, string | undefined]> = [
     ["Fecha", turno.fechaFormateada || turno.fecha],
@@ -271,7 +274,8 @@ export function ResumenDelTurno({
 
   return (
     <Card className="p-4 shadow-none">
-      {titulo && <p className="mb-3 font-medium">{titulo}</p>}
+      {titulo && <p className={detalle ? "font-medium" : "mb-3 font-medium"}>{titulo}</p>}
+      {detalle && <p className="mb-3 mt-0.5 text-[15px] text-muted-foreground">{detalle}</p>}
       <div className="space-y-2 text-[15px]">
         {visibles.map(([etiqueta, valor]) => (
           <FilaDeResumen key={etiqueta} etiqueta={etiqueta} valor={valor} />
@@ -359,6 +363,8 @@ export function BotonSecundario({
 export function ResumenDeConfirmacion({
   paciente,
   turno,
+  tituloDelTurno = "Datos del turno",
+  reemplaza,
 }: {
   paciente: {
     nombre?: string
@@ -373,6 +379,17 @@ export function ResumenDeConfirmacion({
     sede?: string
     agendaId?: string
   }
+  /** "Nuevo turno" cuando se está reemplazando uno; si no, "Datos del turno". */
+  tituloDelTurno?: string
+  /**
+   * El turno que este cambio deja sin efecto (28/9/2026).
+   *
+   * Va en su propio bloque, al final y después del turno nuevo, porque el
+   * orden es el de la decisión: primero qué se llevan, después qué pierden.
+   * Mezclar los dos turnos en una sola lista es lo que hacía que el paciente
+   * no supiera cuál de las dos fechas estaba confirmando.
+   */
+  reemplaza?: { cuando?: string }
 }) {
   const tieneNombreYApellido = Boolean(paciente.nombre && paciente.apellido)
 
@@ -421,7 +438,23 @@ export function ResumenDeConfirmacion({
   return (
     <Card className="space-y-4 p-4 shadow-none">
       {bloque("Datos del paciente", visibles(datosDelPaciente))}
-      {bloque("Datos del turno", visibles(datosDelTurno))}
+      {bloque(tituloDelTurno, visibles(datosDelTurno))}
+
+      {reemplaza?.cuando && (
+        <div className="border-t pt-4">
+          <p className="mb-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            Turno actual
+          </p>
+          <p className="text-[15px] font-medium first-letter:uppercase">{reemplaza.cuando}</p>
+          {/* Dice la consecuencia de apretar el botón, no lo que va a pasar
+              con el turno viejo en abstracto. "Vamos a cancelar tu turno"
+              suena a amenaza; esto explica el intercambio. */}
+          <p className="mt-1 text-[15px] text-muted-foreground">
+            Al confirmar, tu turno actual será cancelado y reemplazado por el nuevo turno
+            seleccionado.
+          </p>
+        </div>
+      )}
     </Card>
   )
 }

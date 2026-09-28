@@ -559,11 +559,23 @@ export default async function PaginaDelPortal({
                     quedaba entre la instrucción y el calendario, partiendo en
                     dos lo que hay que hacer. */}
                 {contexto.turno && (
-                  <ResumenDelTurno turno={contexto.turno} titulo="Tu turno actual" />
+                  <ResumenDelTurno
+                    turno={contexto.turno}
+                    titulo="Tu turno actual"
+                    detalle="Estos son los datos del turno que vas a reagendar."
+                  />
                 )}
 
-                <TituloDePaso tipo="agenda">
-                  {nombre ? `Hola, ${nombre}. ` : ""}Elegí el nuevo día y horario para tu turno
+                {/* Sin "Hola, Nicolas": el saludo iba cuando el título era lo
+                    primero de la pantalla. Ahora llega después de la tarjeta
+                    del turno, donde ya quedó claro de qué se trata, y un
+                    saludo a mitad de camino suena a que la página empezó dos
+                    veces. */}
+                <TituloDePaso
+                  tipo="agenda"
+                  detalle="Seleccioná una fecha y un horario disponibles para reemplazar tu turno actual."
+                >
+                  Elegí un nuevo día y horario
                 </TituloDePaso>
 
                 {/* Si no se pudo identificar al profesional se ofrecen turnos
