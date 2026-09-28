@@ -552,13 +552,19 @@ export default async function PaginaDelPortal({
             // horario" son de ESTA pantalla, no de las tres.
             encabezado={
               <>
-                <TituloDePaso tipo="agenda">
-                  {nombre ? `Hola, ${nombre}. ` : ""}Elegí el nuevo horario
-                </TituloDePaso>
-
+                {/* El turno actual va PRIMERO (28/9/2026).
+                    El orden de arriba abajo es el de la pregunta que el
+                    paciente se hace: "¿cuál es el turno que tengo?" y recién
+                    después "¿cuál elijo?". Con el título arriba, la tarjeta
+                    quedaba entre la instrucción y el calendario, partiendo en
+                    dos lo que hay que hacer. */}
                 {contexto.turno && (
                   <ResumenDelTurno turno={contexto.turno} titulo="Tu turno actual" />
                 )}
+
+                <TituloDePaso tipo="agenda">
+                  {nombre ? `Hola, ${nombre}. ` : ""}Elegí el nuevo día y horario para tu turno
+                </TituloDePaso>
 
                 {/* Si no se pudo identificar al profesional se ofrecen turnos
                     de la sede, y hay que decirlo: el paciente asume que ve los

@@ -446,7 +446,10 @@ export function SelectorDeTurnos({
 
       {diaElegido && (
         <div className="space-y-2">
-          <p className="font-medium capitalize text-foreground">
+          {/* `capitalize` de Tailwind pone en mayúscula CADA palabra, y la
+              etiqueta es una frase: "miércoles 30 de septiembre" salía
+              "Miércoles 30 De Septiembre". Sólo la primera letra. */}
+          <p className="font-medium text-foreground first-letter:uppercase">
             {dias.find((d) => d.fecha === diaElegido)?.etiqueta}
           </p>
           <div className="grid grid-cols-3 gap-2">
