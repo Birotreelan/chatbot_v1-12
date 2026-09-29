@@ -755,6 +755,24 @@ export default async function PaginaDelPortal({
   const diasNuevos = conEjemplos ? turnosDeEjemplo() : agendaNueva.dias
   const direccionesNuevo = diasNuevos.length > 0 ? await direccionesDeLasSedes(clienteId) : {}
 
+  // ── Con quién son estos horarios (30/9/2026) ──────────────────────────────
+  //
+  // `agendaNueva.profesionalNombre` sólo viene cuando la agenda resolvió al
+  // profesional por nombre. Cuando el filtro llegó por `profesionalId` —que es
+  // lo que pasa al venir del enlace de "reagendar con el mismo profesional"—
+  // el id está pero el nombre no, y la pantalla terminaba diciendo "Horarios
+  // disponibles." a secas.
+  //
+  // El nombre está en los turnos. Se usa sólo si TODOS son del mismo: si hay
+  // varios, afirmar uno sería mentir, y ahí el nombre va al lado de cada
+  // horario, que es donde sirve.
+  const profesionalesEnAgenda = new Set(
+    diasNuevos.flatMap((d) => d.turnos.map((t) => t.profesionalNombre)).filter(Boolean),
+  )
+  const profesionalDeLaAgenda =
+    agendaNueva.profesionalNombre ||
+    (profesionalesEnAgenda.size === 1 ? [...profesionalesEnAgenda][0] : undefined)
+
   return marco(
     <>
       {conEjemplos && (
@@ -794,14 +812,19 @@ export default async function PaginaDelPortal({
               Elegí un día y horario
             </TituloDePaso>
 
-            {/* Con quién son estos horarios, o que son de todos. Es lo que
-                decide si el nombre del profesional hace falta al lado de cada
-                horario, así que conviene que el paciente lo lea antes. */}
-            <p className="text-[15px] text-muted-foreground">
-              {agendaNueva.profesionalNombre
-                ? `Horarios disponibles con ${agendaNueva.profesionalNombre}.`
-                : "Horarios disponibles."}
-            </p>
+            {/* Con quién son estos horarios. Es lo que decide si el nombre
+                del profesional hace falta al lado de cada horario, así que
+                conviene que el paciente lo lea antes.
+
+                Si no sabemos con quién son, NO se pone nada: "Horarios
+                disponibles." a secas no dice nada que el título no haya dicho
+                ya, y una línea que no informa es ruido que empuja el
+                calendario más abajo. */}
+            {profesionalDeLaAgenda && (
+              <p className="text-[15px] text-muted-foreground">
+                Horarios disponibles con {profesionalDeLaAgenda}.
+              </p>
+            )}
           </>
         }
       />

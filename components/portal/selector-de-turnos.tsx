@@ -398,14 +398,14 @@ export function SelectorDeTurnos({
   return (
     <div className="space-y-4">
       {encabezado}
-      <div className="space-y-4 lg:grid lg:grid-cols-[420px_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
+      <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:items-start lg:gap-8 lg:space-y-0">
         {/* La tarjeta va a lo ancho de la columna —así se alinea con el resto—
           pero el calendario adentro se acota y se centra.
           Las celdas son un séptimo del ancho disponible: sin tope, en una
           columna de 640px quedarían de 88px, que es un calendario gigante con
           números perdidos en el medio de cada casilla. */}
-        <div className="rounded-xl border bg-card p-1 sm:p-3">
-          <div className="mx-auto w-full max-w-[400px]">
+        <div className="rounded-xl border bg-card p-2 sm:p-4">
+          <div className="mx-auto w-full max-w-[360px]">
             <Calendar
               mode="single"
               locale={es}
@@ -455,10 +455,17 @@ export function SelectorDeTurnos({
                 // 32px de margen del contenedor, no entraban en un teléfono de
                 // 320px y el calendario desbordaba. Ahora cada celda toma un
                 // séptimo del ancho disponible y nunca baja de 40px.
-                head_cell: "w-[14.28%] min-w-10 text-xs font-normal text-muted-foreground sm:text-sm",
-                cell: "h-11 w-[14.28%] min-w-10 p-0 text-center sm:h-12",
+                head_cell: "w-[14.28%] min-w-10 pb-1 text-xs font-normal text-muted-foreground",
+                cell: "h-11 w-[14.28%] min-w-10 p-0 text-center",
+                // El alto lo pone la celda; las filas no tienen que sumar el
+                // suyo. El `mt-2` por defecto de shadcn, por seis filas, eran
+                // 96px de aire que estiraban la tarjeta muy por debajo del
+                // último día (30/9/2026).
+                row: "flex w-full",
+                month: "space-y-2",
+                caption: "relative flex items-center justify-center pt-0",
                 // Sin color acá: lo pone el modificador que corresponda.
-                day: "h-11 w-full rounded-lg p-0 text-base sm:h-12 sm:text-lg",
+                day: "h-11 w-full rounded-lg p-0 text-base",
                 // El día de hoy sin turnos no debe parecer seleccionable: sólo se
                 // marca con un borde.
                 day_today: "border border-input",
@@ -517,7 +524,10 @@ export function SelectorDeTurnos({
         )}
 
         {diaElegido && (
-          <div ref={horariosRef} className="scroll-mt-24 space-y-2 lg:scroll-mt-0">
+          // `lg:pt-2` alinea el título del día con el del mes, que arranca más
+          // abajo por el padding de la tarjeta. Sin eso las dos columnas
+          // empiezan a alturas distintas y se leen como dos bloques sueltos.
+          <div ref={horariosRef} className="scroll-mt-24 space-y-3 lg:scroll-mt-0 lg:pt-2">
           {/* `capitalize` de Tailwind pone en mayúscula CADA palabra, y la
               etiqueta es una frase: "miércoles 30 de septiembre" salía
               "Miércoles 30 De Septiembre". Sólo la primera letra. */}
@@ -533,7 +543,17 @@ export function SelectorDeTurnos({
 
               El corte va en 360 y no en 380: un iPhone estándar mide 375, y
               con 380 se quedaba con dos columnas justo el tamaño más común. */}
-          <div className="grid grid-cols-2 gap-2 min-[360px]:grid-cols-3 sm:grid-cols-4 sm:gap-3">
+          {/* `auto-fill` con un mínimo, en vez de un número fijo de columnas:
+              "07:00" en un chip de 130px de ancho parece un botón al que le
+              falta la etiqueta. Así entran los que entren y quedan del tamaño
+              de su contenido. El mínimo sube cuando hay nombre de profesional,
+              que es texto largo. */}
+          <div
+            className="grid gap-2 sm:gap-3"
+            style={{
+              gridTemplateColumns: `repeat(auto-fill, minmax(${variosProfesionales ? 150 : 96}px, 1fr))`,
+            }}
+          >
             {turnosDelDia.map((turno) => (
               <button
                 key={turno.id}
@@ -551,7 +571,7 @@ export function SelectorDeTurnos({
                 }
                 // 56px de alto: lo toca con el pulgar alguien parado, y este
                 // portal lo usan pacientes mayores.
-                className="min-h-[56px] rounded-xl border bg-card px-1 py-2 text-base font-medium text-card-foreground transition-colors hover:bg-accent active:bg-accent sm:min-h-[52px] sm:text-lg"
+                className="min-h-[56px] rounded-xl border bg-card px-2 py-2 text-base font-medium text-card-foreground transition-colors hover:border-primary/40 hover:bg-accent active:bg-accent lg:min-h-[48px]"
               >
                 {turno.hora}
                 {/* El nombre sólo cuando los horarios del día son de
