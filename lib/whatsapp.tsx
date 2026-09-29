@@ -297,6 +297,20 @@ const RESCHEDULE_OFFER_BUTTONS = [
   { id: "2", title: "No reagendar" },
 ]
 
+/**
+ * La oferta de reagendar, con un solo botón (29/9/2026).
+ *
+ * "No reagendar" era una opción que no hacía nada y costaba dos mensajes: el
+ * toque del paciente y el "bueno, listo" nuestro. Quien no quiere reagendar no
+ * toca nada y la conversación termina, que es lo que pasa igual en la práctica.
+ *
+ * Se conserva `RESCHEDULE_OFFER_BUTTONS` con las dos porque los clientes sin
+ * portal siguen usando el menú numerado, donde la opción 2 sí tiene sentido:
+ * ahí el flujo de reserva es conversacional y el paciente necesita una forma
+ * explícita de salir.
+ */
+const RESCHEDULE_OFFER_BOTON_UNICO = [{ id: "1", title: "Reagendar" }]
+
 async function sendDirectResponse(
   ctx: DirectResponseContext,
   message: string,
@@ -1283,8 +1297,28 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         // criterio correcto: turno.admite_reagendamiento Y config.permitirReagendamiento).
         // Antes se recalculaba acá sin chequear el toggle, por lo que un cliente con
         // permitirReagendamiento=false igual veía la oferta de reagendar tras cancelar.
-        const successMsg = buildCancellationSuccessMessage(chatbotData, flowState.turnoIndex || 0, admiteReagendamiento)
-        await sendDirectResponse(ctx, successMsg, "awaiting_cancel_confirmation", admiteReagendamiento ? RESCHEDULE_OFFER_BUTTONS : undefined)
+        // En los clientes del portal la oferta es un botón suelto y el texto no
+        // pide que escriba nada; en el resto sigue el menú numerado de siempre,
+        // porque allá el reagendamiento es conversacional y hace falta una
+        // forma explícita de salir.
+        const ofertaConBoton = usaPortal(config)
+        const successMsg = buildCancellationSuccessMessage(
+          chatbotData,
+          flowState.turnoIndex || 0,
+          admiteReagendamiento,
+          false,
+          ofertaConBoton,
+        )
+        await sendDirectResponse(
+          ctx,
+          successMsg,
+          "awaiting_cancel_confirmation",
+          admiteReagendamiento
+            ? ofertaConBoton
+              ? RESCHEDULE_OFFER_BOTON_UNICO
+              : RESCHEDULE_OFFER_BUTTONS
+            : undefined,
+        )
 
         // Si no hay flujo de reagendamiento, el turno quedó cancelado → volver al menú sin él
         if (!admiteReagendamiento) {

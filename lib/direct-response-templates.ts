@@ -397,7 +397,20 @@ export function buildCancellationSuccessMessage(
   chatbotData: ChatbotData,
   turnoIndex: number = 0,
   includeRescheduleOffer: boolean = true,
-  transitionToNewBooking: boolean = false
+  transitionToNewBooking: boolean = false,
+  /**
+   * El reagendamiento se ofrece con un botón y no con un menú numerado
+   * (29/9/2026).
+   *
+   * El menú listaba "1. Reagendar" y "2. No quiero reagendar", y esa segunda
+   * opción cuesta dos mensajes —la respuesta del paciente y el "bueno, listo"
+   * nuestro— para no hacer nada. Con un botón, quien no quiere reagendar
+   * simplemente no lo toca y la conversación termina ahí.
+   *
+   * El texto tampoco dice "escribí el número": con un botón al lado, pedirle
+   * que escriba es mandarlo por el camino largo.
+   */
+  ofertaConBoton: boolean = false,
 ): string {
   const nombre = formatPatientName(chatbotData)
   const turno = chatbotData.turnos[turnoIndex]
@@ -421,7 +434,11 @@ export function buildCancellationSuccessMessage(
   }
 
   if (admiteReagendamiento) {
-    message += `
+    message += ofertaConBoton
+      ? `
+
+Si querés, podés sacar un turno nuevo con el botón de acá abajo.`
+      : `
 
 Puedo ofrecerte la opción de reagendar tu turno en otra fecha y horario.
 
