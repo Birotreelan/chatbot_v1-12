@@ -192,6 +192,27 @@ export interface ContextoDelPortal {
   /** Cuántas veces se abrió desde un dispositivo distinto al primero. */
   aperturasDeOtroDispositivo?: number
   aperturas?: number
+
+  /**
+   * Cuándo el paciente abrió el enlace DE VERDAD (30/9/2026).
+   *
+   * ── Por qué no alcanza con `aperturas` ─────────────────────────────────
+   *
+   * Ese contador sube con cada lectura del contexto: cada paso del portal y
+   * cada llamada a la API. No dice "el paciente entró", dice "alguien leyó
+   * esto".
+   *
+   * Y aunque se mirara sólo la primera, seguiría contando aperturas que no
+   * son del paciente: un escáner de enlaces, un antivirus corporativo o un
+   * proxy que sigue la URL renderizan la página igual que un navegador. Para
+   * un tablero de "¿la gente logra entrar?", un falso positivo ahí es peor
+   * que no tener el dato.
+   *
+   * Por eso lo marca el navegador, no el servidor: un cliente que ejecuta
+   * JavaScript es la evidencia más barata de que del otro lado hay una
+   * persona. Ver `app/api/portal/visto/route.ts`.
+   */
+  visto?: string
 }
 
 export interface EnlaceEmitido {
@@ -378,6 +399,35 @@ export async function leerEnlace(
  * que tiene que describir lo que quedó, no lo que se pidió: "Tu turno quedó
  * para el viernes 26/09 a las 08:25", no "Recibimos tu solicitud".
  */
+/**
+ * Anota que el paciente abrió el enlace, la primera vez.
+ *
+ * Devuelve `true` sólo en esa primera vez: el llamador usa eso para escribir
+ * una única línea en la conversación. Las recargas y los pasos siguientes no
+ * vuelven a anotar nada —el panel se llenaría de "abrió el enlace" y el dato
+ * dejaría de servir—.
+ */
+export async function marcarVisto(token: string): Promise<{ primera: boolean; contexto: ContextoDelPortal } | null> {
+  const redis = getRedisClient()
+  if (!redis || !token) return null
+
+  const crudo = await redis.get(clave(token))
+  if (!crudo) return null
+
+  let contexto: ContextoDelPortal
+  try {
+    contexto = typeof crudo === "string" ? JSON.parse(crudo) : (crudo as ContextoDelPortal)
+  } catch {
+    return null
+  }
+
+  if (contexto.visto) return { primera: false, contexto }
+
+  contexto.visto = new Date().toISOString()
+  await guardar(token, contexto)
+  return { primera: true, contexto }
+}
+
 export async function consumirEnlace(
   token: string,
   resultado: {

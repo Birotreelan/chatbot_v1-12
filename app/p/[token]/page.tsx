@@ -119,7 +119,7 @@ export default async function PaginaDelPortal({
 
   if (!permiteVerDatos(estado)) {
     return (
-      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
+      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO} token={token}>
         <Aviso
           tono="atencion"
           titulo="Este enlace venció"
@@ -169,7 +169,7 @@ export default async function PaginaDelPortal({
           : "Te va a llegar la confirmación por WhatsApp."
 
     return (
-      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
+      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO} token={token}>
         <Avance actual="Confirmar" />
         <TituloDePaso tipo="listo" sinIcono>
           {titulo}
@@ -200,7 +200,7 @@ export default async function PaginaDelPortal({
   // enlace que caduca sin explicar por qué es peor que este mensaje.
   if (!permiteGestionar(estado)) {
     return (
-      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
+      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO} token={token}>
         <Aviso
           tono="atencion"
           titulo="El plazo para gestionar por acá terminó"
@@ -403,6 +403,7 @@ export default async function PaginaDelPortal({
       cookieNueva={secretoNuevo}
       nombreCookie={COOKIE_DISPOSITIVO}
       ancho={ancho}
+      token={token}
     >
       {avisoDemo}
       {hijos}

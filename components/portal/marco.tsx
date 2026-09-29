@@ -129,9 +129,12 @@ export function Marco({
   cookieNueva,
   nombreCookie,
   ancho = "normal",
+  token,
 }: {
   marca: MarcaDelPortal
   children: ReactNode
+  /** El token del enlace, sólo para avisar que se abrió. Ver el script de abajo. */
+  token?: string
   /**
    * "amplio" en el paso de agenda, donde el calendario y los horarios van uno
    * al lado del otro.
@@ -167,6 +170,31 @@ export function Marco({
             __html: `document.cookie=${JSON.stringify(
               `${nombreCookie}=${cookieNueva}; Path=/p; Max-Age=2592000; SameSite=Lax`,
             )}`,
+          }}
+        />
+      )}
+
+      {/* ── "El paciente abrió el enlace" ───────────────────────────────────
+          Un aviso al servidor para que el panel sepa que alguien entró. La
+          ruta lo anota una sola vez por enlace, así que dispararlo en cada
+          paso no ensucia nada.
+
+          Va desde el navegador y no desde el render por un motivo: la página
+          la puede pedir cualquier cosa que siga la URL —un escáner de
+          enlaces, un antivirus, un proxy— y todas reciben el mismo HTML.
+          Ejecutar JavaScript es la evidencia más barata de que del otro lado
+          hay una persona.
+
+          `keepalive` para que el pedido sobreviva si el paciente toca algo
+          enseguida, y el error se traga: esto es telemetría, no puede
+          romperle la pantalla a nadie. */}
+      {token && (
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              `fetch("/api/portal/visto",{method:"POST",keepalive:true,` +
+              `headers:{"Content-Type":"application/json"},` +
+              `body:JSON.stringify({token:${JSON.stringify(token)}})}).catch(function(){})`,
           }}
         />
       )}
