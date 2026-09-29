@@ -148,8 +148,24 @@ export async function enviarMensajeConEnlace(
  * entrante. Hay un test que lo verifica.
  */
 export const PLANTILLAS_DEL_ENLACE: Record<IntencionDelPortal, string> = {
-  nuevo_turno: "para solicitar tu turno, utilizá el botón que aparece a continuación.",
-  familiar: "para solicitar el turno de tu familiar, utilizá el botón que aparece a continuación.",
+  // ── Decir a dónde lleva el botón (29/9/2026) ─────────────────────────────
+  //
+  // Decía "utilizá el botón que aparece a continuación" y nada más. El
+  // paciente está en WhatsApp, le llega un botón y no sabe qué hay del otro
+  // lado: nombrar la plataforma de la clínica y lo que va a poder hacer ahí
+  // es lo que hace que toque en vez de dudar.
+  //
+  // "su necesidad" y no "tu necesidad" en el de familiar: el turno es de otra
+  // persona y el texto tiene que sostener eso hasta el final. Quien pide para
+  // su madre y lee "tu" carga sus propios datos.
+  nuevo_turno:
+    "para solicitar un nuevo turno, ingresá a la plataforma de gestión de turnos de la clínica " +
+    "utilizando el botón que aparece a continuación. Allí podrás consultar los horarios " +
+    "disponibles y elegir el que mejor se adapte a tu necesidad.",
+  familiar:
+    "para solicitar un nuevo turno para tu familiar, ingresá a la plataforma de gestión de turnos " +
+    "de la clínica utilizando el botón que aparece a continuación. Allí podrás consultar los " +
+    "horarios disponibles y elegir el que mejor se adapte a su necesidad.",
   reagendar: "para reagendar tu turno{cuando}, utilizá el botón que aparece a continuación.",
   // ── El texto más delicado de los cuatro (25/9/2026) ──────────────────────
   //

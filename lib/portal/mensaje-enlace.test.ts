@@ -21,9 +21,12 @@ import {
 } from "./mensaje-enlace"
 
 describe("cada flujo dice lo suyo", () => {
-  it("solicitar un turno", () => {
-    expect(textoDelEnlace({ intencion: "nuevo_turno", nombre: "Nicolas DE SANTIAGO" })).toBe(
-      "Nicolas, para solicitar tu turno, utilizá el botón que aparece a continuación.",
+  it("solicitar un turno dice a dónde lleva el botón", () => {
+    const t = textoDelEnlace({ intencion: "nuevo_turno", nombre: "Nicolas DE SANTIAGO" })
+    expect(t).toBe(
+      "Nicolas, para solicitar un nuevo turno, ingresá a la plataforma de gestión de turnos de la " +
+        "clínica utilizando el botón que aparece a continuación. Allí podrás consultar los horarios " +
+        "disponibles y elegir el que mejor se adapte a tu necesidad.",
     )
   })
 
@@ -31,8 +34,17 @@ describe("cada flujo dice lo suyo", () => {
     // Si dijera "tu turno", quien pide para su madre carga su propio DNI y el
     // turno queda a nombre equivocado.
     const t = textoDelEnlace({ intencion: "familiar", nombre: "Nicolas" })
-    expect(t).toContain("el turno de tu familiar")
+    expect(t).toContain("un nuevo turno para tu familiar")
     expect(t).not.toMatch(/\btu turno\b/)
+  })
+
+  it("el de familiar sostiene la tercera persona hasta el final", () => {
+    // El remate decía "que mejor se adapte a TU necesidad" en la versión de
+    // turno propio. Copiado tal cual al de familiar, la frase vuelve a hablar
+    // del que escribe justo cuando hay que pensar en el que se atiende.
+    const t = textoDelEnlace({ intencion: "familiar", nombre: "Nicolas" })
+    expect(t).toContain("se adapte a su necesidad")
+    expect(t).not.toContain("se adapte a tu necesidad")
   })
 
   it("reagendar nombra el turno del que habla", () => {
@@ -104,8 +116,8 @@ describe("redacción propia del cliente", () => {
   })
 
   it("vacía o en blanco cae en la plantilla del flujo", () => {
-    expect(textoDelEnlace({ intencion: "nuevo_turno", nombre: "Ana", plantilla: "   " })).toBe(
-      "Ana, para solicitar tu turno, utilizá el botón que aparece a continuación.",
+    expect(textoDelEnlace({ intencion: "nuevo_turno", nombre: "Ana", plantilla: "   " })).toContain(
+      "Ana, para solicitar un nuevo turno",
     )
   })
 })
