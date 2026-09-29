@@ -170,8 +170,10 @@ export default async function PaginaDelPortal({
 
     return (
       <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
-        <Avance actual="Confirmación" />
-        <TituloDePaso tipo="listo">{titulo}</TituloDePaso>
+        <Avance actual="Confirmar" />
+        <TituloDePaso tipo="listo" sinIcono>
+          {titulo}
+        </TituloDePaso>
         {/* Sin `detalle`: el título de arriba ya encabeza, así que el aviso
             lleva la frase concreta y nada más. Repetir "Turno cancelado" dos
             veces seguidas no agrega nada y empuja el dato real más abajo. */}
@@ -424,10 +426,11 @@ export default async function PaginaDelPortal({
         <Avance actual="Elegir" />
         <TituloDePaso
           tipo="dni"
+          sinIcono
           detalle={
             paraFamiliar
-              ? "Si ya se atendió en la clínica, con esto alcanza: traemos sus datos solos."
-              : "Si ya te atendiste en la clínica, con esto alcanza: traemos tus datos solos."
+              ? "Si ya se atendió en la clínica, con el documento alcanza: recuperamos sus datos automáticamente."
+              : "Si ya te atendiste en la clínica, con tu documento alcanza: recuperamos tus datos automáticamente."
           }
         >
           {paraFamiliar ? "¿Cuál es el DNI de la persona que se va a atender?" : "¿Cuál es tu DNI?"}
@@ -445,10 +448,11 @@ export default async function PaginaDelPortal({
         <Avance actual="Elegir" />
         <TituloDePaso
           tipo="datos"
+          sinIcono
           detalle={
             paraFamiliar
-              ? "Completá los datos de la persona que se va a atender y seguimos con el turno."
-              : "Completá estos datos y seguimos con el turno."
+              ? "Completá los datos de la persona que se va a atender. Luego vas a poder elegir el turno."
+              : "Completá tus datos para registrarte. Luego vas a poder elegir el turno."
           }
         >
           {paraFamiliar ? "Es su primera vez con nosotros" : "Es tu primera vez con nosotros"}
@@ -580,7 +584,7 @@ export default async function PaginaDelPortal({
                   <ResumenDelTurno
                     turno={contexto.turno}
                     titulo="Tu turno actual"
-                    detalle="Éste es el turno que vas a reemplazar. Revisá que sea el correcto antes de elegir el nuevo."
+                    detalle="Éste es el turno que vas a reemplazar. Verificá que sea el correcto antes de elegir el nuevo."
                   />
                 )}
 
@@ -592,9 +596,21 @@ export default async function PaginaDelPortal({
                 <Avance actual="Elegir" />
                 <TituloDePaso
                   tipo="agenda"
-                  detalle="Primero la fecha; después vas a ver los horarios de ese día. Todavía no se cancela nada: el cambio se confirma en el paso siguiente."
+                  sinIcono
+                  detalle={
+                    <>
+                      <p>
+                        Seleccioná primero una fecha. Luego te mostraremos los horarios
+                        disponibles para ese día.
+                      </p>
+                      <p>
+                        Tu turno actual sigue vigente: no se cancela hasta que confirmes el
+                        cambio.
+                      </p>
+                    </>
+                  }
                 >
-                  Elegí un nuevo día y horario
+                  Elegí cuándo querés reprogramar tu turno
                 </TituloDePaso>
 
                 {/* Si no se pudo identificar al profesional se ofrecen turnos
@@ -634,7 +650,8 @@ export default async function PaginaDelPortal({
         <Avance actual="Elegir" />
         <TituloDePaso
           tipo="elegir"
-          detalle="Elegí dónde querés atenderte. Después vas a ver los horarios disponibles en esa sede."
+          sinIcono
+          detalle="Seleccioná el lugar donde querés atenderte. Luego te mostraremos los horarios disponibles en esa sede."
         >
           ¿A qué sede querés ir?
         </TituloDePaso>
@@ -664,7 +681,8 @@ export default async function PaginaDelPortal({
         <Avance actual="Elegir" />
         <TituloDePaso
           tipo="elegir"
-          detalle="Elegí cómo preferís buscar. Cualquiera de las tres te lleva a los horarios disponibles."
+          sinIcono
+          detalle="Elegí cómo preferís buscar tu turno. Cualquiera de las opciones te lleva a los horarios disponibles."
         >
           ¿Cómo querés buscar tu turno?
         </TituloDePaso>
@@ -691,7 +709,8 @@ export default async function PaginaDelPortal({
           <Avance actual="Elegir" />
           <TituloDePaso
             tipo="elegir"
-            detalle="Seleccioná la especialidad de tu consulta. Vas a ver los horarios de los profesionales que la atienden."
+            sinIcono
+            detalle="Seleccioná la especialidad de tu consulta. Luego te mostraremos los horarios de los profesionales que la atienden."
           >
             ¿Qué especialidad necesitás?
           </TituloDePaso>
@@ -726,7 +745,8 @@ export default async function PaginaDelPortal({
           <Avance actual="Elegir" />
           <TituloDePaso
             tipo="elegir"
-            detalle="Seleccioná con quién querés atenderte y vas a ver sus horarios disponibles."
+            sinIcono
+            detalle="Seleccioná con quién querés atenderte. Luego te mostraremos sus horarios disponibles."
           >
             ¿Con qué profesional querés atenderte?
           </TituloDePaso>
@@ -822,9 +842,18 @@ export default async function PaginaDelPortal({
             <Avance actual="Elegir" />
             <TituloDePaso
               tipo="agenda"
-              detalle="Primero la fecha; después vas a ver los horarios de ese día. Vas a poder revisar todo antes de confirmar."
+              sinIcono
+              detalle={
+                <>
+                  <p>
+                    Seleccioná primero una fecha. Luego te mostraremos los horarios disponibles
+                    para ese día.
+                  </p>
+                  <p>Antes de confirmar, vas a poder revisar todos los datos de tu turno.</p>
+                </>
+              }
             >
-              Elegí un día y horario
+              Elegí cuándo querés tu turno
             </TituloDePaso>
 
             {/* Con quién son estos horarios. Es lo que decide si el nombre

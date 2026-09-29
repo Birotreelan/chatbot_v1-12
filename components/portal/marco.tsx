@@ -245,22 +245,38 @@ export function TituloDePaso({
   tipo,
   children,
   detalle,
+  sinIcono = false,
 }: {
   tipo: TipoDePaso
   children: ReactNode
   detalle?: ReactNode
+  /**
+   * El ícono en círculo sobra cuando arriba ya está el indicador de avance
+   * (30/9/2026): dos señales de "estás acá" compitiendo, y la de abajo no
+   * agrega nada que la de arriba no diga mejor.
+   */
+  sinIcono?: boolean
 }) {
   const Icono = ICONOS_DE_PASO[tipo]
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <div className="flex items-center gap-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-          <Icono className="h-[18px] w-[18px]" aria-hidden />
-        </span>
+        {!sinIcono && (
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+            <Icono className="h-[18px] w-[18px]" aria-hidden />
+          </span>
+        )}
         <p className="text-lg font-medium text-foreground sm:text-xl">{children}</p>
       </div>
-      {detalle && <p className="text-[15px] text-muted-foreground sm:text-base">{detalle}</p>}
+      {/* `div` y no `p`: el detalle suele ser más de una frase y van en
+          párrafos separados. Un <p> adentro de otro <p> es HTML inválido y el
+          navegador lo cierra solo, dejando el segundo afuera del estilo. */}
+      {detalle && (
+        <div className="space-y-1.5 text-[15px] leading-relaxed text-muted-foreground sm:text-base">
+          {detalle}
+        </div>
+      )}
     </div>
   )
 }
@@ -270,8 +286,10 @@ export function TituloDePaso({
  *
  * ── Por qué sin números ────────────────────────────────────────────────────
  *
- * "Paso 2 de 4" es más concreto y fue lo primero que se pensó. No se puede: el
- * portal no tiene una cantidad fija de pasos. Según lo que el cliente tenga
+ * Los pasos van numerados —1, 2, 3— pero NO como "paso 2 de 4". La diferencia
+ * no es cosmética: acá el número es la posición de una etapa con nombre, y las
+ * etapas son siempre tres. Un "de N" sería otra cosa y no se puede: el portal
+ * no tiene una cantidad fija de pantallas. Según lo que el cliente tenga
  * habilitado y lo que el paciente elija, el flujo de turno nuevo pasa por
  * sede, tipo de búsqueda, especialidad o profesional —o por ninguno—. Quien
  * elige "por especialidad" recorre un paso más que quien elige "cualquier
@@ -291,7 +309,7 @@ export function TituloDePaso({
  * lector de pantalla eso se anuncia como posición; hecho con `div`s y colores
  * no se anunciaría nada.
  */
-export const PASOS_DEL_AVANCE = ["Elegir", "Revisar", "Confirmación"] as const
+export const PASOS_DEL_AVANCE = ["Elegir", "Revisar", "Confirmar"] as const
 
 export type PasoDelAvance = (typeof PASOS_DEL_AVANCE)[number]
 
@@ -314,6 +332,9 @@ export function Avance({ actual }: { actual: PasoDelAvance }) {
               )}
               <span
                 aria-current={esActual ? "step" : undefined}
+                // El número va DENTRO del mismo span que el nombre para que el
+                // lector de pantalla lo anuncie junto: "1 Elegir", no "1" y
+                // después "Elegir" como si fueran dos cosas.
                 className={
                   esActual
                     ? "text-primary"
@@ -324,6 +345,7 @@ export function Avance({ actual }: { actual: PasoDelAvance }) {
                         "text-muted-foreground/50"
                 }
               >
+                <span aria-hidden>{i + 1}. </span>
                 {paso}
               </span>
             </li>

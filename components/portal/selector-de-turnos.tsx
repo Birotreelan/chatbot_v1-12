@@ -234,8 +234,8 @@ export function SelectorDeTurnos({
             Sin esto la pantalla final quedaba sin encabezado —el de la página
             se fue con el paso anterior— y el paciente pasaba de un título que
             le pedía algo a una pantalla sin ninguno. */}
-        <Avance actual="Confirmación" />
-        <TituloDePaso tipo="listo">
+        <Avance actual="Confirmar" />
+        <TituloDePaso tipo="listo" sinIcono>
           {accion === "cambiar"
             ? resultado.pendiente
               ? "Pedimos el cambio"
@@ -313,10 +313,25 @@ export function SelectorDeTurnos({
         <Avance actual="Revisar" />
         <TituloDePaso
           tipo="confirmar"
+          sinIcono
           detalle={
-            accion === "cambiar"
-              ? "Verificá que los datos sean correctos. Al confirmar se cancela tu turno actual y queda el nuevo."
-              : "Verificá que los datos sean correctos. Al confirmar, el turno queda reservado a tu nombre."
+            accion === "cambiar" ? (
+              <>
+                <p>Verificá que los datos sean correctos antes de continuar.</p>
+                <p>
+                  Al confirmar, cancelamos tu turno actual y queda reservado el nuevo. Te
+                  enviaremos la confirmación por WhatsApp.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>Verificá que los datos sean correctos antes de continuar.</p>
+                <p>
+                  Al confirmar, el turno queda reservado a tu nombre. Te enviaremos la
+                  confirmación por WhatsApp.
+                </p>
+              </>
+            )
           }
         >
           {accion === "cambiar" ? "Revisá y confirmá el cambio" : "Revisá y confirmá tu turno"}
@@ -529,8 +544,8 @@ export function SelectorDeTurnos({
 
         {!diaElegido && (
           <p className="text-[15px] text-muted-foreground lg:pt-2">
-            Los días con turnos disponibles están resaltados. Tocá uno para ver los horarios de
-            ese día.
+            Los días con turnos disponibles aparecen resaltados. Seleccioná uno para ver los
+            horarios de ese día.
           </p>
         )}
 
@@ -546,7 +561,7 @@ export function SelectorDeTurnos({
             {dias.find((d) => d.fecha === diaElegido)?.etiqueta}
           </p>
           <p className="text-[15px] text-muted-foreground">
-            Estos son los horarios libres de ese día. Tocá el que prefieras.
+            Seleccioná el horario que prefieras.
           </p>
           {/* Dos columnas sólo en los teléfonos más angostos —un iPhone SE de
               320px, donde tres chips con el nombre del profesional quedan
