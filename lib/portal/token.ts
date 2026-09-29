@@ -219,8 +219,29 @@ export function generarToken(): string {
  * `/p/` y no `/portal/turnos/` a propósito: cuanto más corta, menos ruido en la
  * barra del navegador y menos posibilidad de que se corte al compartirla.
  */
-export function urlDelPortal(token: string, baseUrl?: string): string {
-  return `${baseDelPortal(baseUrl)}/p/${token}`
+export function urlDelPortal(
+  token: string,
+  baseUrl?: string,
+  /**
+   * Filtros ya elegidos, para que el portal no los vuelva a preguntar
+   * (29/9/2026).
+   *
+   * Viajan en la query string y no en el token porque es donde ya vive todo
+   * lo que el paciente va eligiendo: así el "Volver" de cada paso los saca
+   * igual que a los que eligió a mano, y el que prefiere otro profesional
+   * puede cambiarlo. Guardarlos en el token los volvería inamovibles.
+   */
+  filtros?: Record<string, string | undefined>,
+): string {
+  const base = `${baseDelPortal(baseUrl)}/p/${token}`
+
+  const params = new URLSearchParams()
+  for (const [clave, valor] of Object.entries(filtros || {})) {
+    if (valor) params.set(clave, valor)
+  }
+
+  const query = params.toString()
+  return query ? `${base}?${query}` : base
 }
 
 /**
@@ -256,6 +277,8 @@ export async function emitirEnlace(params: {
   turno?: TurnoDelPortal
   baseUrl?: string
   demo?: boolean
+  /** Filtros que el enlace deja ya aplicados. Ver `urlDelPortal`. */
+  filtros?: Record<string, string | undefined>
 }): Promise<EnlaceEmitido | null> {
   const redis = getRedisClient()
   if (!redis) return null
@@ -294,7 +317,7 @@ export async function emitirEnlace(params: {
     `[PORTAL] Enlace emitido para ${params.phone} (${params.intencion}, ${params.origen}), vence ${venceAccion}`,
   )
 
-  return { token, url: urlDelPortal(token, params.baseUrl), contexto }
+  return { token, url: urlDelPortal(token, params.baseUrl, params.filtros), contexto }
 }
 
 export interface LecturaDelEnlace {

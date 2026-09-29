@@ -196,6 +196,14 @@ export async function derivarAlPortal(params: {
    * que reprogramar"— donde el texto general diría algo que no corresponde.
    */
   plantilla?: string
+  /**
+   * Filtros que el enlace deja ya aplicados (`profesionalId`, `sedeId`…).
+   *
+   * Sirve para cumplir lo que el mensaje promete: si el texto dice "reagendá
+   * con el mismo profesional", el enlace tiene que llegar con ese profesional
+   * puesto. Ver `urlDelPortal`.
+   */
+  filtros?: Record<string, string | undefined>
 }): Promise<boolean> {
   const { config, paciente } = params
 
@@ -254,6 +262,7 @@ export async function derivarAlPortal(params: {
       obraSocialId: paciente?.obraSocialId,
       sedeId: paciente?.sedeId,
       turno: paciente?.turno,
+      filtros: params.filtros,
     })
 
     if (!enlace) {

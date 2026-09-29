@@ -418,7 +418,7 @@ export function buildCancellationSuccessMessage(
   // Verificar si el turno admite reagendamiento
   const admiteReagendamiento = turno?.admite_reagendamiento !== false
 
-  let message = `Gracias, ${nombre}. La cancelación fue procesada correctamente.`
+  let message = `Gracias, ${nombre}. La cancelación de tu turno fue procesada correctamente.`
 
   // El paciente ya pidió "cancelar y solicitar uno nuevo": no ofrecer el menú de
   // reagendamiento, sino transicionar directamente al flujo de reserva (selección de sede).
@@ -437,7 +437,9 @@ export function buildCancellationSuccessMessage(
     message += ofertaConBoton
       ? `
 
-Si querés, podés sacar un turno nuevo con el botón de acá abajo.`
+Si necesitás reagendar con el mismo profesional, utilizá el botón que aparece a continuación para ingresar a la plataforma de gestión de turnos de la clínica y consultar los horarios disponibles.
+
+Si no deseás reagendar, simplemente podés ignorar el botón.`
       : `
 
 Puedo ofrecerte la opción de reagendar tu turno en otra fecha y horario.

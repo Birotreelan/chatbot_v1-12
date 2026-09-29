@@ -309,7 +309,7 @@ const RESCHEDULE_OFFER_BUTTONS = [
  * ahí el flujo de reserva es conversacional y el paciente necesita una forma
  * explícita de salir.
  */
-const RESCHEDULE_OFFER_BOTON_UNICO = [{ id: "1", title: "Reagendar" }]
+const RESCHEDULE_OFFER_BOTON_UNICO = [{ id: "1", title: "Reagendar turno" }]
 
 async function sendDirectResponse(
   ctx: DirectResponseContext,
@@ -1641,6 +1641,19 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
       //
       // Si la derivación falla, sigue el camino conversacional de abajo.
       if (usaPortal(config)) {
+        // ── El enlace llega con el profesional puesto (29/9/2026) ───────────
+        //
+        // El mensaje dice "reagendar con el mismo profesional". Sin estos
+        // filtros el portal le preguntaba sede, tipo de búsqueda y
+        // profesional otra vez, o sea que el texto prometía algo que la
+        // pantalla no hacía.
+        //
+        // Salen de `turno_cancelado`, que `clearAppointmentTurnos` guarda al
+        // vaciar los turnos justamente para esto. Van en la query string y no
+        // en el token: así el "Volver" del portal los saca igual que a los
+        // que el paciente eligió a mano, y el que prefiere otro profesional
+        // puede cambiarlo.
+        const cancelado = (chatbotData as any)?.turno_cancelado
         const derivado = await derivarAlPortal({
           config,
           phoneNumberId,
@@ -1648,6 +1661,10 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
           intencion: 'nuevo_turno',
           origen: 'conversacion',
           paciente: datosDesdeElContexto(chatbotData),
+          filtros: {
+            profesionalId: cancelado?.profesional_id ? String(cancelado.profesional_id) : undefined,
+            sedeId: cancelado?.sede_id ? String(cancelado.sede_id) : undefined,
+          },
         })
         if (derivado) return true
       }
