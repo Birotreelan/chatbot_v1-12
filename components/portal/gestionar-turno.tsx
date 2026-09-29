@@ -26,7 +26,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import { LoadingState } from "@/components/ui/loading-state"
-import { Aviso, ResumenDelTurno, TituloDePaso } from "./marco"
+import { Avance, Aviso, ResumenDelTurno, TituloDePaso } from "./marco"
 import type { TurnoDelPortal } from "@/lib/portal/token"
 
 type Estado = "eligiendo" | "enviando" | "listo"
@@ -81,6 +81,7 @@ export function GestionarTurno({
         {/* La pantalla final también lleva título. Sin él, el paciente pasa de
             una que le preguntaba algo a una sin encabezado y tiene que leer el
             aviso para saber qué pasó. */}
+        <Avance actual="Confirmación" />
         <TituloDePaso tipo="listo">
           {cancelado ? "Cancelamos tu turno" : "Confirmamos tu asistencia"}
         </TituloDePaso>
@@ -100,7 +101,11 @@ export function GestionarTurno({
 
   return (
     <div className="space-y-4">
-      <TituloDePaso tipo="confirmar">
+      <Avance actual="Elegir" />
+      <TituloDePaso
+        tipo="confirmar"
+        detalle="Elegí una de las tres opciones. Ninguna se aplica hasta que la toques."
+      >
         {nombre ? `${nombre}, ¿qué querés hacer con tu turno?` : "¿Qué querés hacer con tu turno?"}
       </TituloDePaso>
 

@@ -266,6 +266,75 @@ export function TituloDePaso({
 }
 
 /**
+ * Dónde está el paciente y qué le falta (30/9/2026).
+ *
+ * ── Por qué sin números ────────────────────────────────────────────────────
+ *
+ * "Paso 2 de 4" es más concreto y fue lo primero que se pensó. No se puede: el
+ * portal no tiene una cantidad fija de pasos. Según lo que el cliente tenga
+ * habilitado y lo que el paciente elija, el flujo de turno nuevo pasa por
+ * sede, tipo de búsqueda, especialidad o profesional —o por ninguno—. Quien
+ * elige "por especialidad" recorre un paso más que quien elige "cualquier
+ * profesional".
+ *
+ * Un total que cambia a mitad de camino es peor que no mostrar ninguno: el
+ * paciente que leyó "de 4" y después ve "de 5" deja de confiar en todo lo
+ * demás que le decimos.
+ *
+ * Los nombres, en cambio, son estables: siempre se elige, se revisa y se
+ * confirma. Los filtros de adelante quedan todos bajo "Elegir", que es lo que
+ * el paciente siente que está haciendo.
+ *
+ * ── Accesibilidad ──────────────────────────────────────────────────────────
+ *
+ * Es una lista ordenada de verdad, con `aria-current` en el actual. Para un
+ * lector de pantalla eso se anuncia como posición; hecho con `div`s y colores
+ * no se anunciaría nada.
+ */
+export const PASOS_DEL_AVANCE = ["Elegir", "Revisar", "Confirmación"] as const
+
+export type PasoDelAvance = (typeof PASOS_DEL_AVANCE)[number]
+
+export function Avance({ actual }: { actual: PasoDelAvance }) {
+  const indiceActual = PASOS_DEL_AVANCE.indexOf(actual)
+
+  return (
+    <nav aria-label="Progreso">
+      <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium uppercase tracking-wide">
+        {PASOS_DEL_AVANCE.map((paso, i) => {
+          const esActual = i === indiceActual
+          const yaPaso = i < indiceActual
+
+          return (
+            <li key={paso} className="flex items-center gap-2">
+              {i > 0 && (
+                <span aria-hidden className="text-muted-foreground/40">
+                  ›
+                </span>
+              )}
+              <span
+                aria-current={esActual ? "step" : undefined}
+                className={
+                  esActual
+                    ? "text-primary"
+                    : yaPaso
+                      ? "text-muted-foreground"
+                      : // Los que faltan, más apagados: se leen como "todavía
+                        // no", no como algo que se pueda tocar.
+                        "text-muted-foreground/50"
+                }
+              >
+                {paso}
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
+  )
+}
+
+/**
  * El paso atrás.
  *
  * ── Era demasiado discreto (28/9/2026) ────────────────────────────────────

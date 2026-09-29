@@ -41,6 +41,7 @@ import { es } from "date-fns/locale"
 import { LoadingState } from "@/components/ui/loading-state"
 import type { DiaConTurnos } from "@/lib/portal/agenda"
 import {
+  Avance,
   Aviso,
   BotonPrimario,
   BotonSecundario,
@@ -233,6 +234,7 @@ export function SelectorDeTurnos({
             Sin esto la pantalla final quedaba sin encabezado —el de la página
             se fue con el paso anterior— y el paciente pasaba de un título que
             le pedía algo a una pantalla sin ninguno. */}
+        <Avance actual="Confirmación" />
         <TituloDePaso tipo="listo">
           {accion === "cambiar"
             ? resultado.pendiente
@@ -308,7 +310,15 @@ export function SelectorDeTurnos({
   if (elegido) {
     return (
       <div className="space-y-4">
-        <TituloDePaso tipo="confirmar">
+        <Avance actual="Revisar" />
+        <TituloDePaso
+          tipo="confirmar"
+          detalle={
+            accion === "cambiar"
+              ? "Verificá que los datos sean correctos. Al confirmar se cancela tu turno actual y queda el nuevo."
+              : "Verificá que los datos sean correctos. Al confirmar, el turno queda reservado a tu nombre."
+          }
+        >
           {accion === "cambiar" ? "Revisá y confirmá el cambio" : "Revisá y confirmá tu turno"}
         </TituloDePaso>
 
@@ -519,7 +529,8 @@ export function SelectorDeTurnos({
 
         {!diaElegido && (
           <p className="text-[15px] text-muted-foreground lg:pt-2">
-            Los días con turno están resaltados. Tocá uno para ver los horarios.
+            Los días con turnos disponibles están resaltados. Tocá uno para ver los horarios de
+            ese día.
           </p>
         )}
 
@@ -534,7 +545,9 @@ export function SelectorDeTurnos({
           <p className="font-medium text-foreground first-letter:uppercase">
             {dias.find((d) => d.fecha === diaElegido)?.etiqueta}
           </p>
-          <p className="text-[15px] text-muted-foreground">Seleccioná un horario disponible:</p>
+          <p className="text-[15px] text-muted-foreground">
+            Estos son los horarios libres de ese día. Tocá el que prefieras.
+          </p>
           {/* Dos columnas sólo en los teléfonos más angostos —un iPhone SE de
               320px, donde tres chips con el nombre del profesional quedan
               ilegibles—, tres desde 360px, que es lo que mide el teléfono

@@ -45,7 +45,7 @@ import {
 } from "@/lib/api-tools/api-functions"
 import { getWhatsAppConfigById } from "@/lib/db"
 import Link from "next/link"
-import { Marco, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/components/portal/marco"
+import { Marco, Avance, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/components/portal/marco"
 import type { AnchoDelMarco } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
@@ -170,6 +170,7 @@ export default async function PaginaDelPortal({
 
     return (
       <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
+        <Avance actual="Confirmación" />
         <TituloDePaso tipo="listo">{titulo}</TituloDePaso>
         {/* Sin `detalle`: el título de arriba ya encabeza, así que el aviso
             lleva la frase concreta y nada más. Repetir "Turno cancelado" dos
@@ -420,6 +421,7 @@ export default async function PaginaDelPortal({
         {/* Se llegó acá a propósito, para corregir: tiene que haber salida sin
             cambiar nada. */}
         {filtrosCrudos.paso && <Volver href={urlCon({})} />}
+        <Avance actual="Elegir" />
         <TituloDePaso
           tipo="dni"
           detalle={
@@ -440,6 +442,7 @@ export default async function PaginaDelPortal({
     return marco(
       <>
         {filtrosCrudos.paso && <Volver href={urlCon({})} />}
+        <Avance actual="Elegir" />
         <TituloDePaso
           tipo="datos"
           detalle={
@@ -577,7 +580,7 @@ export default async function PaginaDelPortal({
                   <ResumenDelTurno
                     turno={contexto.turno}
                     titulo="Tu turno actual"
-                    detalle="Estos son los datos del turno que vas a reagendar."
+                    detalle="Éste es el turno que vas a reemplazar. Revisá que sea el correcto antes de elegir el nuevo."
                   />
                 )}
 
@@ -586,9 +589,10 @@ export default async function PaginaDelPortal({
                     del turno, donde ya quedó claro de qué se trata, y un
                     saludo a mitad de camino suena a que la página empezó dos
                     veces. */}
+                <Avance actual="Elegir" />
                 <TituloDePaso
                   tipo="agenda"
-                  detalle="Seleccioná una fecha y un horario disponibles para reemplazar tu turno actual."
+                  detalle="Primero la fecha; después vas a ver los horarios de ese día. Todavía no se cancela nada: el cambio se confirma en el paso siguiente."
                 >
                   Elegí un nuevo día y horario
                 </TituloDePaso>
@@ -627,7 +631,11 @@ export default async function PaginaDelPortal({
     return marco(
       <>
         {volverQuitando() && <Volver href={volverQuitando()!} />}
-        <TituloDePaso tipo="elegir" detalle="Vas a ver los horarios de la sede que elijas.">
+        <Avance actual="Elegir" />
+        <TituloDePaso
+          tipo="elegir"
+          detalle="Elegí dónde querés atenderte. Después vas a ver los horarios disponibles en esa sede."
+        >
           ¿A qué sede querés ir?
         </TituloDePaso>
         <ElegirFiltro token={token} campo="sedeId" opciones={sedesParaElegir} />
@@ -653,7 +661,11 @@ export default async function PaginaDelPortal({
         {/* El saludo va una sola vez, en la banda de arriba con el nombre de
             la clínica. Repetirlo en cada título hacía que todas las pantallas
             parecieran la primera. */}
-        <TituloDePaso tipo="elegir" detalle="Elegí una opción para encontrar el horario que buscás.">
+        <Avance actual="Elegir" />
+        <TituloDePaso
+          tipo="elegir"
+          detalle="Elegí cómo preferís buscar. Cualquiera de las tres te lleva a los horarios disponibles."
+        >
           ¿Cómo querés buscar tu turno?
         </TituloDePaso>
         <ElegirFiltro
@@ -676,9 +688,10 @@ export default async function PaginaDelPortal({
       return marco(
         <>
           {volverQuitando() && <Volver href={volverQuitando()!} />}
+          <Avance actual="Elegir" />
           <TituloDePaso
             tipo="elegir"
-            detalle="Seleccioná una especialidad para ver los horarios disponibles."
+            detalle="Seleccioná la especialidad de tu consulta. Vas a ver los horarios de los profesionales que la atienden."
           >
             ¿Qué especialidad necesitás?
           </TituloDePaso>
@@ -710,9 +723,10 @@ export default async function PaginaDelPortal({
       return marco(
         <>
           {volverA && <Volver href={volverA} />}
+          <Avance actual="Elegir" />
           <TituloDePaso
             tipo="elegir"
-            detalle="Seleccioná un profesional para ver sus horarios disponibles."
+            detalle="Seleccioná con quién querés atenderte y vas a ver sus horarios disponibles."
           >
             ¿Con qué profesional querés atenderte?
           </TituloDePaso>
@@ -805,9 +819,10 @@ export default async function PaginaDelPortal({
         encabezado={
           <>
             {volverQuitando() && <Volver href={volverQuitando()!} />}
+            <Avance actual="Elegir" />
             <TituloDePaso
               tipo="agenda"
-              detalle="Seleccioná una fecha y después un horario disponible."
+              detalle="Primero la fecha; después vas a ver los horarios de ese día. Vas a poder revisar todo antes de confirmar."
             >
               Elegí un día y horario
             </TituloDePaso>
