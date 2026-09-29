@@ -107,18 +107,48 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || ""
  */
 const COLUMNA = "mx-auto w-full max-w-[560px] sm:max-w-[640px]"
 
+/**
+ * El ancho del paso de agenda, que necesita más (29/9/2026).
+ *
+ * El calendario y la grilla de horarios apilados no entran en la altura de
+ * una notebook: el paciente elige un día, los horarios aparecen abajo del
+ * pliegue y hay que desplazarse. Puestos uno al lado del otro entran, y
+ * sobraba pantalla a los costados.
+ *
+ * Sólo desde 1024px, y sólo en esa pantalla. Los demás pasos son listas de
+ * opciones y texto: a 1000px de ancho las líneas se leen mal y una lista de
+ * tres opciones parece un formulario abandonado.
+ */
+const COLUMNA_AMPLIA = `${COLUMNA} lg:max-w-[1000px]`
+
+export type AnchoDelMarco = "normal" | "amplio"
+
 export function Marco({
   marca,
   children,
   cookieNueva,
   nombreCookie,
+  ancho = "normal",
 }: {
   marca: MarcaDelPortal
   children: ReactNode
+  /**
+   * "amplio" en el paso de agenda, donde el calendario y los horarios van uno
+   * al lado del otro.
+   *
+   * Lo toman la banda, el contenido y el pie a la vez: si sólo creciera el
+   * contenido, quedaría más ancho que el encabezado y volvería la
+   * desalineación que este mismo componente arregló. El costo es que el
+   * nombre de la clínica se corre unos píxeles al entrar a la agenda, en
+   * pantallas de más de 1024px. Es mucho menos molesto que la alternativa.
+   */
+  ancho?: AnchoDelMarco
   /** Se emite en la primera visita, para reconocer el dispositivo después. */
   cookieNueva?: string | null
   nombreCookie?: string
 }) {
+  const columna = ancho === "amplio" ? COLUMNA_AMPLIA : COLUMNA
+
   return (
     // `flex flex-col` + `main flex-1`: el pie queda abajo de la ventana aunque
     // la pantalla tenga tres renglones, sin `position: fixed` —que en el
@@ -154,7 +184,7 @@ export function Marco({
           paddingTop: "max(env(safe-area-inset-top), 16px)",
         }}
       >
-        <div className={`${COLUMNA} flex items-center gap-3 px-4 pb-4 sm:gap-4`}>
+        <div className={`${columna} flex items-center gap-3 px-4 pb-4 sm:gap-4`}>
           <CalendarDays className="h-6 w-6 shrink-0 sm:h-7 sm:w-7" aria-hidden />
           <div className="min-w-0">
             <p className="truncate text-lg font-medium sm:text-xl">{marca.clinica}</p>
@@ -164,7 +194,7 @@ export function Marco({
       </header>
 
       <main
-        className={`${COLUMNA} flex-1 space-y-4 px-4 pb-12 pt-5 text-base leading-relaxed sm:space-y-5 sm:pt-7 sm:text-[17px]`}
+        className={`${columna} flex-1 space-y-4 px-4 pb-12 pt-5 text-base leading-relaxed sm:space-y-5 sm:pt-7 sm:text-[17px]`}
         role="main"
       >
         {children}
@@ -188,7 +218,7 @@ export function Marco({
           desde una subcarpeta, da 404. Con el sitio en la raíz la variable
           queda vacía y el prefijo no molesta. */}
       <footer className="border-t py-6">
-        <div className={`${COLUMNA} flex items-center justify-center gap-2 px-4`}>
+        <div className={`${columna} flex items-center justify-center gap-2 px-4`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${BASE_PATH}/treelan-logo.jpg`}

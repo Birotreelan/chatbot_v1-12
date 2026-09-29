@@ -383,128 +383,141 @@ export function SelectorDeTurnos({
   }
 
   // ── Elegir día y hora ────────────────────────────────────────────────────
+  //
+  // Hasta 1024px, uno abajo del otro. Desde ahí, al lado: el calendario a la
+  // izquierda con su ancho natural y los horarios ocupando el resto.
+  //
+  // El motivo no es estético. Apilados no entran en la altura de una
+  // notebook: el paciente elige un día, los horarios aparecen abajo del
+  // pliegue, y hay que desplazarse para ver lo que acaba de pedir. Al lado
+  // entran los dos, y el espacio horizontal que sobraba pasa a usarse.
+  //
+  // `items-start` para que la columna de horarios no se estire a la altura del
+  // calendario, y `minmax(0,1fr)` porque sin el 0 la grilla de chips no deja
+  // que la columna se achique y desborda.
   return (
     <div className="space-y-4">
       {encabezado}
-      {/* La tarjeta va a lo ancho de la columna —así se alinea con el resto—
+      <div className="space-y-4 lg:grid lg:grid-cols-[420px_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
+        {/* La tarjeta va a lo ancho de la columna —así se alinea con el resto—
           pero el calendario adentro se acota y se centra.
           Las celdas son un séptimo del ancho disponible: sin tope, en una
           columna de 640px quedarían de 88px, que es un calendario gigante con
           números perdidos en el medio de cada casilla. */}
-      <div className="rounded-xl border bg-card p-1 sm:p-3">
-        <div className="mx-auto w-full max-w-[400px]">
-          <Calendar
-            mode="single"
-            locale={es}
-            defaultMonth={primerDia ? aFecha(primerDia) : undefined}
-            selected={diaElegido ? aFecha(diaElegido) : undefined}
-            onSelect={(fecha) => {
-              if (!fecha) return
-              setDiaElegido(aISO(fecha))
-            }}
-            // Los días sin agenda quedan apagados y no se pueden tocar. Es la
-            // mitad del valor del calendario: se ve dónde hay antes de tocar.
-            disabled={(fecha) => !fechasConAgenda.has(aISO(fecha))}
-            // ── Dos correcciones sobre el calendario del dashboard ───────────
-            //
-            // 1. Celdas de 44px en vez de 36px. El resto del portal no baja de
-            //    48px porque lo usan pacientes mayores en un teléfono; un
-            //    calendario con celdas de 36 sería el único lugar donde alguien
-            //    toca el día equivocado.
-            //
-            // 2. Colores explícitos en vez de los tokens del tema
-            //    (`bg-primary`, `text-muted-foreground`). Esos tokens siguen el
-            //    tema del dashboard, modo oscuro incluido. El portal es de un
-            //    solo tema claro a propósito —el navegador interno de WhatsApp
-            //    maneja el modo oscuro de forma inconsistente y un contraste roto
-            //    acá deja a alguien sin poder sacar un turno—, así que el
-            //    calendario tiene que respetar esa decisión igual que el resto.
-            // ── Los días se distinguen con estilos, no con clases ───────────
-            //
-            // Acá había un bug que dejaba el calendario todo del mismo color:
-            // `day` traía `text-gray-900` y `day_disabled` traía `text-gray-300`,
-            // y las dos clases caen sobre el MISMO elemento. Cuál gana no lo
-            // decide el orden en que están escritas sino el orden en que Tailwind
-            // las emite en la hoja de estilos — y ahí `text-gray-900` va después.
-            // Resultado: los días sin turno se veían igual de negros que los
-            // disponibles, con un cartel abajo diciendo "los días con turno están
-            // resaltados".
-            //
-            // La lección: dos clases de Tailwind que pisan la misma propiedad no
-            // son una jerarquía, son un empate que resuelve el compilador.
-            //
-            // Por eso el color de cada estado va por `modifiersStyles`, que son
-            // estilos en línea y le ganan a cualquier clase sin ambigüedad.
-            classNames={{
-              caption_label: "text-base font-medium capitalize text-foreground",
-              // Ancho fluido con piso táctil (29/9/2026). Antes eran 44px
-              // fijos: 7 columnas × 44 = 308px, más el borde de la tarjeta y los
-              // 32px de margen del contenedor, no entraban en un teléfono de
-              // 320px y el calendario desbordaba. Ahora cada celda toma un
-              // séptimo del ancho disponible y nunca baja de 40px.
-              head_cell: "w-[14.28%] min-w-10 text-xs font-normal text-muted-foreground sm:text-sm",
-              cell: "h-11 w-[14.28%] min-w-10 p-0 text-center sm:h-12",
-              // Sin color acá: lo pone el modificador que corresponda.
-              day: "h-11 w-full rounded-lg p-0 text-base sm:h-12 sm:text-lg",
-              // El día de hoy sin turnos no debe parecer seleccionable: sólo se
-              // marca con un borde.
-              day_today: "border border-input",
-              // Vacíos para anular los de `components/ui/calendar`, que usan
-              // tokens del tema del dashboard (`bg-primary`, `text-muted-
-              // foreground`, `opacity-50`). Esos tokens siguen el modo oscuro,
-              // que este portal no tiene a propósito, y además el `opacity-50`
-              // del deshabilitado se sumaba al gris y lo dejaba casi invisible.
-              day_selected: "",
-              day_disabled: "",
-              day_outside: "",
-            }}
-            // `disponible` excluye al día ya elegido a propósito: así los tres
-            // estados son mutuamente excluyentes y no depende del orden en que
-            // react-day-picker aplique los modificadores. Un día no puede estar
-            // disponible y elegido a la vez, ni disponible y deshabilitado.
-            modifiers={{
-              disponible: (fecha) => {
-                const iso = aISO(fecha)
-                return fechasConAgenda.has(iso) && iso !== diaElegido
-              },
-            }}
-            modifiersStyles={{
-              // Con turno: resaltado de verdad —fondo, color de la clínica y
-              // negrita—, que es lo que el texto de abajo promete.
-              // Los tres van con `hsl(var(--token))` y no con hexadecimales:
-              // react-day-picker pide estilos en línea acá, pero las variables
-              // son las mismas que usa el resto del portal, así que el día
-              // resaltado no puede quedar de un azul distinto al de los botones.
-              disponible: {
-                background: "hsl(var(--primary) / 0.08)",
-                color: "hsl(var(--primary))",
-                fontWeight: 600,
-              },
-              // Sin turno: apagado y claramente no tocable.
-              disabled: {
-                color: "hsl(var(--muted-foreground) / 0.45)",
-                fontWeight: 400,
-                background: "transparent",
-              },
-              // El elegido, lleno.
-              selected: {
-                background: "hsl(var(--primary))",
-                color: "hsl(var(--primary-foreground))",
-                fontWeight: 600,
-              },
-            }}
-          />
+        <div className="rounded-xl border bg-card p-1 sm:p-3">
+          <div className="mx-auto w-full max-w-[400px]">
+            <Calendar
+              mode="single"
+              locale={es}
+              defaultMonth={primerDia ? aFecha(primerDia) : undefined}
+              selected={diaElegido ? aFecha(diaElegido) : undefined}
+              onSelect={(fecha) => {
+                if (!fecha) return
+                setDiaElegido(aISO(fecha))
+              }}
+              // Los días sin agenda quedan apagados y no se pueden tocar. Es la
+              // mitad del valor del calendario: se ve dónde hay antes de tocar.
+              disabled={(fecha) => !fechasConAgenda.has(aISO(fecha))}
+              // ── Dos correcciones sobre el calendario del dashboard ───────────
+              //
+              // 1. Celdas de 44px en vez de 36px. El resto del portal no baja de
+              //    48px porque lo usan pacientes mayores en un teléfono; un
+              //    calendario con celdas de 36 sería el único lugar donde alguien
+              //    toca el día equivocado.
+              //
+              // 2. Colores explícitos en vez de los tokens del tema
+              //    (`bg-primary`, `text-muted-foreground`). Esos tokens siguen el
+              //    tema del dashboard, modo oscuro incluido. El portal es de un
+              //    solo tema claro a propósito —el navegador interno de WhatsApp
+              //    maneja el modo oscuro de forma inconsistente y un contraste roto
+              //    acá deja a alguien sin poder sacar un turno—, así que el
+              //    calendario tiene que respetar esa decisión igual que el resto.
+              // ── Los días se distinguen con estilos, no con clases ───────────
+              //
+              // Acá había un bug que dejaba el calendario todo del mismo color:
+              // `day` traía `text-gray-900` y `day_disabled` traía `text-gray-300`,
+              // y las dos clases caen sobre el MISMO elemento. Cuál gana no lo
+              // decide el orden en que están escritas sino el orden en que Tailwind
+              // las emite en la hoja de estilos — y ahí `text-gray-900` va después.
+              // Resultado: los días sin turno se veían igual de negros que los
+              // disponibles, con un cartel abajo diciendo "los días con turno están
+              // resaltados".
+              //
+              // La lección: dos clases de Tailwind que pisan la misma propiedad no
+              // son una jerarquía, son un empate que resuelve el compilador.
+              //
+              // Por eso el color de cada estado va por `modifiersStyles`, que son
+              // estilos en línea y le ganan a cualquier clase sin ambigüedad.
+              classNames={{
+                caption_label: "text-base font-medium capitalize text-foreground",
+                // Ancho fluido con piso táctil (29/9/2026). Antes eran 44px
+                // fijos: 7 columnas × 44 = 308px, más el borde de la tarjeta y los
+                // 32px de margen del contenedor, no entraban en un teléfono de
+                // 320px y el calendario desbordaba. Ahora cada celda toma un
+                // séptimo del ancho disponible y nunca baja de 40px.
+                head_cell: "w-[14.28%] min-w-10 text-xs font-normal text-muted-foreground sm:text-sm",
+                cell: "h-11 w-[14.28%] min-w-10 p-0 text-center sm:h-12",
+                // Sin color acá: lo pone el modificador que corresponda.
+                day: "h-11 w-full rounded-lg p-0 text-base sm:h-12 sm:text-lg",
+                // El día de hoy sin turnos no debe parecer seleccionable: sólo se
+                // marca con un borde.
+                day_today: "border border-input",
+                // Vacíos para anular los de `components/ui/calendar`, que usan
+                // tokens del tema del dashboard (`bg-primary`, `text-muted-
+                // foreground`, `opacity-50`). Esos tokens siguen el modo oscuro,
+                // que este portal no tiene a propósito, y además el `opacity-50`
+                // del deshabilitado se sumaba al gris y lo dejaba casi invisible.
+                day_selected: "",
+                day_disabled: "",
+                day_outside: "",
+              }}
+              // `disponible` excluye al día ya elegido a propósito: así los tres
+              // estados son mutuamente excluyentes y no depende del orden en que
+              // react-day-picker aplique los modificadores. Un día no puede estar
+              // disponible y elegido a la vez, ni disponible y deshabilitado.
+              modifiers={{
+                disponible: (fecha) => {
+                  const iso = aISO(fecha)
+                  return fechasConAgenda.has(iso) && iso !== diaElegido
+                },
+              }}
+              modifiersStyles={{
+                // Con turno: resaltado de verdad —fondo, color de la clínica y
+                // negrita—, que es lo que el texto de abajo promete.
+                // Los tres van con `hsl(var(--token))` y no con hexadecimales:
+                // react-day-picker pide estilos en línea acá, pero las variables
+                // son las mismas que usa el resto del portal, así que el día
+                // resaltado no puede quedar de un azul distinto al de los botones.
+                disponible: {
+                  background: "hsl(var(--primary) / 0.08)",
+                  color: "hsl(var(--primary))",
+                  fontWeight: 600,
+                },
+                // Sin turno: apagado y claramente no tocable.
+                disabled: {
+                  color: "hsl(var(--muted-foreground) / 0.45)",
+                  fontWeight: 400,
+                  background: "transparent",
+                },
+                // El elegido, lleno.
+                selected: {
+                  background: "hsl(var(--primary))",
+                  color: "hsl(var(--primary-foreground))",
+                  fontWeight: 600,
+                },
+              }}
+            />
+          </div>
         </div>
-      </div>
 
-      {!diaElegido && (
-        <p className="text-[15px] text-muted-foreground">
-          Los días con turno están resaltados. Tocá uno para ver los horarios.
-        </p>
-      )}
+        {!diaElegido && (
+          <p className="text-[15px] text-muted-foreground lg:pt-2">
+            Los días con turno están resaltados. Tocá uno para ver los horarios.
+          </p>
+        )}
 
-      {diaElegido && (
-        <div ref={horariosRef} className="scroll-mt-24 space-y-2">
+        {diaElegido && (
+          <div ref={horariosRef} className="scroll-mt-24 space-y-2 lg:scroll-mt-0">
           {/* `capitalize` de Tailwind pone en mayúscula CADA palabra, y la
               etiqueta es una frase: "miércoles 30 de septiembre" salía
               "Miércoles 30 De Septiembre". Sólo la primera letra. */}
@@ -520,7 +533,7 @@ export function SelectorDeTurnos({
 
               El corte va en 360 y no en 380: un iPhone estándar mide 375, y
               con 380 se quedaba con dos columnas justo el tamaño más común. */}
-          <div className="grid grid-cols-2 gap-2 min-[360px]:grid-cols-3 sm:grid-cols-4 sm:gap-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 min-[360px]:grid-cols-3 sm:grid-cols-4 sm:gap-3">
             {turnosDelDia.map((turno) => (
               <button
                 key={turno.id}
@@ -556,9 +569,10 @@ export function SelectorDeTurnos({
                   )}
               </button>
             ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

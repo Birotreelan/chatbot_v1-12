@@ -46,6 +46,7 @@ import {
 import { getWhatsAppConfigById } from "@/lib/db"
 import Link from "next/link"
 import { Marco, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/components/portal/marco"
+import type { AnchoDelMarco } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
 import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
@@ -391,8 +392,15 @@ export default async function PaginaDelPortal({
     />
   ) : null
 
-  const marco = (hijos: React.ReactNode) => (
-    <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
+  // `ancho` sólo lo pide el paso de agenda, donde el calendario y los horarios
+  // van uno al lado del otro en pantallas grandes. Ver `Marco`.
+  const marco = (hijos: React.ReactNode, ancho: AnchoDelMarco = "normal") => (
+    <Marco
+      marca={marca}
+      cookieNueva={secretoNuevo}
+      nombreCookie={COOKIE_DISPOSITIVO}
+      ancho={ancho}
+    >
       {avisoDemo}
       {hijos}
     </Marco>
@@ -606,6 +614,7 @@ export default async function PaginaDelPortal({
           />
         )}
       </>,
+      "amplio",
     )
   }
 
@@ -797,6 +806,7 @@ export default async function PaginaDelPortal({
         }
       />
     </>,
+    "amplio",
   )
 }
 
