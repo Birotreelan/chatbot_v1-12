@@ -10,13 +10,14 @@
  * función.
  */
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import {
   calcularVencimientos,
   estadoDelEnlace,
   permiteGestionar,
   permiteVerDatos,
   reemplazaElTurnoPrevio,
+  vencimientoHabilitado,
   VENTANA_CONVERSACION_MS,
   TOPE_RECORDATORIO_MS,
 } from "./vigencia"
@@ -78,6 +79,17 @@ describe("los cuatro estados", () => {
     venceVisibilidad: new Date(AHORA + DIA).toISOString(),
   }
 
+  // Los estados de vencimiento sólo existen con el interruptor encendido. Hoy
+  // está apagado en producción (ver `vencimientoHabilitado`), pero la lógica
+  // se sigue probando: es la que vuelve a regir cuando se encienda, y un
+  // interruptor que tapa código sin probar es código que se pudre.
+  beforeEach(() => {
+    process.env.PORTAL_VENCIMIENTO_HABILITADO = "true"
+  })
+  afterEach(() => {
+    delete process.env.PORTAL_VENCIMIENTO_HABILITADO
+  })
+
   it("vigente: se puede gestionar", () => {
     const e = estadoDelEnlace(base, AHORA)
     expect(e).toBe("vigente")
@@ -123,6 +135,13 @@ describe("los cuatro estados", () => {
 })
 
 describe("datos rotos no habilitan nada", () => {
+  beforeEach(() => {
+    process.env.PORTAL_VENCIMIENTO_HABILITADO = "true"
+  })
+  afterEach(() => {
+    delete process.env.PORTAL_VENCIMIENTO_HABILITADO
+  })
+
   it("fechas inválidas o ausentes caen en vencido", () => {
     for (const contexto of [
       { venceAccion: "", venceVisibilidad: "" },
@@ -162,5 +181,52 @@ describe("¿el enlace reemplaza el turno que trae?", () => {
   it("el turno de un familiar tampoco", () => {
     // El turno del token es del titular del teléfono, no del familiar.
     expect(reemplazaElTurnoPrevio("familiar")).toBe(false)
+  })
+})
+
+describe("el interruptor del vencimiento (29/9/2026)", () => {
+  const viejo = {
+    venceAccion: new Date(AHORA - 5 * DIA).toISOString(),
+    venceVisibilidad: new Date(AHORA - 5 * DIA).toISOString(),
+  }
+
+  it("por defecto está apagado", () => {
+    // El default es lo que corre en producción: si alguien invierte el sentido
+    // de la variable, esto lo atrapa antes que un paciente.
+    delete process.env.PORTAL_VENCIMIENTO_HABILITADO
+    expect(vencimientoHabilitado()).toBe(false)
+  })
+
+  it("apagado, un enlace de hace cinco días sigue sirviendo", () => {
+    delete process.env.PORTAL_VENCIMIENTO_HABILITADO
+    const e = estadoDelEnlace(viejo, AHORA)
+    expect(e).toBe("vigente")
+    expect(permiteGestionar(e)).toBe(true)
+  })
+
+  it("apagado, lo ya gestionado sigue mostrándose y no se puede rehacer", () => {
+    // Que no venza no significa que se pueda gestionar dos veces: el enlace se
+    // consume al usarse y eso no depende del reloj.
+    delete process.env.PORTAL_VENCIMIENTO_HABILITADO
+    const e = estadoDelEnlace({ ...viejo, resultado: { texto: "x" } }, AHORA)
+    expect(e).toBe("gestionado")
+    expect(permiteGestionar(e)).toBe(false)
+    expect(permiteVerDatos(e)).toBe(true)
+  })
+
+  it("encendido, el mismo enlace vence", () => {
+    process.env.PORTAL_VENCIMIENTO_HABILITADO = "true"
+    expect(estadoDelEnlace(viejo, AHORA)).toBe("vencido")
+    delete process.env.PORTAL_VENCIMIENTO_HABILITADO
+  })
+
+  it("se lee en cada llamada, no al cargar el módulo", () => {
+    // Si se leyera una sola vez, cambiar la variable en Vercel no surtiría
+    // efecto hasta el próximo despliegue.
+    delete process.env.PORTAL_VENCIMIENTO_HABILITADO
+    expect(vencimientoHabilitado()).toBe(false)
+    process.env.PORTAL_VENCIMIENTO_HABILITADO = "true"
+    expect(vencimientoHabilitado()).toBe(true)
+    delete process.env.PORTAL_VENCIMIENTO_HABILITADO
   })
 })

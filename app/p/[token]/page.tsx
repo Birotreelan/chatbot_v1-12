@@ -190,6 +190,10 @@ export default async function PaginaDelPortal({
     )
   }
 
+  // Hoy esto no se alcanza: el vencimiento está apagado y `estadoDelEnlace`
+  // nunca devuelve "vencido" (ver `vencimientoHabilitado`). Se deja porque es
+  // la pantalla que vuelve a hacer falta el día que se encienda, y porque un
+  // enlace que caduca sin explicar por qué es peor que este mensaje.
   if (!permiteGestionar(estado)) {
     return (
       <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>

@@ -103,6 +103,32 @@ export const TOPE_RECORDATORIO_MS = 48 * HORA
 /** Cuando no hay un turno con fecha (pedir uno nuevo), el resultado se ve una semana. */
 export const VISIBILIDAD_SIN_TURNO_MS = 7 * DIA
 
+/**
+ * ── Los enlaces no vencen (29/9/2026) ─────────────────────────────────────
+ *
+ * Mientras se mide cuánta gente completa el flujo, un enlace vencido es un
+ * paciente perdido y un dato que no sabemos leer: no hay forma de distinguir
+ * "abandonó" de "llegó tarde y le cerramos la puerta". Con el vencimiento
+ * apagado, todo el que vuelve encuentra su enlace funcionando.
+ *
+ * Es un interruptor y no un borrado, por dos motivos:
+ *
+ *  - La razón por la que existía sigue siendo buena. Una URL queda en el
+ *    historial del navegador, se copia de la barra de direcciones y sobrevive
+ *    en una computadora compartida; la ventana corta era la única protección
+ *    que controlábamos nosotros. Cuando el embudo esté medido, esto se vuelve
+ *    a encender y las ventanas de arriba siguen calculadas y guardadas en cada
+ *    enlace, listas para volver a regir.
+ *  - Apagarlo borrando el código obligaría a reescribirlo, y lo reescrito
+ *    nunca es igual.
+ *
+ * Se lee en cada llamada, no al cargar el módulo: así cambiar la variable de
+ * entorno surte efecto sin volver a desplegar.
+ */
+export function vencimientoHabilitado(): boolean {
+  return process.env.PORTAL_VENCIMIENTO_HABILITADO === "true"
+}
+
 export interface Vencimientos {
   /** ISO. Hasta acá se puede gestionar. */
   venceAccion: string
@@ -159,6 +185,13 @@ export function estadoDelEnlace(
   contexto: { venceAccion: string; venceVisibilidad: string; resultado?: unknown },
   ahora: number = Date.now(),
 ): EstadoDelEnlace {
+  // Con el vencimiento apagado quedan dos estados: o ya se gestionó, o se
+  // puede. El único punto donde se decide, para que no haya que acordarse de
+  // esto en cada pantalla ni en cada ruta.
+  if (!vencimientoHabilitado()) {
+    return contexto.resultado ? "gestionado" : "vigente"
+  }
+
   const accion = fechaValida(contexto.venceAccion) ?? 0
   const visibilidad = fechaValida(contexto.venceVisibilidad) ?? 0
 

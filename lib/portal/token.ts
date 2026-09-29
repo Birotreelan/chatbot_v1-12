@@ -27,6 +27,7 @@ import {
   calcularVencimientos,
   estadoDelEnlace,
   type EstadoDelEnlace,
+  vencimientoHabilitado,
   type IntencionDelPortal,
   type OrigenDelEnlace,
 } from "./vigencia"
@@ -35,6 +36,39 @@ const PREFIJO = "portal:"
 
 /** Margen sobre la visibilidad antes de que Redis borre la clave. */
 const MARGEN_TTL_SEGUNDOS = 24 * 60 * 60
+
+/**
+ * Cuánto vive la clave cuando el vencimiento está apagado (29/9/2026).
+ *
+ * ── El error que esto evita ────────────────────────────────────────────────
+ *
+ * `estadoDelEnlace` dejó de vencer enlaces, pero el TTL de Redis es otra cosa:
+ * si la clave se borra, `leerEnlace` devuelve null y el paciente ve "Este
+ * enlace ya no está disponible" — un callejón sin salida PEOR que el mensaje
+ * de vencimiento que acabamos de sacar, porque ni siquiera explica qué pasó.
+ *
+ * Apagar el vencimiento en un lado y dejarlo puesto en el otro es la misma
+ * pregunta respondida dos veces con respuestas distintas. Los dos leen el
+ * mismo interruptor.
+ *
+ * Un año y no "para siempre": Redis necesita un número, y un enlace de hace un
+ * año es basura para todos. Cuando el vencimiento se vuelva a encender, las
+ * claves nuevas vuelven al cálculo de siempre; las viejas se caen solas.
+ */
+const TTL_SIN_VENCIMIENTO_SEGUNDOS = 365 * 24 * 60 * 60
+
+/**
+ * El TTL de la clave, según el interruptor.
+ *
+ * Una sola función para los dos lugares que guardan —emitir y actualizar—
+ * porque tenían el cálculo copiado y una copia se actualiza y la otra no.
+ */
+function ttlDeLaClave(venceVisibilidad: string): number {
+  if (!vencimientoHabilitado()) return TTL_SIN_VENCIMIENTO_SEGUNDOS
+
+  const restante = Math.ceil((new Date(venceVisibilidad).getTime() - Date.now()) / 1000)
+  return Math.max(60, restante + MARGEN_TTL_SEGUNDOS)
+}
 
 export interface TurnoDelPortal {
   agendaId?: string
@@ -254,12 +288,7 @@ export async function emitirEnlace(params: {
   }
 
   const token = generarToken()
-  const ttl = Math.max(
-    60,
-    Math.ceil((new Date(venceVisibilidad).getTime() - Date.now()) / 1000) + MARGEN_TTL_SEGUNDOS,
-  )
-
-  await redis.setex(clave(token), ttl, JSON.stringify(contexto))
+  await redis.setex(clave(token), ttlDeLaClave(venceVisibilidad), JSON.stringify(contexto))
 
   console.log(
     `[PORTAL] Enlace emitido para ${params.phone} (${params.intencion}, ${params.origen}), vence ${venceAccion}`,
@@ -392,7 +421,5 @@ export async function guardarIdentidad(
 async function guardar(token: string, contexto: ContextoDelPortal): Promise<void> {
   const redis = getRedisClient()
   if (!redis) return
-  const restante = Math.ceil((new Date(contexto.venceVisibilidad).getTime() - Date.now()) / 1000)
-  const ttl = Math.max(60, restante + MARGEN_TTL_SEGUNDOS)
-  await redis.setex(clave(token), ttl, JSON.stringify(contexto))
+  await redis.setex(clave(token), ttlDeLaClave(contexto.venceVisibilidad), JSON.stringify(contexto))
 }
