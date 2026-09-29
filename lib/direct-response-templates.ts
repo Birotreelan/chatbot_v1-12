@@ -427,10 +427,30 @@ export function buildCancellationSuccessMessage(
     return message
   }
 
+  /**
+   * La despedida, que sólo va cuando éste es de verdad el último mensaje
+   * (29/9/2026).
+   *
+   * Desde que el bot dejó de contestar los "gracias" —ver silencio.ts—, un
+   * mensaje que termina sin cerrar deja al paciente esperando una respuesta
+   * que no va a llegar. La despedida es lo que convierte ese silencio en algo
+   * intencional.
+   *
+   * No va en la variante del menú numerado: ahí el mensaje TERMINA en una
+   * pregunta y el bot está esperando el 1 o el 2. Despedirse y preguntar en la
+   * misma línea es pedirle al paciente que adivine cuál de las dos cosas va en
+   * serio.
+   */
+  const despedida = ofertaConBoton
+    ? `
+
+Gracias por comunicarte con nosotros. ¡Que tengas un buen día!`
+    : ``
+
   // Reagendamiento no disponible (turno no lo admite o el cliente lo tiene
   // desactivado): cancelación simple, sin texto adicional ni menú.
   if (!includeRescheduleOffer) {
-    return message
+    return message + despedida
   }
 
   if (admiteReagendamiento) {
@@ -439,7 +459,7 @@ export function buildCancellationSuccessMessage(
 
 Si necesitás reagendar con el mismo profesional, utilizá el botón que aparece a continuación para ingresar a la plataforma de gestión de turnos de la clínica y consultar los horarios disponibles.
 
-Si no deseás reagendar, simplemente podés ignorar el botón.`
+Si no deseás reagendar, simplemente podés ignorar el botón.${despedida}`
       : `
 
 Puedo ofrecerte la opción de reagendar tu turno en otra fecha y horario.
