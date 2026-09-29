@@ -1309,6 +1309,52 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
           false,
           ofertaConBoton,
         )
+
+        // ── El enlace va EN este mensaje, no en el siguiente (29/9/2026) ────
+        //
+        // La oferta era un botón de respuesta rápida: el paciente lo tocaba,
+        // eso volvía al bot como un mensaje de texto, y recién ahí salía el
+        // mensaje con el enlace. Dos mensajes de la clínica para decir algo
+        // que entra en uno, y desde el 1/10 los dos se pagan.
+        //
+        // Un botón CTA de URL lleva directo al portal sin pasar por nosotros.
+        // La contra: WhatsApp no avisa cuando lo tocan, así que perdemos el
+        // dato de cuántos siguen desde acá. Se mide del lado del portal, que
+        // es donde se mide todo el embudo.
+        //
+        // Sólo cuando el turno admite reagendamiento: si no, el mensaje es una
+        // cancelación a secas y no lleva botón.
+        //
+        // El enlace sale con el profesional y la sede del turno cancelado,
+        // porque el texto promete "con el mismo profesional".
+        if (ofertaConBoton && admiteReagendamiento) {
+          const cancelado = (chatbotData as any)?.turno_cancelado || turno
+          const conEnlace = await derivarAlPortal({
+            config,
+            phoneNumberId,
+            userPhoneNumber,
+            intencion: 'nuevo_turno',
+            origen: 'conversacion',
+            paciente: datosDesdeElContexto(chatbotData),
+            cuerpoLiteral: successMsg,
+            textoDelBoton: 'Reagendar turno',
+            filtros: {
+              profesionalId: cancelado?.profesional_id ? String(cancelado.profesional_id) : undefined,
+              sedeId: cancelado?.sede_id ? String(cancelado.sede_id) : undefined,
+            },
+          })
+
+          if (conEnlace) {
+            // No queda nada que responder por chat: el botón se va al portal.
+            // Dejar `awaiting_reschedule_choice` puesto haría que el próximo
+            // mensaje del paciente —"gracias"— se interprete como una elección.
+            await clearFlowState(userPhoneNumber, config.id)
+            return true
+          }
+          // Si falló, sigue el mensaje con el botón de respuesta rápida: el
+          // camino es más largo pero el paciente no se queda sin salida.
+        }
+
         await sendDirectResponse(
           ctx,
           successMsg,

@@ -204,6 +204,30 @@ export async function derivarAlPortal(params: {
    * puesto. Ver `urlDelPortal`.
    */
   filtros?: Record<string, string | undefined>
+  /**
+   * El cuerpo ya armado, cuando el mensaje no es "acá va tu enlace" sino otra
+   * cosa que ADEMÁS lleva el enlace (29/9/2026).
+   *
+   * El caso que lo motivó: la confirmación de una cancelación. Antes salían
+   * dos mensajes —"lo cancelamos" con un botón de respuesta rápida, y recién
+   * al tocarlo el mensaje con el enlace—. Dos mensajes que se pagan para
+   * decir algo que entra en uno.
+   *
+   * No pasa por `textoDelEnlace` a propósito. Ese arma el texto desde una
+   * plantilla y le antepone el nombre del paciente; un cuerpo que ya dice
+   * "Gracias, Nicolas…" saldría como "Nicolas, Gracias, Nicolas…".
+   * `plantilla` sigue siendo el camino para redactar distinto un mensaje de
+   * enlace; esto es para cuando el mensaje no es de enlace.
+   */
+  cuerpoLiteral?: string
+  /**
+   * La etiqueta del botón, cuando el flujo no la describe bien.
+   *
+   * La intención acá es `nuevo_turno` —el turno viejo ya no existe— pero para
+   * el paciente esto es reagendar, y el botón tiene que decir lo que él cree
+   * que está haciendo, no cómo lo llamamos nosotros por dentro.
+   */
+  textoDelBoton?: string
 }): Promise<boolean> {
   const { config, paciente } = params
 
@@ -278,14 +302,16 @@ export async function derivarAlPortal(params: {
       return false
     }
 
-    const cuerpoBase = textoDelEnlace({
-      intencion: params.intencion,
-      nombre: paciente?.pacienteNombre,
-      turno: paciente?.turno,
-      // El texto puntual gana sobre la redacción del cliente, y ésta sobre la
-      // plantilla por defecto del flujo.
-      plantilla: params.plantilla || config.textoEnlacePortal,
-    })
+    const cuerpoBase =
+      params.cuerpoLiteral ||
+      textoDelEnlace({
+        intencion: params.intencion,
+        nombre: paciente?.pacienteNombre,
+        turno: paciente?.turno,
+        // El texto puntual gana sobre la redacción del cliente, y ésta sobre la
+        // plantilla por defecto del flujo.
+        plantilla: params.plantilla || config.textoEnlacePortal,
+      })
 
     // Por el mismo embudo que el resto: si es el primer mensaje del día, el
     // paciente tiene que saber que le está escribiendo una IA antes de que le
@@ -299,7 +325,7 @@ export async function derivarAlPortal(params: {
       // La etiqueta sale de la misma tabla que la nombra dentro del texto
       // ("presionando el botón «Cancelar mi turno»"). Decidirla acá otra vez
       // era pedirle al paciente que apriete un botón que dice otra cosa.
-      textoDelBoton: botonDelEnlace(params.intencion),
+      textoDelBoton: params.textoDelBoton || botonDelEnlace(params.intencion),
       // Sin pie: el nombre de la clínica ya aparece como remitente del chat, y
       // repetirlo abajo de un mensaje de una línea lo hacía ver más largo de lo
       // que es.
