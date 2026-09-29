@@ -6306,39 +6306,27 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                     ...(wantsBookNew ? { postCancelAction: 'book_new' as const } : {}),
                   })
 
-                  // ── Clientes del portal: cancelar sin preguntar dos veces ──────
+                  // ── La doble confirmación vuelve para cancelar (29/9/2026) ─────
                   //
-                  // La doble confirmación existe para que nadie cancele un turno sin
-                  // querer. Cuesta dos mensajes: el "¿estás seguro?" y la respuesta.
-                  // Desde el 1/10 los dos se pagan.
+                  // El 25/9 se había sacado en los clientes del portal, para ahorrar
+                  // los dos mensajes que cuesta —el "¿estás seguro?" y la respuesta—.
+                  // Se repone, y conviene dejar por qué, porque el ahorro era real.
                   //
-                  // En estos clientes la protección vive en otro lado: el botón
-                  // "Cancelar" del recordatorio no cancela, abre el portal, y ahí la
-                  // confirmación es una pantalla y no cuesta nada. Quien llega hasta
-                  // acá escribió un número en un menú que dice "Cancelar el turno
-                  // médico": es un acto deliberado, no un dedo que resbaló.
+                  // El argumento para sacarla era que quien responde "1" a un menú que
+                  // dice "Cancelar el turno médico" hizo un acto deliberado. Cierto
+                  // para el que responde un número. Pero a esta misma acción se llega
+                  // también por texto libre: el clasificador manda acá cosas como "no
+                  // voy a poder ir" o "no llego", y ahí la certeza no es la misma.
+                  // Sin red, una frase mal interpretada cancela un turno médico y no
+                  // hay vuelta atrás: el horario se libera y lo toma otro.
                   //
-                  // Se reusa `handlePendingFlowResponse` con la respuesta afirmativa
-                  // en vez de copiar la cancelación. Ese camino hace bastante más que
-                  // llamar al proxy —estadísticas, limpieza selectiva del contexto,
-                  // nota al historial para que el bot deje de ver el turno como
-                  // vigente, vuelta al menú—, y una copia se olvida de la mitad y se
-                  // desactualiza con el primer cambio.
-                  if (!wantsBookNew && usaPortal(config)) {
-                    const cancelada = await handlePendingFlowResponse(
-                      "1",
-                      userPhoneNumber,
-                      config,
-                      value.metadata.phone_number_id,
-                      value,
-                    )
-                    if (cancelada) {
-                      await completePatientDetectionFlow(userPhoneNumber, config.id)
-                      return
-                    }
-                    // No se pudo: se sigue con la doble confirmación de siempre, que
-                    // deja al paciente con una salida en vez de un silencio.
-                  }
+                  // Dos mensajes es un precio bajo para eso. La cancelación es la
+                  // única acción de todo el sistema que destruye algo que el paciente
+                  // no puede recuperar solo.
+                  //
+                  // "Cancelar y solicitar uno nuevo" no pasa por acá: ése se va al
+                  // portal unos renglones más arriba, donde la confirmación es una
+                  // pantalla y no cuesta nada.
 
                   // Construir y enviar mensaje de doble confirmación
                   const doubleConfirmMsg = buildCancelDoubleConfirmMessage(
