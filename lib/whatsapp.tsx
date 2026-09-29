@@ -1590,6 +1590,34 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
       }
       logger.info("Usuario quiere reagendar - switch a asistente de reagendamiento")
       await clearFlowState(userPhoneNumber, config.id)
+
+      // ── Clientes del portal: sacar el turno nuevo en la pantalla ───────────
+      //
+      // Acá el turno viejo YA está cancelado. Lo que viene es armar uno nuevo
+      // —sede, especialidad, profesional, día, horario—, que por chat son
+      // cinco o seis mensajes más. Ése es exactamente el gasto que el portal
+      // existe para evitar, y el motivo por el que "Cancelar y solicitar uno
+      // nuevo" del menú también deriva.
+      //
+      // La intención es `nuevo_turno` y no `reagendar`: no hay turno que
+      // reprogramar, se canceló hace un segundo. Mandar `reagendar` haría que
+      // el portal busque un turno que no existe. `datosDesdeElContexto` trae
+      // la identidad del paciente —que `clearAppointmentTurnos` preserva a
+      // propósito— así que no vuelve a pedirle el DNI.
+      //
+      // Si la derivación falla, sigue el camino conversacional de abajo.
+      if (usaPortal(config)) {
+        const derivado = await derivarAlPortal({
+          config,
+          phoneNumberId,
+          userPhoneNumber,
+          intencion: 'nuevo_turno',
+          origen: 'conversacion',
+          paciente: datosDesdeElContexto(chatbotData),
+        })
+        if (derivado) return true
+      }
+
       return {
         type: 'route_to_reagendamiento',
         chatbotData,
@@ -3261,6 +3289,60 @@ export async function handleMessage(value: any) {
       if (accionDelRecordatorio === "reagendar" || accionDelRecordatorio === "cancelar") {
         const contextoDelTurno = await getAppointmentContext(userPhoneNumber, config.id).catch(() => null)
         const datosDelPaciente = datosDesdeElContexto(contextoDelTurno)
+
+        // ── Cancelar se resuelve en el chat, no en el portal (29/9/2026) ───
+        //
+        // Este botón mandaba al portal, con el argumento de que una
+        // cancelación por chat cuesta cuatro mensajes y por enlace cuesta uno.
+        // El argumento era correcto y aun así la decisión estaba mal.
+        //
+        // Lo que no pesaba en esa cuenta: el que toca "Cancelar" ya decidió.
+        // Sacarlo de WhatsApp, abrirle un navegador y pedirle que confirme en
+        // una web es mucha fricción para la gestión más simple del sistema —y
+        // la fricción, en este público, no se paga en mensajes: se paga en
+        // gente que no cancela y no aparece, que para la clínica es peor que
+        // cuatro mensajes.
+        //
+        // El reagendamiento SÍ sigue yendo al portal, y no se pierde: cuando
+        // la cancelación se confirma, el mensaje de "listo, lo cancelamos"
+        // lleva el botón para sacar otro turno —sólo si ese turno admitía
+        // reagendamiento, que es la regla de siempre—. Ver el manejo de
+        // `awaiting_cancel_confirmation` y `awaiting_reschedule_choice`.
+        //
+        // Se entra al mismo flujo que el menú, no a una copia: el estado
+        // `awaiting_cancel_confirmation` y el mensaje de doble confirmación
+        // son los mismos que usa la opción "Cancelar el turno médico".
+        if (accionDelRecordatorio === "cancelar" && contextoDelTurno?.turnos?.length) {
+          await setFlowState(userPhoneNumber, config.id, {
+            type: 'awaiting_cancel_confirmation',
+            createdAt: new Date().toISOString(),
+            turnoIndex: 0,
+          })
+
+          await sendDirectResponse(
+            {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            },
+            buildCancelDoubleConfirmMessage(contextoDelTurno, 0),
+            "cancel_flow",
+            CANCEL_CONFIRM_BUTTONS,
+          )
+
+          await saveConversationMessage({
+            id: nanoid(),
+            role: "user",
+            content: userMessage,
+            timestamp: new Date().toISOString(),
+            phoneNumber: userPhoneNumber,
+            configId: config.id,
+          })
+          await updateWhatsAppStats(config.id, { messagesReceived: 1, messagesProcessed: 1 })
+          return
+        }
 
         // ── Sin turno no hay nada que reprogramar ni cancelar (25/9/2026) ──
         //
