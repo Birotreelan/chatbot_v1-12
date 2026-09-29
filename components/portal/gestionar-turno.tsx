@@ -115,7 +115,7 @@ export function GestionarTurno({
             recién después. */}
         <Link
           href={urlParaReagendar}
-          className="block min-h-[64px] rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline"
+          className="block min-h-[64px] rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline transition-colors hover:bg-accent sm:min-h-[60px] sm:px-5"
         >
           <span className="block font-medium">Cambiarlo de horario</span>
           <span className="mt-0.5 block text-sm text-muted-foreground">
@@ -127,7 +127,7 @@ export function GestionarTurno({
           type="button"
           onClick={() => decidir("confirmar")}
           disabled={enviando}
-          className="block min-h-[64px] w-full rounded-xl border bg-card px-4 py-3 text-left"
+          className="block min-h-[64px] w-full rounded-xl border bg-card px-4 py-3 text-left transition-colors hover:bg-accent sm:min-h-[60px] sm:px-5"
         >
           <span className="block font-medium text-card-foreground">Mantenerlo, voy a ir</span>
           <span className="mt-0.5 block text-sm text-muted-foreground">Confirmás tu asistencia</span>
@@ -140,7 +140,7 @@ export function GestionarTurno({
             type="button"
             onClick={() => decidir("cancelar")}
             disabled={enviando}
-            className="block min-h-[64px] w-full rounded-xl border border-destructive/50 bg-card px-4 py-3 text-left hover:bg-destructive/5"
+            className="block min-h-[64px] w-full rounded-xl border border-destructive/50 bg-card px-4 py-3 text-left transition-colors hover:bg-destructive/5 sm:min-h-[60px] sm:px-5"
           >
             <span className="block font-medium text-destructive">
               {enviando ? <LoadingState inline label="Un momento…" /> : "Cancelar el turno"}

@@ -92,6 +92,21 @@ export type TipoDePaso = keyof typeof ICONOS_DE_PASO
  */
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || ""
 
+/**
+ * El ancho de la columna, y de todo lo que tiene que alinearse con ella
+ * (29/9/2026).
+ *
+ * 560px en teléfono y 640px desde tablet. No crece más: a partir de ahí las
+ * líneas de texto se vuelven incómodas de leer, y este portal es sobre todo
+ * texto y opciones en lista, no un tablero.
+ *
+ * Es una constante y no una clase copiada en cada lado porque son tres —la
+ * banda de arriba, el contenido y el pie— y basta que una quede distinta para
+ * que la pantalla se vea desalineada en una notebook. Es el mismo error que
+ * tenía el encabezado antes de esto.
+ */
+const COLUMNA = "mx-auto w-full max-w-[560px] sm:max-w-[640px]"
+
 export function Marco({
   marca,
   children,
@@ -126,23 +141,30 @@ export function Marco({
         />
       )}
 
+      {/* La banda ocupa todo el ancho —es el borde superior de la pantalla—
+          pero su CONTENIDO va en la misma columna que el resto (29/9/2026).
+          Antes el nombre de la clínica arrancaba a 16px del borde izquierdo
+          mientras el contenido estaba centrado: en un teléfono no se nota, en
+          una notebook el nombre quedaba flotando solo a la izquierda. */}
       <header
-        className="sticky top-0 z-10 flex items-center gap-3 bg-primary/95 px-4 py-4 text-primary-foreground backdrop-blur supports-[backdrop-filter]:bg-primary/90"
+        className="sticky top-0 z-10 bg-primary/95 text-primary-foreground backdrop-blur supports-[backdrop-filter]:bg-primary/90"
         style={{
           // En un iPhone el navegador de WhatsApp mete la barra de estado
           // encima del contenido; sin esto el nombre de la clínica queda tapado.
           paddingTop: "max(env(safe-area-inset-top), 16px)",
         }}
       >
-        <CalendarDays className="h-6 w-6 shrink-0" aria-hidden />
-        <div className="min-w-0">
-          <p className="truncate text-lg font-medium">{marca.clinica}</p>
-          <p className="text-sm opacity-90">Gestión de turnos</p>
+        <div className={`${COLUMNA} flex items-center gap-3 px-4 pb-4 sm:gap-4`}>
+          <CalendarDays className="h-6 w-6 shrink-0 sm:h-7 sm:w-7" aria-hidden />
+          <div className="min-w-0">
+            <p className="truncate text-lg font-medium sm:text-xl">{marca.clinica}</p>
+            <p className="text-sm opacity-90">Gestión de turnos</p>
+          </div>
         </div>
       </header>
 
       <main
-        className="mx-auto w-full max-w-[560px] flex-1 space-y-4 px-4 pb-12 pt-5 text-base leading-relaxed"
+        className={`${COLUMNA} flex-1 space-y-4 px-4 pb-12 pt-5 text-base leading-relaxed sm:space-y-5 sm:pt-7 sm:text-[17px]`}
         role="main"
       >
         {children}
@@ -166,7 +188,7 @@ export function Marco({
           desde una subcarpeta, da 404. Con el sitio en la raíz la variable
           queda vacía y el prefijo no molesta. */}
       <footer className="border-t py-6">
-        <div className="mx-auto flex max-w-[560px] items-center justify-center gap-2 px-4">
+        <div className={`${COLUMNA} flex items-center justify-center gap-2 px-4`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${BASE_PATH}/treelan-logo.jpg`}
@@ -206,9 +228,9 @@ export function TituloDePaso({
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
           <Icono className="h-[18px] w-[18px]" aria-hidden />
         </span>
-        <p className="text-lg font-medium text-foreground">{children}</p>
+        <p className="text-lg font-medium text-foreground sm:text-xl">{children}</p>
       </div>
-      {detalle && <p className="text-[15px] text-muted-foreground">{detalle}</p>}
+      {detalle && <p className="text-[15px] text-muted-foreground sm:text-base">{detalle}</p>}
     </div>
   )
 }
@@ -344,10 +366,10 @@ export function ResumenDelTurno({
   if (visibles.length === 0) return null
 
   return (
-    <Card className="p-4 shadow-none">
+    <Card className="p-4 shadow-none sm:p-5">
       {titulo && <p className={detalle ? "font-medium" : "mb-3 font-medium"}>{titulo}</p>}
-      {detalle && <p className="mb-3 mt-0.5 text-[15px] text-muted-foreground">{detalle}</p>}
-      <div className="space-y-2 text-[15px]">
+      {detalle && <p className="mb-3 mt-0.5 text-[15px] text-muted-foreground sm:text-base">{detalle}</p>}
+      <div className="space-y-2 text-[15px] sm:text-base">
         {visibles.map(([etiqueta, valor]) => (
           <FilaDeResumen key={etiqueta} etiqueta={etiqueta} valor={valor} />
         ))}
@@ -384,7 +406,11 @@ export function BotonPrimario({
       type={type}
       onClick={onClick}
       disabled={deshabilitado}
-      className="h-auto w-full py-4 text-[17px] font-medium"
+      // `flex` en vez del `inline-flex` de shadcn: hace falta para que
+      // `mx-auto` centre. En teléfono va a ancho completo —se toca con el
+      // pulgar—; desde tablet se acota, porque un botón de 640px de ancho y
+      // 56px de alto operado con un mouse es un cartel.
+      className="flex h-auto w-full py-4 text-[17px] font-medium sm:mx-auto sm:max-w-sm sm:py-3.5 sm:text-base"
     >
       {children}
     </Button>
@@ -404,7 +430,7 @@ export function BotonSecundario({
       type="button"
       variant="outline"
       onClick={onClick}
-      className="h-auto w-full py-4 text-[17px] font-medium"
+      className="flex h-auto w-full py-4 text-[17px] font-medium sm:mx-auto sm:max-w-sm sm:py-3.5 sm:text-base"
     >
       {children}
     </Button>
@@ -502,7 +528,7 @@ export function ResumenDeConfirmacion({
     filas.length === 0 ? null : (
       <div>
         <p className="mb-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">{titulo}</p>
-        <div className="space-y-2 text-[15px]">
+        <div className="space-y-2 text-[15px] sm:text-base">
           {filas.map(([etiqueta, valor]) => (
             <FilaDeResumen key={etiqueta} etiqueta={etiqueta} valor={valor} />
           ))}
@@ -511,7 +537,7 @@ export function ResumenDeConfirmacion({
     )
 
   return (
-    <Card className="space-y-4 p-4 shadow-none">
+    <Card className="space-y-4 p-4 shadow-none sm:space-y-5 sm:p-5">
       {bloque("Datos del paciente", visibles(datosDelPaciente))}
       {bloque(tituloDelTurno, visibles(datosDelTurno))}
 

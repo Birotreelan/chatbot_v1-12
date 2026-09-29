@@ -29,7 +29,7 @@ import { Aviso, BotonPrimario } from "./marco"
 // 16px o más en el campo: con menos, iOS hace zoom solo al enfocarlo y el
 // paciente queda con la pantalla corrida.
 const CLASES_CAMPO =
-  "w-full rounded-xl border border-input bg-background px-4 py-3.5 text-base text-foreground outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+  "w-full rounded-xl border border-input bg-background px-4 py-3.5 text-base text-foreground sm:py-3 outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
 function Campo({
   etiqueta,
@@ -291,7 +291,7 @@ export function DarseDeAlta({
                 setElegida(os)
                 setOpcionesOS([])
               }}
-              className="min-h-[52px] w-full rounded-xl border bg-card px-4 py-3 text-left text-[15px] hover:bg-accent"
+              className="min-h-[52px] w-full rounded-xl border bg-card px-4 py-3 text-left text-[15px] transition-colors hover:bg-accent sm:min-h-[48px] sm:px-5 sm:text-base"
             >
               {os.nombre}
               {/* Las que no permiten turnos online se muestran igual, marcadas.

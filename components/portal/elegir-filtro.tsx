@@ -55,7 +55,7 @@ export function ElegirFiltro({
             href={`/p/${token}?${params.toString()}`}
             // 60px: el paciente lo toca con el pulgar, parado, a veces con poca
             // vista. Un enlace chico acá es una barrera real.
-            className="flex min-h-[60px] items-center rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline transition-colors hover:bg-accent active:bg-accent"
+            className="flex min-h-[60px] items-center rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline transition-colors hover:bg-accent active:bg-accent sm:min-h-[56px] sm:px-5"
           >
             <span
               aria-hidden
@@ -64,7 +64,7 @@ export function ElegirFiltro({
             <span className="min-w-0">
               <span className="block font-medium">{opcion.nombre}</span>
               {opcion.detalle && (
-                <span className="mt-0.5 block text-sm text-muted-foreground">{opcion.detalle}</span>
+                <span className="mt-0.5 block text-sm text-muted-foreground sm:text-[15px]">{opcion.detalle}</span>
               )}
             </span>
           </Link>

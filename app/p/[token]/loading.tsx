@@ -37,19 +37,24 @@ import { Skeleton } from "@/components/ui/skeleton"
 export default function Cargando() {
   return (
     <div className="portal flex min-h-screen flex-col bg-background text-foreground">
+      {/* La misma estructura que el encabezado real —banda a todo lo ancho,
+          contenido en la columna—. Si se separan, la pantalla salta al
+          terminar de cargar. Ver `Marco`. */}
       <header
-        className="sticky top-0 z-10 flex items-center gap-3 bg-primary/95 px-4 py-4 text-primary-foreground"
+        className="sticky top-0 z-10 bg-primary/95 text-primary-foreground"
         style={{ paddingTop: "max(env(safe-area-inset-top), 16px)" }}
       >
-        <CalendarDays className="h-6 w-6 shrink-0" aria-hidden />
-        <div className="min-w-0 space-y-1.5">
-          <Skeleton className="h-4 w-40 bg-primary-foreground/30" />
-          <Skeleton className="h-3 w-24 bg-primary-foreground/20" />
+        <div className="mx-auto flex w-full max-w-[560px] items-center gap-3 px-4 pb-4 sm:max-w-[640px] sm:gap-4">
+          <CalendarDays className="h-6 w-6 shrink-0 sm:h-7 sm:w-7" aria-hidden />
+          <div className="min-w-0 space-y-1.5">
+            <Skeleton className="h-4 w-40 bg-primary-foreground/30" />
+            <Skeleton className="h-3 w-24 bg-primary-foreground/20" />
+          </div>
         </div>
       </header>
 
       <main
-        className="mx-auto w-full max-w-[560px] flex-1 space-y-4 px-4 pb-12 pt-5"
+        className="mx-auto w-full max-w-[560px] flex-1 space-y-4 px-4 pb-12 pt-5 sm:max-w-[640px] sm:space-y-5 sm:pt-7"
         // El lector de pantalla tiene que enterarse de que está esperando; la
         // animación no le dice nada.
         role="status"
