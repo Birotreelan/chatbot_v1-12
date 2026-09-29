@@ -42,7 +42,21 @@ export interface InitBookingSlots {
  * Qué debe hacer whatsapp.tsx después de que el executor termine.
  */
 export type ExecutorAction =
-  | { type: 'send_and_return'; message: string }              // enviar mensaje y terminar
+  /**
+   * `cierreConversacional`: el mensaje sólo cierra la charla —un "gracias a
+   * vos", una despedida— y no lleva información que el paciente necesite
+   * (29/9/2026).
+   *
+   * Lo marca el executor y no el llamador porque acá se sabe QUÉ tool lo
+   * produjo, que es la única señal confiable. Del texto no se puede deducir:
+   * "¡Gracias por escribirnos!" y "Gracias, tu turno quedó para el martes"
+   * empiezan igual.
+   *
+   * Quién decide qué hacer con la marca es el llamador: en los clientes del
+   * portal no se envía; en el resto sí, porque ahí el chat es el único camino
+   * y el silencio se lee como "no funciona".
+   */
+  | { type: 'send_and_return'; message: string; cierreConversacional?: boolean } // enviar mensaje y terminar
   | { type: 'init_patient_detection' }                        // iniciar detección de paciente
   | { type: 'init_existing_patient_flow'; slots?: InitBookingSlots }
   | { type: 'init_new_patient_flow'; slots?: InitBookingSlots }
@@ -51,7 +65,7 @@ export type ExecutorAction =
   | { type: 'trigger_cancel_menu' }                          // mostrar menú de cancelación
   | { type: 'trigger_cancel_and_rebook' }                    // cancelar + iniciar reserva
   | { type: 'continue_active_flow' }                         // reenviar mensaje al flow activo
-  | { type: 'end_conversation'; message: string }            // finalizar/abandonar: cerrar flujo + despedir
+  | { type: 'end_conversation'; message: string; cierreConversacional?: boolean } // finalizar/abandonar: cerrar flujo + despedir
   | { type: 'derive_to_human'; motivo?: string }             // el paciente pidió hablar con una persona
   | { type: 'derive_external'; message: string }             // consulta fuera de scope: ofrecer humano u tel.
   | { type: 'passthrough' }                                  // ceder al enqueue/OpenAI normal
@@ -365,7 +379,15 @@ async function resolverDecision(
       const respuesta = decision.args.respuesta as string | undefined
       const base = respuesta || '¡Gracias por escribirnos! Si necesitás algo más, estoy acá para ayudarte.'
       return {
-        action: { type: 'send_and_return', message: conSaludoSiCorresponde(base, ctx, deps) },
+        action: {
+          type: 'send_and_return',
+          message: conSaludoSiCorresponde(base, ctx, deps),
+          // Acá llegan los "gracias", los "perfecto" y los "dale". El
+          // dispatcher ya separó estos casos de los que traen una pregunta
+          // pegada; ver sus instrucciones sobre usar este tool SÓLO cuando el
+          // mensaje no responde nada ni pregunta nada nuevo.
+          cierreConversacional: true,
+        },
         logNote: 'Dispatcher → respuesta empática',
       }
     }
@@ -388,6 +410,10 @@ async function resolverDecision(
         action: {
           type: 'end_conversation',
           message: (decision.args.mensaje as string) || '¡Listo! Cuando quieras retomar tu turno, escribime. ¡Que tengas un buen día!',
+          // La despedida es un mensaje que no aporta nada: el paciente ya se
+          // fue. Cerrar los flujos SÍ hay que hacerlo igual —eso es estado
+          // nuestro, no un mensaje—, así que la marca sólo evita el envío.
+          cierreConversacional: true,
         },
         logNote: 'Dispatcher → finalizar conversación',
       }

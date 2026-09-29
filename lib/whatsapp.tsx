@@ -16,6 +16,12 @@ import {
   mensajeSinAtencionHumana,
 } from "./media-entrante"
 import { usaPortal, derivarAlPortal, datosDesdeElContexto } from "./portal/derivar-al-portal"
+import {
+  usaSilencio,
+  yaSeDijo,
+  anotarQueSeDijo,
+  registrarSilencio,
+} from "./conversation-state/silencio"
 import { cancelacionReciente, mensajeYaCancelado } from "./portal/cancelacion-reciente"
 import { PLANTILLA_SIN_TURNO } from "./portal/mensaje-enlace"
 import { accionDelBoton } from "./flows/recordatorio-con-botones"
@@ -315,10 +321,51 @@ async function sendDirectResponse(
   ctx: DirectResponseContext,
   message: string,
   phase = "direct",
-  buttons?: Array<{ id: string; title: string }>
+  buttons?: Array<{ id: string; title: string }>,
+  opciones?: {
+    /**
+     * Este mensaje se manda una sola vez cada 24 h (29/9/2026).
+     *
+     * El valor es una ETIQUETA de qué se está diciendo —"derivacion",
+     * "cancelacion_no_permitida"— y no el texto: si mañana se reescribe la
+     * frase, el paciente no tiene que volver a recibirla por ser otras
+     * palabras.
+     *
+     * Se marca a mano, en las pocas ramas donde repetir no agrega nada. NO se
+     * deduce del texto: "no entendí, elegí una opción" seguido del mismo menú
+     * también es una repetición, y ésa hay que mandarla.
+     *
+     * Ver lib/conversation-state/silencio.ts.
+     */
+    unaVezPorVentana?: string
+  },
 ): Promise<boolean> {
   const logger = createConversationLogger(ctx.userPhoneNumber, ctx.configId, phase)
   try {
+    // ── ¿Ya se lo dijimos hoy? ────────────────────────────────────────────
+    //
+    // Va arriba de todo, antes de la presentación y del armado: si no se va a
+    // enviar, no tiene sentido prepararlo. Y va en el embudo y no en cada rama
+    // por el mismo motivo que la presentación —ver presentacion-inicial—: una
+    // rama que se olvida de callar no se nota hasta que alguien mira la
+    // factura.
+    if (opciones?.unaVezPorVentana) {
+      const configSilencio = await getWhatsAppConfigById(ctx.configId).catch(() => null)
+      if (
+        usaSilencio(configSilencio) &&
+        (await yaSeDijo(ctx.configId, ctx.userPhoneNumber, opciones.unaVezPorVentana))
+      ) {
+        registrarSilencio({
+          configId: ctx.configId,
+          phoneNumber: ctx.userPhoneNumber,
+          motivo: "ya_se_dijo",
+          texto: message,
+          detalle: opciones.unaVezPorVentana,
+        })
+        return true
+      }
+    }
+
     // Presentación como asistente de IA en la primera respuesta del día
     // (17/9/2026). Se decide acá, en el embudo, y no en cada rama: estaba
     // resuelta a mano en 13 lugares y cada capa nueva se olvidaba —el executor,
@@ -373,6 +420,13 @@ async function sendDirectResponse(
     appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: message, timestamp: Date.now() }).catch(() => {})
 
     await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
+
+    // Recién ahora, con el mensaje ya enviado. Anotarlo antes y que el envío
+    // fallara dejaría al paciente sin la respuesta y sin poder recibirla por
+    // 24 h.
+    if (opciones?.unaVezPorVentana) {
+      await anotarQueSeDijo(ctx.configId, ctx.userPhoneNumber, opciones.unaVezPorVentana)
+    }
 
     // Recordar los botones y el texto del paso actual (para re-mostrarlos en una
     // consulta intercalada o un "no te entendí"). No lo hacemos para la propia
@@ -2088,7 +2142,11 @@ async function startCancelDoubleConfirm(
       ctxDirect,
       `Actualmente no es posible cancelar turnos por este medio.\n\n` +
         fraseDerivacion('Para cancelar tu turno, por favor contactanos', config.escalationPhoneNumber),
-      "cancelacion-no-permitida"
+      "cancelacion-no-permitida",
+      undefined,
+      // El paciente ya sabe que por acá no se puede: repetírselo cada vez que
+      // insiste no le agrega nada y se paga cada vez.
+      { unaVezPorVentana: "cancelacion_no_permitida" },
     )
     await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
     return true
@@ -2401,6 +2459,38 @@ function buildConfirmNotYetMessage(): string {
   return "Tu turno ya está agendado, todavía no hace falta que confirmes — antes de la fecha te vamos a mandar un recordatorio para que confirmes o canceles tu asistencia. Si necesitás algo más mientras tanto, decime."
 }
 
+/**
+ * ¿Este mensaje del dispatcher se calla? (29/9/2026)
+ *
+ * Los cierres conversacionales —"gracias a vos", "que tengas buen día"— no
+ * llevan información y se pagan igual que un turno. En los clientes del portal
+ * no se envían: el paciente tiene el enlace y los botones a la vista, así que
+ * el silencio no lo deja sin camino.
+ *
+ * Quién decide QUÉ es un cierre es el dispatcher, no esta función: viene
+ * marcado en la acción. Ver `cierreConversacional` en tool-executor.ts.
+ *
+ * Está acá y no dentro de `sendDirectResponse` porque la marca viaja en la
+ * acción y no en el texto, y meterla al embudo obligaría a pasarla por todas
+ * las ramas que no la tienen.
+ */
+function seCallaElCierre(
+  action: { cierreConversacional?: boolean },
+  config: any,
+  userPhoneNumber: string,
+  mensaje: string,
+): boolean {
+  if (!action.cierreConversacional || !usaSilencio(config)) return false
+
+  registrarSilencio({
+    configId: config.id,
+    phoneNumber: userPhoneNumber,
+    motivo: "cierre_conversacional",
+    texto: mensaje,
+  })
+  return true
+}
+
 async function runPrimaryDispatcherNoFlow(
   userPhoneNumber: string,
   userMessage: string,
@@ -2455,13 +2545,17 @@ async function runPrimaryDispatcherNoFlow(
     const action = execResult.action
 
     if (action.type === 'send_and_return') {
+      if (seCallaElCierre(action, config, userPhoneNumber, action.message)) return true
       await sendDirectResponse(ctxDirect, action.message, "router-primary")
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
       return true
     }
 
     if (action.type === 'end_conversation') {
+      // Los flujos se cierran SIEMPRE: eso es estado nuestro, no un mensaje.
+      // Lo único que el silencio evita es el envío de la despedida.
       await clearActiveFlows(userPhoneNumber, config)
+      if (seCallaElCierre(action, config, userPhoneNumber, action.message)) return true
       await sendDirectResponse(ctxDirect, action.message, "router-end")
       await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
       return true
@@ -2716,7 +2810,9 @@ async function runInterjectionInActiveFlow(
         configId: config.id,
         clienteId: config.cliente_id,
       }
-      await sendDirectResponse(ctxEnd, action.message, "router-end")
+      if (!seCallaElCierre(action, config, userPhoneNumber, action.message)) {
+        await sendDirectResponse(ctxEnd, action.message, "router-end")
+      }
       routerLogger.info('[Router intercalada] Finalizar conversación → flujo cerrado')
       return true
     }
@@ -6348,7 +6444,9 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 detectionCtx,
                 `Actualmente no es posible cancelar turnos por este medio.\n\n` +
                   fraseDerivacion('Para cancelar tu turno, por favor contactanos', config.escalationPhoneNumber),
-                "cancelacion-no-permitida"
+                "cancelacion-no-permitida",
+                undefined,
+                { unaVezPorVentana: "cancelacion_no_permitida" },
               )
             } else if (detectionResult.action === 'confirm_appointment' || detectionResult.action === 'cancel_appointment' || detectionResult.action === 'cancel_and_book_new_appointment') {
               // Sprint 9a: Manejar confirmación/cancelación directamente con los turnos del paciente detectado
@@ -6946,6 +7044,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             const action = execResult.action
 
             if (action.type === 'send_and_return') {
+              if (seCallaElCierre(action, config, userPhoneNumber, action.message)) return
               await sendDirectResponse(dispatcherCtxDirect, action.message, "ai-dispatcher")
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
@@ -6953,6 +7052,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
             if (action.type === 'end_conversation') {
               await clearActiveFlows(userPhoneNumber, config)
+              if (seCallaElCierre(action, config, userPhoneNumber, action.message)) return
               await sendDirectResponse(dispatcherCtxDirect, action.message, "ai-dispatcher-end")
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
@@ -7350,7 +7450,9 @@ export async function processIndividualMessage(
           { phoneNumberId, accessToken: config.accessToken, userPhoneNumber, configId: config.id, clienteId: config.cliente_id },
           `Actualmente no es posible reagendar turnos por este medio.\n\n` +
             fraseDerivacion('Para reagendar tu turno, por favor contactanos', config.escalationPhoneNumber),
-          "reagendamiento-no-permitido"
+          "reagendamiento-no-permitido",
+          undefined,
+          { unaVezPorVentana: "reagendamiento_no_permitido" },
         )
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
         return
