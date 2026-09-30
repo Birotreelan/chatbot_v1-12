@@ -54,23 +54,21 @@ describe("cada flujo dice lo suyo", () => {
         nombre: "NICOLAS",
         turno: { fecha: "2026-09-24", fechaFormateada: "24/09/2026", horaFormateada: "09:00" },
       }),
-    ).toBe(
-      "Nicolas, para reagendar tu turno del jueves, 24 de septiembre de 2026 a las 09:00, " +
-        "utilizá el botón que aparece a continuación.",
-    )
+    ).toContain("Nicolas, para reagendar tu turno del jueves, 24 de septiembre de 2026 a las 09:00")
   })
 
   it("sin fecha, reagendar sigue siendo una frase correcta", () => {
-    expect(textoDelEnlace({ intencion: "reagendar", nombre: "Ana" })).toBe(
-      "Ana, para reagendar tu turno, utilizá el botón que aparece a continuación.",
-    )
+    const t = textoDelEnlace({ intencion: "reagendar", nombre: "Ana" })
+    expect(t).toContain("Ana, para reagendar tu turno, ingresá a la plataforma")
+    // El marcador vacío no deja el espacio ni la coma que lo rodeaban.
+    expect(t).not.toContain(" ,")
   })
 })
 
 describe("el nombre", () => {
   it("sin nombre la frase arranca en mayúscula", () => {
-    expect(textoDelEnlace({ intencion: "nuevo_turno" })).toBe(
-      "Para solicitar tu turno, utilizá el botón que aparece a continuación.",
+    expect(textoDelEnlace({ intencion: "nuevo_turno" })).toMatch(
+      /^Para solicitar un nuevo turno, ingresá a la plataforma/,
     )
   })
 
@@ -159,14 +157,14 @@ describe("cuando ya no hay turno que reprogramar", () => {
     })
     // El orden importa: quien lee "sacá un turno" sin la explicación previa
     // cree que el bot no lo entendió.
-    expect(t.indexOf("no encontramos un turno activo")).toBeLessThan(t.indexOf("sacar uno nuevo"))
+    expect(t.indexOf("no encontramos un turno activo")).toBeLessThan(t.indexOf("solicitar uno nuevo"))
     expect(t.startsWith("Nicolas, ")).toBe(true)
   })
 
   it("funciona sin nombre, como el resto", () => {
     expect(textoDelEnlace({ intencion: "nuevo_turno", plantilla: PLANTILLA_SIN_TURNO })).toBe(
-      "No encontramos un turno activo para reprogramar; puede que ya lo hayas cancelado. " +
-        "Si querés sacar uno nuevo, usá el botón de acá abajo.",
+      "No encontramos un turno activo para reprogramar: puede que ya lo hayas cancelado.\n\n" +
+        "Si querés solicitar uno nuevo, ingresá con el botón que aparece a continuación.",
     )
   })
 
@@ -267,5 +265,23 @@ describe("la fecha del turno", () => {
   it("si no puede formatear, devuelve lo que haya en vez de un hueco", () => {
     expect(fechaPresentable({ fechaFormateada: "el jueves" })).toBe("el jueves")
     expect(fechaPresentable({})).toBe("")
+  })
+})
+
+describe("los párrafos (30/9/2026)", () => {
+  it("ninguna plantilla es un bloque corrido", () => {
+    // En WhatsApp cuatro renglones seguidos se leen como una pared: el
+    // paciente busca el botón y no lee. Un párrafo por idea.
+    for (const [flujo, plantilla] of Object.entries(PLANTILLAS_DEL_ENLACE)) {
+      if (plantilla.length < 140) continue
+      expect(plantilla, `${flujo}: ${plantilla.length} caracteres de una tirada`).toContain("\n\n")
+    }
+  })
+
+  it("los saltos sobreviven a la limpieza de espacios", () => {
+    // `textoDelEnlace` colapsa espacios repetidos. Un `\s{2,}` común se
+    // llevaba puestos los saltos de línea y dejaba todo en un solo bloque.
+    const t = textoDelEnlace({ intencion: "nuevo_turno", nombre: "Ana" })
+    expect(t.split("\n\n")).toHaveLength(2)
   })
 })
