@@ -158,15 +158,27 @@ export const PLANTILLAS_DEL_ENLACE: Record<IntencionDelPortal, string> = {
   // "su necesidad" y no "tu necesidad" en el de familiar: el turno es de otra
   // persona y el texto tiene que sostener eso hasta el final. Quien pide para
   // su madre y lee "tu" carga sus propios datos.
+  // ── Un párrafo por idea (30/9/2026) ──────────────────────────────────────
+  //
+  // En WhatsApp un bloque de cuatro renglones corridos se lee como una pared.
+  // Acá la primera frase dice QUÉ hacer —tocar el botón— y la segunda QUÉ va a
+  // encontrar del otro lado. Separadas, el paciente puede quedarse con la
+  // primera y actuar; juntas tiene que leer las dos para encontrar la
+  // instrucción.
   nuevo_turno:
     "para solicitar un nuevo turno, ingresá a la plataforma de gestión de turnos de la clínica " +
-    "utilizando el botón que aparece a continuación. Allí podrás consultar los horarios " +
-    "disponibles y elegir el que mejor se adapte a tu necesidad.",
+    "utilizando el botón que aparece a continuación.\n\n" +
+    "Allí podrás consultar los horarios disponibles y elegir el que mejor se adapte a tu " +
+    "necesidad.",
   familiar:
     "para solicitar un nuevo turno para tu familiar, ingresá a la plataforma de gestión de turnos " +
-    "de la clínica utilizando el botón que aparece a continuación. Allí podrás consultar los " +
-    "horarios disponibles y elegir el que mejor se adapte a su necesidad.",
-  reagendar: "para reagendar tu turno{cuando}, utilizá el botón que aparece a continuación.",
+    "de la clínica utilizando el botón que aparece a continuación.\n\n" +
+    "Allí podrás consultar los horarios disponibles y elegir el que mejor se adapte a su " +
+    "necesidad.",
+  reagendar:
+    "para reagendar tu turno{cuando}, ingresá a la plataforma de gestión de turnos de la clínica " +
+    "utilizando el botón que aparece a continuación.\n\n" +
+    "Allí vas a poder elegir el día y el horario que mejor te queden.",
   // ── El texto más delicado de los cuatro (25/9/2026) ──────────────────────
   //
   // Tocar "Cancelar" en el recordatorio no cancela nada: abre el portal. El
@@ -253,8 +265,8 @@ export function primerNombrePresentable(nombre?: string | null): string | null {
  * lee "sacá un turno" sin la explicación previa cree que el bot no lo entendió.
  */
 export const PLANTILLA_SIN_TURNO =
-  "no encontramos un turno activo para reprogramar; puede que ya lo hayas cancelado. " +
-  "Si querés sacar uno nuevo, usá el botón de acá abajo."
+  "no encontramos un turno activo para reprogramar: puede que ya lo hayas cancelado.\n\n" +
+  "Si querés solicitar uno nuevo, ingresá con el botón que aparece a continuación."
 
 export interface DatosDelTexto {
   intencion: IntencionDelPortal

@@ -2456,7 +2456,12 @@ async function handleDeriveToHuman(
  * antes esto no respondía nada y el flujo caía en "Perdón, no te entendí" repetido.
  */
 function buildConfirmNotYetMessage(): string {
-  return "Tu turno ya está agendado, todavía no hace falta que confirmes — antes de la fecha te vamos a mandar un recordatorio para que confirmes o canceles tu asistencia. Si necesitás algo más mientras tanto, decime."
+  return (
+    "Tu turno ya está agendado, todavía no hace falta que confirmes.\n\n" +
+    "Antes de la fecha te vamos a mandar un recordatorio para que confirmes o canceles tu " +
+    "asistencia.\n\n" +
+    "Si necesitás algo más mientras tanto, decime."
+  )
 }
 
 /**

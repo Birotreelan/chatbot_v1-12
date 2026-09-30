@@ -163,7 +163,13 @@ export function buildConfirmationMessageNoName(appointmentInfo: {
   if (lugar) partes.push(`en ${lugar}`)
 
   const detalle = partes.join(' ')
-  return `Gracias, tu confirmación para el turno ${detalle} fue recibida correctamente. Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}`
+  // Un párrafo por idea: primero qué pasó con el turno, después la puerta
+  // abierta. En un solo bloque el "si necesitás algo más" se lee como parte
+  // de la confirmación y se pierde.
+  return (
+    `Gracias, tu confirmación para el turno ${detalle} fue recibida correctamente.\n\n` +
+    `Si necesitás algo más, no dudes en escribirme. ${getTimeBasedGreeting()}`
+  )
 }
 
 /**
@@ -559,7 +565,11 @@ export function buildAlreadyCancelledMessage(
   const turno = chatbotData.turnos[turnoIndex]
 
   if (!turno) {
-    return `${nombre}, el turno que intentás confirmar ya no está disponible, ya que fue cancelado previamente. Si necesitás agendar un nuevo turno, podés escribirme y te ayudo.`
+    return (
+      `${nombre}, el turno que intentás confirmar ya no está disponible: fue cancelado ` +
+      `previamente.\n\n` +
+      `Si necesitás agendar un nuevo turno, podés escribirme y te ayudo.`
+    )
   }
 
   const fechaCompleta = formatFullDate(turno.fecha)
