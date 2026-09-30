@@ -44,7 +44,7 @@ import {
   obtenerTodasLasSedes,
 } from "@/lib/api-tools/api-functions"
 import { getWhatsAppConfigById } from "@/lib/db"
-import Link from "next/link"
+import { EnlaceDePaso } from "@/components/portal/enlace-de-paso"
 import { Marco, Avance, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/components/portal/marco"
 import type { AnchoDelMarco } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
@@ -1043,13 +1043,15 @@ function VerTodos({
 }) {
   const params = new URLSearchParams({ ...(conservar || {}), sinFiltro: "1" })
   return (
-    <Link
+    <EnlaceDePaso
       href={`/p/${token}?${params.toString()}`}
-      className="mt-3 block min-h-[56px] rounded-xl border bg-card px-4 py-3 text-center text-card-foreground no-underline hover:bg-accent"
+      className="mt-3 flex min-h-[56px] items-center justify-center rounded-xl border bg-card px-4 py-3 text-center text-card-foreground no-underline hover:bg-accent"
     >
-      <span className="block font-medium">{etiqueta}</span>
-      {detalle && <span className="mt-0.5 block text-sm text-muted-foreground">{detalle}</span>}
-    </Link>
+      <span className="block">
+        <span className="block font-medium">{etiqueta}</span>
+        {detalle && <span className="mt-0.5 block text-sm text-muted-foreground">{detalle}</span>}
+      </span>
+    </EnlaceDePaso>
   )
 }
 

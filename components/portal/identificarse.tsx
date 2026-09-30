@@ -106,9 +106,13 @@ export function PedirDNI({
         return
       }
       setError(data.errores?.dni || data.error || "No pudimos validar el DNI.")
+      setCargando(false)
     } catch {
       setError("No pudimos conectarnos. Revisá tu señal y probá de nuevo.")
-    } finally {
+      // Sólo se apaga el "Validando…" cuando hay algo que corregir. En el
+      // camino bueno NO se apaga: `router.refresh` tarda lo que tarde el
+      // servidor, y devolver el botón a su estado normal en el medio deja la
+      // pantalla quieta y sin explicación —que es justo lo que pasaba—.
       setCargando(false)
     }
   }
@@ -229,9 +233,11 @@ export function DarseDeAlta({
         return
       }
       setErrores(data.errores || { general: data.error || "Revisá los datos." })
+      setCargando(false)
     } catch {
       setErrores({ general: "No pudimos conectarnos. Revisá tu señal y probá de nuevo." })
-    } finally {
+      // Ver la nota en PedirDNI: en el camino bueno el botón se queda
+      // esperando hasta que la pantalla siguiente esté.
       setCargando(false)
     }
   }

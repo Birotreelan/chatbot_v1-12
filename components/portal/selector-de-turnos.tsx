@@ -34,7 +34,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import Link from "next/link"
+import { EnlaceDePaso } from "./enlace-de-paso"
 import { useRouter } from "next/navigation"
 import { fechaPresentableEnMayuscula } from "@/lib/portal/fechas"
 import { Calendar } from "@/components/ui/calendar"
@@ -439,9 +439,12 @@ export function SelectorDeTurnos({
             sin esto, quien se equivocó un dígito del DNI al darse de alta veía
             el error en el resumen y no tenía cómo arreglarlo. */}
         {corregirDatosEn && !enviando && (
-          <Link href={corregirDatosEn} className="block text-[15px] text-muted-foreground underline">
+          <EnlaceDePaso
+            href={corregirDatosEn}
+            className="inline-flex items-center gap-2 text-[15px] text-muted-foreground underline"
+          >
             Corregir mis datos
-          </Link>
+          </EnlaceDePaso>
         )}
 
         <Acciones>

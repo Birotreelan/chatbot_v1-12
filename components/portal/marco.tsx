@@ -44,7 +44,7 @@
  */
 
 import type { ReactNode } from "react"
-import Link from "next/link"
+import { EnlaceDePaso } from "./enlace-de-paso"
 import { fechaPresentableEnMayuscula } from "@/lib/portal/fechas"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -408,12 +408,12 @@ export function Avance({ actual }: { actual: PasoDelAvance }) {
  */
 export function Volver({ href }: { href: string }) {
   return (
-    <Link
+    <EnlaceDePaso
       href={href}
       className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border bg-card px-3 py-2 text-[15px] font-medium text-primary no-underline hover:bg-accent"
     >
       <ChevronLeft className="h-5 w-5" aria-hidden /> Volver
-    </Link>
+    </EnlaceDePaso>
   )
 }
 

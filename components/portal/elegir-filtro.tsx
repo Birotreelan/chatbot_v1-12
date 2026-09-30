@@ -31,7 +31,7 @@
  * una superficie tocable con su nombre y, si la hay, una aclaración debajo.
  */
 
-import Link from "next/link"
+import { EnlaceDePaso } from "./enlace-de-paso"
 
 export function ElegirFiltro({
   token,
@@ -109,13 +109,13 @@ export function ElegirFiltro({
         }
 
         return (
-          <Link
+          <EnlaceDePaso
             key={opcion.id}
             href={`/p/${token}?${params.toString()}`}
             className={`${forma} bg-card text-card-foreground no-underline transition-colors hover:bg-accent active:bg-accent`}
           >
             {contenido}
-          </Link>
+          </EnlaceDePaso>
         )
       })}
     </div>

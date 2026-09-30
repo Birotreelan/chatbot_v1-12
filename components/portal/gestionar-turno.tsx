@@ -24,7 +24,7 @@
  */
 
 import { useState } from "react"
-import Link from "next/link"
+import { EnlaceDePaso } from "./enlace-de-paso"
 import { LoadingState } from "@/components/ui/loading-state"
 import { Avance, Aviso, ResumenDelTurno, TituloDePaso } from "./marco"
 import type { TurnoDelPortal } from "@/lib/portal/token"
@@ -117,7 +117,7 @@ export function GestionarTurno({
             decidido a cancelar baja dos renglones; quien no puede ese día
             encuentra la alternativa antes de cancelar, que en el chat aparecía
             recién después. */}
-        <Link
+        <EnlaceDePaso
           href={urlParaReagendar}
           className="block min-h-[64px] rounded-xl border border-primary/50 bg-card px-4 py-3 text-card-foreground no-underline transition-colors hover:bg-primary/5 sm:min-h-[60px] sm:px-5"
         >
@@ -125,7 +125,7 @@ export function GestionarTurno({
           <span className="mt-0.5 block text-sm text-muted-foreground">
             Elegís otro y este queda libre
           </span>
-        </Link>
+        </EnlaceDePaso>
 
         <button
           type="button"
