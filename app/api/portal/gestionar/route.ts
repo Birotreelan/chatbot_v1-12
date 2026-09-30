@@ -48,6 +48,7 @@ import { saveConversationMessage } from "@/lib/conversations"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
 import { trackAppointmentEvent, checkAndClearPendingReschedule } from "@/lib/appointment-stats"
 import { olvidarCancelacion } from "@/lib/portal/cancelacion-reciente"
+import { fechaPresentable } from "@/lib/portal/fechas"
 import { nanoid } from "nanoid"
 
 export const runtime = "nodejs"
@@ -350,72 +351,77 @@ export async function POST(request: Request) {
     (reserva?.datos as { confirmacion_humana?: boolean } | undefined)?.confirmacion_humana ?? true
 
   // ── 4. Cerrar el enlace y dejar rastro ────────────────────────────────────
-  const cuando = [datosDelTurnoElegido.fechaFormateada, datosDelTurnoElegido.horaFormateada]
+  //
+  // ── El orden de la frase es el orden de los hechos (30/9/2026) ───────────
+  //
+  // Antes decía "Pedimos tu turno para el X. Cancelamos el turno del Y", o
+  // sea: primero lo que todavía no es seguro y después lo que ya pasó. El
+  // paciente leía la fecha nueva creyendo que ya la tenía, y la cancelación
+  // del viejo llegaba como una nota al final.
+  //
+  // Ahora va en el orden en que ocurrió: se canceló el viejo, se pidió el
+  // nuevo, y el nuevo todavía no está. Es también el orden en que el paciente
+  // necesita entenderlo, porque lo primero que quiere saber es qué pasó con
+  // el turno que tenía.
+  const cuando = [
+    fechaPresentable(datosDelTurnoElegido) || datosDelTurnoElegido.fechaFormateada,
+    datosDelTurnoElegido.horaFormateada,
+  ]
     .filter(Boolean)
     .join(" a las ")
-  const conQuien = datosDelTurnoElegido.profesional ? ` con ${datosDelTurnoElegido.profesional}` : ""
+  const conQuien = datosDelTurnoElegido.profesional ? `, con ${datosDelTurnoElegido.profesional}` : ""
+
+  // El turno viejo, con la fecha completa. Decía "del 2026-09-30 a las 08:00":
+  // correcto y a la vez ilegible justo en la frase que le avisa que perdió un
+  // turno.
+  const cuandoElAnterior = [fechaPresentable(contexto.turno), contexto.turno?.horaFormateada]
+    .filter(Boolean)
+    .join(" a las ")
 
   /**
-   * La aclaración de que falta la aprobación, aparte del resto (30/9/2026).
+   * La aclaración de que falta la aprobación, aparte del resto.
    *
    * Va separada porque la pantalla la muestra en negrita: es lo único que el
-   * paciente NO puede dar por hecho, y en un párrafo corrido se pierde entre
-   * la fecha y el nombre del profesional.
-   *
-   * `texto` la sigue llevando adentro. Ése es el que se guarda en la
-   * conversación y el que el paciente vuelve a leer si reabre el enlace, y
-   * ahí no hay negritas: tiene que ser una frase completa.
+   * paciente NO puede dar por hecho. `texto` la sigue llevando adentro —ése
+   * es el que se guarda en la conversación y el que se vuelve a leer al
+   * reabrir el enlace, y ahí no hay negritas—.
    */
   const aclaracionPendiente = confirmacionHumana
-    ? "La clínica tiene que aprobarlo y te avisaremos a tu WhatsApp apenas lo haga."
+    ? "El nuevo turno todavía no está confirmado: la clínica debe aprobar la solicitud. " +
+      "Te avisaremos por WhatsApp cuando la clínica lo haya aprobado."
     : ""
 
-  const textoDelTurnoNuevo = confirmacionHumana
+  // Lo que pasó con el turno viejo. Va PRIMERO cuando hubo uno.
+  const sobreElAnterior = seCancelóElAnterior
+    ? `Tu turno previo${cuandoElAnterior ? `, del ${cuandoElAnterior},` : ""} fue cancelado correctamente.`
+    : cancelacionFallida
+      ? `No pudimos cancelar tu turno previo${cuandoElAnterior ? ` del ${cuandoElAnterior}` : ""}: ` +
+        `sigue activo, escribinos por WhatsApp para que lo cancelemos.`
+      : ""
+
+  // Y lo que pasó con el nuevo. Se arma siempre como oración completa, con
+  // mayúscula, y recién después se le antepone "En su lugar" si corresponde.
+  // Componerlo al revés —pegar el prefijo y dejar el resto en minúscula—
+  // dejaba el caso sin turno previo empezando con "enviamos a la clínica…".
+  const sobreElNuevo = confirmacionHumana
     ? cuando
-      ? `Pedimos tu turno para el ${cuando}${conQuien}. ${aclaracionPendiente}`
-      : `Pedimos tu turno. ${aclaracionPendiente}`
+      ? `Enviamos a la clínica una solicitud de nuevo turno para el ${cuando}${conQuien}.`
+      : "Enviamos a la clínica una solicitud de nuevo turno."
     : cuando
-      ? `Tu turno quedó para el ${cuando}${conQuien}.`
+      ? `Tu turno quedó reservado para el ${cuando}${conQuien}.`
       : "Tu turno quedó reservado."
 
-  /** Lo mismo, sin la aclaración: la pantalla la agrega aparte y en negrita. */
-  const textoSinAclaracion = confirmacionHumana
-    ? cuando
-      ? `Pedimos tu turno para el ${cuando}${conQuien}.`
-      : "Pedimos tu turno."
-    : textoDelTurnoNuevo
+  // "En su lugar" SÓLO cuando el viejo se canceló de verdad. Si la
+  // cancelación falló, el paciente se queda con los dos y no hay ningún
+  // reemplazo del que hablar: decirlo ahí sería describir algo que no pasó.
+  const nuevoEnContexto = seCancelóElAnterior
+    ? `En su lugar, ${sobreElNuevo.charAt(0).toLowerCase()}${sobreElNuevo.slice(1)}`
+    : sobreElNuevo
 
-  // ── Decir que el anterior se canceló (25/9/2026) ──────────────────────────
-  //
-  // El mensaje hablaba sólo del turno nuevo. Quien reagenda se queda sin saber
-  // qué pasó con el que tenía, y cuando el nuevo además queda pendiente de
-  // aprobación, la duda es peor: ¿me guardan el viejo mientras tanto?
-  //
-  // Se dice explícitamente. Es la mitad de la operación que el paciente pidió
-  // y es la mitad que no puede ver en ningún lado.
-  const fechaAnterior =
-    contexto.turno?.fechaFormateada || contexto.turno?.fecha
-      ? [contexto.turno?.fechaFormateada || contexto.turno?.fecha, contexto.turno?.horaFormateada]
-          .filter(Boolean)
-          .join(" a las ")
-      : ""
+  /** Sin la aclaración: la pantalla la agrega aparte y en negrita. */
+  const textoSinAclaracion = [sobreElAnterior, nuevoEnContexto].filter(Boolean).join(" ")
 
-  // Lo que se le dice del turno viejo tiene que coincidir con lo que pasó: si
-  // la cancelación falló, el paciente tiene dos turnos y no lo sabe. Enterarse
-  // por el mensaje es mucho mejor que enterarse en la clínica.
-  // Lo que se le dice del turno VIEJO, que se le pega a las dos versiones —la
-  // completa y la que va sin la aclaración—. Antes esto se componía sólo con
-  // la completa, y `textoPrincipal` terminaba arrastrando la aclaración
-  // adentro: la pantalla la habría mostrado dos veces, una corrida y otra en
-  // negrita.
-  const sobreElAnterior = seCancelóElAnterior
-    ? ` Cancelamos el turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"}.`
-    : cancelacionFallida
-      ? ` Tu turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"} sigue activo: ` +
-        `escribinos por WhatsApp para que lo cancelemos.`
-      : ""
-
-  const texto = `${textoDelTurnoNuevo}${sobreElAnterior}`
+  const texto = [textoSinAclaracion, aclaracionPendiente].filter(Boolean).join(" ")
 
   // ── Las estadísticas (24/9/2026) ──────────────────────────────────────────
   //
@@ -481,7 +487,7 @@ export async function POST(request: Request) {
     texto,
     // Las dos partes por separado, para que la pantalla pueda destacar la
     // aclaración. `texto` sigue siendo la frase completa.
-    textoPrincipal: `${textoSinAclaracion}${sobreElAnterior}`,
+    textoPrincipal: textoSinAclaracion,
     aclaracion: aclaracionPendiente || undefined,
     // La interfaz lo usa para no decir "Listo" cuando todavía falta que la
     // clínica apruebe.
