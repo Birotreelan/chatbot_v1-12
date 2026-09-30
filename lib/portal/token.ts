@@ -113,6 +113,7 @@ export interface ContextoDelPortal {
   pacienteEmail?: string
   pacienteDNI?: string
   obraSocialId?: string
+  obraSocialNombre?: string
   sedeId?: string
 
   /** El turno sobre el que se actúa. Ausente cuando se pide uno nuevo. */
@@ -294,6 +295,7 @@ export async function emitirEnlace(params: {
   pacienteEmail?: string
   pacienteDNI?: string
   obraSocialId?: string
+  obraSocialNombre?: string
   sedeId?: string
   turno?: TurnoDelPortal
   baseUrl?: string
@@ -322,6 +324,7 @@ export async function emitirEnlace(params: {
     pacienteEmail: params.pacienteEmail,
     pacienteDNI: params.pacienteDNI,
     obraSocialId: params.obraSocialId,
+    obraSocialNombre: params.obraSocialNombre,
     sedeId: params.sedeId,
     turno: params.turno,
     demo: params.demo === true ? true : undefined,

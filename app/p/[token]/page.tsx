@@ -348,7 +348,10 @@ export default async function PaginaDelPortal({
     nombre: identidad.nombre || contexto.pacienteNombres || contexto.pacienteNombre || undefined,
     apellido: identidad.apellido || contexto.pacienteApellido,
     dni: identidad.dni,
-    obraSocial: identidad.obraSocialNombre,
+    // Lo que averiguó el portal manda sobre lo que trajo el token, que puede
+    // ser de hace horas. Con el id solo no se puede escribir nada, así que si
+    // no hay nombre la fila no aparece —que es mejor que mostrar un número—.
+    obraSocial: identidad.obraSocialNombre || contexto.obraSocialNombre,
   }
 
   const clienteId = contexto.clienteId || ""

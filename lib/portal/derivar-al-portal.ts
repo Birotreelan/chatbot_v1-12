@@ -43,6 +43,15 @@ export interface DatosDelPaciente {
   pacienteEmail?: string
   pacienteDNI?: string
   obraSocialId?: string
+  /**
+   * El nombre, no sólo el id (30/9/2026).
+   *
+   * El repaso previo a confirmar muestra la obra social igual que el bot, y
+   * con el id no se puede escribir nada. El `Chatbot_Data` lo trae al lado del
+   * id desde siempre; simplemente no se estaba leyendo, así que al paciente
+   * que el bot había identificado le faltaba esa fila.
+   */
+  obraSocialNombre?: string
   sedeId?: string
   turno?: TurnoDelPortal
   /**
@@ -134,6 +143,7 @@ export function datosDesdeElContexto(contexto: any): DatosDelPaciente | undefine
     pacienteEmail: paciente?.mail || paciente?.email || undefined,
     pacienteDNI: paciente?.dni || undefined,
     obraSocialId: paciente?.obra_social_id || undefined,
+    obraSocialNombre: paciente?.obra_social_nombre || paciente?.obra_social || undefined,
     sedeId: turno?.sede_id || contexto.sede_id || undefined,
     // Se deja pasar `undefined` tal cual: distingue "el turno no admite
     // reagendamiento" de "el proxy no manda el campo". Ver `permiteReprogramarOnline`.
@@ -284,6 +294,7 @@ export async function derivarAlPortal(params: {
       pacienteEmail: paciente?.pacienteEmail,
       pacienteDNI: paciente?.pacienteDNI,
       obraSocialId: paciente?.obraSocialId,
+      obraSocialNombre: paciente?.obraSocialNombre,
       sedeId: paciente?.sedeId,
       turno: paciente?.turno,
       filtros: params.filtros,
