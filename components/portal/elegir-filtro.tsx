@@ -41,7 +41,25 @@ export function ElegirFiltro({
 }: {
   token: string
   campo: "sedeId" | "tipoBusqueda" | "especialidadId" | "profesionalId"
-  opciones: Array<{ id: string; nombre: string; detalle?: string }>
+  opciones: Array<{
+    id: string
+    nombre: string
+    detalle?: string
+    /**
+     * La opción se ve pero no se puede elegir (30/9/2026).
+     *
+     * El caso: un profesional sin agenda en los próximos 60 días. Antes se
+     * podía tocar y llevaba a una pantalla con dos mensajes de error
+     * encadenados —"no encontramos horarios con esos filtros" y "no hay
+     * horarios disponibles"—, o sea que el portal le daba a elegir algo que
+     * ya sabía que no iba a funcionar.
+     *
+     * Se muestra apagada en vez de ocultarla: quien viene buscando a su
+     * médico tiene que poder ver que existe y que hoy no tiene turnos. Si
+     * desapareciera de la lista, pensaría que se equivocó de clínica.
+     */
+    deshabilitada?: boolean
+  }>
   /** Lo ya elegido en pasos anteriores, para no perderlo. */
   conservar?: Record<string, string>
 }) {
@@ -49,24 +67,54 @@ export function ElegirFiltro({
     <div className="space-y-2">
       {opciones.map((opcion) => {
         const params = new URLSearchParams({ ...(conservar || {}), [campo]: opcion.id })
-        return (
-          <Link
-            key={opcion.id}
-            href={`/p/${token}?${params.toString()}`}
-            // 60px: el paciente lo toca con el pulgar, parado, a veces con poca
-            // vista. Un enlace chico acá es una barrera real.
-            className="flex min-h-[60px] items-center rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline transition-colors hover:bg-accent active:bg-accent sm:min-h-[56px] sm:px-5"
-          >
+
+        const contenido = (
+          <>
             <span
               aria-hidden
-              className="mr-3 w-1 self-stretch rounded-sm bg-primary"
+              className={`mr-3 w-1 self-stretch rounded-sm ${
+                opcion.deshabilitada ? "bg-muted-foreground/30" : "bg-primary"
+              }`}
             />
             <span className="min-w-0">
               <span className="block font-medium">{opcion.nombre}</span>
               {opcion.detalle && (
-                <span className="mt-0.5 block text-sm text-muted-foreground sm:text-[15px]">{opcion.detalle}</span>
+                <span className="mt-0.5 block text-sm text-muted-foreground sm:text-[15px]">
+                  {opcion.detalle}
+                </span>
               )}
             </span>
+          </>
+        )
+
+        // 60px: el paciente lo toca con el pulgar, parado, a veces con poca
+        // vista. Un enlace chico acá es una barrera real.
+        const forma =
+          "flex min-h-[60px] items-center rounded-xl border px-4 py-3 sm:min-h-[56px] sm:px-5"
+
+        if (opcion.deshabilitada) {
+          // Un `div` y no un enlace apagado: un `<a>` sigue siendo tocable y
+          // navegable con el teclado por más gris que se vea. `aria-disabled`
+          // para que el lector de pantalla lo anuncie como no disponible en
+          // vez de leerlo como una opción más.
+          return (
+            <div
+              key={opcion.id}
+              aria-disabled
+              className={`${forma} cursor-not-allowed bg-muted/40 text-muted-foreground`}
+            >
+              {contenido}
+            </div>
+          )
+        }
+
+        return (
+          <Link
+            key={opcion.id}
+            href={`/p/${token}?${params.toString()}`}
+            className={`${forma} bg-card text-card-foreground no-underline transition-colors hover:bg-accent active:bg-accent`}
+          >
+            {contenido}
           </Link>
         )
       })}

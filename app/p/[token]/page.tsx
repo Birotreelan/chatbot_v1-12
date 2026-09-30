@@ -744,7 +744,81 @@ export default async function PaginaDelPortal({
   // que no hay ninguna cargada no quiere elegir un profesional — quiere ver
   // los horarios. El salto ahora lo hace el bloque de especialidad.
   if (paso === "elegir_profesional") {
-    const opciones = normalizarOpciones(await obtenerTodosLosProfesionales(clienteId).catch(() => null), "profesionales")
+    const listaDeProfesionales = normalizarOpciones(
+      await obtenerTodosLosProfesionales(clienteId).catch(() => null),
+      "profesionales",
+    )
+
+    // ── Quién tiene agenda de verdad (30/9/2026) ─────────────────────────
+    //
+    // La lista de arriba es el directorio de la clínica: están todos, tengan
+    // turnos o no. Elegir a uno sin agenda llevaba a una pantalla con dos
+    // mensajes de error encadenados —"no encontramos horarios con esos
+    // filtros" y "no hay horarios disponibles"—. El portal le ofrecía algo
+    // que ya sabía que no iba a funcionar.
+    //
+    // La disponibilidad sale de UNA consulta de agenda sin filtrar por
+    // profesional: los turnos traen su `profesionalId`, así que el conjunto
+    // de los que aparecen es el de los que tienen algo en los próximos 60
+    // días. Es la misma consulta que se hace un paso después si el paciente
+    // elige "cualquier profesional", así que no es una llamada de más en el
+    // camino, es la misma adelantada.
+    //
+    // Ante un fallo se deja TODO habilitado. Deshabilitar por no haber
+    // podido preguntar sería bloquear al paciente por un problema nuestro;
+    // que toque y se encuentre con el mensaje de siempre es menos malo.
+    const agendaParaSaberQuienTiene =
+      listaDeProfesionales.length > 0
+        ? await agendaParaTurnoNuevo({
+            clienteId,
+            phone: contexto.phone,
+            sedeId: filtros.sedeId,
+            especialidadId: filtros.especialidadId,
+            pacienteDNI: identidad.dni,
+            tieneFicha: identidad.tieneFicha === true,
+            obraSocialId: identidad.obraSocialId,
+          }).catch(() => null)
+        : null
+
+    const conAgenda = new Set(
+      (agendaParaSaberQuienTiene?.dias || [])
+        .flatMap((d) => d.turnos.map((t) => String(t.profesionalId || "")))
+        .filter(Boolean),
+    )
+
+    const opciones = listaDeProfesionales.map((o) => {
+      const sinTurnos = conAgenda.size > 0 && !conAgenda.has(String(o.id))
+      return sinTurnos
+        ? { ...o, deshabilitada: true, detalle: "Sin turnos disponibles por ahora" }
+        : o
+    })
+
+    // Nadie tiene agenda: se dice acá, no después de hacerlo elegir. La
+    // consulta tiene que haber funcionado —si falló, `agendaParaSaberQuienTiene`
+    // es null y no se afirma nada—, y el modo demo se saltea porque ahí la
+    // agenda real está vacía a propósito y los horarios son inventados.
+    if (
+      !contexto.demo &&
+      agendaParaSaberQuienTiene &&
+      agendaParaSaberQuienTiene.total === 0 &&
+      conAgenda.size === 0
+    ) {
+      const volverA = volverQuitando()
+      return marco(
+        <>
+          {volverA && <Volver href={volverA} />}
+          <Avance actual="Elegir" />
+          <Aviso
+            tono="atencion"
+            titulo="No hay turnos disponibles por ahora"
+            detalle={
+              mensajeSinTurnos(agendaParaSaberQuienTiene.infoSinTurnos) ||
+              "Ningún profesional tiene horarios en los próximos 60 días. Escribinos por WhatsApp y buscamos una alternativa."
+            }
+          />
+        </>,
+      )
+    }
 
     if (opciones.length > 0) {
       // Se conserva TODO lo elegido, no sólo la especialidad: antes la sede
