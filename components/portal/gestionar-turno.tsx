@@ -110,8 +110,6 @@ export function GestionarTurno({
         {nombre ? `${nombre}, ¿qué querés hacer con tu turno?` : "¿Qué querés hacer con tu turno?"}
       </TituloDePaso>
 
-      {turno && <ResumenDelTurno turno={turno} />}
-
       {error && <Aviso titulo="No pudimos completar la gestión" detalle={error} tono="error" />}
 
       <div className="space-y-2">
@@ -121,9 +119,9 @@ export function GestionarTurno({
             recién después. */}
         <Link
           href={urlParaReagendar}
-          className="block min-h-[64px] rounded-xl border bg-card px-4 py-3 text-card-foreground no-underline transition-colors hover:bg-accent sm:min-h-[60px] sm:px-5"
+          className="block min-h-[64px] rounded-xl border border-primary/50 bg-card px-4 py-3 text-card-foreground no-underline transition-colors hover:bg-primary/5 sm:min-h-[60px] sm:px-5"
         >
-          <span className="block font-medium">Cambiarlo de horario</span>
+          <span className="block font-medium text-primary">Cambiarlo de horario</span>
           <span className="mt-0.5 block text-sm text-muted-foreground">
             Elegís otro y este queda libre
           </span>
@@ -133,9 +131,9 @@ export function GestionarTurno({
           type="button"
           onClick={() => decidir("confirmar")}
           disabled={enviando}
-          className="block min-h-[64px] w-full rounded-xl border bg-card px-4 py-3 text-left transition-colors hover:bg-accent sm:min-h-[60px] sm:px-5"
+          className="block min-h-[64px] w-full rounded-xl border border-secondary/50 bg-card px-4 py-3 text-left transition-colors hover:bg-secondary/5 sm:min-h-[60px] sm:px-5"
         >
-          <span className="block font-medium text-card-foreground">Mantenerlo, voy a ir</span>
+          <span className="block font-medium text-secondary">Mantenerlo, voy a ir</span>
           <span className="mt-0.5 block text-sm text-muted-foreground">Confirmás tu asistencia</span>
         </button>
 
@@ -157,6 +155,19 @@ export function GestionarTurno({
           </button>
         </div>
       </div>
+
+      {/* ── El turno, DEBAJO de las opciones (30/9/2026) ──────────────────
+          Estaba arriba y empujaba las tres opciones fuera de la primera
+          pantalla: el paciente abría el enlace y lo primero que veía era el
+          turno que ya conoce, con lo que vino a hacer más abajo.
+
+          Acá abajo sigue estando para verificar —"¿es este el turno?"— pero
+          no le gana el lugar a la decisión, que es lo que la pantalla pide.
+
+          Los tres colores no son decoración: verde la que conserva el turno,
+          azul la alternativa, rojo la única que el paciente no puede deshacer
+          solo. Son los mismos tres del resto del portal. */}
+      {turno && <ResumenDelTurno turno={turno} titulo="El turno del que hablamos" />}
     </div>
   )
 }

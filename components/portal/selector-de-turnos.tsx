@@ -36,6 +36,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { fechaPresentableEnMayuscula } from "@/lib/portal/fechas"
 import { Calendar } from "@/components/ui/calendar"
 import { es } from "date-fns/locale"
 import { LoadingState } from "@/components/ui/loading-state"
@@ -324,7 +325,10 @@ export function SelectorDeTurnos({
   // la hora suelta que tocó, sin el profesional ni la sede, es pedirle que
   // confirme a ciegas.
   const cuandoElViejo = [
-    reemplazaA?.fechaFormateada || reemplazaA?.fecha,
+    // Completa: "2026-09-30 a las 08:00" es un dato, "Miércoles, 30 de
+    // septiembre de 2026 a las 08:00" es algo que el paciente puede
+    // reconocer como suyo. Y es el turno que está por perder.
+    fechaPresentableEnMayuscula(reemplazaA),
     reemplazaA?.horaFormateada || reemplazaA?.hora,
   ]
     .filter(Boolean)

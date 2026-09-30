@@ -45,6 +45,7 @@
 
 import type { ReactNode } from "react"
 import Link from "next/link"
+import { fechaPresentableEnMayuscula } from "@/lib/portal/fechas"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -501,7 +502,10 @@ export function ResumenDelTurno({
   detalle?: string
 }) {
   const filas: Array<[string, string | undefined]> = [
-    ["Fecha", turno.fechaFormateada || turno.fecha],
+    // Completa y no cruda (30/9/2026). Cuando el turno viene del recordatorio
+    // sin `fecha_formateada`, acá salía "2026-09-30": correcto para una
+    // máquina e inútil para verificar un turno médico de un vistazo.
+    ["Fecha", fechaPresentableEnMayuscula(turno) || undefined],
     ["Hora", turno.horaFormateada || turno.hora],
     ["Profesional", turno.profesional],
     ["Sede", turno.sede],
@@ -685,7 +689,7 @@ export function ResumenDeConfirmacion({
       ]
 
   const datosDelTurno: Array<[string, string | undefined]> = [
-    ["Fecha", turno.fechaFormateada],
+    ["Fecha", fechaPresentableEnMayuscula(turno) || turno.fechaFormateada],
     ["Hora", turno.horaFormateada],
     // Sin "Dr." adelante, a diferencia del bot: ese prefijo se agrega sin
     // saber si corresponde, y la agenda tiene instrumentadores quirúrgicos y
@@ -723,8 +727,12 @@ export function ResumenDeConfirmacion({
 
       {reemplaza?.cuando && (
         <div className="border-t pt-4">
+          {/* "Turno a cancelar" y no "Turno actual" (30/9/2026): describe lo
+              que va a pasar con él, que es lo que el paciente tiene que
+              registrar antes de apretar el botón. "Actual" sólo lo ubica en el
+              tiempo y deja la consecuencia para la letra chica de abajo. */}
           <p className="mb-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
-            Turno actual
+            Turno a cancelar
           </p>
           <p className="text-[15px] font-medium first-letter:uppercase">{reemplaza.cuando}</p>
           {/* Dice la consecuencia de apretar el botón, no lo que va a pasar

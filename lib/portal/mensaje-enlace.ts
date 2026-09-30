@@ -18,7 +18,7 @@
  */
 
 import { fraseDerivacion } from "../utils/escalation-contact"
-import { formatDateWithDayOfWeek } from "../utils/date-utils"
+import { fechaPresentable } from "./fechas"
 import type { IntencionDelPortal } from "./vigencia"
 
 export const LIMITE_TEXTO_BOTON = 20
@@ -371,32 +371,6 @@ export function botonDelEnlace(intencion: IntencionDelPortal): string {
   return BOTONES_DEL_ENLACE[intencion] || BOTON_GESTIONAR
 }
 
-/**
- * La fecha del turno, en la forma larga que usa el resto del sistema:
- * "sábado, 26 de septiembre de 2026".
- *
- * Se prefiere `fecha` cruda ("2026-09-26") porque es la que el formateador
- * sabe leer. `fecha_formateada` llega como "26/09/2026" y se convierte acá
- * antes de pasarla: si se la diera cruda a `new Date`, en Argentina saldría
- * el mes cambiado por el día.
- *
- * Si nada se puede formatear, devuelve lo que haya. Un paciente prefiere
- * "26/09/2026" antes que un hueco donde iba la fecha de su turno.
- */
-export function fechaPresentable(turno?: { fecha?: string; fechaFormateada?: string }): string {
-  const cruda = (turno?.fecha || "").trim()
-  const mostrada = (turno?.fechaFormateada || "").trim()
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(cruda)) return formatDateWithDayOfWeek(cruda)
-
-  const ddmmaaaa = mostrada.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
-  if (ddmmaaaa) {
-    const [, d, m, a] = ddmmaaaa
-    return formatDateWithDayOfWeek(`${a}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`)
-  }
-
-  return mostrada || cruda
-}
 
 /**
  * El respaldo de `botonDelEnlace` para una intención que no esté en la tabla.
@@ -406,3 +380,6 @@ export function fechaPresentable(turno?: { fecha?: string; fechaFormateada?: str
  * Máximo 20 caracteres, como todos los CTA.
  */
 export const BOTON_GESTIONAR = "Gestionar mi turno"
+
+/** Re-exportada por compatibilidad: su casa es `./fechas`. */
+export { fechaPresentable }
