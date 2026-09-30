@@ -577,6 +577,9 @@ export default async function PaginaDelPortal({
             etiquetaConfirmar="Confirmar el cambio"
             accion="cambiar"
             reemplazaA={contexto.turno}
+            profesionalFijo={
+              agenda.filtradoPorProfesional ? agenda.profesionalNombre : undefined
+            }
             direccionesPorSede={direcciones}
             // Va adentro y no acá arriba porque tiene que irse cuando el
             // paciente pasa al repaso: el turno viejo y "elegí el nuevo
@@ -842,6 +845,11 @@ export default async function PaginaDelPortal({
         corregirDatosEn={corregirDatosEn}
         etiquetaConfirmar="Confirmar mi turno"
         direccionesPorSede={direccionesNuevo}
+        // El MISMO valor que decide el aviso azul de arriba. Si el aviso dice
+        // "Horarios disponibles con X", los chips no repiten el nombre; si no
+        // lo dice, cada horario lo lleva. Dos reglas separadas para la misma
+        // pregunta es cómo un día aparecía el nombre y al siguiente no.
+        profesionalFijo={profesionalDeLaAgenda}
         // El "Volver" va adentro por el mismo motivo que el título: en el
         // repaso el paso atrás es "Elegir otro horario", y dos formas de
         // volver que hacen cosas distintas en la misma pantalla es cómo se

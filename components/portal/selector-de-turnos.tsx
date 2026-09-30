@@ -110,6 +110,28 @@ interface Props {
    * Sin entrada para esa sede, la fila no se muestra.
    */
   direccionesPorSede?: Record<string, string>
+  /**
+   * El profesional al que está acotada TODA la agenda, si lo hay (30/9/2026).
+   *
+   * Cuando está, los horarios no repiten el nombre: ya lo dice el aviso de
+   * arriba y repetirlo en ocho chips convierte la grilla en un bloque de
+   * texto.
+   *
+   * Cuando NO está —el paciente eligió "cualquier profesional"— el nombre va
+   * en cada horario, siempre.
+   *
+   * ── El error que esto corrige ────────────────────────────────────────────
+   *
+   * Antes se decidía por día: se miraba si los turnos de ESE día eran de
+   * profesionales distintos. Con "cualquier profesional", un día con dos
+   * médicos mostraba los nombres y el día siguiente, que casualmente tenía
+   * uno solo, los ocultaba. El paciente pasaba de una pantalla a otra y
+   * asumía que seguía siendo el mismo médico de antes.
+   *
+   * La pregunta no era "¿este día tiene varios?" sino "¿el paciente eligió
+   * profesional?", que es una propiedad de la búsqueda y no de la fecha.
+   */
+  profesionalFijo?: string
 }
 
 interface Elegido {
@@ -143,6 +165,7 @@ export function SelectorDeTurnos({
   accion = "reservar",
   reemplazaA,
   direccionesPorSede,
+  profesionalFijo,
 }: Props) {
   const router = useRouter()
   const [diaElegido, setDiaElegido] = useState<string | null>(null)
@@ -168,10 +191,9 @@ export function SelectorDeTurnos({
   const primerDia = dias[0]?.fecha
   const turnosDelDia = dias.find((d) => d.fecha === diaElegido)?.turnos || []
 
-  // Se mira el día que se está mostrando, no toda la agenda: un día puede ser
-  // de un solo profesional y el siguiente de tres.
-  const variosProfesionales =
-    new Set(turnosDelDia.map((t) => t.profesionalNombre).filter(Boolean)).size > 1
+  // Si la agenda no está acotada a un profesional, el nombre va en cada
+  // horario. No se mira cuántos hay en el día: ver `profesionalFijo`.
+  const mostrarProfesional = !profesionalFijo
 
   // ── Llevar la pantalla a los horarios al elegir un día (28/9/2026) ────────
   //
@@ -609,7 +631,7 @@ export function SelectorDeTurnos({
           <div
             className="grid gap-2 sm:gap-3"
             style={{
-              gridTemplateColumns: `repeat(auto-fill, minmax(${variosProfesionales ? 150 : 96}px, 1fr))`,
+              gridTemplateColumns: `repeat(auto-fill, minmax(${mostrarProfesional ? 150 : 96}px, 1fr))`,
             }}
           >
             {turnosDelDia.map((turno) => (
@@ -632,13 +654,10 @@ export function SelectorDeTurnos({
                 className="min-h-[56px] rounded-xl border bg-card px-2 py-2 text-base font-medium text-card-foreground transition-colors hover:border-primary/40 hover:bg-accent active:bg-accent lg:min-h-[48px]"
               >
                 {turno.hora}
-                {/* El nombre sólo cuando los horarios del día son de
-                    profesionales DISTINTOS. Si son todos del mismo, ya está
-                    dicho arriba y repetirlo ocho veces hace que la grilla se
-                    lea como un bloque de texto en vez de como ocho horarios.
-                    Cuando difieren, en cambio, es el dato que decide cuál
-                    tocar. */}
-                {variosProfesionales &&
+                {/* El nombre va salvo que la agenda entera sea de un solo
+                    profesional, en cuyo caso ya lo dice el aviso de arriba.
+                    Ver `profesionalFijo`. */}
+                {mostrarProfesional &&
                   turno.profesionalNombre &&
                   turno.profesionalNombre !== "Sin asignar" && (
                     <span className="block break-words text-xs font-normal leading-tight text-muted-foreground">
