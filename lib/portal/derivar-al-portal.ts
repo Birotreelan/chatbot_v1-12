@@ -349,7 +349,18 @@ export async function derivarAlPortal(params: {
     await saveConversationMessage({
       id: nanoid(),
       role: "assistant",
-      content: `${cuerpo}\n\n[Enlace de gestión enviado]`,
+      // Con la URL adentro (30/9/2026). Antes decía sólo "[Enlace de gestión
+      // enviado]", y desde el panel no había forma de ver a dónde se lo mandó
+      // —ni de abrirlo para reproducir lo que ve el paciente cuando algo le
+      // falla—. Es el dato que convierte el monitor en una herramienta de
+      // diagnóstico en vez de un registro de que algo pasó.
+      //
+      // Queda anotado que esa URL ES la credencial: quien la vea en el panel
+      // puede gestionar el turno de ese paciente. Hoy eso no agrega poder
+      // —un agente ya puede cancelar y reprogramar desde el panel— pero si
+      // mañana el monitor se comparte con alguien que no debería poder, esto
+      // hay que volver a mirarlo.
+      content: `${cuerpo}\n\n[Enlace de gestión enviado: ${enlace.url}]`,
       timestamp: new Date().toISOString(),
       phoneNumber: params.userPhoneNumber,
       configId: config.id,
