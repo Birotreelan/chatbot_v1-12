@@ -41,6 +41,7 @@ import { es } from "date-fns/locale"
 import { LoadingState } from "@/components/ui/loading-state"
 import type { DiaConTurnos } from "@/lib/portal/agenda"
 import {
+  Acciones,
   Avance,
   Aviso,
   BotonPrimario,
@@ -417,14 +418,17 @@ export function SelectorDeTurnos({
           </Link>
         )}
 
-        <div className="space-y-2">
+        <Acciones>
           <BotonPrimario onClick={confirmar} deshabilitado={enviando}>
             {enviando ? <LoadingState inline label="Reservando…" /> : etiquetaConfirmar}
           </BotonPrimario>
+          {/* Mientras se envía, la secundaria desaparece: tocar "elegir otro
+              horario" con la reserva en vuelo deja al paciente eligiendo sobre
+              un turno que quizás ya se guardó. */}
           {!enviando && (
             <BotonSecundario onClick={() => setElegido(null)}>Elegir otro horario</BotonSecundario>
           )}
-        </div>
+        </Acciones>
       </div>
     )
   }

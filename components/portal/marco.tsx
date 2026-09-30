@@ -528,6 +528,34 @@ export function ResumenDelTurno({
 }
 
 /**
+ * Las acciones del final de un paso (30/9/2026).
+ *
+ * En teléfono van una debajo de otra y a ancho completo: se tocan con el
+ * pulgar y no hay lugar para otra cosa.
+ *
+ * Desde tablet van una al lado de la otra. Apiladas en una columna de 640px
+ * son dos barras enormes que empujan todo hacia abajo, y con mouse no hace
+ * falta que sean tan grandes.
+ *
+ * `flex-row-reverse` y no `flex-row`: la acción primaria va a la derecha, que
+ * es donde se la busca en un cuadro de confirmación. El orden en el HTML
+ * queda al revés —primero la primaria— y así también es como la escucha un
+ * lector de pantalla, que es el orden correcto para entender de qué se trata
+ * la pantalla.
+ *
+ * `[&>*]:flex-1` reparte el ancho en partes iguales: con dos botones de texto
+ * distinto, dejarlos a su tamaño natural da una pareja despareja que se lee
+ * como si uno importara más por ser más largo.
+ */
+export function Acciones({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2 sm:mx-auto sm:max-w-lg sm:flex-row-reverse sm:gap-3 sm:[&>*]:flex-1">
+      {children}
+    </div>
+  )
+}
+
+/**
  * El botón primario, uno por pantalla.
  *
  * 56px de alto y ancho completo: lo toca con el pulgar alguien parado en una
@@ -559,6 +587,9 @@ export function BotonPrimario({
       // `mx-auto` centre. En teléfono va a ancho completo —se toca con el
       // pulgar—; desde tablet se acota, porque un botón de 640px de ancho y
       // 56px de alto operado con un mouse es un cartel.
+      //
+      // Cuando está dentro de `Acciones`, el `flex-1` del contenedor pisa el
+      // `max-w` y los dos botones se reparten el ancho.
       className="flex h-auto w-full py-4 text-[17px] font-medium sm:mx-auto sm:max-w-sm sm:py-3.5 sm:text-base"
     >
       {children}
