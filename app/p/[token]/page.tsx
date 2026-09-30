@@ -179,9 +179,14 @@ export default async function PaginaDelPortal({
             veces seguidas no agrega nada y empuja el dato real más abajo. */}
         <Aviso
           titulo={contexto.resultado.texto}
-          // Cancelar salió bien, pero no es una buena noticia: el verde le
-          // pone una celebración encima a alguien que perdió su turno.
-          tono={pendiente || tipo === "cancelacion" ? "neutro" : "exito"}
+          // Verde salvo en la cancelación: salió bien, pero no es una buena
+          // noticia, y el verde le pone una celebración encima a alguien que
+          // perdió su turno.
+          //
+          // Pendiente de aprobación SÍ va en verde (30/9/2026): el color no
+          // habla del turno sino de lo que el paciente hizo, y su solicitud
+          // salió bien. Lo que falta se lo dice el texto.
+          tono={tipo === "cancelacion" ? "neutro" : "exito"}
         />
         {contexto.resultado.turno && (
           <ResumenDelTurno

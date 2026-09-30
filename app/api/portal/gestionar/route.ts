@@ -355,13 +355,35 @@ export async function POST(request: Request) {
     .join(" a las ")
   const conQuien = datosDelTurnoElegido.profesional ? ` con ${datosDelTurnoElegido.profesional}` : ""
 
+  /**
+   * La aclaración de que falta la aprobación, aparte del resto (30/9/2026).
+   *
+   * Va separada porque la pantalla la muestra en negrita: es lo único que el
+   * paciente NO puede dar por hecho, y en un párrafo corrido se pierde entre
+   * la fecha y el nombre del profesional.
+   *
+   * `texto` la sigue llevando adentro. Ése es el que se guarda en la
+   * conversación y el que el paciente vuelve a leer si reabre el enlace, y
+   * ahí no hay negritas: tiene que ser una frase completa.
+   */
+  const aclaracionPendiente = confirmacionHumana
+    ? "La clínica tiene que aprobarlo y te avisaremos a tu WhatsApp apenas lo haga."
+    : ""
+
   const textoDelTurnoNuevo = confirmacionHumana
     ? cuando
-      ? `Pedimos tu turno para el ${cuando}${conQuien}. La clínica tiene que aprobarlo y te avisamos apenas lo haga.`
-      : "Pedimos tu turno. La clínica tiene que aprobarlo y te avisamos apenas lo haga."
+      ? `Pedimos tu turno para el ${cuando}${conQuien}. ${aclaracionPendiente}`
+      : `Pedimos tu turno. ${aclaracionPendiente}`
     : cuando
       ? `Tu turno quedó para el ${cuando}${conQuien}.`
       : "Tu turno quedó reservado."
+
+  /** Lo mismo, sin la aclaración: la pantalla la agrega aparte y en negrita. */
+  const textoSinAclaracion = confirmacionHumana
+    ? cuando
+      ? `Pedimos tu turno para el ${cuando}${conQuien}.`
+      : "Pedimos tu turno."
+    : textoDelTurnoNuevo
 
   // ── Decir que el anterior se canceló (25/9/2026) ──────────────────────────
   //
@@ -381,12 +403,19 @@ export async function POST(request: Request) {
   // Lo que se le dice del turno viejo tiene que coincidir con lo que pasó: si
   // la cancelación falló, el paciente tiene dos turnos y no lo sabe. Enterarse
   // por el mensaje es mucho mejor que enterarse en la clínica.
-  const texto = seCancelóElAnterior
-    ? `${textoDelTurnoNuevo} Cancelamos el turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"}.`
+  // Lo que se le dice del turno VIEJO, que se le pega a las dos versiones —la
+  // completa y la que va sin la aclaración—. Antes esto se componía sólo con
+  // la completa, y `textoPrincipal` terminaba arrastrando la aclaración
+  // adentro: la pantalla la habría mostrado dos veces, una corrida y otra en
+  // negrita.
+  const sobreElAnterior = seCancelóElAnterior
+    ? ` Cancelamos el turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"}.`
     : cancelacionFallida
-      ? `${textoDelTurnoNuevo} Tu turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"} sigue activo: ` +
+      ? ` Tu turno${fechaAnterior ? ` del ${fechaAnterior}` : " anterior"} sigue activo: ` +
         `escribinos por WhatsApp para que lo cancelemos.`
-      : textoDelTurnoNuevo
+      : ""
+
+  const texto = `${textoDelTurnoNuevo}${sobreElAnterior}`
 
   // ── Las estadísticas (24/9/2026) ──────────────────────────────────────────
   //
@@ -450,6 +479,10 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     texto,
+    // Las dos partes por separado, para que la pantalla pueda destacar la
+    // aclaración. `texto` sigue siendo la frase completa.
+    textoPrincipal: `${textoSinAclaracion}${sobreElAnterior}`,
+    aclaracion: aclaracionPendiente || undefined,
     // La interfaz lo usa para no decir "Listo" cuando todavía falta que la
     // clínica apruebe.
     pendienteDeAprobacion: confirmacionHumana,

@@ -154,6 +154,10 @@ export function SelectorDeTurnos({
   const [sinTurno, setSinTurno] = useState(false)
   const [resultado, setResultado] = useState<{
     texto: string
+    /** Lo mismo, sin la aclaración de que falta la aprobación. */
+    principal?: string
+    /** "La clínica tiene que aprobarlo…", que se muestra en negrita. */
+    aclaracion?: string
     aviso?: boolean
     pendiente?: boolean
   } | null>(null)
@@ -210,6 +214,8 @@ export function SelectorDeTurnos({
       if (datos.ok) {
         setResultado({
           texto: datos.texto,
+          principal: datos.textoPrincipal,
+          aclaracion: datos.aclaracion,
           aviso: datos.avisoCancelacion,
           pendiente: datos.pendienteDeAprobacion === true,
         })
@@ -245,10 +251,22 @@ export function SelectorDeTurnos({
               : "¡Tu turno está confirmado!"}
         </TituloDePaso>
 
-        {/* "Listo" sólo cuando de verdad está listo. Si la clínica todavía
-            tiene que aprobarlo, decir "Listo" hace que el paciente se presente
-            un día que puede no tener turno. */}
-        <Aviso titulo={resultado.texto} tono={resultado.pendiente ? "neutro" : "exito"} />
+        {/* Verde también cuando falta la aprobación (30/9/2026).
+            Antes era neutro, con el argumento de que el turno todavía no está
+            otorgado. Pero el verde no habla del turno, habla de lo que el
+            paciente acaba de hacer: su solicitud salió bien. Lo que no puede
+            dar por hecho se lo dice la aclaración, en negrita, que es donde
+            se lee de verdad —en un párrafo corrido se perdía entre la fecha y
+            el nombre del profesional—. */}
+        <Aviso
+          tono="exito"
+          titulo={resultado.principal || resultado.texto}
+          detalle={
+            resultado.aclaracion ? (
+              <span className="font-semibold">{resultado.aclaracion}</span>
+            ) : undefined
+          }
+        />
         {elegido && (
           <ResumenDelTurno
             turno={{
@@ -261,18 +279,22 @@ export function SelectorDeTurnos({
             }}
             titulo={
               resultado.pendiente
-                ? "El turno que pediste"
+                ? "Datos del turno solicitado"
                 : accion === "cambiar"
-                  ? "Tu turno nuevo"
-                  : "Los datos de tu turno"
+                  ? "Datos de tu turno nuevo"
+                  : "Datos de tu turno"
             }
           />
         )}
-        <p className="text-[15px] text-muted-foreground">
-          {resultado.pendiente
-            ? "Te avisamos por WhatsApp apenas la clínica la apruebe."
-            : "Te va a llegar la confirmación por WhatsApp. Guardá estos datos para tu próxima visita."}
-        </p>
+        {/* Sin línea al pie cuando está pendiente: lo que decía —"te avisamos
+            por WhatsApp apenas la clínica apruebe"— ya está arriba, en
+            negrita, y repetirlo en gris al final lo debilita. */}
+        {!resultado.pendiente && (
+          <p className="text-[15px] text-muted-foreground">
+            Te va a llegar la confirmación por WhatsApp. Guardá estos datos para tu próxima
+            visita.
+          </p>
+        )}
         {resultado.aviso && (
           <Aviso
             titulo="Revisemos tu turno anterior"
