@@ -631,9 +631,10 @@ export default async function PaginaDelPortal({
                 )}
 
                 {agenda.filtradoPorProfesional && agenda.profesionalNombre && (
-                  <p className="text-[15px] text-muted-foreground">
-                    Horarios disponibles con {agenda.profesionalNombre}.
-                  </p>
+                  <Aviso
+                    tono="neutro"
+                    titulo={`Horarios disponibles con ${agenda.profesionalNombre}.`}
+                  />
                 )}
               </>
             }
@@ -871,9 +872,10 @@ export default async function PaginaDelPortal({
                 ya, y una línea que no informa es ruido que empuja el
                 calendario más abajo. */}
             {profesionalDeLaAgenda && (
-              <p className="text-[15px] text-muted-foreground">
-                Horarios disponibles con {profesionalDeLaAgenda}.
-              </p>
+              // Resaltado y no en gris: no es una nota al pie, es el filtro
+              // con el que está mirando la agenda. Si no lo registra, elige un
+              // horario creyendo que había más opciones de las que hay.
+              <Aviso tono="neutro" titulo={`Horarios disponibles con ${profesionalDeLaAgenda}.`} />
             )}
           </>
         }
