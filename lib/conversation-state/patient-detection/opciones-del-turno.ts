@@ -58,3 +58,88 @@ export function seOfreceConfirmarAsistencia(permisos: PermisosDeConfirmacion): b
 export function seMencionaLaFaltaDeConfirmacion(permisos: PermisosDeConfirmacion): boolean {
   return seOfreceConfirmarAsistencia(permisos)
 }
+
+/**
+ * Las acciones del menú, EN ORDEN (30/9/2026).
+ *
+ * El orden es el número que el paciente responde: la primera es el "1".
+ *
+ * Existe porque esta lista se armaba en tres lugares —el texto del menú, el
+ * mapa de números y, desde hoy, los botones interactivos— y el archivo ya
+ * explica por qué eso termina mal. Los TEXTOS siguen siendo de cada
+ * superficie: el menú escribe "Cancelar el turno médico" y el botón
+ * "Cancelar turno", porque WhatsApp corta los títulos en 20 caracteres. Lo
+ * que no puede diferir es qué opciones hay y en qué orden.
+ */
+export type AccionDelMenu =
+  | "confirm_appointment"
+  | "cancel_appointment"
+  | "cancel_and_book_new_appointment"
+  | "other_inquiry_intent"
+
+export interface PermisosDelMenu extends PermisosDeConfirmacion {
+  /** `WhatsAppConfig.permitirCancelacion`. Default true. */
+  permitirCancelacion?: boolean
+  /** `WhatsAppConfig.permitirNuevoTurno`. Default true. */
+  permitirNuevoTurno?: boolean
+  /** La obra social del paciente no admite turnos online. */
+  obraSocialBloqueada?: boolean
+}
+
+/** Las gestiones, sin "Realizar otra consulta". */
+export function gestionesDelTurno(permisos: PermisosDelMenu): AccionDelMenu[] {
+  const acciones: AccionDelMenu[] = []
+
+  if (seOfreceConfirmarAsistencia(permisos)) acciones.push("confirm_appointment")
+  if (permisos.permitirCancelacion !== false) acciones.push("cancel_appointment")
+
+  // La obra social bloqueada inhabilita sólo la parte de "solicitar uno
+  // nuevo": cancelar sigue siendo una gestión válida para ese paciente.
+  if (
+    permisos.permitirCancelacion !== false &&
+    permisos.permitirNuevoTurno !== false &&
+    permisos.obraSocialBloqueada !== true
+  ) {
+    acciones.push("cancel_and_book_new_appointment")
+  }
+
+  return acciones
+}
+
+/**
+ * ¿La única gestión posible es cancelar?
+ *
+ * Ese caso no muestra menú numerado: muestra un solo botón "Cancelar turno" y
+ * deriva el resto por teléfono.
+ */
+export function soloSePuedeCancelar(permisos: PermisosDelMenu): boolean {
+  const acciones = gestionesDelTurno(permisos)
+  return acciones.length === 1 && acciones[0] === "cancel_appointment"
+}
+
+/**
+ * El menú numerado completo. Vacío cuando no hay nada que ofrecer o cuando la
+ * única gestión es cancelar, que se resuelve con un botón suelto.
+ */
+export function menuDelTurno(permisos: PermisosDelMenu): AccionDelMenu[] {
+  const acciones = gestionesDelTurno(permisos)
+  if (acciones.length === 0 || soloSePuedeCancelar(permisos)) return []
+  return [...acciones, "other_inquiry_intent"]
+}
+
+/**
+ * El título de cada acción como botón de WhatsApp.
+ *
+ * Son más cortos que los del menú escrito porque WhatsApp corta en 20
+ * caracteres: "Cancelar el turno médico" son 24 y llegaría mutilado. Hay un
+ * test que verifica el largo.
+ */
+export const BOTON_DE_LA_ACCION: Record<AccionDelMenu, string> = {
+  confirm_appointment: "Confirmar asistencia",
+  cancel_appointment: "Cancelar turno",
+  cancel_and_book_new_appointment: "Cancelar y reagendar",
+  other_inquiry_intent: "Otra consulta",
+}
+
+/** Máximo de botones que admite un mensaje interactivo de WhatsApp. */
+export const MAXIMO_DE_BOTONES = 3

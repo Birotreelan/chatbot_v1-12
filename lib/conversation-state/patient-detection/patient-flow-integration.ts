@@ -32,7 +32,12 @@ import {
 } from './patient-templates'
 import { detectFamiliarIntent } from './familiar-intent-detector'
 import { classifyTurnoEstado } from './turno-estado'
-import { seOfreceConfirmarAsistencia } from './opciones-del-turno'
+import {
+  seOfreceConfirmarAsistencia,
+  menuDelTurno,
+  BOTON_DE_LA_ACCION,
+  MAXIMO_DE_BOTONES,
+} from './opciones-del-turno'
 import { extractDNI, extractAllDNIs } from '../dni-handler'
 import { resolverTurnosOnline } from '../shared/obra-social'
 import { recordDiag, DIAG } from '@/lib/diagnostics'
@@ -439,13 +444,49 @@ export async function initializePatientDetection(
       permitirCancelacion !== false &&
       permitirNuevoTurno === false
 
+    // ── Botones también para el paciente CON turno (30/9/2026) ────────────
+    //
+    // Hasta hoy el saludo con turno salía sin botones y con la lista numerada
+    // a secas. No era un olvido: el menú tenía cuatro opciones —confirmar,
+    // cancelar, cancelar y pedir otro, otra consulta— y WhatsApp admite tres
+    // botones. Con cuatro, no hay forma.
+    //
+    // Al sacar "Confirmar asistencia" en los clientes del portal quedaron
+    // exactamente tres, así que entran. Para el resto de los clientes el menú
+    // sigue teniendo cuatro y se sigue respondiendo con el número: por eso la
+    // condición es la cantidad y no el switch del portal. El día que un menú
+    // vuelva a tener cuatro opciones, los botones desaparecen solos en vez de
+    // salir truncados.
+    //
+    // Las opciones y su orden salen de `menuDelTurno`, el mismo que arma el
+    // mapa de números. Escribirlas acá otra vez sería la cuarta copia de la
+    // misma lista, que es el bug del caso Liliana esperando a pasar de nuevo.
+    const menuConTurno = hasTurnos
+      ? menuDelTurno({
+          estadoAdmiteConfirmar: singleTurno
+            ? classifyTurnoEstado(singleTurno) === 'no_confirmado' && hasReminder
+            : true,
+          usaPortalWeb,
+          permitirCancelacion,
+          permitirNuevoTurno,
+          obraSocialBloqueada: obraSocialBloqueada !== undefined,
+        })
+      : []
+
     // Incluir botones interactivos para los casos sin turnos médicos.
     // Los ids DEBEN coincidir con el texto del menú y con el action map: con la
     // obra social bloqueada no se ofrece "Solicitar turno" y todo se corre uno.
     const greetingButtons: Array<{ id: string; title: string }> | undefined =
       singleTurnoSoloCancelar
         ? [{ id: "1", title: "Cancelar turno" }]
-        : (!hasTurnos)
+        : hasTurnos
+          ? menuConTurno.length > 0 && menuConTurno.length <= MAXIMO_DE_BOTONES
+            ? menuConTurno.map((accion, i) => ({
+                id: String(i + 1),
+                title: BOTON_DE_LA_ACCION[accion],
+              }))
+            : undefined
+          : (!hasTurnos)
             ? (permitirNuevoTurno === false
                 ? undefined
                 : obraSocialBloqueada

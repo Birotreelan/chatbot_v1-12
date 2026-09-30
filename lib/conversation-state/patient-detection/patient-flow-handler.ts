@@ -13,7 +13,11 @@ import {
   EXISTING_PATIENT_MULTIPLE_TURNOS_MENU,
 } from './menu-option-detector'
 import { shouldOfferConfirmation } from './turno-estado'
-import { seOfreceConfirmarAsistencia } from './opciones-del-turno'
+import {
+  seOfreceConfirmarAsistencia,
+  menuDelTurno,
+  soloSePuedeCancelar,
+} from './opciones-del-turno'
 import { buildPostActionMenu, buildTurnoInfoResponse } from './patient-templates'
 import { parseOptionNumber } from '../selection-extractor'
 
@@ -974,38 +978,31 @@ export async function processPatientDetectionMessage(
         // se ofrece (comportamiento pre-existente, no depende de hasReminder). Ninguno de
         // los dos depende de los toggles nuevos.
         const isSingleTurno = state.turnos!.length === 1
-        const puedeConfirmar = seOfreceConfirmarAsistencia({
+        // Las opciones y su orden salen de `menuDelTurno`, el mismo que arma
+        // el texto del menú y los botones. Ver opciones-del-turno.ts.
+        const permisosDelMenu = {
           estadoAdmiteConfirmar: isSingleTurno ? !singleTurnoSinConfirmacion : true,
           usaPortalWeb: state.usaPortalWeb,
-        })
-        const puedeCancelar = state.permitirCancelacion !== false
-        // La obra social bloqueada inhabilita solo la parte de "solicitar uno nuevo".
-        const puedeCancelarYNuevo =
-          state.permitirCancelacion !== false &&
-          state.permitirNuevoTurno !== false &&
-          state.obraSocialBloqueada !== true
+          permitirCancelacion: state.permitirCancelacion,
+          permitirNuevoTurno: state.permitirNuevoTurno,
+          obraSocialBloqueada: state.obraSocialBloqueada === true,
+        }
+        const menu = menuDelTurno(permisosDelMenu)
 
-        const acciones: string[] = []
-        if (puedeConfirmar) acciones.push('confirm_appointment')
-        if (puedeCancelar) acciones.push('cancel_appointment')
-        if (puedeCancelarYNuevo) acciones.push('cancel_and_book_new_appointment')
-
-        if (acciones.length === 0) {
-          // Ninguna gestión disponible (restricciones del cliente activas y sin turno
-          // pendiente de confirmación) → el saludo ya mostró sólo info + derivación,
-          // sin menú numerado.
+        if (menu.length > 0) {
           actionMap = {}
-        } else if (isSingleTurno && !puedeConfirmar && puedeCancelar && !puedeCancelarYNuevo) {
+          menu.forEach((accion, i) => {
+            actionMap[i + 1] = accion
+          })
+        } else if (soloSePuedeCancelar(permisosDelMenu)) {
           // Única gestión disponible: cancelar. El saludo muestra sólo el botón
           // "Cancelar turno" (id "1"), sin "Otra consulta" — el resto se deriva
           // por texto. Debe coincidir con buildSingleTurnoGreeting.
           actionMap = { 1: 'cancel_appointment' }
         } else {
-          acciones.push('other_inquiry_intent')
+          // Ninguna gestión disponible: el saludo ya mostró sólo info y
+          // derivación, sin menú numerado.
           actionMap = {}
-          acciones.forEach((accion, i) => {
-            actionMap[i + 1] = accion
-          })
         }
       } else {
         // Paciente SOLO con cirugías (no gestionables) o SIN turnos: mismo menú.
@@ -1160,33 +1157,31 @@ export async function processPatientDetectionMessage(
 
         if (hasTurnos) {
           const isSingleTurno = state.turnos!.length === 1
-          const puedeConfirmar = seOfreceConfirmarAsistencia({
+          // Las opciones y su orden salen de `menuDelTurno`, el mismo que arma
+          // el texto del menú y los botones. Antes esta lista se construía acá
+          // a mano, y que coincidiera con las otras dependía de que nadie se
+          // olvidara. Ver opciones-del-turno.ts.
+          const permisosDelMenu = {
             estadoAdmiteConfirmar: isSingleTurno ? !singleTurnoSinConfirmacion : true,
             usaPortalWeb: state.usaPortalWeb,
-          })
-          const puedeCancelar = state.permitirCancelacion !== false
-          // Ver comentario equivalente en el action map de arriba: la obra social
-          // bloqueada inhabilita solo la parte de "solicitar uno nuevo".
-          const puedeCancelarYNuevo =
-            state.permitirCancelacion !== false &&
-            state.permitirNuevoTurno !== false &&
-            state.obraSocialBloqueada !== true
+            permitirCancelacion: state.permitirCancelacion,
+            permitirNuevoTurno: state.permitirNuevoTurno,
+            obraSocialBloqueada: state.obraSocialBloqueada === true,
+          }
+          const menu = menuDelTurno(permisosDelMenu)
 
-          const acciones: string[] = []
-          if (puedeConfirmar) acciones.push('confirm_appointment')
-          if (puedeCancelar) acciones.push('cancel_appointment')
-          if (puedeCancelarYNuevo) acciones.push('cancel_and_book_new_appointment')
-
-          if (acciones.length === 0) {
+          if (menu.length > 0) {
             actionMap = {}
-          } else if (isSingleTurno && !puedeConfirmar && puedeCancelar && !puedeCancelarYNuevo) {
-            actionMap = { 1: 'cancel_appointment' }
-          } else {
-            acciones.push('other_inquiry_intent')
-            actionMap = {}
-            acciones.forEach((accion, i) => {
+            menu.forEach((accion, i) => {
               actionMap[i + 1] = accion
             })
+          } else if (soloSePuedeCancelar(permisosDelMenu)) {
+            // Única gestión disponible: el saludo muestra un botón suelto.
+            actionMap = { 1: 'cancel_appointment' }
+          } else {
+            // Ninguna gestión disponible: el saludo informa y deriva, sin
+            // números que interpretar.
+            actionMap = {}
           }
         } else {
           // Sin turnos o sólo cirugías: mismo menú. Con obra social bloqueada se
