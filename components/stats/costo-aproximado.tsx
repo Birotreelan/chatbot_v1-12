@@ -39,10 +39,24 @@ const dolares = new Intl.NumberFormat("es-AR", {
 export function CostoAproximado({
   clienteId,
   interacciones,
+  serviciosConCargo = 0,
   cargandoInteracciones,
 }: {
   clienteId: string
+  /**
+   * Unidades facturables del período: interacciones + mensajes de servicio
+   * con cargo. Ver `unidadesFacturables` en tarjeta-de-interacciones.tsx.
+   */
   interacciones: number
+  /**
+   * Cuántas de esas unidades son mensajes de servicio con cargo.
+   *
+   * Sólo sirve para explicarlo abajo. Mientras sea 0 —el caso de hoy— el
+   * costo coincide con el total de interacciones que se ve arriba y no hace
+   * falta aclarar nada; cuando deje de serlo, los dos números dejan de
+   * coincidir a la vista y sin una línea que lo diga parecería un error.
+   */
+  serviciosConCargo?: number
   /** El total todavía se está trayendo: no mostrar un costo de cero. */
   cargandoInteracciones?: boolean
 }) {
@@ -101,6 +115,13 @@ export function CostoAproximado({
           {totalPesos !== null ? (
             <>
               {dolares.format(totalUsd)} · dólar venta {pesos.format(costo.dolarVenta as number)}
+              {serviciosConCargo > 0 && (
+                <>
+                  <br />
+                  Incluye {serviciosConCargo} mensaje{serviciosConCargo === 1 ? "" : "s"} de servicio
+                  con cargo
+                </>
+              )}
             </>
           ) : (
             // Se dice por qué está en dólares. Sin esto, la clínica que un día

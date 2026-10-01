@@ -100,6 +100,21 @@ export function TarjetaDeInteracciones({
 }) {
   const interacciones = recordatoriosEnviados + conversacionesIniciadas
 
+  // ── La base del costo no son las interacciones (1/10/2026) ──────────────
+  //
+  // Es lo facturable, que es lo mismo que cobra Facturación: plantillas +
+  // mensajes de servicio PAGOS + conversaciones iniciadas. Los mensajes de
+  // servicio sin cargo no entran.
+  //
+  // Mientras `servicio.pagados` sea 0 los dos números coinciden y la cuenta
+  // se puede hacer a ojo con los recuadros de arriba. El día que deje de
+  // serlo, calcular sobre las interacciones mostraría un costo menor que la
+  // factura que después le llega al cliente — y de ese tamaño: con 300
+  // mensajes pagos, 102 unidades contra 402. Por eso la cuenta sigue a la
+  // factura y no a lo que se ve en la tarjeta, y por eso el recuadro de
+  // servicio está a la vista: es lo que explica la diferencia.
+  const unidadesFacturables = interacciones + (servicio?.pagados ?? 0)
+
   return (
     <Card className="border-purple-200 bg-purple-50/30">
       <CardHeader>
@@ -147,7 +162,8 @@ export function TarjetaDeInteracciones({
 
           <CostoAproximado
             clienteId={clienteId}
-            interacciones={interacciones}
+            interacciones={unidadesFacturables}
+            serviciosConCargo={servicio?.pagados ?? 0}
             cargandoInteracciones={cargando}
           />
         </div>
