@@ -1,4 +1,25 @@
 /**
+ * ── La compuerta de pausa (1/10/2026) ───────────────────────────────────────
+ *
+ * Las cuatro funciones de envío de este archivo preguntan primero si el número
+ * está pausado y, si lo está, no llaman a Meta.
+ *
+ * Va acá y no en el webhook porque este es el único embudo real: más de sesenta
+ * llamadores —el bot, los recordatorios, el portal, el panel de soporte— pasan
+ * por estas cuatro puertas, y no hay forma de mandar un mensaje sin cruzar una.
+ * Cortar en el webhook habría dejado afuera los recordatorios, que son casi
+ * tres cuartas partes del consumo: un cliente que pausa y sigue recibiendo
+ * recordatorios no pausó nada.
+ *
+ * No lanza excepción: devuelve una respuesta con `pausado: true`. Así los
+ * llamadores siguen su curso normal —guardan el mensaje, actualizan el flujo,
+ * contestan 200 al webhook— sin tener que tocarlos uno por uno. Lo único que
+ * no pasa es el gasto.
+ */
+
+import { envíosPausados, respuestaDeEnvioPausado } from "./pausa-de-envios"
+
+/**
  * Enmascara un token/secreto para logging seguro.
  * Nunca loguear el token completo: queda expuesto en runtime logs de Vercel
  * (accesibles a cualquiera con permisos de lectura de logs del proyecto).
@@ -84,6 +105,10 @@ export async function sendWhatsAppMessage(
   to: string,
   message: string,
 ): Promise<any> {
+  // Antes que el troceado: un mensaje largo son varios envíos, y preguntar
+  // después implicaría preguntar una vez por fragmento.
+  if (await envíosPausados(phoneNumberId)) return respuestaDeEnvioPausado(phoneNumberId, to)
+
   // Si el mensaje supera el límite de WhatsApp, enviarlo en fragmentos secuenciales.
   // Esto evita el error 400 "text.body must be at most 4096 characters" que, sin este
   // control, dejaba al paciente sin ninguna respuesta.
@@ -156,6 +181,8 @@ export async function sendWhatsAppInteractive(
   body: string,
   buttons: Array<{ id: string; title: string }>,
 ): Promise<any> {
+  if (await envíosPausados(phoneNumberId)) return respuestaDeEnvioPausado(phoneNumberId, to)
+
   try {
     const normalizedPhone = normalizePhoneNumber(to)
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
@@ -222,6 +249,8 @@ export async function sendWhatsAppList(
   rows: Array<{ id: string; title: string; description?: string }>,
   sectionTitle: string = "Opciones",
 ): Promise<any> {
+  if (await envíosPausados(phoneNumberId)) return respuestaDeEnvioPausado(phoneNumberId, to)
+
   try {
     const normalizedPhone = normalizePhoneNumber(to)
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
@@ -284,6 +313,10 @@ export async function sendWhatsAppTemplate(
   template: any,
   wabaId?: string,
 ): Promise<any> {
+  // Los recordatorios entran por acá. Es el envío que más pesa en la factura,
+  // así que es el que la pausa tiene que cubrir sí o sí.
+  if (await envíosPausados(phoneNumberId)) return respuestaDeEnvioPausado(phoneNumberId, to)
+
   try {
     console.log("[v0] [WHATSAPP_API] sendWhatsAppTemplate - accessToken:", maskToken(accessToken))
     const normalizedPhone = normalizePhoneNumber(to)

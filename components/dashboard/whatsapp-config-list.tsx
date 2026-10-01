@@ -34,11 +34,14 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
       const data = await response.json()
 
       // Update local state
-      setConfigs((prev) => prev.map((c) => (c.id === configId ? { ...c, paused: data.paused } : c)))
+      setConfigs((prev) =>
+        prev.map((c) => (c.id === configId ? { ...c, enviosPausados: data.paused } : c)),
+      )
 
       toast({
-        title: data.paused ? "IA Pausada" : "IA Reanudada",
+        title: data.paused ? "Envíos pausados" : "Envíos reanudados",
         description: data.message,
+        variant: data.paused ? "destructive" : "default",
       })
     } catch (error) {
       toast({
@@ -175,7 +178,13 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
                   ) : (
                     <Badge variant="destructive">Inactivo</Badge>
                   )}
-                  {config.paused && <Badge variant="secondary">IA Pausada</Badge>}
+                  {/* "IA Pausada" se quedaba corto y además mentía: esto
+                      corta TODOS los envíos, recordatorios incluidos. */}
+                  {(config as any).enviosPausados && (
+                    <Badge variant="destructive" title="No se envía ningún mensaje, ni recordatorios">
+                      Envíos pausados
+                    </Badge>
+                  )}
                 </div>
               </TableCell>
               <TableCell>
@@ -210,13 +219,21 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
                     <Activity className="h-4 w-4" />
                   </Button>
                   <Button
-                    variant={config.paused ? "default" : "outline"}
+                    variant={(config as any).enviosPausados ? "default" : "outline"}
                     size="sm"
                     onClick={() => handleTogglePause(config.id)}
                     disabled={loadingPause === config.id}
-                    title={config.paused ? "Reanudar IA" : "Pausar IA"}
+                    title={
+                      (config as any).enviosPausados
+                        ? "Reanudar envíos"
+                        : "Pausar TODOS los envíos (incluidos recordatorios)"
+                    }
                   >
-                    {config.paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                    {(config as any).enviosPausados ? (
+                      <Play className="h-4 w-4" />
+                    ) : (
+                      <Pause className="h-4 w-4" />
+                    )}
                   </Button>
                   <Link href={`/dashboard/config/${config.id}`}>
                     <Button variant="outline" size="sm">

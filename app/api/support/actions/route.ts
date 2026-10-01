@@ -482,7 +482,33 @@ async function handleMessage(sessionId: string, session: SessionData, message: s
 
     console.log("[v0] [MESSAGE] Enviando mensaje a WhatsApp...")
     try {
-      await sendWhatsAppMessage(config.phoneNumberId, config.accessToken, supportSession.phoneNumber, message.trim())
+      const resultado = await sendWhatsAppMessage(
+        config.phoneNumberId,
+        config.accessToken,
+        supportSession.phoneNumber,
+        message.trim(),
+      )
+
+      // ── Envíos pausados (1/10/2026) ───────────────────────────────────
+      //
+      // La pausa no hace excepción con el agente humano: fue el pedido, y es
+      // coherente —el objetivo es que no se gaste NADA—. Pero el emisor no
+      // lanza excepción cuando omite el envío, así que sin este control el
+      // agente escribía, veía su mensaje en el panel y creía que había
+      // llegado. Escribirle al vacío a un paciente que espera es peor que
+      // no poder escribirle.
+      if (resultado?.pausado) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "Los envíos de este cliente están pausados, así que el mensaje no se envió. " +
+              "Reanudalos desde la lista de configuraciones para poder responder.",
+            enviosPausados: true,
+          },
+          { status: 409 },
+        )
+      }
     } catch (error) {
       // Antes este error subía tal cual y el agente veía el JSON de Meta en un
       // alert. El caso más frecuente es la ventana de 24 h cerrada, que no es
