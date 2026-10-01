@@ -21,14 +21,13 @@
  */
 
 import { NextResponse } from "next/server"
+import { anotarEnElMonitor, etiquetaDelDesenlace } from "@/lib/portal/monitor"
 import { leerEnlace, consumirEnlace } from "@/lib/portal/token"
 import { permiteGestionar } from "@/lib/portal/vigencia"
 import { cancelarTurno, confirmarTurno } from "@/lib/api-tools/api-functions"
-import { saveConversationMessage } from "@/lib/conversations"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
 import { trackAppointmentEvent } from "@/lib/appointment-stats"
 import { marcarCancelacion } from "@/lib/portal/cancelacion-reciente"
-import { nanoid } from "nanoid"
 
 export const runtime = "nodejs"
 
@@ -175,20 +174,25 @@ export async function POST(request: Request) {
 
   // El bot y el panel tienen que enterarse: sin esto, un agente abre la
   // conversación y ve que el paciente recibió un enlace y desapareció.
+  // Etiqueta primero, texto del paciente debajo. Ver el mismo bloque en
+  // `gestionar/route.ts`.
+  const desenlace = etiquetaDelDesenlace({
+    tipo: accion === "cancelar" ? "cancelacion" : "confirmacion",
+    cuando,
+    profesional: contexto.turno?.profesional,
+  })
+
+  await anotarEnElMonitor({
+    configId: contexto.configId,
+    phoneNumber: contexto.phone,
+    texto: `${desenlace}\n\n${texto}`,
+  })
+
   try {
-    await saveConversationMessage({
-      id: nanoid(),
-      role: "assistant",
-      content: `[Portal] ${texto}`,
-      timestamp: new Date().toISOString(),
-      phoneNumber: contexto.phone,
-      configId: contexto.configId,
-      messageType: "portal",
-    })
     // El contexto de turnos que tenía el bot quedó viejo en este instante.
     await clearAppointmentContext(contexto.phone, contexto.configId)
   } catch (error) {
-    console.error("[PORTAL] No se pudo registrar en la conversación:", error)
+    console.error("[PORTAL] No se pudo limpiar el contexto de turnos:", error)
   }
 
   return NextResponse.json({ ok: true, accion, texto })

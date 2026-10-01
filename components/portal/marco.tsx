@@ -47,6 +47,7 @@ import type { ReactNode } from "react"
 import { EnlaceDePaso } from "./enlace-de-paso"
 import { fechaPresentableEnMayuscula } from "@/lib/portal/fechas"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { AnotarHito } from "./anotar-hito"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 
@@ -175,30 +176,7 @@ export function Marco({
         />
       )}
 
-      {/* ── "El paciente abrió el enlace" ───────────────────────────────────
-          Un aviso al servidor para que el panel sepa que alguien entró. La
-          ruta lo anota una sola vez por enlace, así que dispararlo en cada
-          paso no ensucia nada.
-
-          Va desde el navegador y no desde el render por un motivo: la página
-          la puede pedir cualquier cosa que siga la URL —un escáner de
-          enlaces, un antivirus, un proxy— y todas reciben el mismo HTML.
-          Ejecutar JavaScript es la evidencia más barata de que del otro lado
-          hay una persona.
-
-          `keepalive` para que el pedido sobreviva si el paciente toca algo
-          enseguida, y el error se traga: esto es telemetría, no puede
-          romperle la pantalla a nadie. */}
-      {token && (
-        <script
-          dangerouslySetInnerHTML={{
-            __html:
-              `fetch("/api/portal/visto",{method:"POST",keepalive:true,` +
-              `headers:{"Content-Type":"application/json"},` +
-              `body:JSON.stringify({token:${JSON.stringify(token)}})}).catch(function(){})`,
-          }}
-        />
-      )}
+      <AnotarHito token={token} hito="abierto" />
 
       {/* La banda ocupa todo el ancho —es el borde superior de la pantalla—
           pero su CONTENIDO va en la misma columna que el resto (29/9/2026).

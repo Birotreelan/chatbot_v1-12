@@ -46,6 +46,7 @@ import {
 import { getWhatsAppConfigById } from "@/lib/db"
 import { EnlaceDePaso } from "@/components/portal/enlace-de-paso"
 import { Marco, Avance, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/components/portal/marco"
+import { AnotarHito } from "@/components/portal/anotar-hito"
 import { lineasDeContactoParaWeb } from "@/lib/utils/escalation-contact"
 import type { AnchoDelMarco } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
@@ -574,6 +575,8 @@ export default async function PaginaDelPortal({
             y el clic— y el paciente merece una frase igual.
             Cuando el proxy explica por qué no hay turnos, se usa SU mensaje:
             sabe cosas que nosotros no. */}
+        {dias.length === 0 && <AnotarHito token={token} hito="sin_horarios" />}
+
         {dias.length === 0 && (
           <Aviso
             tono="atencion"
@@ -920,6 +923,8 @@ export default async function PaginaDelPortal({
           tono="atencion"
         />
       )}
+
+      {agendaNueva.total === 0 && !conEjemplos && <AnotarHito token={token} hito="sin_horarios" />}
 
       {agendaNueva.total === 0 && !conEjemplos && (
         <Aviso

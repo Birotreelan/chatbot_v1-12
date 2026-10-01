@@ -40,6 +40,7 @@
  */
 
 import { NextResponse } from "next/server"
+import { anotarEnElMonitor, etiquetaDelDesenlace } from "@/lib/portal/monitor"
 import { leerEnlace, consumirEnlace, type TurnoDelPortal } from "@/lib/portal/token"
 import { permiteGestionar, reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
 import { resolverPorDNI } from "@/lib/portal/identidad"
@@ -466,20 +467,34 @@ export async function POST(request: Request) {
   // El bot y el panel tienen que enterarse. Sin esto, un agente abre la
   // conversación y ve que el paciente recibió un enlace y desapareció; y si el
   // paciente después pregunta "¿me quedó?", el bot contesta con datos viejos.
+  // La etiqueta va PRIMERO y el texto del paciente debajo (1/10/2026). El
+  // registro servía para que un agente entendiera la conversación, pero no
+  // para la pregunta que se hace durante el despliegue —"¿cuántos de los que
+  // abrieron el enlace terminaron en turno?"—, que se contesta leyendo cien
+  // conversaciones en diagonal. "Pedimos tu turno para el miércoles…" obliga a
+  // leer la frase entera; "TURNO AGENDADO" se ve de un vistazo.
+  //
+  // El texto del paciente NO se reemplaza: el agente que abre la conversación
+  // tiene que poder leer exactamente lo que la persona leyó.
+  const desenlace = etiquetaDelDesenlace({
+    tipo: seCancelóElAnterior || cancelacionFallida ? "cambio" : "reserva",
+    cuando,
+    profesional: datosDelTurnoElegido.profesional,
+    pendiente: confirmacionHumana,
+    avisoCancelacion: cancelacionFallida,
+  })
+
+  await anotarEnElMonitor({
+    configId: contexto.configId,
+    phoneNumber: contexto.phone,
+    texto: `${desenlace}\n\n${texto}`,
+  })
+
   try {
-    await saveConversationMessage({
-      id: nanoid(),
-      role: "assistant",
-      content: `[Portal] ${texto}`,
-      timestamp: new Date().toISOString(),
-      phoneNumber: contexto.phone,
-      configId: contexto.configId,
-      messageType: "portal",
-    })
     // El contexto de turnos que tenía el bot quedó viejo en este mismo instante.
     await clearAppointmentContext(contexto.phone, contexto.configId)
   } catch (error) {
-    console.error("[PORTAL] No se pudo registrar en la conversación:", error)
+    console.error("[PORTAL] No se pudo limpiar el contexto de turnos:", error)
   }
 
   return NextResponse.json({

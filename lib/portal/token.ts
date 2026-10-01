@@ -211,9 +211,11 @@ export interface ContextoDelPortal {
    *
    * Por eso lo marca el navegador, no el servidor: un cliente que ejecuta
    * JavaScript es la evidencia más barata de que del otro lado hay una
-   * persona. Ver `app/api/portal/visto/route.ts`.
+   * persona. Ver `app/api/portal/hito/route.ts`.
    */
   visto?: string
+  /** Hitos del recorrido ya anotados, para no repetirlos. Ver `marcarHito`. */
+  hitos?: Record<string, string>
 }
 
 export interface EnlaceEmitido {
@@ -427,6 +429,42 @@ export async function marcarVisto(token: string): Promise<{ primera: boolean; co
   if (contexto.visto) return { primera: false, contexto }
 
   contexto.visto = new Date().toISOString()
+  await guardar(token, contexto)
+  return { primera: true, contexto }
+}
+
+/**
+ * Lo mismo que `marcarVisto`, para los demás hitos del recorrido (1/10/2026).
+ *
+ * `visto` tiene su propio campo porque además de anotar sirve para decidir —el
+ * contexto lo lee en otros lados—. Los hitos nuevos son sólo observación, así
+ * que viven juntos en un diccionario y no suman un campo cada uno.
+ *
+ * Idempotente por la misma razón que `marcarVisto`: el paciente que recarga, o
+ * que vuelve atrás y repite la búsqueda, no puede generar cinco líneas iguales
+ * en el monitor. La primera vez es la que informa; las demás son ruido que
+ * haría dudar del dato.
+ */
+export async function marcarHito(
+  token: string,
+  hito: string,
+): Promise<{ primera: boolean; contexto: ContextoDelPortal } | null> {
+  const redis = getRedisClient()
+  if (!redis || !token || !hito) return null
+
+  const crudo = await redis.get(clave(token))
+  if (!crudo) return null
+
+  let contexto: ContextoDelPortal
+  try {
+    contexto = typeof crudo === "string" ? JSON.parse(crudo) : (crudo as ContextoDelPortal)
+  } catch {
+    return null
+  }
+
+  if (contexto.hitos?.[hito]) return { primera: false, contexto }
+
+  contexto.hitos = { ...(contexto.hitos || {}), [hito]: new Date().toISOString() }
   await guardar(token, contexto)
   return { primera: true, contexto }
 }

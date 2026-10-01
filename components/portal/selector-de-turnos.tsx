@@ -35,6 +35,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { EnlaceDePaso } from "./enlace-de-paso"
+import { AnotarHito } from "./anotar-hito"
 import { useRouter } from "next/navigation"
 import { fechaPresentableEnMayuscula } from "@/lib/portal/fechas"
 import { Calendar } from "@/components/ui/calendar"
@@ -332,11 +333,14 @@ export function SelectorDeTurnos({
 
   if (dias.length === 0) {
     return (
-      <Aviso
-        titulo="No hay horarios disponibles"
-        detalle="No encontramos turnos en los próximos días. Escribinos por WhatsApp y buscamos una alternativa."
-        tono="atencion"
-      />
+      <>
+        <AnotarHito token={token} hito="sin_horarios" />
+        <Aviso
+          titulo="No hay horarios disponibles"
+          detalle="No encontramos turnos en los próximos días. Escribinos por WhatsApp y buscamos una alternativa."
+          tono="atencion"
+        />
+      </>
     )
   }
 
