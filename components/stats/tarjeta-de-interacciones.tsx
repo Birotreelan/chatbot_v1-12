@@ -100,20 +100,26 @@ export function TarjetaDeInteracciones({
 }) {
   const interacciones = recordatoriosEnviados + conversacionesIniciadas
 
-  // ── La base del costo no son las interacciones (1/10/2026) ──────────────
+  // ── Qué se cobra (1/10/2026) ────────────────────────────────────────────
   //
-  // Es lo facturable, que es lo mismo que cobra Facturación: plantillas +
-  // mensajes de servicio PAGOS + conversaciones iniciadas. Los mensajes de
-  // servicio sin cargo no entran.
+  // Sólo lo que Meta cobra por mandar: los recordatorios (plantillas) y los
+  // mensajes de servicio que salieron de la franja sin cargo.
   //
-  // Mientras `servicio.pagados` sea 0 los dos números coinciden y la cuenta
-  // se puede hacer a ojo con los recuadros de arriba. El día que deje de
-  // serlo, calcular sobre las interacciones mostraría un costo menor que la
-  // factura que después le llega al cliente — y de ese tamaño: con 300
-  // mensajes pagos, 102 unidades contra 402. Por eso la cuenta sigue a la
-  // factura y no a lo que se ve en la tarjeta, y por eso el recuadro de
-  // servicio está a la vista: es lo que explica la diferencia.
-  const unidadesFacturables = interacciones + (servicio?.pagados ?? 0)
+  // Quedan afuera dos cosas, y las dos a propósito:
+  //
+  //  - Las conversaciones iniciadas por el paciente. Meta cobra lo que se
+  //    manda, no lo que entra.
+  //  - Los mensajes de servicio sin cargo. Cobrarlos sería cobrar algo que no
+  //    se paga.
+  //
+  // El resultado es exactamente el `mensajes_pagados` que devuelve el proxy.
+  // Se recalcula igual, sumando las dos partes que la tarjeta ya muestra, para
+  // que el cliente pueda verificar la cuenta mirando los recuadros de arriba
+  // en vez de confiar en un número que llega hecho.
+  //
+  // Consecuencia a tener presente: este número ya NO es el total grande de la
+  // tarjeta. Por eso el recuadro del costo explica abajo de qué se compone.
+  const unidadesFacturables = recordatoriosEnviados + (servicio?.pagados ?? 0)
 
   return (
     <Card className="border-purple-200 bg-purple-50/30">
@@ -162,7 +168,8 @@ export function TarjetaDeInteracciones({
 
           <CostoAproximado
             clienteId={clienteId}
-            interacciones={unidadesFacturables}
+            unidades={unidadesFacturables}
+            recordatorios={recordatoriosEnviados}
             serviciosConCargo={servicio?.pagados ?? 0}
             cargandoInteracciones={cargando}
           />

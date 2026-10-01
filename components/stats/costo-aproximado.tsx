@@ -38,24 +38,20 @@ const dolares = new Intl.NumberFormat("es-AR", {
 
 export function CostoAproximado({
   clienteId,
-  interacciones,
+  unidades,
+  recordatorios,
   serviciosConCargo = 0,
   cargandoInteracciones,
 }: {
   clienteId: string
   /**
-   * Unidades facturables del período: interacciones + mensajes de servicio
-   * con cargo. Ver `unidadesFacturables` en tarjeta-de-interacciones.tsx.
+   * Las unidades que se cobran: recordatorios + mensajes de servicio con
+   * cargo. Ver `unidadesFacturables` en tarjeta-de-interacciones.tsx.
    */
-  interacciones: number
-  /**
-   * Cuántas de esas unidades son mensajes de servicio con cargo.
-   *
-   * Sólo sirve para explicarlo abajo. Mientras sea 0 —el caso de hoy— el
-   * costo coincide con el total de interacciones que se ve arriba y no hace
-   * falta aclarar nada; cuando deje de serlo, los dos números dejan de
-   * coincidir a la vista y sin una línea que lo diga parecería un error.
-   */
+  unidades: number
+  /** Cuántas de esas unidades son recordatorios. */
+  recordatorios: number
+  /** Cuántas son mensajes de servicio con cargo. */
   serviciosConCargo?: number
   /** El total todavía se está trayendo: no mostrar un costo de cero. */
   cargandoInteracciones?: boolean
@@ -87,7 +83,7 @@ export function CostoAproximado({
 
   const esperando = cargando || cargandoInteracciones
 
-  const totalUsd = costo ? interacciones * costo.precioUnitarioUsd : 0
+  const totalUsd = costo ? unidades * costo.precioUnitarioUsd : 0
   const totalPesos = costo?.dolarVenta ? totalUsd * costo.dolarVenta : null
 
   return (
@@ -112,16 +108,19 @@ export function CostoAproximado({
 
       {!esperando && costo && (
         <p className="mt-1 text-xs text-muted-foreground">
+          {/* La composición va SIEMPRE, no sólo cuando hay mensajes con cargo
+              (1/10/2026). Desde que el costo dejó de calcularse sobre el total
+              de interacciones, el número de arriba y el de acá no coinciden
+              nunca: sin esta línea, el cliente divide el costo por el total
+              que ve y le da cualquier cosa. Con ella, la cuenta se verifica
+              contra los recuadros de la izquierda. */}
+          {unidades} unidad{unidades === 1 ? "" : "es"} cobrables: {recordatorios} recordatorio
+          {recordatorios === 1 ? "" : "s"} + {serviciosConCargo} mensaje
+          {serviciosConCargo === 1 ? "" : "s"} de servicio con cargo
+          <br />
           {totalPesos !== null ? (
             <>
               {dolares.format(totalUsd)} · dólar venta {pesos.format(costo.dolarVenta as number)}
-              {serviciosConCargo > 0 && (
-                <>
-                  <br />
-                  Incluye {serviciosConCargo} mensaje{serviciosConCargo === 1 ? "" : "s"} de servicio
-                  con cargo
-                </>
-              )}
             </>
           ) : (
             // Se dice por qué está en dólares. Sin esto, la clínica que un día
