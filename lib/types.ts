@@ -120,6 +120,26 @@ export interface WhatsAppConfig {
   clientePortalWeb?: boolean
 
   /**
+   * Cuándo se prendió el portal para este cliente (1/10/2026).
+   *
+   * No es informativo: es lo que hace posible migrar un cliente que ya está en
+   * producción sin cortarle la conversación a nadie. Durante las 24 h
+   * siguientes, el paciente que tenga un flujo conversacional abierto termina
+   * ese flujo en el chat en vez de recibir un enlace. Ver
+   * `sigueEnElChatPorMigracion` en lib/portal/migracion.ts.
+   *
+   * 24 h porque es el TTL más largo de los estados de flujo (detección, alta de
+   * paciente nuevo y flow state); pasado ese plazo no puede quedar vivo ningún
+   * flujo anterior al switch, así que la compuerta se retira sola y el portal
+   * queda al 100% sin que nadie tenga que acordarse de apagarla.
+   *
+   * Lo escribe `updateWhatsAppConfig` cuando el switch pasa de apagado a
+   * encendido, no el formulario: hay tres rutas que guardan configuración y la
+   * que se agregue mañana también tiene que sellarlo.
+   */
+  clientePortalWebDesde?: string
+
+  /**
    * Redacción propia del mensaje que acompaña al botón del portal (24/9/2026).
    *
    * Vacío = se usa la plantilla que corresponde al flujo

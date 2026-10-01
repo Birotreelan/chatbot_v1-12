@@ -32,6 +32,7 @@ import { sendWhatsAppMessage } from "../whatsapp-api"
 import type { IntencionDelPortal, OrigenDelEnlace } from "./vigencia"
 import { saveConversationMessage } from "../conversations"
 import { estaBloqueadaLaObraSocial } from "./identidad"
+import { sigueEnElChatPorMigracion } from "./migracion"
 import { presentarSiCorresponde } from "../conversation-state/presentacion-inicial"
 import { nanoid } from "nanoid"
 
@@ -282,6 +283,23 @@ export async function derivarAlPortal(params: {
   const { config, paciente } = params
 
   if (!usaPortal(config)) return false
+
+  // ── Migración: el que ya venía en un flujo, lo termina en el chat ───────
+  //
+  // Primero de todas las compuertas a propósito. Las de abajo son del producto
+  // —qué puede hacer este paciente— y ésta es del despliegue: mientras dura la
+  // ventana, al que estaba a mitad de camino no le cambiamos el piso, sea cual
+  // sea la gestión que haya pedido. Por eso tampoco distingue intención.
+  //
+  // Se retira sola a las 24 h del encendido del switch, y fuera de esa ventana
+  // ni siquiera lee Redis. Ver lib/portal/migracion.ts.
+  if (await sigueEnElChatPorMigracion({ config, userPhoneNumber: params.userPhoneNumber })) {
+    console.log(
+      `[PORTAL] ${params.userPhoneNumber} tiene un flujo conversacional abierto y el portal se ` +
+        `encendió hace menos de 24 h; se queda en el chat (intención: ${params.intencion})`,
+    )
+    return false
+  }
 
   // ── La obra social que no saca turnos online (1/10/2026) ────────────────
   //

@@ -355,6 +355,30 @@ export async function getAllWhatsAppConfigs(): Promise<WhatsAppConfig[]> {
 }
 
 // Actualizar una configuración
+
+/**
+ * Deja constancia de cuándo se prendió el portal, para poder migrar un cliente
+ * que ya está en producción sin cortarle la conversación a nadie (1/10/2026).
+ *
+ * Va acá y no en el formulario porque hay varias rutas que guardan
+ * configuración —`configs/update`, `configs/[id]`— y la que se agregue mañana
+ * también tiene que sellarlo. Este es el embudo por el que pasan todas.
+ *
+ * Sólo marca el ENCENDIDO. Apagar el switch no borra la fecha: si alguien lo
+ * prende, lo apaga y lo vuelve a prender, la segunda vez arranca una ventana
+ * nueva, que es lo correcto —hay flujos abiertos otra vez—. Borrarla al apagar
+ * dejaría ese caso sin proteger.
+ *
+ * Ver `sigueEnElChatPorMigracion` en lib/portal/migracion.ts.
+ */
+function sellarEncendidoDelPortal(
+  config: WhatsAppConfig,
+  updates: Partial<WhatsAppConfig>,
+): Partial<WhatsAppConfig> {
+  const seEstaPrendiendo = updates.clientePortalWeb === true && config.clientePortalWeb !== true
+  return seEstaPrendiendo ? { clientePortalWebDesde: new Date().toISOString() } : {}
+}
+
 export async function updateWhatsAppConfig(
   id: string,
   updates: Partial<WhatsAppConfig>,
@@ -377,6 +401,7 @@ export async function updateWhatsAppConfig(
       const updatedConfig: WhatsAppConfig = {
         ...config,
         ...updates,
+        ...sellarEncendidoDelPortal(config, updates),
         updatedAt: new Date().toISOString(),
       }
 
@@ -400,6 +425,7 @@ export async function updateWhatsAppConfig(
       const updatedConfig: WhatsAppConfig = {
         ...config,
         ...updates,
+        ...sellarEncendidoDelPortal(config, updates),
         updatedAt: new Date().toISOString(),
       }
 

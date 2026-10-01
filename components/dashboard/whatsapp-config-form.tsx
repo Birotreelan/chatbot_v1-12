@@ -259,6 +259,17 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     }
   }
 
+  // Ver `clientePortalWebDesde` en lib/types.ts: la fecha la sella el servidor
+  // al guardar, así que acá sólo se lee.
+  const enMigracion = (() => {
+    const desde = (formData as { clientePortalWebDesde?: string }).clientePortalWebDesde
+    if (!desde) return false
+    const encendido = Date.parse(desde)
+    if (Number.isNaN(encendido)) return false
+    const transcurrido = Date.now() - encendido
+    return transcurrido >= 0 && transcurrido < 24 * 60 * 60 * 1000
+  })()
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <Tabs defaultValue="general" className="w-full">
@@ -397,6 +408,20 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                   </p>
                 </div>
               </div>
+
+              {/* La ventana de migración, mientras dura (1/10/2026). Se muestra
+                  sola y desaparece sola: es el único lugar donde Nicolás puede
+                  ver que la protección está puesta, y saberlo cambia cómo lee
+                  el monitor en las primeras horas —un paciente que sigue en el
+                  chat no es el portal fallando—. */}
+              {formData.clientePortalWeb === true && enMigracion && (
+                <p className="rounded-md border border-sky-500/40 bg-sky-500/5 px-3 py-2 text-xs">
+                  <strong>Migración en curso.</strong> Durante las primeras 24 horas desde que
+                  activaste el portal, los pacientes que ya tenían una conversación a medias con
+                  el chatbot la terminan ahí en vez de recibir el enlace. La protección se retira
+                  sola; no hay que desactivar nada.
+                </p>
+              )}
 
               {formData.clientePortalWeb === true && (
                 <div className="space-y-2 p-2 rounded-md bg-muted/30">
