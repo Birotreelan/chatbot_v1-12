@@ -18,7 +18,8 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
   const [stats, setStats] = useState<ClientAppointmentStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [mensajesPagados, setMensajesPagados] = useState<number>(0)
+  const [recordatoriosEnviados, setRecordatoriosEnviados] = useState<number>(0)
+  const [servicio, setServicio] = useState<{ total: number; gratis: number; pagados: number } | null>(null)
   const [loadingMensajes, setLoadingMensajes] = useState(true)
   const todayUTC = new Date()
   const today = new Date(Date.UTC(todayUTC.getUTCFullYear(), todayUTC.getUTCMonth(), todayUTC.getUTCDate()))
@@ -28,9 +29,10 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
   const [endDate, setEndDate] = useState<string | null>(today)
 
   // Fetch mensajes_pagados from the API route
-  const loadMensajesPagados = useCallback(async () => {
+  const loadConsumo = useCallback(async () => {
     if (!clienteId || !startDate || !endDate) {
-      setMensajesPagados(0)
+      setRecordatoriosEnviados(0)
+      setServicio(null)
       setLoadingMensajes(false)
       return
     }
@@ -42,14 +44,17 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
       
       if (response.ok) {
         const data = await response.json()
-        setMensajesPagados(data.mensajes_pagados || 0)
+        setRecordatoriosEnviados(data.plantillas ?? data.mensajes_pagados ?? 0)
+        setServicio(data.servicio ?? null)
       } else {
         console.error("[APPOINTMENT_STATS] Error fetching mensajes_pagados:", response.status)
-        setMensajesPagados(0)
+        setRecordatoriosEnviados(0)
+        setServicio(null)
       }
     } catch (error) {
       console.error("[APPOINTMENT_STATS] Error fetching mensajes_pagados:", error)
-      setMensajesPagados(0)
+      setRecordatoriosEnviados(0)
+      setServicio(null)
     } finally {
       setLoadingMensajes(false)
     }
@@ -78,13 +83,13 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
   useEffect(() => {
     setLoading(true)
     loadStats()
-    loadMensajesPagados()
-  }, [clienteId, loadStats, loadMensajesPagados])
+    loadConsumo()
+  }, [clienteId, loadStats, loadConsumo])
 
   const handleRefresh = () => {
     setRefreshing(true)
     loadStats()
-    loadMensajesPagados()
+    loadConsumo()
   }
 
   const handleFilterChange = (newStartDate: string | null, newEndDate: string | null) => {
@@ -138,7 +143,8 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
 
       <TarjetaDeInteracciones
         clienteId={clienteId}
-        mensajesPagados={mensajesPagados}
+        recordatoriosEnviados={recordatoriosEnviados}
+        servicio={servicio}
         conversacionesIniciadas={stats?.totalUserInitiated || 0}
         cargando={loadingMensajes}
       />
@@ -155,7 +161,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
               {loadingMensajes ? (
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               ) : (
-                mensajesPagados
+                recordatoriosEnviados
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-1">Total de mensajes pagados</p>
@@ -195,12 +201,12 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-gray-600">
-              {Math.max(0, mensajesPagados - (stats?.totalConfirmed || 0) - (stats?.totalCancelled || 0))}
+              {Math.max(0, recordatoriosEnviados - (stats?.totalConfirmed || 0) - (stats?.totalCancelled || 0))}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Tasa sin respuesta: <span className="font-semibold text-gray-600">
-                {mensajesPagados > 0
-                  ? (((mensajesPagados - (stats?.totalConfirmed || 0) - (stats?.totalCancelled || 0)) / mensajesPagados) * 100).toFixed(1)
+                {recordatoriosEnviados > 0
+                  ? (((recordatoriosEnviados - (stats?.totalConfirmed || 0) - (stats?.totalCancelled || 0)) / recordatoriosEnviados) * 100).toFixed(1)
                   : 0}%
               </span>
             </p>
@@ -347,7 +353,7 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </CardContent>
       </Card>
 
-      {(!stats || (mensajesPagados === 0 && stats.totalConfirmed === 0 && stats.totalUserInitiated === 0)) && (
+      {(!stats || (recordatoriosEnviados === 0 && stats.totalConfirmed === 0 && stats.totalUserInitiated === 0)) && (
         <Card className="border-dashed">
           <CardContent className="py-8 text-center">
             <p className="text-muted-foreground">Aún no hay datos de estadísticas para este cliente.</p>

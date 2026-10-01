@@ -14,24 +14,37 @@
  *
  * ── Los loaders ────────────────────────────────────────────────────────────
  *
- * Los cuatro valores dependen de `mensajesPagados`, que llega de un endpoint
- * aparte (`/api/appointment-stats/mensajes-pagados`, que consulta al proxy).
- * Mientras esa respuesta no llega, ese número vale 0, y mostrarlo significa
- * dibujar un total y un costo que están mal y que cambian solos un segundo
- * después.
+ * Todos los valores dependen del consumo, que llega de un endpoint aparte
+ * (`/api/appointment-stats/mensajes-pagados`, que consulta al proxy). Mientras
+ * esa respuesta no llega, ese número vale 0, y mostrarlo significa dibujar un
+ * total y un costo que están mal y que cambian solos un segundo después.
  *
  * El que lo mira no tiene forma de saber que ese 18 era un número a medio
  * cargar: un dato incompleto que se ve igual que un dato bueno es peor que un
- * spinner. Por eso esperan los cuatro juntos, incluido "Conversaciones
- * iniciadas", que ya tiene su valor: si se mostrara solo, la tarjeta quedaría
- * con un número firme al lado de tres cargando y parecería que los otros tres
- * fallaron.
+ * spinner. Por eso esperan todos juntos, incluido "Conversaciones iniciadas",
+ * que ya tiene su valor: si se mostrara solo, la tarjeta quedaría con un
+ * número firme al lado de varios cargando y parecería que los otros fallaron.
+ *
+ * ── Mensajes de servicio ───────────────────────────────────────────────────
+ *
+ * El recuadro de servicio existe para explicar una diferencia que si no sería
+ * inexplicable: Facturación cobra plantillas + mensajes de servicio PAGOS,
+ * mientras que acá el total de interacciones son plantillas + conversaciones
+ * iniciadas. Sin el desglose a la vista, la clínica compara los dos paneles,
+ * ve dos números distintos del mismo mes y llama. Con el desglose, la
+ * diferencia se reconstruye sola.
  */
 
-import { Loader2, MessageCircle, Send, TrendingUp } from "lucide-react"
+import { Loader2, MessageCircle, MessagesSquare, Send, TrendingUp } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CostoAproximado } from "@/components/stats/costo-aproximado"
+
+export interface MensajesDeServicio {
+  total: number
+  gratis: number
+  pagados: number
+}
 
 /** Un valor de la tarjeta: el número, o el spinner mientras no esté. */
 function Valor({ cargando, children }: { cargando: boolean; children: React.ReactNode }) {
@@ -46,18 +59,47 @@ function Valor({ cargando, children }: { cargando: boolean; children: React.Reac
   return <div className="text-3xl font-bold text-purple-600">{children}</div>
 }
 
+function Recuadro({
+  icono: Icono,
+  etiqueta,
+  detalle,
+  cargando,
+  children,
+}: {
+  icono: typeof TrendingUp
+  etiqueta: string
+  detalle?: React.ReactNode
+  cargando: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
+      <Icono className="h-6 w-6 text-purple-400 mx-auto mb-2" />
+      <Valor cargando={cargando}>{children}</Valor>
+      <div className="text-sm text-muted-foreground mt-1">{etiqueta}</div>
+      {!cargando && detalle && <p className="mt-1 text-xs text-muted-foreground">{detalle}</p>}
+    </div>
+  )
+}
+
 export function TarjetaDeInteracciones({
   clienteId,
-  mensajesPagados,
+  recordatoriosEnviados,
   conversacionesIniciadas,
+  servicio,
   cargando,
 }: {
   clienteId: string
-  mensajesPagados: number
+  /** Plantillas despachadas en el período. */
+  recordatoriosEnviados: number
   conversacionesIniciadas: number
-  /** Todavía no llegó la respuesta de "recordatorios enviados". */
+  /** `null` mientras no llegó, o si el proxy no manda el desglose. */
+  servicio: MensajesDeServicio | null
+  /** Todavía no llegó la respuesta del consumo. */
   cargando: boolean
 }) {
+  const interacciones = recordatoriosEnviados + conversacionesIniciadas
+
   return (
     <Card className="border-purple-200 bg-purple-50/30">
       <CardHeader>
@@ -70,28 +112,42 @@ export function TarjetaDeInteracciones({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
-            <TrendingUp className="h-6 w-6 text-purple-500 mx-auto mb-2" />
-            <Valor cargando={cargando}>{mensajesPagados + conversacionesIniciadas}</Valor>
-            <div className="text-sm text-muted-foreground mt-1">Total de interacciones</div>
-          </div>
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <Recuadro icono={TrendingUp} etiqueta="Total de interacciones" cargando={cargando}>
+            {interacciones}
+          </Recuadro>
 
-          <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
-            <Send className="h-6 w-6 text-purple-400 mx-auto mb-2" />
-            <Valor cargando={cargando}>{mensajesPagados}</Valor>
-            <div className="text-sm text-muted-foreground mt-1">Recordatorios enviados</div>
-          </div>
+          <Recuadro icono={Send} etiqueta="Recordatorios enviados" cargando={cargando}>
+            {recordatoriosEnviados}
+          </Recuadro>
 
-          <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
-            <MessageCircle className="h-6 w-6 text-purple-400 mx-auto mb-2" />
-            <Valor cargando={cargando}>{conversacionesIniciadas}</Valor>
-            <div className="text-sm text-muted-foreground mt-1">Conversaciones iniciadas</div>
-          </div>
+          <Recuadro icono={MessageCircle} etiqueta="Conversaciones iniciadas" cargando={cargando}>
+            {conversacionesIniciadas}
+          </Recuadro>
+
+          {/* Sólo si el proxy manda el desglose. Un recuadro con tres ceros
+              sería peor que su ausencia: se leería como "no hubo mensajes de
+              servicio" cuando en realidad no sabemos. */}
+          {(cargando || servicio) && (
+            <Recuadro
+              icono={MessagesSquare}
+              etiqueta="Mensajes de servicio"
+              cargando={cargando}
+              detalle={
+                servicio ? (
+                  <>
+                    {servicio.gratis} sin cargo · {servicio.pagados} con cargo
+                  </>
+                ) : undefined
+              }
+            >
+              {servicio?.total ?? 0}
+            </Recuadro>
+          )}
 
           <CostoAproximado
             clienteId={clienteId}
-            interacciones={mensajesPagados + conversacionesIniciadas}
+            interacciones={interacciones}
             cargandoInteracciones={cargando}
           />
         </div>

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getConsumoDeWpp } from "@/lib/consumos-wpp"
 import { requireBillingAgentForApi } from "@/lib/auth"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import { getAppointmentStatsByClienteIdFiltered } from "@/lib/appointment-stats"
@@ -48,19 +49,16 @@ export async function GET(request: Request) {
       clientesConId.map(async (config): Promise<FacturacionClienteRow[]> => {
         const clienteId = config.cliente_id!
 
-        // Mensajes pagados desde el servicio externo (mismo origen que /api/stats)
-        let mensajesPagados = 0
-        try {
-          const externalResponse = await fetch(
-            `https://proxy.santiagovulliez.com/proxy_service/wpp_consumos.php?cliente_id=${encodeURIComponent(clienteId)}&fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`,
-          )
-          if (externalResponse.ok) {
-            const externalData = await externalResponse.json()
-            mensajesPagados = externalData.mensajes_pagados || 0
-          }
-        } catch (err) {
-          console.warn(`[FACTURACION_API] Error consumos externos para ${clienteId}:`, err)
-        }
+        // Lo facturable desde el servicio externo (mismo origen que /api/stats).
+        //
+        // `mensajesPagados` sigue siendo el campo correcto acá después del
+        // cambio de formato del 1/10/2026: ahora vale plantillas + mensajes de
+        // servicio pagos, que es exactamente lo que Meta cobra. Estadísticas,
+        // en cambio, muestra `plantillas` bajo "Recordatorios enviados", así
+        // que los dos paneles dejan de mostrar el mismo total — decisión
+        // tomada, no un descuido. Ver lib/consumos-wpp.ts.
+        const consumo = await getConsumoDeWpp(clienteId, fechaInicio, fechaFin)
+        const mensajesPagados = consumo?.mensajesPagados ?? 0
 
         let stats = await getAppointmentStatsByClienteIdFiltered(clienteId, fechaInicio, fechaFin)
         if (!stats && config.id !== clienteId) {

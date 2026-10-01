@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getConsumoDeWpp } from "@/lib/consumos-wpp"
 import { getAppointmentStatsByClienteIdFiltered } from "@/lib/appointment-stats"
 import { getConfigByClienteId } from "@/lib/db"
 
@@ -66,30 +67,24 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
       }
     }
 
-    // Obtener mensajes_pagados desde el endpoint externo
-    let mensajesPagados = 0
-    try {
-      const externalResponse = await fetch(
-        `https://proxy.santiagovulliez.com/proxy_service/wpp_consumos.php?cliente_id=${encodeURIComponent(cliente_id)}&fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
-      )
-      
-      if (externalResponse.ok) {
-        const externalData = await externalResponse.json()
-        mensajesPagados = externalData.mensajes_pagados || 0
-        console.log(`[STATS_API] mensajes_pagados obtenidos: ${mensajesPagados}`)
-      } else {
-        console.warn(`[STATS_API] Error al obtener mensajes_pagados: ${externalResponse.status}`)
-      }
-    } catch (error) {
-      console.warn("[STATS_API] Error al conectar con el endpoint externo de mensajes_pagados:", error)
-    }
+    // ── Consumo del proxy (1/10/2026) ─────────────────────────────────────
+    //
+    // `mensajes_pagados` dejó de ser "recordatorios enviados": ahora es
+    // plantillas + mensajes de servicio pagos. Los recordatorios son
+    // `plantillas`, y es ese el número que alimenta las tasas de abajo —
+    // confirmados y cancelados salen de responder un recordatorio, así que
+    // dividir por un total que incluye mensajes de servicio daba un
+    // porcentaje más bajo que el real. Ver lib/consumos-wpp.ts.
+    const consumo = await getConsumoDeWpp(cliente_id, fechaInicio, fechaFin)
+    const recordatoriosEnviados = consumo?.plantillas ?? 0
+    const mensajesPagados = consumo?.mensajesPagados ?? 0
 
     // Calcular métricas adicionales usando mensajes_pagados en lugar de totalTemplatesSent
     const totalSinRespuesta = stats 
-      ? mensajesPagados - stats.totalConfirmed - stats.totalCancelled
+      ? recordatoriosEnviados - stats.totalConfirmed - stats.totalCancelled
       : 0
-    const tasaSinRespuesta = mensajesPagados > 0 
-      ? Math.round(((totalSinRespuesta) / mensajesPagados) * 10000) / 100
+    const tasaSinRespuesta = recordatoriosEnviados > 0 
+      ? Math.round(((totalSinRespuesta) / recordatoriosEnviados) * 10000) / 100
       : 0
     
     // Tasa de intento de reagendamiento (respecto a cancelados)
@@ -102,7 +97,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
     // recordatorios enviados + conversaciones iniciadas por pacientes. Antes
     // también sumaba totalRescheduleStarted, dando un número distinto al que
     // ve el equipo interno y los clientes en las otras pantallas.
-    const totalInteracciones = mensajesPagados + (stats?.totalUserInitiated || 0)
+    const totalInteracciones = recordatoriosEnviados + (stats?.totalUserInitiated || 0)
 
     // Respuesta en español con los mismos nombres del panel
     const respuestaEnEspanol = {
@@ -118,7 +113,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
         
         // Recordatorios
         recordatorios: {
-          enviados: mensajesPagados,
+          enviados: recordatoriosEnviados,
           confirmados: stats?.totalConfirmed || 0,
           cancelados: stats?.totalCancelled || 0,
           sinRespuesta: totalSinRespuesta,
@@ -145,9 +140,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ clie
         // Consumo Totalizado
         consumoTotalizado: {
           totalInteracciones: totalInteracciones,
-          recordatoriosEnviados: mensajesPagados,
+          recordatoriosEnviados: recordatoriosEnviados,
           iniciosReagendamiento: stats?.totalRescheduleStarted || 0,
           conversacionesPorPacientes: stats?.totalUserInitiated || 0,
+          // Lo que Meta cobra: plantillas + mensajes de servicio pagos. Es el
+          // número que usa Facturación, y no coincide con totalInteracciones
+          // a propósito (1/10/2026). El desglose va al lado para que la
+          // diferencia se pueda reconstruir sin preguntar.
+          mensajesFacturables: mensajesPagados,
+          mensajesDeServicio: consumo?.servicio ?? null,
         },
 
         // Tiempos de Respuesta
