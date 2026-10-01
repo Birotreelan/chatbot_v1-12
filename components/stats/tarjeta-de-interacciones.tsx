@@ -35,7 +35,7 @@
  * diferencia se reconstruye sola.
  */
 
-import { Loader2, MessageCircle, MessagesSquare, Send, TrendingUp } from "lucide-react"
+import { Loader2, MessagesSquare, Send, TrendingUp } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CostoAproximado } from "@/components/stats/costo-aproximado"
@@ -98,6 +98,12 @@ export function TarjetaDeInteracciones({
   /** Todavía no llegó la respuesta del consumo. */
   cargando: boolean
 }) {
+  // Las conversaciones iniciadas SUMAN al total pero ya no tienen recuadro
+  // propio acá (1/10/2026): tienen su propia tarjeta más abajo —"Conversaciones
+  // Iniciadas por Pacientes"— y repetirlas era mostrar el mismo número dos
+  // veces en la misma pantalla. El total sigue siendo lo que el título de la
+  // tarjeta promete, así que para reconstruirlo hay que mirar esa otra
+  // tarjeta; el costo, en cambio, se explica solo en su propio recuadro.
   const interacciones = recordatoriosEnviados + conversacionesIniciadas
 
   // ── Qué se cobra (1/10/2026) ────────────────────────────────────────────
@@ -133,17 +139,13 @@ export function TarjetaDeInteracciones({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <Recuadro icono={TrendingUp} etiqueta="Total de interacciones" cargando={cargando}>
             {interacciones}
           </Recuadro>
 
           <Recuadro icono={Send} etiqueta="Recordatorios enviados" cargando={cargando}>
             {recordatoriosEnviados}
-          </Recuadro>
-
-          <Recuadro icono={MessageCircle} etiqueta="Conversaciones iniciadas" cargando={cargando}>
-            {conversacionesIniciadas}
           </Recuadro>
 
           {/* Sólo si el proxy manda el desglose. Un recuadro con tres ceros
