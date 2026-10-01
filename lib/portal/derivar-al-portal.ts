@@ -31,6 +31,7 @@ import {
 import { sendWhatsAppMessage } from "../whatsapp-api"
 import type { IntencionDelPortal, OrigenDelEnlace } from "./vigencia"
 import { saveConversationMessage } from "../conversations"
+import { estaBloqueadaLaObraSocial } from "./identidad"
 import { presentarSiCorresponde } from "../conversation-state/presentacion-inicial"
 import { nanoid } from "nanoid"
 
@@ -181,6 +182,45 @@ export function usaPortal(config: { clientePortalWeb?: boolean } | null | undefi
 }
 
 /**
+ * ¿La obra social de quien escribe tiene bloqueados los turnos online?
+ *
+ * Dos fuentes, en este orden:
+ *
+ *  1. El flag que dejó el saludo en el estado de detección. Es la respuesta ya
+ *     resuelta para esta misma persona en esta misma conversación.
+ *  2. El nombre de la obra social, venga del estado o del contexto del
+ *     recordatorio, resuelto contra el proxy. Hace falta porque no todos los
+ *     caminos al portal pasan por el saludo.
+ *
+ * `false` ante la duda. Si no se pudo averiguar, mandar el enlace es el error
+ * barato —adentro el portal vuelve a chequearlo y muestra la derivación—;
+ * retenerlo sería mandar al teléfono a alguien que podía resolverlo solo.
+ */
+async function tieneObraSocialBloqueada(
+  userPhoneNumber: string,
+  config: any,
+  paciente?: DatosDelPaciente,
+): Promise<boolean> {
+  try {
+    const { getPatientDetectionState } = await import(
+      "../conversation-state/patient-detection/patient-flow-handler"
+    )
+    const estado = await getPatientDetectionState(userPhoneNumber)
+
+    if (estado?.obraSocialBloqueada === true) return true
+
+    const nombre = paciente?.obraSocialNombre || estado?.obraSocialNombre
+    const id = paciente?.obraSocialId || estado?.obraSocialId
+    if (!nombre?.trim()) return false
+
+    return (await estaBloqueadaLaObraSocial(config.cliente_id, nombre, id)) === true
+  } catch (error) {
+    console.error("[PORTAL] No se pudo verificar la obra social; se deja pasar el enlace", error)
+    return false
+  }
+}
+
+/**
  * Atiende al paciente que pidió reprogramar o sacar turno.
  *
  * `true` = el paciente YA recibió una respuesta y el llamador debe cortar ahí.
@@ -242,6 +282,37 @@ export async function derivarAlPortal(params: {
   const { config, paciente } = params
 
   if (!usaPortal(config)) return false
+
+  // ── La obra social que no saca turnos online (1/10/2026) ────────────────
+  //
+  // Reportado por Nicolás: el bot le contesta a quien tiene PAMI DEVOTO que
+  // esa obra social no saca turnos por acá y le pasa los teléfonos de las
+  // sedes. Con el portal encendido, esa misma persona recibía un enlace. Se
+  // enteraba adentro, después de haber salido de WhatsApp.
+  //
+  // La compuerta va acá por el mismo motivo que la de reagendar: son varios
+  // los puntos desde los que se llega a "quiero un turno" y van a ser más; en
+  // cada llamador, el próximo que agreguemos la olvida.
+  //
+  // Sólo para `nuevo_turno`. NO para `familiar`: la obra social que conocemos
+  // es la de quien escribe, no la del familiar que se va a atender, y negarle
+  // el turno a otro por la obra social de un tercero es un error peor. Tampoco
+  // para `cancelar`, que siempre tiene que poder.
+  //
+  // Primero el flag que ya resolvió el saludo. Está persistido en el estado de
+  // detección justamente para que el menú mostrado y el interpretado no se
+  // separen (ver patient-flow-integration.ts); reusarlo acá suma un tercer
+  // lugar que dice lo mismo en vez de un tercero que dice otra cosa, y evita
+  // un viaje más al proxy en el camino caliente del webhook.
+  if (params.intencion === "nuevo_turno") {
+    if (await tieneObraSocialBloqueada(params.userPhoneNumber, config, paciente)) {
+      console.log(
+        `[PORTAL] ${params.userPhoneNumber}: obra social sin turnos online; no se manda el enlace, ` +
+          `sigue el flujo conversacional que deriva por teléfono`,
+      )
+      return false
+    }
+  }
 
   // ── Compuerta: ¿este turno se puede reprogramar solo? ────────────────────
   //

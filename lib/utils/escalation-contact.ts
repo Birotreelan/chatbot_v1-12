@@ -45,6 +45,23 @@ function lineasDeContacto(valor?: string | null): string[] {
   return lineas
 }
 
+/**
+ * Las mismas líneas, para pantallas HTML (1/10/2026).
+ *
+ * El portal muestra el mismo bloque de teléfonos que el bot, pero el bot
+ * escribe para WhatsApp: ahí `*0800*` es negrita y en una página web son dos
+ * asteriscos a la vista. Por eso se quitan acá y la negrita, si hace falta, la
+ * pone el componente con sus propias clases.
+ *
+ * Se descartan las líneas vacías: en WhatsApp separan párrafos, en HTML el
+ * espaciado lo da el contenedor.
+ */
+export function lineasDeContactoParaWeb(valor?: string | null): string[] {
+  return lineasDeContacto(valor)
+    .map((linea) => linea.replace(/\*/g, "").trim())
+    .filter((linea) => linea.length > 0)
+}
+
 /** true si la clínica cargó más de una línea (modo bloque). */
 export function esContactoMultilinea(valor?: string | null): boolean {
   return lineasDeContacto(valor).length > 1

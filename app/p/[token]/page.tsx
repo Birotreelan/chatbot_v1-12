@@ -46,6 +46,7 @@ import {
 import { getWhatsAppConfigById } from "@/lib/db"
 import { EnlaceDePaso } from "@/components/portal/enlace-de-paso"
 import { Marco, Avance, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/components/portal/marco"
+import { lineasDeContactoParaWeb } from "@/lib/utils/escalation-contact"
 import type { AnchoDelMarco } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
@@ -484,6 +485,8 @@ export default async function PaginaDelPortal({
   // elegir un turno que no va a poder sacar es peor que decírselo de entrada.
   if (paso === "derivar_obra_social") {
     const nombreOS = identidad.obraSocialNombre
+    const telefonosDeDerivacion = lineasDeContactoParaWeb(config?.escalationPhoneNumber)
+
     return marco(
       <>
         <Aviso
@@ -493,10 +496,24 @@ export default async function PaginaDelPortal({
               ? `Los turnos de ${nombreOS} se gestionan por teléfono`
               : "Tu turno se gestiona por teléfono"
           }
+          // El mismo bloque de contacto que manda el bot por WhatsApp
+          // (1/10/2026). El `escalationPhoneNumber` de estas clínicas no es un
+          // número suelto: es el 0800 y el WhatsApp de cada sede, una línea
+          // por sede. Antes se interpolaba en medio de una oración —"comunicate
+          // al {bloque} y te lo dan enseguida"— y quedaba ilegible.
           detalle={
-            config?.escalationPhoneNumber
-              ? `Comunicate con la clínica al ${config.escalationPhoneNumber} y te lo dan enseguida.`
-              : "Escribinos por WhatsApp y te pasamos el contacto de la clínica."
+            telefonosDeDerivacion.length > 0 ? (
+              <>
+                <p>Para sacarlo, comunicate con la clínica:</p>
+                <div className="mt-2 space-y-0.5 font-medium text-foreground">
+                  {telefonosDeDerivacion.map((linea, i) => (
+                    <div key={i}>{linea}</div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              "Escribinos por WhatsApp y te pasamos el contacto de la clínica."
+            )
           }
         />
         <p className="text-[15px] text-muted-foreground">
