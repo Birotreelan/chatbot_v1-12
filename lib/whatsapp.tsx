@@ -3464,8 +3464,30 @@ export async function handleMessage(value: any) {
     // `derivarAlPortal` devuelve false ante cualquier problema —el switch
     // apagado, Redis caído, la URL sin dominio— y entonces seguimos con el
     // flujo conversacional de siempre. Activar el portal no puede romper nada.
+    // ── La pausa por atención humana manda, también acá (1/10/2026) ──────
+    //
+    // Este bloque se adelantó al ruteo normal a propósito, y al hacerlo se
+    // adelantó también al chequeo de `isConversationPaused`, que vive más
+    // abajo. Consecuencia: un paciente con una sesión de soporte abierta que
+    // toca un botón de un recordatorio viejo —siguen vivos en su chat— recibía
+    // la respuesta del bot encima del agente que lo estaba atendiendo. En el
+    // chatbot original los botones se procesaban DESPUÉS de la pausa y eso no
+    // pasaba.
+    //
+    // Se chequea sólo dentro de este bloque: el camino de archivos de más
+    // arriba también corre antes de la pausa, pero ése está hecho a propósito
+    // así (`registrarArchivoEntrante` sabe qué hacer con una sesión ya
+    // abierta). Acá no hay nada que decidir: si hay un humano atendiendo, el
+    // bot no habla.
+    const pausadaPorHumano =
+      usaPortal(config) &&
+      (message.type === "button" || message.interactive?.type === "button_reply")
+        ? await isConversationPaused(config.id, userPhoneNumber).catch(() => false)
+        : false
+
     if (
       usaPortal(config) &&
+      !pausadaPorHumano &&
       (message.type === "button" || message.interactive?.type === "button_reply")
     ) {
       const boton =
