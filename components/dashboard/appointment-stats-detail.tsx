@@ -5,7 +5,7 @@ import type { ClientAppointmentStats } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, MessageCircle, PlusCircle, Clock, TrendingUp } from "lucide-react"
-import { CostoAproximado } from "@/components/stats/costo-aproximado"
+import { TarjetaDeInteracciones } from "@/components/stats/tarjeta-de-interacciones"
 import { DateRangeFilter } from "./date-range-filter"
 
 interface AppointmentStatsDetailProps {
@@ -136,47 +136,12 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         </Button>
       </div>
 
-      {/* Fila 1: Total de Interacciones */}
-      <Card className="border-purple-200 bg-purple-50/30">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-purple-600" />
-            Total de Interacciones
-          </CardTitle>
-          <CardDescription>
-            Sumatoria de recordatorios enviados y conversaciones iniciadas por pacientes.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
-              <TrendingUp className="h-6 w-6 text-purple-500 mx-auto mb-2" />
-              <div className="text-3xl font-bold text-purple-600">
-                {mensajesPagados + (stats?.totalUserInitiated || 0)}
-              </div>
-              <div className="text-sm text-muted-foreground mt-1">Total de interacciones</div>
-            </div>
-
-            <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
-              <Send className="h-6 w-6 text-purple-400 mx-auto mb-2" />
-              <div className="text-3xl font-bold text-purple-600">{mensajesPagados}</div>
-              <div className="text-sm text-muted-foreground mt-1">Recordatorios enviados</div>
-            </div>
-
-            <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
-              <MessageCircle className="h-6 w-6 text-purple-400 mx-auto mb-2" />
-              <div className="text-3xl font-bold text-purple-600">{stats?.totalUserInitiated || 0}</div>
-              <div className="text-sm text-muted-foreground mt-1">Conversaciones iniciadas</div>
-            </div>
-
-            <CostoAproximado
-              clienteId={clienteId}
-              interacciones={mensajesPagados + (stats?.totalUserInitiated || 0)}
-              cargandoInteracciones={loadingMensajes}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <TarjetaDeInteracciones
+        clienteId={clienteId}
+        mensajesPagados={mensajesPagados}
+        conversacionesIniciadas={stats?.totalUserInitiated || 0}
+        cargando={loadingMensajes}
+      />
 
       {/* Fila 2: Recordatorios - Enviados, Confirmados, Cancelados, Sin respuesta */}
       <div className="grid gap-4 md:grid-cols-4">
