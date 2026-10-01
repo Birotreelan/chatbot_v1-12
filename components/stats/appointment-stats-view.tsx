@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Loader2, RefreshCw, Send, CheckCircle, XCircle, CalendarClock, MessageCircle, PlusCircle, Clock, TrendingUp } from "lucide-react"
+import { CostoAproximado } from "@/components/stats/costo-aproximado"
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 
 interface AppointmentStatsViewProps {
@@ -188,7 +189,7 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-6 md:grid-cols-3">
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
                   <TrendingUp className="h-6 w-6 text-purple-500 mx-auto mb-2" />
                   <div className="text-3xl font-bold text-purple-600">
@@ -208,6 +209,12 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
                   <div className="text-3xl font-bold text-purple-600">{stats?.totalUserInitiated || 0}</div>
                   <div className="text-sm text-muted-foreground mt-1">Conversaciones iniciadas</div>
                 </div>
+
+                <CostoAproximado
+                  clienteId={clienteId}
+                  interacciones={mensajesPagados + (stats?.totalUserInitiated || 0)}
+                  cargandoInteracciones={loadingMensajes}
+                />
               </div>
             </CardContent>
           </Card>
