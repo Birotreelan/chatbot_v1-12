@@ -21,6 +21,8 @@ import {
   yaSeDijo,
   anotarQueSeDijo,
   registrarSilencio,
+  esIdenticoALoUltimo,
+  recordarUltimaRespuesta,
 } from "./conversation-state/silencio"
 import { cancelacionReciente, mensajeYaCancelado } from "./portal/cancelacion-reciente"
 import { PLANTILLA_SIN_TURNO } from "./portal/mensaje-enlace"
@@ -399,6 +401,33 @@ async function sendDirectResponse(
       }
     }
 
+    // ── El mismo texto dos veces seguidas (2/10/2026) ─────────────────────
+    //
+    // Reportado: un paciente escribió cuatro veces y recibió cuatro veces el
+    // mismo saludo, palabra por palabra, en un minuto.
+    //
+    // Se compara contra lo ÚLTIMO enviado y no contra todo lo del día: el
+    // caso legítimo —"no entendí tu respuesta" seguido del mismo menú— no es
+    // idéntico al menú solo, así que sale. Ver `esIdenticoALoUltimo`.
+    //
+    // La config ya está leída arriba cuando hizo falta; si no, se lee ahora.
+    // Es una lectura más por respuesta sólo para los clientes del portal.
+    const configRepeticion = configSilencio ?? (await getWhatsAppConfigById(ctx.configId).catch(() => null))
+
+    if (
+      usaSilencio(configRepeticion) &&
+      (await esIdenticoALoUltimo(ctx.configId, ctx.userPhoneNumber, message))
+    ) {
+      registrarSilencio({
+        configId: ctx.configId,
+        phoneNumber: ctx.userPhoneNumber,
+        motivo: "respuesta_identica",
+        texto: message,
+        detalle: "idéntica a la anterior — revisar por qué el flujo no avanzó",
+      })
+      return true
+    }
+
     // Presentación como asistente de IA en la primera respuesta del día
     // (17/9/2026). Se decide acá, en el embudo, y no en cada rama: estaba
     // resuelta a mano en 13 lugares y cada capa nueva se olvidaba —el executor,
@@ -460,6 +489,10 @@ async function sendDirectResponse(
     if (etiqueta) {
       await anotarQueSeDijo(ctx.configId, ctx.userPhoneNumber, etiqueta)
     }
+
+    // El texto tal como salió —ya con la presentación y las etiquetas del
+    // cliente aplicadas—, que es con lo que hay que comparar el próximo.
+    await recordarUltimaRespuesta(ctx.configId, ctx.userPhoneNumber, message)
 
     // Recordar los botones y el texto del paso actual (para re-mostrarlos en una
     // consulta intercalada o un "no te entendí"). No lo hacemos para la propia

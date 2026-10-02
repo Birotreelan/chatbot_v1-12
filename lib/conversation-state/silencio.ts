@@ -52,7 +52,18 @@ const PREFIJO = "silencio:"
  */
 const VENTANA_SEGUNDOS = 24 * 60 * 60
 
-export type MotivoDelSilencio = "cierre_conversacional" | "ya_se_dijo"
+export type MotivoDelSilencio = "cierre_conversacional" | "ya_se_dijo" | "respuesta_identica"
+
+/**
+ * Cuánto dura la memoria de "lo último que le dijimos" (2/10/2026).
+ *
+ * Una hora, y no las 24 h del resto del módulo, a propósito. Lo que justifica
+ * callar es que el paciente TODAVÍA TIENE el mensaje a la vista: en una ráfaga
+ * de tres mensajes seguidos eso es cierto; al día siguiente, no. Alguien que
+ * vuelve a la tarde y recibe silencio porque a la mañana le dijimos lo mismo
+ * creería que el servicio se cayó.
+ */
+const MEMORIA_DE_LA_ULTIMA_SEGUNDOS = 60 * 60
 
 /**
  * ¿Este cliente usa el silencio?
@@ -141,4 +152,77 @@ export function registrarSilencio(params: {
       `${params.detalle ? `: ${params.detalle}` : ""})` +
       `${recorte ? ` — se iba a enviar: "${recorte}"` : ""}`,
   )
+}
+
+/**
+ * ── La repetición consecutiva (2/10/2026) ──────────────────────────────────
+ *
+ * Reportado: un paciente escribió cuatro veces —"Buen día necesito turno",
+ * "Magaly Alvarez", "DNI 92071137", "Por PAMI"— y recibió CUATRO veces el
+ * mismo saludo de bienvenida, palabra por palabra, en un minuto. Se pagaron
+ * cuatro mensajes para decir una sola cosa.
+ *
+ * Esto es la regla que el encabezado de este archivo dice que deliberadamente
+ * NO está, y vale la pena explicar por qué ahora sí y en qué se diferencia.
+ *
+ * Lo que NO se implementa sigue sin implementarse: "no mandes dos veces el
+ * mismo texto EN LA VENTANA". Eso rompería el caso legítimo —"no entendí tu
+ * respuesta" seguido del mismo menú— que hay que mandar.
+ *
+ * Lo que sí se implementa es más angosto: no mandar un texto IDÉNTICO al
+ * ÚLTIMO que se envió, sin nada en el medio. En el caso legítimo no aplica,
+ * porque "no entendí…" + el menú no es idéntico al menú solo: el texto
+ * cambió, así que sale. Acá el texto no cambió en absoluto, y un mensaje que
+ * no cambió en nada no le dice al paciente nada que no esté leyendo ya.
+ *
+ * Importante: esto NO arregla la causa. Si el bot repite el mismo saludo es
+ * porque el flujo no avanzó, y eso hay que mirarlo aparte. Lo que hace es
+ * dejar de pagar por el síntoma y —gracias a `registrarSilencio`— dejarlo
+ * anotado en los logs en vez de escondido.
+ */
+function claveDeLaUltima(configId: string, phoneNumber: string): string {
+  return `${PREFIJO}ultima:${configId}:${phoneNumber}`
+}
+
+/** Normaliza para comparar: el mismo texto con otro espaciado es el mismo. */
+function huella(mensaje: string): string {
+  return mensaje.replace(/\s+/g, " ").trim()
+}
+
+/** ¿Es idéntico a lo último que le mandamos? */
+export async function esIdenticoALoUltimo(
+  configId: string,
+  phoneNumber: string,
+  mensaje: string,
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis || !mensaje) return false
+
+  try {
+    const anterior = await redis.get<string>(claveDeLaUltima(configId, phoneNumber))
+    return typeof anterior === "string" && anterior === huella(mensaje)
+  } catch (error) {
+    console.warn("[SILENCIO] No se pudo leer la última respuesta; se envía igual:", error)
+    return false
+  }
+}
+
+/** Recuerda lo último enviado. Se llama DESPUÉS de que el mensaje salió. */
+export async function recordarUltimaRespuesta(
+  configId: string,
+  phoneNumber: string,
+  mensaje: string,
+): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis || !mensaje) return
+
+  try {
+    await redis.setex(
+      claveDeLaUltima(configId, phoneNumber),
+      MEMORIA_DE_LA_ULTIMA_SEGUNDOS,
+      huella(mensaje),
+    )
+  } catch (error) {
+    console.warn("[SILENCIO] No se pudo recordar la última respuesta:", error)
+  }
 }
