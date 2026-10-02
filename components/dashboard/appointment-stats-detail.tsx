@@ -145,7 +145,6 @@ export function AppointmentStatsDetail({ clienteId, displayName }: AppointmentSt
         clienteId={clienteId}
         recordatoriosEnviados={recordatoriosEnviados}
         servicio={servicio}
-        conversacionesIniciadas={stats?.totalUserInitiated || 0}
         cargando={loadingMensajes}
       />
 

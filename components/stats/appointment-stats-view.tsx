@@ -186,7 +186,6 @@ export function AppointmentStatsView({ clienteId, clientName, initialStats }: Ap
             clienteId={clienteId}
             recordatoriosEnviados={recordatoriosEnviados}
             servicio={servicio}
-            conversacionesIniciadas={stats?.totalUserInitiated || 0}
             cargando={loadingMensajes}
           />
 

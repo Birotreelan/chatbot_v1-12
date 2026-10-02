@@ -35,7 +35,7 @@
  * diferencia se reconstruye sola.
  */
 
-import { Loader2, MessagesSquare, Send, TrendingUp } from "lucide-react"
+import { Loader2, MessagesSquare, Send } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CostoAproximado } from "@/components/stats/costo-aproximado"
@@ -66,7 +66,7 @@ function Recuadro({
   cargando,
   children,
 }: {
-  icono: typeof TrendingUp
+  icono: typeof Send
   etiqueta: string
   detalle?: React.ReactNode
   cargando: boolean
@@ -85,26 +85,17 @@ function Recuadro({
 export function TarjetaDeInteracciones({
   clienteId,
   recordatoriosEnviados,
-  conversacionesIniciadas,
   servicio,
   cargando,
 }: {
   clienteId: string
   /** Plantillas despachadas en el período. */
   recordatoriosEnviados: number
-  conversacionesIniciadas: number
   /** `null` mientras no llegó, o si el proxy no manda el desglose. */
   servicio: MensajesDeServicio | null
   /** Todavía no llegó la respuesta del consumo. */
   cargando: boolean
 }) {
-  // Las conversaciones iniciadas SUMAN al total pero ya no tienen recuadro
-  // propio acá (1/10/2026): tienen su propia tarjeta más abajo —"Conversaciones
-  // Iniciadas por Pacientes"— y repetirlas era mostrar el mismo número dos
-  // veces en la misma pantalla. El total sigue siendo lo que el título de la
-  // tarjeta promete, así que para reconstruirlo hay que mirar esa otra
-  // tarjeta; el costo, en cambio, se explica solo en su propio recuadro.
-  const interacciones = recordatoriosEnviados + conversacionesIniciadas
 
   // ── Qué se cobra (1/10/2026) ────────────────────────────────────────────
   //
@@ -130,20 +121,22 @@ export function TarjetaDeInteracciones({
   return (
     <Card className="border-purple-200 bg-purple-50/30">
       <CardHeader>
+        {/* El título y la bajada siguen al contenido (2/10/2026). Al quedar
+            sólo lo que se envía y lo que cuesta, "Total de Interacciones" pasó
+            a nombrar un número que ya no está en la tarjeta, y la bajada
+            describía dos cifras de las cuales una se fue y la otra nunca
+            estuvo. Un encabezado que promete algo que no se ve manda a buscar
+            un dato inexistente. */}
         <CardTitle className="flex items-center gap-2">
-          <TrendingUp className="h-5 w-5 text-purple-600" />
-          Total de Interacciones
+          <Send className="h-5 w-5 text-purple-600" />
+          Consumo de WhatsApp
         </CardTitle>
         <CardDescription>
-          Sumatoria de recordatorios enviados y conversaciones iniciadas por pacientes.
+          Mensajes enviados en el período y su costo estimado.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <Recuadro icono={TrendingUp} etiqueta="Total de interacciones" cargando={cargando}>
-            {interacciones}
-          </Recuadro>
-
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           <Recuadro icono={Send} etiqueta="Recordatorios enviados" cargando={cargando}>
             {recordatoriosEnviados}
           </Recuadro>
