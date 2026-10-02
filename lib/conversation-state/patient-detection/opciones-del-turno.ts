@@ -143,3 +143,64 @@ export const BOTON_DE_LA_ACCION: Record<AccionDelMenu, string> = {
 
 /** Máximo de botones que admite un mensaje interactivo de WhatsApp. */
 export const MAXIMO_DE_BOTONES = 3
+
+
+/**
+ * ── El menú del paciente NUEVO (2/10/2026) ─────────────────────────────────
+ *
+ * Reportado: alguien escribió "Buen día necesito turno", después su nombre, su
+ * DNI y su obra social, y recibió cuatro veces el mismo saludo. Nunca sacó el
+ * turno.
+ *
+ * La causa es la de siempre en este archivo: el saludo ofrecía TRES opciones
+ *
+ *     1- Solicitar turno médico
+ *     2- Solicitar turno para un familiar
+ *     3- Realizar otra consulta
+ *
+ * y el mapa que interpreta la respuesta tenía DOS —`{1: turno, 2: consulta}`—,
+ * escrito a mano y duplicado en los dos caminos de `patient-flow-handler.ts`
+ * (el numérico y el de texto libre). Resultado: quien contestaba "2" pensando
+ * en un familiar entraba en "otra consulta", y quien contestaba "3" no entraba
+ * en ningún lado, así que el mensaje caía al dispatcher, el dispatcher pedía
+ * "mostrá el menú principal" y volvía el saludo entero. Ese era el bucle.
+ *
+ * Lo llamativo es que `NEW_PATIENT_MENU` —la lista que usa el detector de
+ * texto libre— SÍ tenía las tres desde siempre. O sea que la misma pregunta se
+ * respondía en tres lugares y uno de ellos decía otra cosa.
+ *
+ * Por eso vive acá, junto al resto de los menús: es el mismo archivo y el
+ * mismo motivo.
+ */
+export type AccionDelPacienteNuevo =
+  | "book_appointment_intent"
+  | "familiar_appointment_intent"
+  | "other_inquiry_intent"
+
+/**
+ * Las opciones del saludo de paciente nuevo, EN ORDEN.
+ *
+ * Con `permitirNuevoTurno === false` el saludo es un mensaje de derivación
+ * puro, sin menú ni botón: no hay ninguna opción válida que interpretar.
+ * Devolver una lista vacía es lo que hace que un "1" suelto no active nada.
+ *
+ * Debe coincidir con `buildNewPatientGreeting` (patient-templates.ts) y con
+ * `NEW_PATIENT_MENU` (menu-option-detector.ts).
+ */
+export function menuDelPacienteNuevo(permisos: {
+  permitirNuevoTurno?: boolean
+}): AccionDelPacienteNuevo[] {
+  if (permisos.permitirNuevoTurno === false) return []
+  return ["book_appointment_intent", "familiar_appointment_intent", "other_inquiry_intent"]
+}
+
+/** El mapa número → acción, derivado de la lista de arriba. */
+export function mapaDelPacienteNuevo(permisos: {
+  permitirNuevoTurno?: boolean
+}): Record<number, AccionDelPacienteNuevo> {
+  const mapa: Record<number, AccionDelPacienteNuevo> = {}
+  menuDelPacienteNuevo(permisos).forEach((accion, i) => {
+    mapa[i + 1] = accion
+  })
+  return mapa
+}

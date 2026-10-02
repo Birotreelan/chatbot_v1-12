@@ -17,6 +17,7 @@ import {
   seOfreceConfirmarAsistencia,
   menuDelTurno,
   soloSePuedeCancelar,
+  mapaDelPacienteNuevo,
 } from './opciones-del-turno'
 import { buildPostActionMenu, buildTurnoInfoResponse } from './patient-templates'
 import { parseOptionNumber } from '../selection-extractor'
@@ -869,12 +870,9 @@ export async function processPatientDetectionMessage(
       // NUEVA FASE: Paciente nuevo selecciona: 1-Turno, 2-Consulta
       // Si permitirNuevoTurno está desactivado, el saludo no ofrece menú ni botón
       // (mensaje de derivación puro) → no hay ninguna opción numérica válida.
-      const intentMap: Record<number, string> = state.permitirNuevoTurno === false
-        ? {}
-        : {
-            1: 'book_appointment_intent', // Usuario quiere agendar turno
-            2: 'other_inquiry_intent',     // Usuario quiere hacer otra consulta
-          }
+      // El mismo mapa que usa el camino de texto libre, y derivado de la misma
+      // lista que arma el saludo. Ver `menuDelPacienteNuevo`.
+      const intentMap = mapaDelPacienteNuevo(state)
 
       logger.info('Contact intent selection detected', {
         selection,
@@ -888,6 +886,12 @@ export async function processPatientDetectionMessage(
         if (action === 'book_appointment_intent') {
           // Usuario quiere turno: pasar a solicitar DNI
           state.phase = 'awaiting_initial_response'
+          await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+        } else if (action === 'familiar_appointment_intent') {
+          // Turno para otra persona: lo que sigue es el DNI DEL FAMILIAR, no el
+          // de quien escribe. Sin esta fase el DNI entrante se interpretaría
+          // como del titular y el turno quedaría a nombre equivocado.
+          state.phase = 'awaiting_familiar_dni'
           await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
         } else if (action === 'other_inquiry_intent') {
           // Usuario quiere consulta: marcar como completado y devolver esa acción
@@ -1120,18 +1124,18 @@ export async function processPatientDetectionMessage(
       const selectedOptionNumber = detectionResult.selectedOption
 
       if (state.phase === 'awaiting_contact_intent') {
-        const intentMap: Record<number, string> = state.permitirNuevoTurno === false
-          ? {}
-          : {
-              1: 'book_appointment_intent',
-              2: 'other_inquiry_intent',
-            }
+        const intentMap = mapaDelPacienteNuevo(state)
 
         const action = intentMap[selectedOptionNumber || 0]
 
         if (action) {
           if (action === 'book_appointment_intent') {
             state.phase = 'awaiting_initial_response'
+            await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
+          } else if (action === 'familiar_appointment_intent') {
+            // Ver la nota del camino numérico: lo que sigue es el DNI del
+            // familiar.
+            state.phase = 'awaiting_familiar_dni'
             await redis.setex(stateKey, PATIENT_DETECTION_TTL, JSON.stringify(state))
           } else if (action === 'other_inquiry_intent') {
             state.phase = 'completed'

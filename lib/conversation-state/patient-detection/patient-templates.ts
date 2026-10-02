@@ -569,6 +569,40 @@ export function buildNewPatientGreeting(
 }
 
 /**
+ * Repregunta para el paciente nuevo que ya vio el saludo y contestó otra cosa.
+ *
+ * No es el saludo otra vez: empieza diciendo qué falta. Esa diferencia importa
+ * en los dos sentidos. Para el paciente, porque un mensaje idéntico al anterior
+ * no le dice qué hizo mal —escribió su nombre y su DNI creyendo que alcanzaba—.
+ * Y para el bot, porque la regla de "no repetir el último texto"
+ * (lib/conversation-state/silencio.ts) callaría un saludo repetido, y entonces
+ * se quedaría mudo justo cuando hay algo que aclarar.
+ *
+ * El menú va igual: sin las opciones a la vista, "elegí una opción" no se
+ * puede cumplir.
+ */
+export function buildNewPatientReprompt(
+  permitirNuevoTurno?: boolean,
+  clinicName: string = DEFAULT_CLINIC_NAME,
+  escalationPhoneNumber?: string,
+): string {
+  if (permitirNuevoTurno === false) {
+    // Sin menú que ofrecer no hay nada que repreguntar. Se devuelve el mismo
+    // mensaje de derivación; si resulta idéntico al anterior, el embudo lo
+    // calla solo.
+    return buildNewPatientGreeting(clinicName, permitirNuevoTurno, escalationPhoneNumber)
+  }
+
+  return (
+    `Para poder ayudarte necesito que elijas una de estas opciones. ` +
+    `Respondé con el número o tocá el botón:\n\n` +
+    `1- Solicitar turno médico\n` +
+    `2- Solicitar turno para un familiar\n` +
+    `3- Realizar otra consulta`
+  )
+}
+
+/**
  * Mensaje cuando el usuario elige "Realizar otra consulta" (opción 2)
  */
 export function buildOtherInquiryMessage(

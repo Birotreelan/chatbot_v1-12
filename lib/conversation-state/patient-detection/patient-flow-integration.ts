@@ -21,6 +21,7 @@ import { fraseDerivacion } from '@/lib/utils/escalation-contact'
 import {
   buildExistingPatientGreeting,
   buildNewPatientGreeting,
+  buildNewPatientReprompt,
   buildMultiplePatientGreeting,
   buildSelectionConfirmation,
   buildInvalidSelectionMessage,
@@ -145,6 +146,34 @@ export async function initializePatientDetection(
           getIdentifiedPatient(phoneNumber),
           isPatientDetectionFlowActive(phoneNumber),
         ])
+
+        // ── El paciente NUEVO que todavía no eligió nada (2/10/2026) ──────
+        //
+        // El atajo de abajo exige conocer su nombre, así que al paciente nuevo
+        // no lo cubría: cada mensaje que el dispatcher no entendía terminaba
+        // acá y le rearmaba el saludo COMPLETO.
+        //
+        // Reportado: alguien escribió "Buen día necesito turno", después
+        // "Magaly Alvarez", después "DNI 92071137" y después "Por PAMI", y
+        // recibió cuatro veces el mismo saludo. Ninguno de esos tres datos
+        // servía para avanzar —el menú esperaba un número— pero rehacer la
+        // bienvenida tampoco se lo decía: le mostraba otra vez lo mismo, sin
+        // una sola palabra que indicara qué había que hacer.
+        //
+        // Si ya hay un saludo mostrado, se le dice qué falta en vez de
+        // repetirlo. El menú va igual, porque sin él la indicación no sirve;
+        // lo que cambia es que ahora el mensaje EMPIEZA explicando.
+        if (!identificado?.patientName && detectionActiva) {
+          const estado = await getPatientDetectionState(phoneNumber)
+          if (estado?.phase === 'awaiting_contact_intent') {
+            logger.info('Paciente nuevo sin elegir opción — se repregunta en vez de re-saludar', {})
+            return {
+              handled: true,
+              message: buildNewPatientReprompt(permitirNuevoTurno, clinicName, escalationPhoneNumber),
+              patientInfo: { isNewPatient: true },
+            }
+          }
+        }
 
         if (identificado?.patientName && detectionActiva) {
           const menuCorto = await returnPatientToMenu(phoneNumber)
