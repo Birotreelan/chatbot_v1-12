@@ -20,19 +20,35 @@ La pausa **no vence sola**. Dura hasta que se la reanude.
 Todas las llamadas llevan la clave en el encabezado `x-api-key`.
 
 ```
-x-api-key: trl_8Kx2vQ9mN4pR7sT1wY6zA3bC5dE8fG0h
+x-api-key: <clave>
 ```
 
-La clave es por cuenta y la entregamos nosotros. Tres cosas a tener en cuenta:
+**La clave nunca va en la URL.** Las direcciones quedan escritas en logs de
+servidores, proxies e intermediarios, y una credencial en un log es una
+credencial filtrada.
 
-- **No va en la URL.** Las direcciones quedan escritas en logs de servidores,
-  proxies e intermediarios, y una credencial en un log es una credencial
-  filtrada.
-- **Sólo se muestra una vez**, cuando se emite. De nuestro lado guardamos
-  únicamente su hash, así que no podemos volver a mostrarla: si se pierde,
-  emitimos una nueva.
-- **Emitir una nueva anula la anterior.** Es lo que permite rotarla si se
-  sospecha que se filtró.
+Hay dos tipos de clave, y la diferencia es si hace falta indicar de qué cliente
+se trata.
+
+### Clave compartida (la habitual)
+
+Una sola clave para todas las cuentas. Como no identifica a ninguna en
+particular, **todos los llamados tienen que indicar `cliente_id`**: es el mismo
+UUID que figura como "Cliente ID" en la configuración de la cuenta.
+
+```json
+{ "cliente_id": "faf82cd7-4b56-11ef-b8bf-7824af3b5123", "pausado": true }
+```
+
+Si falta, la respuesta es `400`.
+
+### Clave por cliente
+
+Opcional. Identifica la cuenta por sí sola, así que **no hace falta mandar
+`cliente_id`**: con ella sólo se puede pausar la cuenta a la que pertenece. Se
+muestra una sola vez al emitirla y emitir una nueva anula la anterior.
+
+Si una cuenta tiene clave propia, sigue funcionando igual que antes.
 
 Una clave inválida o ausente devuelve `401`.
 
@@ -46,13 +62,15 @@ x-api-key: <clave>
 Content-Type: application/json
 
 {
+  "cliente_id": "faf82cd7-4b56-11ef-b8bf-7824af3b5123",
   "pausado": true,
   "motivo": "corte por presupuesto del mes"
 }
 ```
 
-`motivo` es opcional (máximo 200 caracteres) y sirve para saber después por qué
-se pausó.
+`cliente_id` es obligatorio con la clave compartida y se omite con la clave por
+cliente. `motivo` es opcional (máximo 200 caracteres) y sirve para saber después
+por qué se pausó.
 
 Respuesta `200`:
 
@@ -81,9 +99,11 @@ El mismo llamado con `"pausado": false`.
 ## Consultar el estado
 
 ```http
-GET https://treelan-bot.vercel.app/api/envios/pausa
+GET https://treelan-bot.vercel.app/api/envios/pausa?cliente_id=faf82cd7-4b56-11ef-b8bf-7824af3b5123
 x-api-key: <clave>
 ```
+
+Con la clave por cliente, el parámetro `cliente_id` se omite.
 
 Pausada:
 
@@ -114,7 +134,7 @@ del usuario si lo hicimos desde nuestro panel.
 | Código | Qué pasó | Qué hacer |
 |---|---|---|
 | `200` | Listo | — |
-| `400` | Falta el campo `pausado` o no es booleano | Corregir el cuerpo del pedido |
+| `400` | Falta el campo `pausado`, o falta `cliente_id` usando la clave compartida | Corregir el cuerpo del pedido |
 | `401` | Clave inválida o ausente | Revisar el encabezado `x-api-key` |
 | `503` | No se pudo guardar el estado | Reintentar en unos segundos |
 
@@ -152,16 +172,16 @@ por períodos largos.
 curl -X POST https://treelan-bot.vercel.app/api/envios/pausa \
   -H "x-api-key: $TREELAN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"pausado": true, "motivo": "cierre por vacaciones"}'
+  -d '{"cliente_id": "faf82cd7-4b56-11ef-b8bf-7824af3b5123", "pausado": true, "motivo": "cierre por vacaciones"}'
 
 # Reanudar
 curl -X POST https://treelan-bot.vercel.app/api/envios/pausa \
   -H "x-api-key: $TREELAN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"pausado": false}'
+  -d '{"cliente_id": "faf82cd7-4b56-11ef-b8bf-7824af3b5123", "pausado": false}'
 
 # Consultar
-curl https://treelan-bot.vercel.app/api/envios/pausa \
+curl "https://treelan-bot.vercel.app/api/envios/pausa?cliente_id=faf82cd7-4b56-11ef-b8bf-7824af3b5123" \
   -H "x-api-key: $TREELAN_API_KEY"
 ```
 
@@ -171,7 +191,7 @@ curl https://treelan-bot.vercel.app/api/envios/pausa \
 <?php
 function treelanPausarEnvios(bool $pausado, ?string $motivo = null): array
 {
-    $cuerpo = ['pausado' => $pausado];
+    $cuerpo = ['cliente_id' => getenv('TREELAN_CLIENTE_ID'), 'pausado' => $pausado];
     if ($motivo !== null) {
         $cuerpo['motivo'] = $motivo;
     }
@@ -211,7 +231,11 @@ async function pausarEnvios(pausado, motivo) {
       "Content-Type": "application/json",
       "x-api-key": process.env.TREELAN_API_KEY,
     },
-    body: JSON.stringify({ pausado, ...(motivo ? { motivo } : {}) }),
+    body: JSON.stringify({
+      cliente_id: process.env.TREELAN_CLIENTE_ID,
+      pausado,
+      ...(motivo ? { motivo } : {}),
+    }),
   })
 
   if (!r.ok) throw new Error(`Treelan respondió ${r.status}: ${await r.text()}`)
