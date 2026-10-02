@@ -2,7 +2,7 @@ import { getWhatsAppConfigByPhoneId, getWhatsAppConfigById, updateWhatsAppStats,
 import { sendWhatsAppMessage, sendWhatsAppInteractive, sendWhatsAppList } from "@/lib/whatsapp-api"
 import { downloadWhatsAppMedia, transcribeAudio } from "@/lib/audio-transcription"
 import { saveConversationAudio } from "@/lib/conversation-audio"
-import { fraseDerivacion, esContactoMultilinea, contactoDerivacionEnLinea } from "@/lib/utils/escalation-contact"
+import { llevaDatosDeContacto, fraseDerivacion, esContactoMultilinea, contactoDerivacionEnLinea } from "@/lib/utils/escalation-contact"
 import { getArgentinaDateTime, formatDateWithDayOfWeek } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
@@ -349,18 +349,51 @@ async function sendDirectResponse(
     // por el mismo motivo que la presentación —ver presentacion-inicial—: una
     // rama que se olvida de callar no se nota hasta que alguien mira la
     // factura.
-    if (opciones?.unaVezPorVentana) {
-      const configSilencio = await getWhatsAppConfigById(ctx.configId).catch(() => null)
+    //
+    // ── Los datos de contacto se mandan una sola vez (2/10/2026) ──────────
+    //
+    // Reportado: a un paciente de PAMI SO le dimos los seis teléfonos de las
+    // sedes en el saludo y, cuando volvió a escribir, se los dimos enteros de
+    // nuevo. El segundo envío no le agrega nada —los tiene dos mensajes más
+    // arriba— y se paga igual que cualquier otro.
+    //
+    // La etiqueta se deduce del texto en vez de marcarse en cada rama. Es la
+    // excepción a la regla de arriba, y tiene su motivo: el bloque sale hoy de
+    // cinco lugares distintos y la sexta rama que se agregue mañana se
+    // olvidaría de etiquetarla. Acá no hay nada que recordar.
+    //
+    // La diferencia con "no repitas el mismo texto" —la regla que silencio.ts
+    // deliberadamente NO implementa— es que esto no mira si el texto se
+    // repite: mira si lleva una información puntual que el paciente ya tiene.
+    // Un menú repetido hay que mandarlo; una lista de teléfonos, no.
+    let etiqueta = opciones?.unaVezPorVentana
+
+    // Sin una tira de siete dígitos no hay teléfono posible, y entonces no
+    // hace falta leer la configuración. Importa: esto corre en cada respuesta,
+    // y la mayoría —menús, confirmaciones, "no te entendí"— no lleva ningún
+    // número. Mismo criterio que el bloque de etiquetas de más abajo.
+    const podriaLlevarContacto = !etiqueta && /\d[\d\s().-]{6,}/.test(message)
+
+    const configSilencio =
+      etiqueta || podriaLlevarContacto
+        ? await getWhatsAppConfigById(ctx.configId).catch(() => null)
+        : null
+
+    if (podriaLlevarContacto && llevaDatosDeContacto(message, configSilencio?.escalationPhoneNumber)) {
+      etiqueta = "datos_de_contacto"
+    }
+
+    if (etiqueta) {
       if (
         usaSilencio(configSilencio) &&
-        (await yaSeDijo(ctx.configId, ctx.userPhoneNumber, opciones.unaVezPorVentana))
+        (await yaSeDijo(ctx.configId, ctx.userPhoneNumber, etiqueta))
       ) {
         registrarSilencio({
           configId: ctx.configId,
           phoneNumber: ctx.userPhoneNumber,
           motivo: "ya_se_dijo",
           texto: message,
-          detalle: opciones.unaVezPorVentana,
+          detalle: etiqueta,
         })
         return true
       }
@@ -424,8 +457,8 @@ async function sendDirectResponse(
     // Recién ahora, con el mensaje ya enviado. Anotarlo antes y que el envío
     // fallara dejaría al paciente sin la respuesta y sin poder recibirla por
     // 24 h.
-    if (opciones?.unaVezPorVentana) {
-      await anotarQueSeDijo(ctx.configId, ctx.userPhoneNumber, opciones.unaVezPorVentana)
+    if (etiqueta) {
+      await anotarQueSeDijo(ctx.configId, ctx.userPhoneNumber, etiqueta)
     }
 
     // Recordar los botones y el texto del paso actual (para re-mostrarlos en una

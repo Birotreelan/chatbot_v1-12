@@ -62,6 +62,52 @@ export function lineasDeContactoParaWeb(valor?: string | null): string[] {
     .filter((linea) => linea.length > 0)
 }
 
+/**
+ * ¿Este mensaje lleva los datos de contacto de la clínica? (2/10/2026)
+ *
+ * Reportado por Nicolás: a un paciente de PAMI SO le mandamos los seis
+ * teléfonos de las sedes en el saludo y, cuando volvió a escribir —"solo
+ * preciso gotas para la vista"—, se los mandamos enteros otra vez. El segundo
+ * envío no le agrega nada: ya los tiene, dos mensajes más arriba.
+ *
+ * La pregunta se contesta mirando el texto y no etiquetando cada rama a mano.
+ * El bloque aparece hoy en cinco lugares —el saludo con obra social bloqueada,
+ * la derivación por consulta médica, "otra consulta", la obra social no
+ * habilitada y la derivación externa— y la sexta que se agregue mañana se
+ * olvidaría de la etiqueta. Esto la cubre sola.
+ *
+ * Se exige coincidencia de una línea COMPLETA del contacto configurado, no de
+ * un número suelto: un mensaje que menciona un teléfono al pasar no es una
+ * derivación, y callarlo sería callar de más.
+ *
+ * Con el contacto sin cargar devuelve `false`: no hay bloque que repetir, y el
+ * placeholder no identifica a nadie.
+ */
+export function llevaDatosDeContacto(mensaje: string, valor?: string | null): boolean {
+  if (!mensaje) return false
+
+  const lineas = lineasDeContacto(valor)
+  if (lineas.length === 0) return false
+
+  // Se compara por DÍGITOS y no por texto. Un mismo teléfono viaja de formas
+  // distintas según por dónde salga —"*0800-345-9393*" en una frase,
+  // "📞 0800-345-9393" dentro del bloque, con o sin guiones— y comparar
+  // cadenas obligaba a que coincidieran los adornos. Los dígitos son lo único
+  // que no cambia.
+  const soloDigitos = (texto: string) => texto.replace(/\D/g, "")
+  const digitosDelMensaje = soloDigitos(mensaje)
+
+  // 7 dígitos: un teléfono. Menos que eso es una hora, un número de turno o un
+  // año, y callar por eso sería callar de más.
+  const numeros = lineas
+    .map(soloDigitos)
+    .filter((n) => n.length >= 7)
+
+  if (numeros.length === 0) return false
+
+  return numeros.some((n) => digitosDelMensaje.includes(n))
+}
+
 /** true si la clínica cargó más de una línea (modo bloque). */
 export function esContactoMultilinea(valor?: string | null): boolean {
   return lineasDeContacto(valor).length > 1
