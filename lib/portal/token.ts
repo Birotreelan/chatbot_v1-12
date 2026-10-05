@@ -526,7 +526,33 @@ export async function guardarIdentidad(
   const contexto: ContextoDelPortal = typeof crudo === "string" ? JSON.parse(crudo) : (crudo as any)
   if (contexto.resultado) return contexto
 
-  contexto.identidad = { ...(contexto.identidad || {}), ...identidad }
+  // ── Cambiar de DNI es cambiar de persona (5/10/2026) ──────────────────
+  //
+  // Esto siempre fusionaba lo nuevo sobre lo viejo, y para completar el alta
+  // paso a paso está bien. Pero en el flujo de turno para un familiar el
+  // paciente puede corregir el documento, y entonces fusionar es un error
+  // grave: si el primer DNI tenía ficha y el segundo no, sobrevivían el
+  // nombre, el apellido, el email y la OBRA SOCIAL del primero pegados al
+  // documento del segundo. `altaCompleta` daba verdadero con datos de otra
+  // persona, el portal saltaba el alta sin preguntar nada, y el turno se
+  // reservaba con la identidad mezclada —el DNI de uno y la cobertura de
+  // otro—, que es exactamente el error que nadie ve hasta que el paciente
+  // llega al mostrador.
+  //
+  // Con un DNI distinto se descarta todo lo anterior y se arranca de cero.
+  // Lo que viene del proxy para ese documento es la verdad completa; lo que
+  // había antes era de otra persona.
+  const dniAnterior = contexto.identidad?.dni
+  const dniNuevo = identidad.dni
+  const cambióDeDNI = Boolean(dniNuevo && dniAnterior && dniAnterior !== dniNuevo)
+
+  contexto.identidad = cambióDeDNI
+    ? { ...identidad }
+    : { ...(contexto.identidad || {}), ...identidad }
+
+  if (cambióDeDNI) {
+    console.log(`[PORTAL] El DNI cambió (${dniAnterior} → ${dniNuevo}); se descartan los datos anteriores`)
+  }
 
   await guardar(token, contexto)
   return contexto

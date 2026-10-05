@@ -431,9 +431,18 @@ export default async function PaginaDelPortal({
   if (paso === "pedir_dni") {
     return marco(
       <>
-        {/* Se llegó acá a propósito, para corregir: tiene que haber salida sin
-            cambiar nada. */}
-        {filtrosCrudos.paso && <Volver href={urlCon({})} />}
+        {/* SIN "Volver" (5/10/2026).
+            
+            Tenía uno que apuntaba a `urlCon({})`, o sea a la pantalla
+            siguiente. Con el DNI ya resuelto eso era un bucle cerrado:
+            desde la sede, "Volver" traía acá; desde acá, "Volver" devolvía a
+            la sede. El paciente que quería corregir el documento rebotaba
+            entre las dos pantallas sin llegar nunca a ningún lado.
+            
+            Este es el PRIMER paso del portal: no hay nada antes, así que no
+            hay a dónde volver. La salida hacia adelante es el botón
+            "Continuar" del formulario, que con el DNI sin cambios simplemente
+            sigue. */}
         <Avance actual="Elegir" />
         <TituloDePaso
           tipo="dni"
@@ -455,7 +464,11 @@ export default async function PaginaDelPortal({
   if (paso === "registrar") {
     return marco(
       <>
-        {filtrosCrudos.paso && <Volver href={urlCon({})} />}
+        {/* El paso anterior al alta es el DNI, no la sede (5/10/2026). Antes
+            esto apuntaba a `urlCon({})` —hacia adelante— y el que se había
+            equivocado un dígito no tenía cómo corregirlo: el único camino era
+            completar un alta que sabía mal. */}
+        <Volver href={urlCon({ paso: "pedir_dni" })} />
         <Avance actual="Elegir" />
         <TituloDePaso
           tipo="datos"
