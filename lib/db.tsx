@@ -793,8 +793,46 @@ export async function clearAllConversationStates(
     `patient_detection_state:${normalizedPhone}`,
     `new_patient_flow:${normalizedPhone}`,
     `existing_patient_flow:${normalizedPhone}`,
+
+    // ── Lo que hace que el bot se CALLE (5/10/2026) ──────────────────────
+    //
+    // Reportado: después de un "tree reset" el bot no saludaba. El reset
+    // limpiaba los flujos pero no la memoria de lo ya dicho, así que el
+    // saludo salía idéntico al de antes del reset y la regla de no repetir
+    // lo callaba. Desde afuera se veía como un bot roto justo después de
+    // pedirle explícitamente que empezara de nuevo.
+    //
+    // Un reinicio tiene que borrar TODO lo que condiciona la próxima
+    // respuesta, no sólo el estado del flujo. Si no, el reinicio es parcial
+    // de un modo que nadie puede adivinar.
+    //
+    // Los prefijos son de lib/conversation-state/silencio.ts y
+    // presentacion-inicial.ts; se escriben acá a mano porque importarlos
+    // desde db.tsx armaría un ciclo. Si allá cambian, esto queda viejo —por
+    // eso los nombres figuran en el comentario, para que se encuentren.
+    `silencio:ultima:${configId}:${normalizedPhone}`,
+    `presentacion_enviada:${configId}:${normalizedPhone}`,
+
+    // El historial que leen el extractor de entidades y el generador de
+    // respuestas. Sin esto, el "análisis de los mensajes previos" sigue
+    // viendo la conversación anterior al reinicio.
+    `conv_history_v2:${normalizedPhone}`,
   ]
   
+  // ── Las etiquetas de "ya se lo dijimos hoy" ─────────────────────────────
+  //
+  // Van por scan porque la etiqueta es parte de la clave y la lista crece:
+  // hoy son `datos_de_contacto`, `cancelacion_no_permitida` y
+  // `reagendamiento_no_permitido`, y la próxima que se agregue quedaría sin
+  // limpiar si acá hubiera una lista escrita a mano. Un reset es una
+  // operación rara, así que el scan no cuesta nada.
+  try {
+    const etiquetas = await scanRedisKeys(redisClient, `silencio:${configId}:${normalizedPhone}:*`)
+    keysToDelete.push(...etiquetas)
+  } catch (error) {
+    errors.push(`Error buscando etiquetas de silencio: ${(error as Error).message}`)
+  }
+
   // Limpiar cada key
   for (const key of keysToDelete) {
     try {
