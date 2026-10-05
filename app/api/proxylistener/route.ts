@@ -12,6 +12,7 @@ import { scheduleMessage } from "@/lib/queue"
 import { resolveDestinationPhone } from "@/lib/utils/destination-phone"
 import { recordDiag, recordDiagSample, DIAG } from "@/lib/diagnostics"
 import { registrarEntrante } from "@/lib/integracion-externa/registro"
+import { nombreDePlantilla } from "@/lib/integracion-externa/catalogo"
 
 export async function POST(request: Request) {
   try {
@@ -345,7 +346,10 @@ async function handleTemplateSend(data: any) {
     // `void` y sin await: es observación, no puede sumar latencia al envío.
     void registrarEntrante({
       clienteId: Cliente_Id,
-      tipo: chatbotDataParaRegistro?.tipo_mensaje,
+      // El nombre de la plantilla es lo único que distingue el primer
+      // recordatorio del tercero: los tres comparten `tipo_mensaje`.
+      nombreDePlantilla: nombreDePlantilla(Body),
+      tipoMensaje: chatbotDataParaRegistro?.tipo_mensaje,
       chatbotData: chatbotDataParaRegistro,
     })
 

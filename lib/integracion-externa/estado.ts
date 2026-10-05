@@ -9,7 +9,7 @@
  * resumen que sólo se pide cuando alguien abre la pantalla.
  */
 
-import { TIPOS_DEL_SISTEMA_EXTERNO, type TipoEsperado } from "./catalogo"
+import { TIPOS_ESPERADOS, type TipoEsperado } from "./catalogo"
 import { observaciones, type ObservacionDeTipo } from "./registro"
 
 /**
@@ -67,12 +67,12 @@ export async function estadoDeIntegracion(
 ): Promise<EstadoDeIntegracion> {
   const vistos = await observaciones(clienteId)
 
-  const filas: FilaDeIntegracion[] = TIPOS_DEL_SISTEMA_EXTERNO.map((esperado) => {
-    if (noAplicables.includes(esperado.tipo)) {
+  const filas: FilaDeIntegracion[] = TIPOS_ESPERADOS.map((esperado) => {
+    if (noAplicables.includes(esperado.clave)) {
       return { ...esperado, estado: "no_aplica", completos: 0, incompletos: 0 }
     }
 
-    const visto = vistos[esperado.tipo]
+    const visto = vistos[esperado.clave]
     if (!visto || (visto.completos === 0 && visto.incompletos === 0)) {
       return { ...esperado, estado: "nunca", completos: 0, incompletos: 0 }
     }
@@ -110,7 +110,7 @@ export async function estadoDeIntegracion(
     }
   })
 
-  const conocidos = new Set(TIPOS_DEL_SISTEMA_EXTERNO.map((t) => t.tipo))
+  const conocidos = new Set(TIPOS_ESPERADOS.map((t) => t.clave))
   const inesperados = Object.values(vistos).filter((v) => v.desconocido && !conocidos.has(v.tipo))
 
   return {

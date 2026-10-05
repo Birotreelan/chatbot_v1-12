@@ -20,7 +20,10 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface Fila {
-  tipo: string
+  clave: string
+  plantilla?: string
+  tipoMensaje?: string
+  critico?: boolean
   nombre: string
   descripcion: string
   requeridos: string[]
@@ -142,16 +145,28 @@ export function IntegracionExterna({ clienteId }: { clienteId: string }) {
           {filas.map((fila) => {
             const { Icono, color, etiqueta } = PRESENTACION[fila.estado]
             return (
-              <Card key={fila.tipo}>
+              <Card key={fila.clave}>
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <CardTitle className="flex items-center gap-2 text-base">
                         <Icono className={`h-5 w-5 shrink-0 ${color}`} />
                         {fila.nombre}
+                        {fila.critico && (
+                          <Badge variant="outline" className="border-primary/40 text-primary">
+                            Crítico
+                          </Badge>
+                        )}
                       </CardTitle>
                       <CardDescription className="mt-1">{fila.descripcion}</CardDescription>
-                      <code className="mt-1 block text-xs text-muted-foreground">{fila.tipo}</code>
+                      {/* Los dos nombres con los que llega, porque es con lo
+                          que hay que hablar del otro lado: la plantilla es lo
+                          que la clínica ve en Meta y el tipo_mensaje es lo que
+                          escribe su backend. */}
+                      <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                        {fila.plantilla && <code>plantilla: {fila.plantilla}</code>}
+                        {fila.tipoMensaje && <code>tipo_mensaje: {fila.tipoMensaje}</code>}
+                      </div>
                     </div>
                     <Badge variant="outline" className={color}>
                       {etiqueta}
@@ -223,7 +238,7 @@ export function IntegracionExterna({ clienteId }: { clienteId: string }) {
               <CardContent className="space-y-2 text-sm">
                 {inesperados.map((i) => (
                   <div key={i.tipo} className="rounded-md border p-3">
-                    <code className="font-medium">{i.tipo}</code>
+                    <code className="font-medium">{i.tipo.replace(/^desconocido:/, "")}</code>
                     <span className="ml-2 text-muted-foreground">
                       {i.incompletos} {i.incompletos === 1 ? "vez" : "veces"} · último{" "}
                       {cuando(i.ultimoIncompleto)}

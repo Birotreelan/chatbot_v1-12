@@ -28,7 +28,7 @@
  */
 
 import { getRedisClient } from "../redis"
-import { camposFaltantes, tipoEsperado } from "./catalogo"
+import { camposFaltantes, claveDelEnvio, tipoEsperado } from "./catalogo"
 
 const PREFIJO = "integracion:"
 
@@ -60,20 +60,26 @@ function claveDelIndice(clienteId: string): string {
 /**
  * Anota un mensaje entrante del sistema externo.
  *
- * Se llama con el `tipo_mensaje` crudo, incluso si no lo conocemos: un tipo
- * desconocido es información valiosa —un error de tipeo del otro lado hace que
- * el tablero muestre "falta X" sin explicar por qué—, y sólo se puede ver si
- * se registra.
+ * Se registra incluso lo que no reconocemos: un nombre desconocido es
+ * información valiosa —un error de tipeo del otro lado hace que el tablero
+ * muestre "falta X" sin explicar por qué—, y sólo se puede ver si queda
+ * anotado tal cual vino.
  */
 export async function registrarEntrante(params: {
   clienteId: string
-  tipo?: string | null
+  /** `Body.template.name`, cuando el envío es una plantilla. */
+  nombreDePlantilla?: string | null
+  /** `Chatbot_Data.tipo_mensaje`. */
+  tipoMensaje?: string | null
   chatbotData?: any
 }): Promise<void> {
   const redis = getRedisClient()
   if (!redis || !params.clienteId) return
 
-  const tipo = (params.tipo || "").trim() || "(sin tipo_mensaje)"
+  // La clave canónica resuelve el caso de un mismo evento con dos nombres: la
+  // plantilla `cancelar_turno_solicitado` y el `tipo_mensaje`
+  // `turno_cancelado_clinica` caen en la misma fila. Ver `claveDelEnvio`.
+  const tipo = claveDelEnvio(params)
 
   try {
     const conocido = Boolean(tipoEsperado(tipo))
