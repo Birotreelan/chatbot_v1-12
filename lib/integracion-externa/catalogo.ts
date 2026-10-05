@@ -28,9 +28,11 @@
  * misma fila.
  *
  * Los tres recordatorios, en cambio, sí son tres filas: comparten el
- * `tipo_mensaje` y lo único que los distingue es el nombre de la plantilla. Que
- * falte el tercero mientras llegan los dos primeros es un problema real y
- * perfectamente silencioso.
+ * `tipo_mensaje` y lo único que los distingue es el nombre de la plantilla. El
+ * número es la CANTIDAD DE TURNOS que anuncia el mensaje —`confirmacion_3_turno`
+ * avisa tres turnos en uno—, no el orden del recordatorio. Que falte el de tres
+ * turnos mientras llegan los otros dos es un problema real y perfectamente
+ * silencioso: afecta a pocos pacientes por día y no mueve ningún total.
  *
  * ── Los campos requeridos no son decorativos ───────────────────────────────
  *
@@ -63,12 +65,22 @@ export interface TipoEsperado {
   critico?: boolean
 }
 
-const REQUERIDOS_DEL_RECORDATORIO = [
-  "paciente.telefono",
-  "turnos[].fecha",
-  "turnos[].hora",
-  "turnos[].profesional",
-]
+/**
+ * Lo que necesita un recordatorio de `cantidad` turnos.
+ *
+ * El número de la plantilla es la CANTIDAD DE TURNOS que anuncia, no el orden
+ * del recordatorio: `confirmacion_3_turno` es el aviso de tres turnos. Por eso
+ * se exigen los datos de cada uno —si llega con dos, la plantilla sale con
+ * parámetros vacíos y el paciente recibe un recordatorio mutilado—, y por eso
+ * la validación no es la misma para las tres.
+ */
+function requeridosDelRecordatorio(cantidad: number): string[] {
+  const campos = ["paciente.telefono"]
+  for (let i = 0; i < cantidad; i++) {
+    campos.push(`turnos[${i}].fecha`, `turnos[${i}].hora`, `turnos[${i}].profesional`)
+  }
+  return campos
+}
 
 const REQUERIDOS_DEL_AVISO = ["paciente.telefono", "turnos[].fecha", "turnos[].hora"]
 
@@ -76,25 +88,26 @@ export const TIPOS_ESPERADOS: TipoEsperado[] = [
   {
     clave: "confirmacion_1_turno",
     plantilla: "confirmacion_1_turno",
-    nombre: "Primer recordatorio",
+    nombre: "Recordatorio de 1 turno",
     descripcion:
-      "El recordatorio con los botones de confirmar y cancelar. Es el de mayor volumen y el que más pesa en la facturación.",
-    requeridos: REQUERIDOS_DEL_RECORDATORIO,
+      "El recordatorio con los botones de confirmar y cancelar, para el paciente que tiene un solo turno. Es el de mayor volumen y el que más pesa en la facturación.",
+    requeridos: requeridosDelRecordatorio(1),
   },
   {
     clave: "confirmacion_2_turno",
     plantilla: "confirmacion_2_turno",
-    nombre: "Segundo recordatorio",
-    descripcion: "El recordatorio siguiente, para quien no respondió al primero.",
-    requeridos: REQUERIDOS_DEL_RECORDATORIO,
+    nombre: "Recordatorio de 2 turnos",
+    descripcion:
+      "El mismo recordatorio para el paciente que tiene dos turnos: los anuncia a los dos en un solo mensaje.",
+    requeridos: requeridosDelRecordatorio(2),
   },
   {
     clave: "confirmacion_3_turno",
     plantilla: "confirmacion_3_turno",
-    nombre: "Tercer recordatorio",
+    nombre: "Recordatorio de 3 turnos",
     descripcion:
-      "El último recordatorio. Es el que más fácil pasa desapercibido si deja de llegar: los dos primeros siguen saliendo y la caída no se nota.",
-    requeridos: REQUERIDOS_DEL_RECORDATORIO,
+      "El recordatorio del paciente con tres turnos. Es el de menos volumen, así que si deja de llegar no se nota: los de uno y dos turnos siguen saliendo y el problema sólo afecta a unos pocos pacientes por día.",
+    requeridos: requeridosDelRecordatorio(3),
   },
   {
     clave: "confirmar_turno_solicitado",
@@ -178,10 +191,10 @@ export function nombreDePlantilla(body: any): string | null {
 /**
  * Lee una ruta con puntos dentro del `Chatbot_Data`.
  *
- * `turnos[].campo` mira el PRIMER turno. Es lo que hacen los flujos cuando el
- * paciente tiene uno solo, que es el caso normal; validar todo el array
- * marcaría como incompleto un payload con cuatro turnos donde al cuarto le
- * falta la dirección, y eso no es lo que rompe nada.
+ * `turnos[].campo` mira el primer turno; `turnos[1].campo`, el segundo. El
+ * índice explícito es lo que permite verificar que un `confirmacion_3_turno`
+ * traiga de verdad los tres turnos: si viene con dos, la plantilla se envía
+ * con un parámetro vacío y el paciente recibe un recordatorio mutilado.
  */
 export function leerRuta(datos: any, ruta: string): unknown {
   if (!datos) return undefined
@@ -189,10 +202,13 @@ export function leerRuta(datos: any, ruta: string): unknown {
   return ruta.split(".").reduce<any>((actual, parte) => {
     if (actual === null || actual === undefined) return undefined
 
-    if (parte.endsWith("[]")) {
-      const campo = parte.slice(0, -2)
+    // `turnos[]` = el primero. `turnos[1]` = el segundo, y así.
+    const conIndice = parte.match(/^(.+)\[(\d*)\]$/)
+    if (conIndice) {
+      const campo = conIndice[1]
+      const indice = conIndice[2] === "" ? 0 : Number(conIndice[2])
       const lista = actual[campo]
-      return Array.isArray(lista) ? lista[0] : undefined
+      return Array.isArray(lista) ? lista[indice] : undefined
     }
 
     return actual[parte]
