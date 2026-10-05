@@ -11,6 +11,7 @@
 
 import { TIPOS_ESPERADOS, type TipoEsperado } from "./catalogo"
 import { observaciones, type IncidenteDeIntegracion, type ObservacionDeTipo } from "./registro"
+import { calcularCadencia, type Cadencia } from "./cadencia"
 
 /**
  * Cuántos días sin recibir un tipo lo vuelven sospechoso.
@@ -24,8 +25,9 @@ import { observaciones, type IncidenteDeIntegracion, type ObservacionDeTipo } fr
 const DIAS_PARA_SOSPECHAR = 7
 
 export type EstadoDelTipo =
-  | "ok" // llegó completo, y hace poco
+  | "ok" // llegó completo, y dentro de su cadencia habitual
   | "incompleto" // llegó, pero faltándole campos que el flujo necesita
+  | "se_corto" // venía llegando con regularidad y se cortó. Ver cadencia.ts
   | "sin_novedades" // llegó alguna vez, hace más de una semana
   | "nunca" // no se vio nunca
   | "no_aplica" // la clínica declaró que no lo usa
@@ -38,6 +40,10 @@ export interface FilaDeIntegracion extends TipoEsperado {
   diasSinRecibir?: number
   /** Los últimos casos incompletos, con el payload. Es lo que se reporta. */
   incidentes: IncidenteDeIntegracion[]
+  /** Cada cuánto suele llegar y hace cuánto que no. Ver cadencia.ts */
+  cadencia: Cadencia
+  /** El nombre de plantilla que usa ESTE cliente, si difiere del general. */
+  plantillaPropia?: string
 }
 
 export interface EstadoDeIntegracion {
@@ -61,20 +67,42 @@ function masReciente(a?: string, b?: string): string | undefined {
   return Date.parse(a) >= Date.parse(b) ? a : b
 }
 
+const SIN_CADENCIA: Cadencia = { habitualMs: null, silencioMs: null, seCorto: false }
+
 export async function estadoDeIntegracion(
   clienteId: string,
   noAplicables: string[] = [],
+  /** Nombres de plantilla propios de este cliente: clave → nombre. */
+  nombresPropios: Record<string, string> = {},
 ): Promise<EstadoDeIntegracion> {
   const vistos = await observaciones(clienteId)
 
   const filas: FilaDeIntegracion[] = TIPOS_ESPERADOS.map((esperado) => {
     if (noAplicables.includes(esperado.clave)) {
-      return { ...esperado, estado: "no_aplica", completos: 0, incompletos: 0, incidentes: [] }
+      return {
+        ...esperado,
+        plantilla: nombresPropios[esperado.clave] || esperado.plantilla,
+        plantillaPropia: nombresPropios[esperado.clave],
+        estado: "no_aplica",
+        completos: 0,
+        incompletos: 0,
+        incidentes: [],
+        cadencia: SIN_CADENCIA,
+      }
     }
 
     const visto = vistos[esperado.clave]
     if (!visto || (visto.completos === 0 && visto.incompletos === 0)) {
-      return { ...esperado, estado: "nunca", completos: 0, incompletos: 0, incidentes: [] }
+      return {
+        ...esperado,
+        plantilla: nombresPropios[esperado.clave] || esperado.plantilla,
+        plantillaPropia: nombresPropios[esperado.clave],
+        estado: "nunca",
+        completos: 0,
+        incompletos: 0,
+        incidentes: [],
+        cadencia: SIN_CADENCIA,
+      }
     }
 
     const ultimo = masReciente(visto.ultimoCompleto, visto.ultimoIncompleto)
@@ -91,8 +119,17 @@ export async function estadoDeIntegracion(
       !Number.isNaN(ultimoIncompleto) &&
       (Number.isNaN(ultimoCompleto) || ultimoIncompleto >= ultimoCompleto)
 
+    // La cadencia se calcula sobre TODAS las llegadas, completas o no: mide si
+    // el sistema externo sigue mandando, no si manda bien.
+    const cadencia = calcularCadencia(visto.llegadas)
+
+    // El orden importa. "Se cortó" va primero porque es el hallazgo más
+    // accionable y el más perecedero: algo que venía andando dejó de andar
+    // hace un rato. Un incompleto puede llevar semanas y seguir ahí.
     let estado: EstadoDelTipo = "ok"
-    if (elIncompletoEsElUltimo) {
+    if (cadencia.seCorto) {
+      estado = "se_corto"
+    } else if (elIncompletoEsElUltimo) {
       estado = "incompleto"
     } else if (dias !== undefined && dias >= DIAS_PARA_SOSPECHAR) {
       estado = "sin_novedades"
@@ -100,7 +137,10 @@ export async function estadoDeIntegracion(
 
     return {
       ...esperado,
+      plantilla: nombresPropios[esperado.clave] || esperado.plantilla,
+      plantillaPropia: nombresPropios[esperado.clave],
       estado,
+      cadencia,
       completos: visto.completos,
       incompletos: visto.incompletos,
       ultimo,

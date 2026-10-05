@@ -153,6 +153,22 @@ export interface WhatsAppConfig {
   tiposNoAplicables?: string[]
 
   /**
+   * Nombres de plantilla propios de esta clínica (5/10/2026).
+   *
+   * El catálogo de `lib/integracion-externa/catalogo.ts` tiene los nombres que
+   * usa la mayoría, pero no todas las clínicas los llaman igual. Acá se declara
+   * la excepción: `{ "confirmacion_1_turno": "recordatorio_simple" }`.
+   *
+   * No es sólo para la pantalla. Lo usa `claveDelEnvio` al registrar, así que
+   * sin esto una clínica con nombres propios tendría TODO en "nunca llegó" y
+   * todo lo real amontonado en "tipos que no reconocemos" — que es exactamente
+   * el síntoma que va a llevar a cargarlos acá.
+   *
+   * La clave es la del catálogo; el valor, el nombre real en Meta.
+   */
+  nombresDePlantilla?: Record<string, string>
+
+  /**
    * Redacción propia del mensaje que acompaña al botón del portal (24/9/2026).
    *
    * Vacío = se usa la plantilla que corresponde al flujo

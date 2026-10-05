@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getWhatsAppConfigByPhoneIdFresh, getAllWhatsAppConfigs } from "@/lib/db"
+import { getWhatsAppConfigByPhoneIdFresh, getAllWhatsAppConfigs, getConfigByClienteId } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
@@ -344,18 +344,28 @@ async function handleTemplateSend(data: any) {
     // mostraría todo verde mientras la integración falla.
     //
     // `void` y sin await: es observación, no puede sumar latencia al envío.
-    void registrarEntrante({
-      clienteId: Cliente_Id,
-      // El nombre de la plantilla es lo único que distingue el primer
-      // recordatorio del tercero: los tres comparten `tipo_mensaje`.
-      nombreDePlantilla: nombreDePlantilla(Body),
-      tipoMensaje: chatbotDataParaRegistro?.tipo_mensaje,
-      // El teléfono tal como vino, sin normalizar: es el que la clínica tiene
-      // en su sistema, y es con ése con el que hay que buscar el caso del otro
-      // lado cuando se le reclama.
-      telefono: typeof Phone === "string" || typeof Phone === "number" ? String(Phone) : undefined,
-      chatbotData: chatbotDataParaRegistro,
-    })
+    //
+    // La config se busca sólo para esto, y por eso va dentro del `void`: si la
+    // lectura falla o tarda, el envío no se entera.
+    void getConfigByClienteId(Cliente_Id)
+      .catch(() => null)
+      .then((configDelCliente) =>
+        registrarEntrante({
+          clienteId: Cliente_Id,
+          // El nombre de la plantilla es lo único que distingue el recordatorio
+          // de un turno del de tres: los tres comparten `tipo_mensaje`.
+          nombreDePlantilla: nombreDePlantilla(Body),
+          tipoMensaje: chatbotDataParaRegistro?.tipo_mensaje,
+          // El teléfono tal como vino, sin normalizar: es el que la clínica
+          // tiene en su sistema, y es con ése con el que hay que buscar el caso
+          // del otro lado cuando se le reclama.
+          telefono: typeof Phone === "string" || typeof Phone === "number" ? String(Phone) : undefined,
+          // Sin esto, una clínica con nombres propios tendría todo en "nunca
+          // llegó" y lo real amontonado en "no reconocemos esto".
+          nombresPropios: configDelCliente?.nombresDePlantilla || {},
+          chatbotData: chatbotDataParaRegistro,
+        }),
+      )
 
     const resolucion = resolveDestinationPhone(Phone, telefonoDeFicha)
 

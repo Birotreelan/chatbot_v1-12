@@ -15,12 +15,14 @@ import { useCallback, useEffect, useState } from "react"
 import {
   AlertTriangle,
   Check,
+  ZapOff,
   CheckCircle2,
   Clock,
   Copy,
   HelpCircle,
   Loader2,
   MinusCircle,
+  Pencil,
   RefreshCw,
   XCircle,
 } from "lucide-react"
@@ -31,14 +33,16 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface Fila {
-  clave: string
   plantilla?: string
   tipoMensaje?: string
   critico?: boolean
   nombre: string
   descripcion: string
   requeridos: string[]
-  estado: "ok" | "incompleto" | "sin_novedades" | "nunca" | "no_aplica"
+  clave: string
+  estado: "ok" | "incompleto" | "se_corto" | "sin_novedades" | "nunca" | "no_aplica"
+  cadencia: { habitualMs: number | null; silencioMs: number | null; seCorto: boolean }
+  plantillaPropia?: string
   completos: number
   incompletos: number
   ultimo?: string
@@ -66,6 +70,7 @@ interface Inesperado {
 const PRESENTACION = {
   ok: { Icono: CheckCircle2, color: "text-green-600", etiqueta: "Llega bien" },
   incompleto: { Icono: AlertTriangle, color: "text-amber-600", etiqueta: "Llega incompleto" },
+  se_corto: { Icono: ZapOff, color: "text-red-600", etiqueta: "Dejó de llegar" },
   sin_novedades: { Icono: Clock, color: "text-amber-600", etiqueta: "Sin novedades" },
   nunca: { Icono: XCircle, color: "text-red-600", etiqueta: "Nunca llegó" },
   no_aplica: { Icono: MinusCircle, color: "text-muted-foreground", etiqueta: "No aplica" },
@@ -74,6 +79,32 @@ const PRESENTACION = {
 function cuando(iso?: string): string {
   if (!iso) return "—"
   return new Date(iso).toLocaleString("es-AR")
+}
+
+/**
+ * Los mismos textos que `lib/integracion-externa/cadencia.ts`, escritos acá
+ * porque este archivo es de cliente. Son cuatro líneas; importar el módulo
+ * entero para esto arrastraría sus dependencias al bundle del navegador.
+ */
+function describirIntervalo(ms: number | null): string {
+  if (ms === null) return "con regularidad"
+  const minutos = Math.round(ms / 60000)
+  if (minutos < 1) return "cada menos de un minuto"
+  if (minutos < 60) return `cada ~${minutos} ${minutos === 1 ? "minuto" : "minutos"}`
+  const horas = Math.round(minutos / 60)
+  if (horas < 24) return `cada ~${horas} ${horas === 1 ? "hora" : "horas"}`
+  const dias = Math.round(horas / 24)
+  return `cada ~${dias} ${dias === 1 ? "día" : "días"}`
+}
+
+function describirSilencio(ms: number | null): string {
+  if (ms === null) return "hace rato"
+  const minutos = Math.round(ms / 60000)
+  if (minutos < 60) return `hace ${minutos} ${minutos === 1 ? "minuto" : "minutos"}`
+  const horas = Math.round(minutos / 60)
+  if (horas < 24) return `hace ${horas} ${horas === 1 ? "hora" : "horas"}`
+  const dias = Math.round(horas / 24)
+  return `hace ${dias} ${dias === 1 ? "día" : "días"}`
 }
 
 
@@ -89,6 +120,110 @@ function cuando(iso?: string): string {
  * armado y se pega en un mail sin tener que transcribir nada —y transcribir a
  * mano es donde se cuelan los errores que hacen que el reclamo rebote—.
  */
+
+/**
+ * Los nombres de plantilla que usa ESTE cliente.
+ *
+ * La mayoría usa los del catálogo, pero no todos. El síntoma de una clínica con
+ * nombres propios es inconfundible y desconcertante: todo en "nunca llegó" y
+ * todo lo real amontonado en "tipos que no reconocemos". Por eso el editor vive
+ * acá arriba, junto al tablero que lo delata, y no escondido en la
+ * configuración general.
+ *
+ * Vacío = se usa el del catálogo. No se guarda una excepción que diga lo mismo
+ * que el código: sería un dato más que mantener sincronizado.
+ */
+function NombresDePlantilla({
+  clienteId,
+  filas,
+  alGuardar,
+}: {
+  clienteId: string
+  filas: Fila[]
+  alGuardar: () => void
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const [valores, setValores] = useState<Record<string, string>>({})
+  const [guardando, setGuardando] = useState(false)
+
+  // Sólo las filas que se identifican por plantilla: `turno_reagendado` llega
+  // como texto con su `tipo_mensaje` y no tiene nombre que personalizar.
+  const conPlantilla = filas.filter((f) => f.plantilla)
+
+  function abrir() {
+    const inicial: Record<string, string> = {}
+    for (const f of conPlantilla) inicial[f.clave] = f.plantillaPropia || ""
+    setValores(inicial)
+    setAbierto(true)
+  }
+
+  async function guardar() {
+    setGuardando(true)
+    try {
+      await fetch("/api/dashboard/integracion-externa", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clienteId, nombresDePlantilla: valores }),
+      })
+      setAbierto(false)
+      alGuardar()
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  if (!abierto) {
+    const propios = conPlantilla.filter((f) => f.plantillaPropia).length
+    return (
+      <Button variant="outline" size="sm" onClick={abrir}>
+        <Pencil className="mr-2 h-4 w-4" />
+        Nombres de plantilla
+        {propios > 0 && <Badge className="ml-2">{propios}</Badge>}
+      </Button>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Nombres de plantilla de este cliente</CardTitle>
+        <CardDescription>
+          Dejá el campo vacío para usar el nombre general. Cargá uno sólo si esta clínica llama
+          distinto a esa plantilla en Meta.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {conPlantilla.map((f) => (
+          <label key={f.clave} className="block">
+            <span className="text-sm font-medium">{f.nombre}</span>
+            <input
+              value={valores[f.clave] ?? ""}
+              onChange={(e) => setValores((v) => ({ ...v, [f.clave]: e.target.value }))}
+              placeholder={f.plantillaPropia ? f.plantilla : `${f.plantilla} (el general)`}
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </label>
+        ))}
+
+        <div className="flex gap-2 pt-1">
+          <Button size="sm" onClick={guardar} disabled={guardando}>
+            {guardando ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Guardar
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setAbierto(false)} disabled={guardando}>
+            Cancelar
+          </Button>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          El cambio aplica a lo que llegue de ahora en adelante. Lo ya registrado con el nombre
+          anterior sigue donde está; si querés empezar limpio, usá &quot;Reiniciar medición&quot;.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 function DetalleDeIncidentes({
   titulo,
   nombreDeLaFila,
@@ -260,6 +395,7 @@ export function IntegracionExterna({ clienteId }: { clienteId: string }) {
             <RefreshCw className={`mr-2 h-4 w-4 ${cargando ? "animate-spin" : ""}`} />
             Actualizar
           </Button>
+          <NombresDePlantilla clienteId={clienteId} filas={filas} alGuardar={cargar} />
           <Button variant="outline" size="sm" onClick={reiniciarMedicion} disabled={cargando}>
             Reiniciar medición
           </Button>
@@ -330,6 +466,29 @@ export function IntegracionExterna({ clienteId }: { clienteId: string }) {
                       <span>Incompletos: {fila.incompletos}</span>
                       <span>Último: {cuando(fila.ultimo)}</span>
                     </div>
+
+                    {/* El hallazgo más accionable y el más perecedero: algo
+                        que venía andando dejó de andar hace un rato. Se dice
+                        contra qué se compara, porque "dejó de llegar" sin la
+                        cadencia habitual no deja juzgar si es grave. */}
+                    {fila.estado === "se_corto" && (
+                      <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">
+                        <p className="font-medium text-destructive">
+                          Venía llegando {describirIntervalo(fila.cadencia.habitualMs)} y{" "}
+                          {describirSilencio(fila.cadencia.silencioMs)} que no llega.
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          La cadencia se aprende de las últimas llegadas de esta misma plantilla en
+                          este cliente, así que no depende del volumen que tenga.
+                        </p>
+                      </div>
+                    )}
+
+                    {fila.estado === "ok" && fila.cadencia.habitualMs !== null && (
+                      <p className="text-xs text-muted-foreground">
+                        Llega {describirIntervalo(fila.cadencia.habitualMs)}.
+                      </p>
+                    )}
 
                     {fila.estado === "sin_novedades" && (
                       <p className="text-amber-700">

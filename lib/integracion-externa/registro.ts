@@ -45,6 +45,14 @@ const MAXIMO_DE_MUESTRA = 4000
 /** Cuántos incidentes se conservan por tipo. */
 const MAXIMO_DE_INCIDENTES = 5
 
+/**
+ * Cuántas llegadas se recuerdan para aprender cada cuánto llega cada plantilla.
+ *
+ * Con 30 marcas de tiempo alcanza para una mediana estable y la lista pesa
+ * poco. Son sólo números: no se guarda nada del paciente.
+ */
+const MAXIMO_DE_LLEGADAS = 30
+
 export interface IncidenteDeIntegracion {
   cuando: string
   /** Campos requeridos que no vinieron. Vacío si el tipo no se reconoce. */
@@ -68,6 +76,8 @@ export interface ObservacionDeTipo {
   ultimoCompleto?: string
   ultimoIncompleto?: string
   incidentes: IncidenteDeIntegracion[]
+  /** Marcas de tiempo de las últimas llegadas, de la más nueva a la más vieja. */
+  llegadas: number[]
   desconocido?: boolean
 }
 
@@ -77,6 +87,10 @@ function clave(clienteId: string, tipo: string): string {
 
 function claveDeIncidentes(clienteId: string, tipo: string): string {
   return `${PREFIJO}${clienteId}:${tipo}:incidentes`
+}
+
+function claveDeLlegadas(clienteId: string, tipo: string): string {
+  return `${PREFIJO}${clienteId}:${tipo}:llegadas`
 }
 
 function claveDelIndice(clienteId: string): string {
@@ -141,6 +155,8 @@ export async function registrarEntrante(params: {
   tipoMensaje?: string | null
   /** El teléfono al que iba, para poder rastrear el caso del otro lado. */
   telefono?: string | null
+  /** `WhatsAppConfig.nombresDePlantilla`, si esta clínica usa nombres propios. */
+  nombresPropios?: Record<string, string>
   chatbotData?: any
 }): Promise<void> {
   const redis = getRedisClient()
@@ -149,7 +165,7 @@ export async function registrarEntrante(params: {
   // La clave canónica resuelve el caso de un mismo evento con dos nombres: la
   // plantilla `cancelar_turno_solicitado` y el `tipo_mensaje`
   // `turno_cancelado_clinica` caen en la misma fila. Ver `claveDelEnvio`.
-  const tipo = claveDelEnvio(params)
+  const tipo = claveDelEnvio(params, params.nombresPropios || {})
 
   try {
     const conocido = Boolean(tipoEsperado(tipo))
@@ -181,6 +197,16 @@ export async function registrarEntrante(params: {
       await redis.ltrim(ki, 0, MAXIMO_DE_INCIDENTES - 1)
     }
 
+    // ── La cadencia (5/10/2026) ─────────────────────────────────────────
+    //
+    // Se anota TODA llegada, completa o no: lo que mide esto es si el sistema
+    // externo sigue mandando, y un payload incompleto demuestra que sigue
+    // mandando igual que uno bueno. Mezclarlo con la validación daría
+    // "dejó de llegar" para algo que llega todo el tiempo y llega mal.
+    const kl = claveDeLlegadas(params.clienteId, tipo)
+    await redis.lpush(kl, Date.now())
+    await redis.ltrim(kl, 0, MAXIMO_DE_LLEGADAS - 1)
+
     await redis.sadd(claveDelIndice(params.clienteId), tipo)
   } catch (error) {
     console.warn("[INTEGRACION] No se pudo registrar el entrante:", error)
@@ -196,9 +222,10 @@ export async function observaciones(clienteId: string): Promise<Record<string, O
     const tipos = (await redis.smembers(claveDelIndice(clienteId))) || []
     if (tipos.length === 0) return {}
 
-    const [resumenes, incidentes] = await Promise.all([
+    const [resumenes, incidentes, llegadas] = await Promise.all([
       Promise.all(tipos.map((t) => redis.hgetall<Record<string, unknown>>(clave(clienteId, t)))),
       Promise.all(tipos.map((t) => redis.lrange<unknown>(claveDeIncidentes(clienteId, t), 0, -1))),
+      Promise.all(tipos.map((t) => redis.lrange<unknown>(claveDeLlegadas(clienteId, t), 0, -1))),
     ])
 
     const salida: Record<string, ObservacionDeTipo> = {}
@@ -216,6 +243,9 @@ export async function observaciones(clienteId: string): Promise<Record<string, O
         incidentes: (incidentes[i] || [])
           .map((crudo) => leerIncidente(crudo))
           .filter((x): x is IncidenteDeIntegracion => x !== null),
+        llegadas: (llegadas[i] || [])
+          .map((v) => (typeof v === "number" ? v : Number(v)))
+          .filter((n) => Number.isFinite(n) && n > 0),
       }
     })
 
@@ -258,7 +288,11 @@ export async function olvidarObservaciones(clienteId: string): Promise<void> {
   try {
     const tipos = (await redis.smembers(claveDelIndice(clienteId))) || []
     await Promise.all(
-      tipos.flatMap((t) => [redis.del(clave(clienteId, t)), redis.del(claveDeIncidentes(clienteId, t))]),
+      tipos.flatMap((t) => [
+        redis.del(clave(clienteId, t)),
+        redis.del(claveDeIncidentes(clienteId, t)),
+        redis.del(claveDeLlegadas(clienteId, t)),
+      ]),
     )
     await redis.del(claveDelIndice(clienteId))
   } catch (error) {

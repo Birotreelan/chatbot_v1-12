@@ -154,14 +154,27 @@ export function tipoEsperado(clave: string): TipoEsperado | undefined {
  * del otro lado explica que una fila figure como que nunca llegó, y sólo se
  * puede ver si se registra tal cual vino.
  */
-export function claveDelEnvio(params: {
-  nombreDePlantilla?: string | null
-  tipoMensaje?: string | null
-}): string {
+export function claveDelEnvio(
+  params: {
+    nombreDePlantilla?: string | null
+    tipoMensaje?: string | null
+  },
+  /**
+   * Nombres propios de este cliente: clave del catálogo → nombre real en Meta.
+   *
+   * Se consultan ANTES que los nombres generales. Una clínica que llama
+   * `recordatorio_simple` a lo que para el resto es `confirmacion_1_turno` tiene
+   * que caer en la fila del recordatorio, no en "no reconocemos esto".
+   */
+  nombresPropios: Record<string, string> = {},
+): string {
   const plantilla = (params.nombreDePlantilla || "").trim()
   const tipo = (params.tipoMensaje || "").trim()
 
   if (plantilla) {
+    const propio = Object.entries(nombresPropios).find(([, nombre]) => nombre === plantilla)
+    if (propio) return propio[0]
+
     const porPlantilla = TIPOS_ESPERADOS.find((t) => t.plantilla === plantilla)
     if (porPlantilla) return porPlantilla.clave
   }
