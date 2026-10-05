@@ -10,7 +10,7 @@
  */
 
 import { TIPOS_ESPERADOS, type TipoEsperado } from "./catalogo"
-import { observaciones, type ObservacionDeTipo } from "./registro"
+import { observaciones, type IncidenteDeIntegracion, type ObservacionDeTipo } from "./registro"
 
 /**
  * Cuántos días sin recibir un tipo lo vuelven sospechoso.
@@ -36,8 +36,8 @@ export interface FilaDeIntegracion extends TipoEsperado {
   incompletos: number
   ultimo?: string
   diasSinRecibir?: number
-  faltantes?: string[]
-  muestra?: string
+  /** Los últimos casos incompletos, con el payload. Es lo que se reporta. */
+  incidentes: IncidenteDeIntegracion[]
 }
 
 export interface EstadoDeIntegracion {
@@ -69,12 +69,12 @@ export async function estadoDeIntegracion(
 
   const filas: FilaDeIntegracion[] = TIPOS_ESPERADOS.map((esperado) => {
     if (noAplicables.includes(esperado.clave)) {
-      return { ...esperado, estado: "no_aplica", completos: 0, incompletos: 0 }
+      return { ...esperado, estado: "no_aplica", completos: 0, incompletos: 0, incidentes: [] }
     }
 
     const visto = vistos[esperado.clave]
     if (!visto || (visto.completos === 0 && visto.incompletos === 0)) {
-      return { ...esperado, estado: "nunca", completos: 0, incompletos: 0 }
+      return { ...esperado, estado: "nunca", completos: 0, incompletos: 0, incidentes: [] }
     }
 
     const ultimo = masReciente(visto.ultimoCompleto, visto.ultimoIncompleto)
@@ -105,8 +105,7 @@ export async function estadoDeIntegracion(
       incompletos: visto.incompletos,
       ultimo,
       diasSinRecibir: dias,
-      faltantes: visto.faltantes,
-      muestra: visto.muestra,
+      incidentes: visto.incidentes,
     }
   })
 

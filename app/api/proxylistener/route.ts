@@ -350,6 +350,10 @@ async function handleTemplateSend(data: any) {
       // recordatorio del tercero: los tres comparten `tipo_mensaje`.
       nombreDePlantilla: nombreDePlantilla(Body),
       tipoMensaje: chatbotDataParaRegistro?.tipo_mensaje,
+      // El teléfono tal como vino, sin normalizar: es el que la clínica tiene
+      // en su sistema, y es con ése con el que hay que buscar el caso del otro
+      // lado cuando se le reclama.
+      telefono: typeof Phone === "string" || typeof Phone === "number" ? String(Phone) : undefined,
       chatbotData: chatbotDataParaRegistro,
     })
 

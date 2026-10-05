@@ -12,7 +12,18 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
-import { AlertTriangle, CheckCircle2, Clock, HelpCircle, Loader2, MinusCircle, RefreshCw, XCircle } from "lucide-react"
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Clock,
+  Copy,
+  HelpCircle,
+  Loader2,
+  MinusCircle,
+  RefreshCw,
+  XCircle,
+} from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -32,15 +43,24 @@ interface Fila {
   incompletos: number
   ultimo?: string
   diasSinRecibir?: number
-  faltantes?: string[]
-  muestra?: string
+  incidentes: Incidente[]
+}
+
+interface Incidente {
+  cuando: string
+  faltantes: string[]
+  plantilla?: string
+  tipoMensaje?: string
+  telefono?: string
+  payload?: string
+  desconocido?: boolean
 }
 
 interface Inesperado {
   tipo: string
   incompletos: number
   ultimoIncompleto?: string
-  muestra?: string
+  incidentes: Incidente[]
 }
 
 const PRESENTACION = {
@@ -54,6 +74,135 @@ const PRESENTACION = {
 function cuando(iso?: string): string {
   if (!iso) return "—"
   return new Date(iso).toLocaleString("es-AR")
+}
+
+
+/**
+ * El detalle de los casos que vinieron mal, y el reporte para mandar.
+ *
+ * La versión anterior mostraba sólo los campos faltantes de la ÚLTIMA vez y
+ * nada más. Alcanzaba para saber que algo fallaba y no para reclamarlo: del
+ * otro lado, "les está llegando algo incompleto" no se puede accionar.
+ *
+ * Lo que sí se puede accionar es una fecha, un teléfono, el nombre exacto de la
+ * plantilla y el JSON que mandaron. Por eso el botón de copiar: el reporte sale
+ * armado y se pega en un mail sin tener que transcribir nada —y transcribir a
+ * mano es donde se cuelan los errores que hacen que el reclamo rebote—.
+ */
+function DetalleDeIncidentes({
+  titulo,
+  nombreDeLaFila,
+  requeridos,
+  incidentes,
+}: {
+  titulo: string
+  nombreDeLaFila: string
+  requeridos: string[]
+  incidentes: Incidente[]
+}) {
+  const [copiado, setCopiado] = useState(false)
+
+  const reporte = [
+    `Reporte de integración — ${nombreDeLaFila}`,
+    ``,
+    requeridos.length ? `Campos que el flujo necesita: ${requeridos.join(", ")}` : ``,
+    ``,
+    `Casos registrados (${incidentes.length}, del más reciente al más viejo):`,
+    ``,
+    ...incidentes.map((inc, n) =>
+      [
+        `── Caso ${n + 1} ──`,
+        `Fecha: ${inc.cuando}`,
+        inc.telefono ? `Teléfono destino: ${inc.telefono}` : ``,
+        inc.plantilla ? `Plantilla: ${inc.plantilla}` : `Plantilla: (no vino nombre de plantilla)`,
+        inc.tipoMensaje ? `tipo_mensaje: ${inc.tipoMensaje}` : `tipo_mensaje: (ausente)`,
+        inc.desconocido
+          ? `Problema: el tipo no está entre los que procesamos.`
+          : `Faltaban: ${inc.faltantes.join(", ") || "(sin detalle)"}`,
+        ``,
+        `Payload recibido:`,
+        inc.payload || "(no se guardó)",
+        ``,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    ),
+  ]
+    .filter((l) => l !== undefined)
+    .join("\n")
+
+  async function copiar() {
+    try {
+      await navigator.clipboard.writeText(reporte)
+      setCopiado(true)
+      setTimeout(() => setCopiado(false), 2000)
+    } catch {
+      // Sin permiso de portapapeles queda el texto a la vista para copiarlo a
+      // mano: no hace falta avisar nada.
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-medium text-amber-800">{titulo}</p>
+        <Button variant="outline" size="sm" onClick={copiar} className="shrink-0">
+          {copiado ? (
+            <>
+              <Check className="mr-2 h-3.5 w-3.5" /> Copiado
+            </>
+          ) : (
+            <>
+              <Copy className="mr-2 h-3.5 w-3.5" /> Copiar reporte
+            </>
+          )}
+        </Button>
+      </div>
+
+      <div className="mt-3 space-y-3">
+        {incidentes.map((inc, n) => (
+          <div key={`${inc.cuando}-${n}`} className="rounded border bg-background p-3 text-sm">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>{cuando(inc.cuando)}</span>
+              {inc.telefono && <span>tel. {inc.telefono}</span>}
+              {inc.plantilla && <code>{inc.plantilla}</code>}
+              {inc.tipoMensaje && <code>{inc.tipoMensaje}</code>}
+            </div>
+
+            <p className="mt-1.5 font-medium">
+              {inc.desconocido ? (
+                <span className="text-amber-800">
+                  El tipo no está entre los que procesamos: el mensaje llegó y no se interpretó.
+                </span>
+              ) : inc.faltantes.length > 0 ? (
+                <>
+                  Faltaban:{" "}
+                  {inc.faltantes.map((f) => (
+                    <code key={f} className="mr-1.5 rounded bg-amber-500/10 px-1 text-amber-900">
+                      {f}
+                    </code>
+                  ))}
+                </>
+              ) : (
+                "Sin detalle de campos faltantes."
+              )}
+            </p>
+
+            {inc.payload && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs text-muted-foreground">
+                  Ver el Chatbot_Data recibido
+                </summary>
+                <pre className="mt-2 max-h-72 overflow-auto rounded bg-muted p-2 text-xs">
+                  {inc.payload}
+                </pre>
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export function IntegracionExterna({ clienteId }: { clienteId: string }) {
@@ -189,22 +338,17 @@ export function IntegracionExterna({ clienteId }: { clienteId: string }) {
                       </p>
                     )}
 
-                    {fila.estado === "incompleto" && fila.faltantes && fila.faltantes.length > 0 && (
-                      <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
-                        <p className="font-medium text-amber-800">
-                          La última vez llegó sin: {fila.faltantes.join(", ")}
-                        </p>
-                        {fila.muestra && (
-                          <details className="mt-2">
-                            <summary className="cursor-pointer text-xs text-muted-foreground">
-                              Ver el payload recibido
-                            </summary>
-                            <pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-2 text-xs">
-                              {fila.muestra}
-                            </pre>
-                          </details>
-                        )}
-                      </div>
+                    {fila.incidentes.length > 0 && (
+                      <DetalleDeIncidentes
+                        titulo={
+                          fila.estado === "incompleto"
+                            ? "Qué vino mal"
+                            : "Casos incompletos anteriores (ya resueltos)"
+                        }
+                        nombreDeLaFila={fila.nombre}
+                        requeridos={fila.requeridos}
+                        incidentes={fila.incidentes}
+                      />
                     )}
 
                     {fila.estado === "nunca" && (
@@ -243,15 +387,13 @@ export function IntegracionExterna({ clienteId }: { clienteId: string }) {
                       {i.incompletos} {i.incompletos === 1 ? "vez" : "veces"} · último{" "}
                       {cuando(i.ultimoIncompleto)}
                     </span>
-                    {i.muestra && (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-xs text-muted-foreground">
-                          Ver el payload recibido
-                        </summary>
-                        <pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-2 text-xs">
-                          {i.muestra}
-                        </pre>
-                      </details>
+                    {i.incidentes.length > 0 && (
+                      <DetalleDeIncidentes
+                        titulo="Qué llegó"
+                        nombreDeLaFila={`Tipo no reconocido: ${i.tipo.replace(/^desconocido:/, "")}`}
+                        requeridos={[]}
+                        incidentes={i.incidentes}
+                      />
                     )}
                   </div>
                 ))}
