@@ -32,13 +32,18 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
+interface Requisito {
+  campo: string
+  rutas: string[]
+}
+
 interface Fila {
   plantilla?: string
   tipoMensaje?: string
   critico?: boolean
   nombre: string
   descripcion: string
-  requeridos: string[]
+  requeridos: Requisito[]
   clave: string
   estado: "ok" | "incompleto" | "se_corto" | "sin_novedades" | "nunca" | "no_aplica"
   cadencia: { habitualMs: number | null; silencioMs: number | null; seCorto: boolean }
@@ -232,7 +237,7 @@ function DetalleDeIncidentes({
 }: {
   titulo: string
   nombreDeLaFila: string
-  requeridos: string[]
+  requeridos: Requisito[]
   incidentes: Incidente[]
 }) {
   const [copiado, setCopiado] = useState(false)
@@ -240,7 +245,10 @@ function DetalleDeIncidentes({
   const reporte = [
     `Reporte de integración — ${nombreDeLaFila}`,
     ``,
-    requeridos.length ? `Campos que el flujo necesita: ${requeridos.join(", ")}` : ``,
+    requeridos.length
+      ? `Datos que el flujo necesita (alcanza con una de las rutas de cada uno):\n` +
+        requeridos.map((r) => `  · ${r.campo}: ${r.rutas.join(" | ")}`).join("\n")
+      : ``,
     ``,
     `Casos registrados (${incidentes.length}, del más reciente al más viejo):`,
     ``,
@@ -513,7 +521,9 @@ export function IntegracionExterna({ clienteId }: { clienteId: string }) {
                     {fila.estado === "nunca" && (
                       <p className="text-muted-foreground">
                         Campos que necesita cuando llegue:{" "}
-                        <code className="text-xs">{fila.requeridos.join(", ") || "ninguno"}</code>
+                        <span className="text-xs">
+                          {fila.requeridos.map((r) => r.campo).join(", ") || "ninguno"}
+                        </span>
                       </p>
                     )}
                   </CardContent>

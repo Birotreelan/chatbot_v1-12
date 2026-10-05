@@ -48,6 +48,30 @@
  * hay uno solo, que es el caso normal.
  */
 
+/**
+ * Un dato que el flujo necesita, con TODAS las formas en que puede venir.
+ *
+ * El sistema de la clínica manda la misma información de dos maneras según el
+ * mensaje: los recordatorios traen `turnos: [{ fecha, hora, … }]` y los avisos
+ * de estado la traen plana en la raíz —`{ fecha, hora, profesional }`—, sin
+ * array y sin objeto `paciente`.
+ *
+ * Las dos son correctas: `lib/whatsapp.tsx` las lee con un `||` encadenado
+ * —`rawCtx.hora_formateada || rawCtx.hora || rawCtx.turnos?.[0]?.hora`—. La
+ * primera versión de esto exigía una sola ruta y marcaba como incompletos
+ * payloads perfectamente válidos, que es el peor error posible en una
+ * herramienta de diagnóstico: manda a reclamarle al otro algo que el otro está
+ * haciendo bien.
+ *
+ * Alcanza con que UNA de las rutas tenga valor.
+ */
+export interface Requisito {
+  /** Cómo se llama el dato en el reporte. */
+  campo: string
+  /** Dónde puede venir, en orden de preferencia. */
+  rutas: string[]
+}
+
 export interface TipoEsperado {
   /** Clave canónica con la que se guarda y se busca. */
   clave: string
@@ -59,8 +83,8 @@ export interface TipoEsperado {
   nombre: string
   /** Qué hace el bot cuando llega, y por qué importa. */
   descripcion: string
-  /** Sin estos campos el flujo no puede trabajar. */
-  requeridos: string[]
+  /** Sin estos datos el flujo no puede trabajar. */
+  requeridos: Requisito[]
   /** Se destaca en el tablero: si deja de llegar, hay pacientes sin respuesta. */
   critico?: boolean
 }
@@ -73,16 +97,44 @@ export interface TipoEsperado {
  * se exigen los datos de cada uno —si llega con dos, la plantilla sale con
  * parámetros vacíos y el paciente recibe un recordatorio mutilado—, y por eso
  * la validación no es la misma para las tres.
+ *
+ * El primer turno acepta además la forma plana, por el mismo motivo que los
+ * avisos: hay clínicas que mandan el único turno en la raíz.
  */
-function requeridosDelRecordatorio(cantidad: number): string[] {
-  const campos = ["paciente.telefono"]
+function requeridosDelRecordatorio(cantidad: number): Requisito[] {
+  const campos: Requisito[] = []
   for (let i = 0; i < cantidad; i++) {
-    campos.push(`turnos[${i}].fecha`, `turnos[${i}].hora`, `turnos[${i}].profesional`)
+    const enLaRaiz = i === 0
+    campos.push(
+      {
+        campo: `fecha del turno ${i + 1}`,
+        rutas: [`turnos[${i}].fecha`, `turnos[${i}].fecha_formateada`, ...(enLaRaiz ? ["fecha", "fecha_formateada"] : [])],
+      },
+      {
+        campo: `hora del turno ${i + 1}`,
+        rutas: [`turnos[${i}].hora`, `turnos[${i}].hora_formateada`, ...(enLaRaiz ? ["hora", "hora_formateada"] : [])],
+      },
+      {
+        campo: `profesional del turno ${i + 1}`,
+        rutas: [`turnos[${i}].profesional`, ...(enLaRaiz ? ["profesional"] : [])],
+      },
+    )
   }
   return campos
 }
 
-const REQUERIDOS_DEL_AVISO = ["paciente.telefono", "turnos[].fecha", "turnos[].hora"]
+/**
+ * Lo que necesita un aviso de estado.
+ *
+ * Sin el teléfono: no viaja en `Chatbot_Data` sino en el parámetro `Phone` del
+ * pedido, que la ruta ya valida por su cuenta y rechaza con 400 si falta.
+ * Exigirlo acá marcaba como incompletos todos los avisos de una clínica que
+ * manda el payload plano, que es como los manda.
+ */
+const REQUERIDOS_DEL_AVISO: Requisito[] = [
+  { campo: "fecha", rutas: ["fecha", "fecha_formateada", "turnos[].fecha", "turnos[].fecha_formateada"] },
+  { campo: "hora", rutas: ["hora", "hora_formateada", "turnos[].hora", "turnos[].hora_formateada"] },
+]
 
 export const TIPOS_ESPERADOS: TipoEsperado[] = [
   {
@@ -229,19 +281,26 @@ export function leerRuta(datos: any, ruta: string): unknown {
 }
 
 /**
- * Qué campos requeridos faltan en este payload.
+ * Qué datos requeridos faltan en este payload.
  *
- * Vacío = llegó completo. Un campo presente pero vacío cuenta como faltante:
- * `hora: ""` rompe igual que no mandarla, y en el tablero tiene que verse igual.
+ * Vacío = llegó completo. Un requisito falta sólo si NINGUNA de sus rutas tiene
+ * valor; un campo presente pero vacío no cuenta —`hora: ""` rompe igual que no
+ * mandarla—.
+ *
+ * En el reporte se nombra el dato y, entre paréntesis, dónde lo buscamos: sin
+ * eso, del otro lado no saben si tienen que agregar `hora` o `turnos[].hora`.
  */
 export function camposFaltantes(clave: string, chatbotData: any): string[] {
   const esperado = tipoEsperado(clave)
   if (!esperado) return []
 
-  return esperado.requeridos.filter((ruta) => {
-    const valor = leerRuta(chatbotData, ruta)
-    if (valor === null || valor === undefined) return true
-    if (typeof valor === "string" && valor.trim() === "") return true
-    return false
-  })
+  return esperado.requeridos
+    .filter((req) => !req.rutas.some((ruta) => tieneValor(leerRuta(chatbotData, ruta))))
+    .map((req) => `${req.campo} (ninguna de: ${req.rutas.join(", ")})`)
+}
+
+function tieneValor(valor: unknown): boolean {
+  if (valor === null || valor === undefined) return false
+  if (typeof valor === "string") return valor.trim() !== ""
+  return true
 }
