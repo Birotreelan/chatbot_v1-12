@@ -140,6 +140,19 @@ export interface WhatsAppConfig {
   clientePortalWebDesde?: string
 
   /**
+   * Tipos de mensaje que esta clínica NO usa (5/10/2026).
+   *
+   * El tablero de integración compara lo que llega contra el catálogo de
+   * `lib/integracion-externa/catalogo.ts`. Una clínica que no reagenda nunca
+   * va a recibir un `turno_reagendado`, y sin esta lista figuraría en rojo
+   * para siempre: una fila que uno aprende a ignorar, que es como un tablero
+   * deja de servir.
+   *
+   * Vacío o ausente = se esperan todos.
+   */
+  tiposNoAplicables?: string[]
+
+  /**
    * Redacción propia del mensaje que acompaña al botón del portal (24/9/2026).
    *
    * Vacío = se usa la plantilla que corresponde al flujo

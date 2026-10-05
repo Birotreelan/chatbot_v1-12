@@ -11,6 +11,7 @@ import { assignSegundoRecordatorioSlot, saveReminderQueue, type QueuedReminder }
 import { scheduleMessage } from "@/lib/queue"
 import { resolveDestinationPhone } from "@/lib/utils/destination-phone"
 import { recordDiag, recordDiagSample, DIAG } from "@/lib/diagnostics"
+import { registrarEntrante } from "@/lib/integracion-externa/registro"
 
 export async function POST(request: Request) {
   try {
@@ -322,13 +323,31 @@ async function handleTemplateSend(data: any) {
     // recupera el celular sin adivinar dónde cortar.
     // Ver lib/utils/destination-phone.ts.
     let telefonoDeFicha: string | undefined
+    let chatbotDataParaRegistro: any
     try {
       const cd = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
+      chatbotDataParaRegistro = cd
       const t = cd?.paciente?.telefono
       if (t !== undefined && t !== null) telefonoDeFicha = String(t)
     } catch {
       // Chatbot_Data ilegible: se sigue con lo que haya en Phone.
     }
+
+    // ── Qué nos mandó la clínica (5/10/2026) ──────────────────────────────
+    //
+    // Se anota ACÁ y no más abajo a propósito: tiene que registrarse aunque el
+    // envío después falle o lo rechacemos por falta de teléfono. La pregunta
+    // que contesta el tablero es "¿el sistema externo manda lo que
+    // necesitamos?", y un payload que llegó mal formado es justamente el caso
+    // que hay que ver — si sólo se anotaran los envíos exitosos, el tablero
+    // mostraría todo verde mientras la integración falla.
+    //
+    // `void` y sin await: es observación, no puede sumar latencia al envío.
+    void registrarEntrante({
+      clienteId: Cliente_Id,
+      tipo: chatbotDataParaRegistro?.tipo_mensaje,
+      chatbotData: chatbotDataParaRegistro,
+    })
 
     const resolucion = resolveDestinationPhone(Phone, telefonoDeFicha)
 
