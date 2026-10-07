@@ -170,6 +170,19 @@ export async function GET(request: Request) {
           }
         }
 
+        // ── Una sola consulta por CLIENTE, no por sede (7/10/2026) ────────
+        //
+        // La franja de mensajes de servicio sin cargo de Meta es de 1.000 por
+        // cliente y por mes, no por sede. Por eso el consumo se pide una vez
+        // con el `cliente_id` y las sedes salen de repartir ese resultado más
+        // abajo: `servicio.gratis` y `servicio.pagados` llegan ya consolidados.
+        //
+        // No cambiar esto por una consulta por sede, aunque parezca más
+        // prolijo. Una clínica con seis sedes tendría seis franjas de 1.000 en
+        // lugar de una, y el costo de monotributo saldría muy por debajo del
+        // real —el caso Salud Ocular, que con 1.804 mensajes de servicio
+        // semanales mostraría 0 pagados en todas sus sedes en vez de 803—. Y
+        // saldría bajo sin fallar: el panel se vería perfecto.
         const consumo = await getConsumoDeWpp(clienteId, fechaInicio, fechaFin)
 
         // ── Lo facturable y sus dos partes (7/10/2026) ────────────────────
