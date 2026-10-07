@@ -32,11 +32,13 @@
  *
  *  - Estadísticas: "Recordatorios enviados" = `plantillas`, y el total de
  *    interacciones = plantillas + conversaciones iniciadas.
- *  - Facturación: `mensajesPagados` + conversaciones iniciadas, porque es lo
- *    que Meta cobra. Decisión de Nicolás (1/10/2026): los dos paneles dejan de
- *    mostrar el mismo total a propósito, y por eso Estadísticas suma el
- *    desglose de mensajes de servicio — para que el cliente pueda reconstruir
- *    de dónde sale la diferencia.
+ *  - Facturación, desde octubre 2026: `plantillas + servicio.pagados`, que es
+ *    lo que se cobra. Ver `facturable` más abajo.
+ *
+ * Decisión de Nicolás (1/10/2026): los dos paneles dejan de mostrar el mismo
+ * total a propósito —Estadísticas informa actividad, Facturación cobra—, y por
+ * eso Estadísticas suma el desglose de mensajes de servicio: para que el
+ * cliente pueda reconstruir de dónde sale la diferencia.
  *
  * ── `null` no es cero ──────────────────────────────────────────────────────
  *
@@ -103,6 +105,44 @@ export function leerConsumo(crudo: any): ConsumoDeWpp | null {
     servicio,
     formatoViejo: !traePlantillas,
   }
+}
+
+/**
+ * Lo que se cobra, y de dónde sale (7/10/2026).
+ *
+ * ── Por qué no se usa `mensajes_pagados` ───────────────────────────────────
+ *
+ * Porque lo que se factura es la suma de las dos partes que el cliente ve en
+ * el panel: recordatorios enviados (`plantillas`) más mensajes de servicio con
+ * cargo (`servicio.pagados`). `mensajes_pagados` debería valer exactamente eso
+ * —el proxy lo calcula así—, pero es un tercer número que el proxy saca por su
+ * cuenta, y tomarlo como total deja abierta la posibilidad de facturar algo que
+ * no coincide con el desglose que se le muestra al cliente. Un total que no se
+ * puede abrir no se puede defender.
+ *
+ * Se calcula acá y no en cada panel porque es la misma pregunta —"¿cuánto se
+ * cobra?"— y ya estuvo contestada en dos lugares distintos.
+ *
+ * ── Cuando el proxy no manda el desglose ───────────────────────────────────
+ *
+ * Sin `servicio` no hay forma de saber cuántos mensajes de servicio tuvieron
+ * cargo. Ahí se cae a `mensajes_pagados − plantillas`, que es lo mismo que
+ * hacíamos antes: mantiene el total en `mensajes_pagados` y no inventa un cero
+ * que se leería como "este mes no hubo mensajes de servicio pagos".
+ */
+export function facturable(consumo: ConsumoDeWpp | null): {
+  recordatorios: number
+  serviciosPagados: number
+  total: number
+} {
+  if (!consumo) return { recordatorios: 0, serviciosPagados: 0, total: 0 }
+
+  const recordatorios = consumo.plantillas
+  const serviciosPagados = consumo.servicio
+    ? consumo.servicio.pagados
+    : Math.max(0, consumo.mensajesPagados - recordatorios)
+
+  return { recordatorios, serviciosPagados, total: recordatorios + serviciosPagados }
 }
 
 /**

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getConsumoDeWpp } from "@/lib/consumos-wpp"
+import { facturable, getConsumoDeWpp } from "@/lib/consumos-wpp"
 import { requireBillingAgentForApi } from "@/lib/auth"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import { getAppointmentStatsByClienteIdFiltered } from "@/lib/appointment-stats"
@@ -105,14 +105,6 @@ export async function GET(request: Request) {
       clientesConId.map(async (config): Promise<FacturacionClienteRow[]> => {
         const clienteId = config.cliente_id!
 
-        // Lo facturable desde el servicio externo (mismo origen que /api/stats).
-        //
-        // `mensajesPagados` sigue siendo el campo correcto acá después del
-        // cambio de formato del 1/10/2026: ahora vale plantillas + mensajes de
-        // servicio pagos, que es exactamente lo que Meta cobra. Estadísticas,
-        // en cambio, muestra `plantillas` bajo "Recordatorios enviados", así
-        // que los dos paneles dejan de mostrar el mismo total — decisión
-        // tomada, no un descuido. Ver lib/consumos-wpp.ts.
         // ── Un mes cerrado no se recalcula (7/10/2026) ──────────────────
         //
         // Si este mes ya terminó y quedó cerrado, se devuelve lo guardado y no
@@ -152,21 +144,16 @@ export async function GET(request: Request) {
         }
 
         const consumo = await getConsumoDeWpp(clienteId, fechaInicio, fechaFin)
-        const mensajesPagados = consumo?.mensajesPagados ?? 0
 
-        // ── El desglose (7/10/2026) ───────────────────────────────────────
+        // ── Lo facturable y sus dos partes (7/10/2026) ────────────────────
         //
-        // Las dos partes de lo facturable: los recordatorios (plantillas) y los
-        // mensajes de servicio que salieron de la franja sin cargo.
-        //
-        // `serviciosPagados` se deriva por RESTA y no se lee de
-        // `servicio.pagados` directamente. El motivo es que lo que se factura
-        // es `mensajesPagados`, y si las dos partes se leyeran por separado
-        // podrían no sumarlo —el proxy las calcula por su cuenta— y la tabla
-        // mostraría un desglose que no cierra con su propio total. Restando, el
-        // desglose siempre suma.
-        const recordatorios = consumo?.plantillas ?? 0
-        const serviciosPagados = Math.max(0, mensajesPagados - recordatorios)
+        // Se cobra `recordatorios + serviciosPagados`, y el total se obtiene
+        // SUMÁNDOLOS, no leyendo `mensajes_pagados`. Es la decisión de Nicolás
+        // del 7/10/2026 y tiene una razón práctica: la tabla le muestra al
+        // cliente esas dos columnas, así que el total tiene que ser su suma o
+        // no se puede explicar. Ver `facturable` en lib/consumos-wpp.ts, que es
+        // el único lugar donde se decide.
+        const { recordatorios, serviciosPagados, total: totalFacturable } = facturable(consumo)
 
         let stats = await getAppointmentStatsByClienteIdFiltered(clienteId, fechaInicio, fechaFin)
         if (!stats && config.id !== clienteId) {
@@ -187,8 +174,8 @@ export async function GET(request: Request) {
         // septiembre.
         const totalInteracciones =
           regla === "solo_enviados"
-            ? mensajesPagados
-            : mensajesPagados + (stats?.totalUserInitiated || 0)
+            ? totalFacturable
+            : totalFacturable + (stats?.totalUserInitiated || 0)
 
         // El reparto por sede se resuelve antes de cerrar: forma parte de lo
         // que hay que congelar.
@@ -226,7 +213,7 @@ export async function GET(request: Request) {
               sedes: reparto?.map((sede) => ({
                 nombre: sede.nombre,
                 interacciones: sede.interacciones,
-                ...desgloseDeLaSede(sede.interacciones, recordatorios, mensajesPagados, regla),
+                ...desgloseDeLaSede(sede.interacciones, recordatorios, totalFacturable, regla),
               })),
             })
           })()
@@ -240,7 +227,7 @@ export async function GET(request: Request) {
             clienteIdBase: clienteId,
             nombreCliente: `${config.displayName} - ${sede.nombre}`,
             totalInteracciones: sede.interacciones,
-            ...desgloseDeLaSede(sede.interacciones, recordatorios, mensajesPagados, regla),
+            ...desgloseDeLaSede(sede.interacciones, recordatorios, totalFacturable, regla),
           }))
         }
 
