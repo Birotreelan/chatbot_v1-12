@@ -238,6 +238,19 @@ export function FacturacionTable({
   // `month >= "2026-10"` suelto en este archivo sería una segunda copia de esa
   // decisión que el día del próximo cambio nadie va a recordar actualizar.
   const hayDesglose = clientes.some((c) => c.recordatorios !== undefined)
+
+  // ── La etiqueta de la columna sigue a la fórmula ───────────────────────────
+  //
+  // La tabla de clientes sin IA llama a su columna "Mensajes pagados" porque
+  // eso era exactamente lo que se les facturaba. Desde octubre 2026 facturan
+  // igual que los de IA —mensajes de servicio gratuitos incluidos—, así que ese
+  // nombre dejó de describir la columna: diría "pagados" sobre un número que
+  // incluye los que no se pagan.
+  //
+  // Se decide con `hayDesglose`, que es la misma condición que determina si la
+  // fórmula nueva se aplicó. Un mes viejo sigue mostrando la etiqueta vieja,
+  // que para ese mes es la correcta.
+  const etiquetaCantidad = hayDesglose ? "Total de Interacciones" : cantidadLabel
   const totalRecordatorios = clientes.reduce((sum, c) => sum + (c.recordatorios || 0), 0)
   const totalServicios = clientes.reduce((sum, c) => sum + (c.serviciosFacturados || 0), 0)
 
@@ -307,14 +320,14 @@ export function FacturacionTable({
                 . Estos valores ya no cambian.
               </>
             ) : (
-              <>{cantidadLabel} por clínica en el período seleccionado</>
+              <>{etiquetaCantidad} por clínica en el período seleccionado</>
             )}
             {/* La relación entre las columnas, escrita. Si no se dice, dos
                 columnas nuevas al lado del total se leen como tres cosas
                 distintas y nadie sabe cuál se factura. */}
             {hayDesglose && (
               <span className="mt-1 block text-xs">
-                Recordatorios enviados + mensajes de servicio = {cantidadLabel.toLowerCase()}.
+                Recordatorios enviados + mensajes de servicio = {etiquetaCantidad.toLowerCase()}.
                 {" "}Los mensajes de servicio se cobran completos, con cargo de Meta o sin él.
               </span>
             )}
@@ -360,7 +373,7 @@ export function FacturacionTable({
                     </TableHead>
                   </>
                 )}
-                <TableHead className="text-right">{cantidadLabel}</TableHead>
+                <TableHead className="text-right">{etiquetaCantidad}</TableHead>
                 {hayCosto && (
                   <TableHead className="text-right font-normal text-muted-foreground">
                     Costo monotributo
@@ -370,7 +383,7 @@ export function FacturacionTable({
                     <span className="block text-[10px] font-normal">
                       US$ {COSTO_POR_MENSAJE_CON_CARGO_USD} ×{" "}
                       {totalConCargo === totalGeneral
-                        ? cantidadLabel.toLowerCase()
+                        ? etiquetaCantidad.toLowerCase()
                         : "mensajes con cargo de Meta"}
                     </span>
                   </TableHead>

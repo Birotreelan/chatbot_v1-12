@@ -3,6 +3,7 @@ import { requireBillingAgentForApi } from "@/lib/auth"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import { CLIENTES_EXCLUIDOS_FACTURACION } from "@/lib/facturacion-sedes"
 import { getDolarVenta } from "@/lib/facturacion-dolar"
+import { facturable, leerConsumo } from "@/lib/consumos-wpp"
 import { getPrecioUnidad } from "@/lib/facturacion-precios"
 import {
   clientesCerrados,
@@ -37,20 +38,22 @@ interface FacturacionClienteRow {
    * calcularía sobre la base equivocada sin que nada avise.
    */
   mensajesConCargoDeMeta?: number
+  /** De dónde salen las unidades, desde octubre 2026. Ver abajo. */
+  recordatorios?: number
+  serviciosFacturados?: number
 }
 
+/**
+ * Desde el 7/10/2026 el endpoint sin IA devuelve la misma estructura que el de
+ * clientes con IA, así que los campos son opcionales sólo por el período de
+ * transición: un mes viejo consultado hoy puede venir sin ellos.
+ */
 interface ClienteSinIAExterno {
   cliente: string
   cliente_id: string
   mensajes_pagados: number
-  // El endpoint sin IA NO manda `plantillas` ni `servicio`. Por eso esta tabla
-  // no tiene las columnas de desglose que tiene la de clientes con IA: no hay
-  // con qué separar recordatorios de mensajes de servicio.
-  //
-  // Si el servicio externo los agrega, no alcanza con leerlos: habría que
-  // decidir antes si a estos clientes se les empiezan a cobrar los mensajes de
-  // servicio gratuitos, como se hace con los de IA desde octubre. Es una
-  // decisión de facturación, no un dato que aparezca.
+  plantillas?: number
+  servicio?: { total: number; gratis: number; pagados: number }
 }
 
 interface ConsumosSinIAResponse {
@@ -89,9 +92,10 @@ export async function GET(request: Request) {
     // con el precio que tenían. Antes esta tabla no se congelaba: el precio
     // seguía editable y el total se movía con cada cambio.
     //
-    // La fórmula de estos clientes es siempre la misma —`mensajes_pagados`, sin
-    // conversaciones iniciadas—, así que el corte de octubre no los afecta en
-    // el conteo; lo que se congela acá es el precio y la cotización.
+    // Desde el 7/10/2026 el corte de octubre SÍ los afecta en el conteo: pasaron
+    // a facturar `plantillas + servicio.total` como los clientes con IA. Los
+    // meses anteriores siguen con `mensajes_pagados`, y los que ya estaban
+    // cerrados ni se recalculan.
     const yaCerrados = congelable ? await clientesCerrados(periodo) : []
 
     let filas: FacturacionClienteRow[] = []
@@ -113,13 +117,38 @@ export async function GET(request: Request) {
         filas = (data.clientes || [])
           .filter((c) => !CLIENTES_EXCLUIDOS_FACTURACION.includes(c.cliente_id))
           .filter((c) => !ocultos.has(c.cliente_id))
-          .map((c) => ({
-            clienteId: c.cliente_id,
-            clienteIdBase: c.cliente_id,
-            nombreCliente: c.cliente,
-            totalInteracciones: c.mensajes_pagados || 0,
-            mensajesConCargoDeMeta: c.mensajes_pagados || 0,
-          }))
+          .map((c) => {
+            // ── Misma fórmula que los clientes con IA (7/10/2026) ──────────
+            //
+            // Desde octubre 2026 estos clientes también facturan
+            // `plantillas + servicio.total`, o sea con los mensajes de servicio
+            // gratuitos incluidos. Antes de octubre se facturaba
+            // `mensajes_pagados`, y así tiene que seguir mostrándose: la regla
+            // la decide el PERÍODO que se está mirando, no la fecha de hoy ni
+            // el formato que haya devuelto el proxy.
+            //
+            // Se reusan `leerConsumo` y `facturable` en lugar de escribir la
+            // suma acá: es la misma pregunta que contesta la otra tabla, y dos
+            // copias de la fórmula de facturación es exactamente el tipo de
+            // divergencia que después nadie puede explicar.
+            const consumo = leerConsumo(c)
+            const { recordatorios, serviciosFacturados, total, segunMeta } = facturable(consumo)
+
+            // `serviciosFacturados` en null significa que esta respuesta vino
+            // sin el desglose. Ahí no se aplica la fórmula nueva: se factura lo
+            // que informa el proxy, y la fila muestra guiones en vez de un
+            // desglose inventado.
+            const aplicaFormulaNueva = regla === "solo_enviados" && serviciosFacturados !== null
+
+            return {
+              clienteId: c.cliente_id,
+              clienteIdBase: c.cliente_id,
+              nombreCliente: c.cliente,
+              totalInteracciones: aplicaFormulaNueva ? total : c.mensajes_pagados || 0,
+              ...(aplicaFormulaNueva ? { recordatorios, serviciosFacturados } : {}),
+              mensajesConCargoDeMeta: segunMeta,
+            }
+          })
 
         // El cierre de cada fila: el guardado si ya existe, o uno nuevo con el
         // precio y el dólar de este momento.
@@ -136,6 +165,8 @@ export async function GET(request: Request) {
                 return {
                   ...fila,
                   totalInteracciones: guardado.unidades,
+                  recordatorios: guardado.desglose?.recordatorios,
+                  serviciosFacturados: guardado.desglose?.serviciosFacturados,
                   // Del cierre, no del dato de hoy: es lo que hace que el costo
                   // de un mes ya facturado no se mueva.
                   mensajesConCargoDeMeta: guardado.mensajesConCargoDeMeta,
@@ -148,6 +179,15 @@ export async function GET(request: Request) {
                 periodo,
                 unidades: fila.totalInteracciones,
                 mensajesConCargoDeMeta: fila.mensajesConCargoDeMeta,
+                // Congelado junto con el total: si se recalculara, un mes
+                // cerrado podría mostrar partes que no suman lo facturado.
+                desglose:
+                  fila.recordatorios !== undefined && fila.serviciosFacturados !== undefined
+                    ? {
+                        recordatorios: fila.recordatorios,
+                        serviciosFacturados: fila.serviciosFacturados,
+                      }
+                    : undefined,
                 precioUnitarioUsd: precio,
                 dolarVenta: dolar,
                 regla,
