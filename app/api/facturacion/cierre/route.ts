@@ -25,8 +25,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 
 import { requireBillingAgentForApi } from "@/lib/auth"
-import { getAllWhatsAppConfigs } from "@/lib/db"
-import { cotizacionFueraDePeriodo, leerCierre, reabrirMes } from "@/lib/facturacion-cierre"
+import { clientesCerrados, cotizacionFueraDePeriodo, leerCierre, reabrirMes } from "@/lib/facturacion-cierre"
 
 export const runtime = "nodejs"
 
@@ -52,10 +51,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Falta "mes" en formato YYYY-MM' }, { status: 400 })
   }
 
-  const configs = await getAllWhatsAppConfigs()
-  const clienteIds = Array.from(
-    new Set(configs.map((c) => c.cliente_id).filter((id): id is string => Boolean(id))),
-  )
+  // Del índice y no de WhatsAppConfig: los clientes "sin IA" no tienen
+  // configuración —sus ids vienen del servicio externo— y quedaban afuera.
+  const clienteIds = await clientesCerrados(mes)
 
   for (const id of clienteIds) {
     const cierre = await leerCierre(id, mes)
@@ -86,10 +84,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Falta "mes" en formato YYYY-MM' }, { status: 400 })
   }
 
-  const configs = await getAllWhatsAppConfigs()
-  const clienteIds = Array.from(
-    new Set(configs.map((c) => c.cliente_id).filter((id): id is string => Boolean(id))),
-  )
+  const clienteIds = await clientesCerrados(mes)
 
   await Promise.all(clienteIds.map((id) => reabrirMes(id, mes)))
 

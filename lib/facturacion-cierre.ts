@@ -75,6 +75,32 @@ function clave(clienteId: string, periodo: string): string {
   return `${PREFIJO}${clienteId}:${periodo}`
 }
 
+/**
+ * Qué clientes tienen cerrado este mes.
+ *
+ * Hace falta porque los clientes de "Facturación sin IA" no existen en
+ * `WhatsAppConfig`: sus ids vienen del servicio externo. Sin este índice,
+ * reabrir un mes recorría sólo los clientes con configuración y dejaba los
+ * cierres de aquéllos intactos — la tabla de arriba se recalculaba y la de
+ * abajo no, en el mismo mes.
+ */
+function claveDelIndice(periodo: string): string {
+  return `${PREFIJO}meses:${periodo}`
+}
+
+/** Los clientes con cierre guardado para este mes. */
+export async function clientesCerrados(periodo: string): Promise<string[]> {
+  const redis = getRedisClient()
+  if (!redis) return []
+
+  try {
+    return (await redis.smembers(claveDelIndice(periodo))) || []
+  } catch (error) {
+    console.warn("[FACTURACION_CIERRE] No se pudo leer el índice:", error)
+    return []
+  }
+}
+
 /** "2026-09" a partir de la fecha de inicio del rango. */
 export function periodoDe(fechaInicio: string): string {
   return (fechaInicio || "").slice(0, 7)
@@ -155,6 +181,7 @@ export async function guardarCierre(clienteId: string, cierre: CierreDeMes): Pro
 
     // Sin TTL: un cierre es un registro contable y no vence.
     await redis.set(k, JSON.stringify(cierre))
+    await redis.sadd(claveDelIndice(cierre.periodo), clienteId)
     console.log(`[FACTURACION_CIERRE] ${clienteId} ${cierre.periodo} cerrado (${cierre.regla})`)
   } catch (error) {
     console.warn("[FACTURACION_CIERRE] No se pudo guardar el cierre:", error)
@@ -177,6 +204,7 @@ export async function reabrirMes(clienteId: string, periodo: string): Promise<vo
 
   try {
     await redis.del(clave(clienteId, periodo))
+    await redis.srem(claveDelIndice(periodo), clienteId)
     console.log(`[FACTURACION_CIERRE] ${clienteId} ${periodo} reabierto`)
   } catch (error) {
     console.warn("[FACTURACION_CIERRE] No se pudo reabrir:", error)

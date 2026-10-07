@@ -3,12 +3,28 @@ import { requireBillingAgentForApi } from "@/lib/auth"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import { CLIENTES_EXCLUIDOS_FACTURACION } from "@/lib/facturacion-sedes"
 import { getDolarVenta } from "@/lib/facturacion-dolar"
+import { getPrecioUnidad } from "@/lib/facturacion-precios"
+import {
+  clientesCerrados,
+  guardarCierre,
+  leerCierre,
+  mesTerminado,
+  periodoDe,
+  reglaDelPeriodo,
+  type CierreDeMes,
+} from "@/lib/facturacion-cierre"
 
 interface FacturacionClienteRow {
   clienteId: string
   clienteIdBase: string
   nombreCliente: string
   totalInteracciones: number
+  /**
+   * El cierre guardado, cuando el mes está congelado: trae el precio y el
+   * dólar con los que se facturó. La tabla lo usa para bloquear el valor por
+   * unidad. Ver lib/facturacion-cierre.ts.
+   */
+  cierre?: CierreDeMes
 }
 
 interface ClienteSinIAExterno {
@@ -42,6 +58,22 @@ export async function GET(request: Request) {
       )
     }
 
+    const periodo = periodoDe(fechaInicio)
+    const regla = reglaDelPeriodo(periodo)
+    const congelable = mesTerminado(periodo)
+
+    // ── Un mes cerrado no se recalcula (7/10/2026) ────────────────────────
+    //
+    // Estos clientes se facturan igual que los otros y el valor por unidad les
+    // va a cambiar en octubre, así que los meses anteriores tienen que quedar
+    // con el precio que tenían. Antes esta tabla no se congelaba: el precio
+    // seguía editable y el total se movía con cada cambio.
+    //
+    // La fórmula de estos clientes es siempre la misma —`mensajes_pagados`, sin
+    // conversaciones iniciadas—, así que el corte de octubre no los afecta en
+    // el conteo; lo que se congela acá es el precio y la cotización.
+    const yaCerrados = congelable ? await clientesCerrados(periodo) : []
+
     let filas: FacturacionClienteRow[] = []
     try {
       const externalResponse = await fetch(
@@ -67,6 +99,39 @@ export async function GET(request: Request) {
             nombreCliente: c.cliente,
             totalInteracciones: c.mensajes_pagados || 0,
           }))
+
+        // El cierre de cada fila: el guardado si ya existe, o uno nuevo con el
+        // precio y el dólar de este momento.
+        if (congelable) {
+          const dolar = await getDolarVenta().catch(() => null)
+
+          filas = await Promise.all(
+            filas.map(async (fila) => {
+              const guardado = yaCerrados.includes(fila.clienteId)
+                ? await leerCierre(fila.clienteId, periodo)
+                : null
+
+              if (guardado) {
+                return { ...fila, totalInteracciones: guardado.unidades, cierre: guardado }
+              }
+
+              const precio = await getPrecioUnidad(fila.clienteId).catch(() => null)
+              const nuevo: CierreDeMes = {
+                periodo,
+                unidades: fila.totalInteracciones,
+                precioUnitarioUsd: precio,
+                dolarVenta: dolar,
+                regla,
+                cerradoEl: new Date().toISOString(),
+              }
+              // Se espera el guardado, al contrario que en la tabla con IA: acá
+              // el cierre se devuelve EN la misma respuesta, y si la escritura
+              // fallara la fila quedaría marcada como cerrada sin estarlo.
+              await guardarCierre(fila.clienteId, nuevo)
+              return { ...fila, cierre: nuevo }
+            }),
+          )
+        }
       } else {
         console.warn(`[FACTURACION_SIN_IA_API] Error ${externalResponse.status} consultando servicio externo`)
       }
