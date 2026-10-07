@@ -88,6 +88,35 @@ export function periodoDe(fechaInicio: string): string {
  * panel: si usara UTC, durante las primeras horas del día 1 el panel diría "mes
  * en curso" y esto diría "ya terminó", y el mes se congelaría incompleto.
  */
+/**
+ * ¿La cotización del cierre es la del mes, o la del día en que se cerró?
+ *
+ * Importa y conviene que se vea. El cierre se hace la primera vez que alguien
+ * abre un mes terminado, con el dólar de ESE momento. Si el mes se abre a los
+ * pocos días de cerrar, la cotización es razonablemente la del período. Si se
+ * abre tres meses después —porque nadie lo miró, o porque esta función recién
+ * existe—, el dólar guardado no tiene nada que ver con el mes facturado.
+ *
+ * No se puede arreglar solo: nunca guardamos cotizaciones históricas, así que
+ * no hay de dónde sacar el dólar de julio. Lo que sí se puede es no mentir:
+ * avisar que ese número es del día del cierre.
+ *
+ * Diez días de margen: cubre el cierre normal —se factura en los primeros días
+ * del mes siguiente— sin tapar el caso del mes abierto mucho después.
+ */
+export function cotizacionFueraDePeriodo(cierre: CierreDeMes): boolean {
+  const cerrado = Date.parse(cierre.cerradoEl)
+  if (Number.isNaN(cerrado)) return false
+
+  // Primer día del mes siguiente al período.
+  const [anio, mes] = cierre.periodo.split("-").map(Number)
+  if (!anio || !mes) return false
+  const finDelPeriodo = Date.UTC(mes === 12 ? anio + 1 : anio, mes === 12 ? 0 : mes, 1)
+
+  const DIEZ_DIAS = 10 * 24 * 60 * 60 * 1000
+  return cerrado - finDelPeriodo > DIEZ_DIAS
+}
+
 export function mesTerminado(periodo: string, ahora: Date = new Date()): boolean {
   const actual = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`
   return periodo < actual

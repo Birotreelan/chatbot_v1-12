@@ -1,7 +1,8 @@
 /**
  * Reabrir un mes cerrado.
  *
- *   DELETE /api/facturacion/cierre?mes=2026-09
+ *   GET    /api/facturacion/cierre?mes=2026-09  → la cotización congelada
+ *   DELETE /api/facturacion/cierre?mes=2026-09  → reabre el mes
  *
  * Borra el cierre guardado de TODOS los clientes para ese mes, con lo cual el
  * panel vuelve a calcularlo —con los datos y el dólar de hoy— y lo cierra de
@@ -25,9 +26,54 @@ import { type NextRequest, NextResponse } from "next/server"
 
 import { requireBillingAgentForApi } from "@/lib/auth"
 import { getAllWhatsAppConfigs } from "@/lib/db"
-import { reabrirMes } from "@/lib/facturacion-cierre"
+import { cotizacionFueraDePeriodo, leerCierre, reabrirMes } from "@/lib/facturacion-cierre"
 
 export const runtime = "nodejs"
+
+/**
+ * El estado del cierre de un mes, para el encabezado del panel.
+ *
+ *   GET /api/facturacion/cierre?mes=2026-09
+ *
+ * Devuelve la cotización con la que quedó cerrado el mes. Hace falta porque el
+ * encabezado mostraba el dólar de HOY aunque se estuviera mirando septiembre:
+ * las filas decían una cosa y el recuadro de arriba otra, y el que lo mira no
+ * tiene forma de saber cuál manda.
+ *
+ * Alcanza con mirar el cierre de cualquier cliente: todos se cierran juntos, la
+ * primera vez que alguien abre el mes, así que comparten la cotización.
+ */
+export async function GET(request: NextRequest) {
+  const { session, error } = await requireBillingAgentForApi()
+  if (!session) return NextResponse.json({ error: error || "No autorizado" }, { status: 401 })
+
+  const mes = new URL(request.url).searchParams.get("mes")
+  if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
+    return NextResponse.json({ error: 'Falta "mes" en formato YYYY-MM' }, { status: 400 })
+  }
+
+  const configs = await getAllWhatsAppConfigs()
+  const clienteIds = Array.from(
+    new Set(configs.map((c) => c.cliente_id).filter((id): id is string => Boolean(id))),
+  )
+
+  for (const id of clienteIds) {
+    const cierre = await leerCierre(id, mes)
+    if (cierre) {
+      return NextResponse.json({
+        exito: true,
+        mes,
+        cerrado: true,
+        dolarVenta: cierre.dolarVenta,
+        cerradoEl: cierre.cerradoEl,
+        regla: cierre.regla,
+        cotizacionFueraDePeriodo: cotizacionFueraDePeriodo(cierre),
+      })
+    }
+  }
+
+  return NextResponse.json({ exito: true, mes, cerrado: false })
+}
 
 export async function DELETE(request: NextRequest) {
   // Rol de facturación, el mismo que el resto del panel: reabrir un mes cambia

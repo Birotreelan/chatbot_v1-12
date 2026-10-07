@@ -9,23 +9,60 @@ const formatoUSD = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, ma
 
 export function FacturacionSection() {
   const [month, setMonth] = useState<string>(getCurrentMonthValue())
-  const [dolarVenta, setDolarVenta] = useState<number | null>(null)
+  const [dolarVivo, setDolarVivo] = useState<number | null>(null)
+  const [dolarCongelado, setDolarCongelado] = useState<number | null>(null)
+  const [mesCerrado, setMesCerrado] = useState(false)
+  const [cotizacionDudosa, setCotizacionDudosa] = useState(false)
 
   const loadDolar = useCallback(async () => {
     try {
       const response = await fetch("/api/facturacion/dolar")
       if (response.ok) {
         const data = await response.json()
-        setDolarVenta(typeof data.dolarVenta === "number" ? data.dolarVenta : null)
+        setDolarVivo(typeof data.dolarVenta === "number" ? data.dolarVenta : null)
       }
     } catch (err) {
       console.error("Error cargando cotización del dólar:", err)
     }
   }, [])
 
+  /**
+   * La cotización con la que quedó cerrado el mes que se está mirando.
+   *
+   * Antes el encabezado mostraba siempre el dólar de hoy, incluso mirando
+   * septiembre: las filas usaban el congelado y el recuadro de arriba el
+   * actual, y quien lo leía no tenía forma de saber cuál manda. Ahora el
+   * encabezado dice el mismo que usan las filas.
+   */
+  const loadCierre = useCallback(async () => {
+    setDolarCongelado(null)
+    setMesCerrado(false)
+    setCotizacionDudosa(false)
+    try {
+      const r = await fetch(`/api/facturacion/cierre?mes=${encodeURIComponent(month)}`)
+      if (!r.ok) return
+      const data = await r.json()
+      if (data?.cerrado) {
+        setMesCerrado(true)
+        setDolarCongelado(typeof data.dolarVenta === "number" ? data.dolarVenta : null)
+        setCotizacionDudosa(Boolean(data.cotizacionFueraDePeriodo))
+      }
+    } catch {
+      // Sin esta información se muestra el dólar vivo, que es el comportamiento
+      // anterior: no vale la pena avisar nada.
+    }
+  }, [month])
+
   useEffect(() => {
     loadDolar()
   }, [loadDolar])
+
+  useEffect(() => {
+    loadCierre()
+  }, [loadCierre])
+
+  // El que se usa para calcular y para mostrar: en un mes cerrado, el suyo.
+  const dolarVenta = mesCerrado ? dolarCongelado : dolarVivo
 
   const esMesEnCurso = month === getCurrentMonthValue()
 
@@ -41,10 +78,20 @@ export function FacturacionSection() {
         <MonthSelector value={month} onChange={setMonth} />
         {esMesEnCurso && <span className="text-sm font-semibold text-red-600">Consumo en curso</span>}
         <div className="ml-auto flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-2">
-          <span className="text-sm text-muted-foreground">Dolar Venta</span>
+          <span className="text-sm text-muted-foreground">
+            {mesCerrado ? "Dólar del cierre" : "Dolar Venta"}
+          </span>
           <span className="text-sm font-semibold">
             {dolarVenta ? `$${formatoUSD.format(dolarVenta)}` : "—"}
           </span>
+          {mesCerrado && (
+            <span
+              className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary"
+              title="La cotización de este mes quedó fija al cerrarse. El dólar de hoy no lo afecta."
+            >
+              fijo
+            </span>
+          )}
         </div>
       </div>
 
@@ -70,6 +117,19 @@ export function FacturacionSection() {
             <span className="font-medium">Qué cambió:</span> {regla.queCambio}
           </p>
         )}
+        {/* Ser honesto con esto importa más que verse prolijo: el cierre usa
+            el dólar del día en que alguien abrió el mes por primera vez, y si
+            eso pasó mucho después, el número no tiene relación con el período
+            facturado. Nunca guardamos cotizaciones históricas, así que no se
+            puede corregir solo — pero sí se puede no presentarlo como si fuera
+            el dólar del mes. */}
+        {cotizacionDudosa && (
+          <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-900">
+            La cotización fija de este mes es la del día en que se cerró, no la del período. Si
+            necesitás el dólar que correspondía, hay que corregirlo a mano.
+          </p>
+        )}
+
         {conReglaAnterior && (
           <p className="mt-2 text-xs text-muted-foreground">
             Los meses anteriores se siguen mostrando con la regla que tenían: si se recalcularan con
