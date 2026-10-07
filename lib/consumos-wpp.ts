@@ -170,6 +170,26 @@ export async function getConsumoDeWpp(
 
     const consumo = leerConsumo(await respuesta.json())
 
+    // ── ¿Las dos cuentas coinciden? ────────────────────────────────────────
+    //
+    // `plantillas + servicio.pagados` tiene que dar `mensajes_pagados`: son la
+    // misma cosa contada de dos formas, y en las respuestas reales coinciden.
+    //
+    // El log existe para el caso en que dejen de coincidir. Facturamos la suma
+    // de las partes, así que una divergencia no rompe nada ni cambia el total
+    // visible — y por eso justamente pasaría inadvertida. Si aparece, es un
+    // cambio de contrato del proxy y hay que mirarlo antes de facturar el mes.
+    if (consumo && !consumo.formatoViejo && consumo.servicio) {
+      const suma = consumo.plantillas + consumo.servicio.pagados
+      if (suma !== consumo.mensajesPagados) {
+        console.warn(
+          `[CONSUMOS_WPP] ${clienteId}: plantillas (${consumo.plantillas}) + servicio.pagados ` +
+            `(${consumo.servicio.pagados}) = ${suma}, pero mensajes_pagados dice ` +
+            `${consumo.mensajesPagados}. Se factura ${suma}.`,
+        )
+      }
+    }
+
     if (consumo?.formatoViejo) {
       // Vale la pena el log: si aparece después de que el proxy nuevo esté
       // desplegado en todos lados, es que algún cliente quedó apuntando a una
