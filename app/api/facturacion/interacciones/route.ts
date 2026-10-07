@@ -41,6 +41,16 @@ interface FacturacionClienteRow {
    */
   recordatorios?: number
   serviciosPagados?: number
+  /**
+   * `true` si el proxy devolvió partes que no suman su propio
+   * `mensajes_pagados`.
+   *
+   * Se calcula en el servidor sobre los valores crudos y viaja como dato, en
+   * lugar de que la tabla lo deduzca comparando las columnas que muestra: con
+   * varias sedes esas columnas están prorrateadas y redondeadas, y la
+   * comparación inventaría inconsistencias donde no hay ninguna.
+   */
+  desgloseInconsistente?: boolean
 }
 
 /**
@@ -52,14 +62,22 @@ interface FacturacionClienteRow {
  * prorratearan los dos por separado, los redondeos harían que las partes no
  * sumen el total de la fila, y una tabla donde 12 + 7 da 20 es una tabla en la
  * que uno deja de confiar.
+ *
+ * Esta resta es distinta de la que se sacó de `facturable`: acá no disimula
+ * nada del proxy —reparte un total del cliente que ya es consistente— y lo que
+ * evita es un artefacto nuestro, el redondeo del prorrateo.
+ *
+ * Sin `serviciosPagadosDelCliente` no hay desglose que repartir: se devuelve
+ * vacío y la fila muestra un guion.
  */
 function desgloseDeLaSede(
   interaccionesDeLaSede: number,
   recordatoriosDelCliente: number,
+  serviciosPagadosDelCliente: number | null,
   totalDelCliente: number,
   regla: string,
 ): { recordatorios?: number; serviciosPagados?: number } {
-  if (regla !== "solo_enviados") return {}
+  if (regla !== "solo_enviados" || serviciosPagadosDelCliente === null) return {}
   if (totalDelCliente <= 0) return { recordatorios: 0, serviciosPagados: 0 }
 
   const proporcion = interaccionesDeLaSede / totalDelCliente
@@ -147,13 +165,20 @@ export async function GET(request: Request) {
 
         // ── Lo facturable y sus dos partes (7/10/2026) ────────────────────
         //
-        // Se cobra `recordatorios + serviciosPagados`, y el total se obtiene
-        // SUMÁNDOLOS, no leyendo `mensajes_pagados`. Es la decisión de Nicolás
-        // del 7/10/2026 y tiene una razón práctica: la tabla le muestra al
-        // cliente esas dos columnas, así que el total tiene que ser su suma o
-        // no se puede explicar. Ver `facturable` en lib/consumos-wpp.ts, que es
-        // el único lugar donde se decide.
-        const { recordatorios, serviciosPagados, total: totalFacturable } = facturable(consumo)
+        // Los tres números se replican de la API sin tocarlos: se factura
+        // `mensajes_pagados`, y las partes son `plantillas` y
+        // `servicio.pagados`. Si alguna vez no cierran, `coincide` viene en
+        // `false` y la tabla lo muestra, que es lo que permite corregirlo en la
+        // API externa en vez de disimularlo acá. Ver lib/consumos-wpp.ts.
+        const { recordatorios, serviciosPagados, total: totalFacturable, coincide } =
+          facturable(consumo)
+
+        // El desglose sólo viaja con la regla nueva, y sólo si el proxy mandó
+        // las dos partes.
+        const desglose =
+          regla === "solo_enviados" && serviciosPagados !== null
+            ? { recordatorios, serviciosPagados }
+            : undefined
 
         let stats = await getAppointmentStatsByClienteIdFiltered(clienteId, fechaInicio, fechaFin)
         if (!stats && config.id !== clienteId) {
@@ -204,8 +229,7 @@ export async function GET(request: Request) {
               unidades: totalInteracciones,
               // Sólo con la regla nueva: con la anterior el total incluía
               // conversaciones iniciadas y las dos partes no lo sumaban.
-              desglose:
-                regla === "solo_enviados" ? { recordatorios, serviciosPagados } : undefined,
+              desglose,
               precioUnitarioUsd: precio,
               dolarVenta: dolar,
               regla,
@@ -213,7 +237,7 @@ export async function GET(request: Request) {
               sedes: reparto?.map((sede) => ({
                 nombre: sede.nombre,
                 interacciones: sede.interacciones,
-                ...desgloseDeLaSede(sede.interacciones, recordatorios, totalFacturable, regla),
+                ...desgloseDeLaSede(sede.interacciones, recordatorios, serviciosPagados, totalFacturable, regla),
               })),
             })
           })()
@@ -227,7 +251,8 @@ export async function GET(request: Request) {
             clienteIdBase: clienteId,
             nombreCliente: `${config.displayName} - ${sede.nombre}`,
             totalInteracciones: sede.interacciones,
-            ...desgloseDeLaSede(sede.interacciones, recordatorios, totalFacturable, regla),
+            ...desgloseDeLaSede(sede.interacciones, recordatorios, serviciosPagados, totalFacturable, regla),
+            ...(coincide ? {} : { desgloseInconsistente: true }),
           }))
         }
 
@@ -237,7 +262,8 @@ export async function GET(request: Request) {
             clienteIdBase: clienteId,
             nombreCliente: config.displayName,
             totalInteracciones,
-            ...(regla === "solo_enviados" ? { recordatorios, serviciosPagados } : {}),
+            ...(desglose ?? {}),
+            ...(coincide ? {} : { desgloseInconsistente: true }),
           },
         ]
       }),

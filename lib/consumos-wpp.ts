@@ -108,41 +108,52 @@ export function leerConsumo(crudo: any): ConsumoDeWpp | null {
 }
 
 /**
- * Lo que se cobra, y de dónde sale (7/10/2026).
+ * Lo que se cobra y sus partes, tal como llegan (7/10/2026).
  *
- * ── Por qué no se usa `mensajes_pagados` ───────────────────────────────────
+ * ── Se replica la API, no se corrige ───────────────────────────────────────
  *
- * Porque lo que se factura es la suma de las dos partes que el cliente ve en
- * el panel: recordatorios enviados (`plantillas`) más mensajes de servicio con
- * cargo (`servicio.pagados`). `mensajes_pagados` debería valer exactamente eso
- * —el proxy lo calcula así—, pero es un tercer número que el proxy saca por su
- * cuenta, y tomarlo como total deja abierta la posibilidad de facturar algo que
- * no coincide con el desglose que se le muestra al cliente. Un total que no se
- * puede abrir no se puede defender.
+ * Los tres números salen de la respuesta sin tocarlos: `plantillas`,
+ * `servicio.pagados` y `mensajes_pagados`. La relación entre ellos tiene que
+ * ser `plantillas + servicio.pagados === mensajes_pagados`, y en las
+ * respuestas reales se cumple.
  *
- * Se calcula acá y no en cada panel porque es la misma pregunta —"¿cuánto se
- * cobra?"— y ya estuvo contestada en dos lugares distintos.
+ * Probamos derivar las partes por resta para que la suma cerrara siempre. Es
+ * peor: una inconsistencia del proxy quedaba disimulada en números que
+ * encajaban, el panel se veía bien y el error seguía ahí, facturándose.
+ * Mostrando los tres como llegan, si alguna vez no coinciden se ve en el
+ * front y se corrige donde está el problema, que es la API externa.
  *
- * ── Cuando el proxy no manda el desglose ───────────────────────────────────
+ * `coincide` es esa verificación hecha una sola vez, acá, sobre los valores
+ * crudos. La pantalla no la rehace comparando lo que muestra: con varias sedes
+ * los números van prorrateados y redondeados, y el redondeo solo haría aparecer
+ * inconsistencias que no existen — un diagnóstico que acusa a la otra parte de
+ * algo que está haciendo bien es el peor error posible en un diagnóstico.
  *
- * Sin `servicio` no hay forma de saber cuántos mensajes de servicio tuvieron
- * cargo. Ahí se cae a `mensajes_pagados − plantillas`, que es lo mismo que
- * hacíamos antes: mantiene el total en `mensajes_pagados` y no inventa un cero
- * que se leería como "este mes no hubo mensajes de servicio pagos".
+ * `serviciosPagados` es `null`, y no 0, cuando el proxy no manda el desglose:
+ * un cero ahí se leería como "este mes no hubo mensajes de servicio con cargo",
+ * que es un dato, y lo que pasa es que no lo sabemos.
  */
 export function facturable(consumo: ConsumoDeWpp | null): {
   recordatorios: number
-  serviciosPagados: number
+  serviciosPagados: number | null
+  /** `mensajes_pagados`, tal como llega: es lo que se factura. */
   total: number
+  /** `false` si las partes no suman el total que informa el proxy. */
+  coincide: boolean
 } {
-  if (!consumo) return { recordatorios: 0, serviciosPagados: 0, total: 0 }
+  if (!consumo) return { recordatorios: 0, serviciosPagados: null, total: 0, coincide: true }
 
   const recordatorios = consumo.plantillas
-  const serviciosPagados = consumo.servicio
-    ? consumo.servicio.pagados
-    : Math.max(0, consumo.mensajesPagados - recordatorios)
+  const serviciosPagados = consumo.servicio ? consumo.servicio.pagados : null
 
-  return { recordatorios, serviciosPagados, total: recordatorios + serviciosPagados }
+  return {
+    recordatorios,
+    serviciosPagados,
+    total: consumo.mensajesPagados,
+    // Sin desglose no hay nada que contrastar: no se acusa de inconsistente a
+    // una respuesta que simplemente no trae el dato.
+    coincide: serviciosPagados === null || recordatorios + serviciosPagados === consumo.mensajesPagados,
+  }
 }
 
 /**

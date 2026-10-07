@@ -39,9 +39,6 @@ import { Loader2, MessagesSquare, Send } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CostoAproximado } from "@/components/stats/costo-aproximado"
-// Sólo la función pura: el `fetch` del módulo vive dentro de otra, así que no
-// arrastra nada de servidor al bundle del navegador.
-import { facturable } from "@/lib/consumos-wpp"
 
 export interface MensajesDeServicio {
   total: number
@@ -112,21 +109,15 @@ export function TarjetaDeInteracciones({
   //  - Los mensajes de servicio sin cargo. Cobrarlos sería cobrar algo que no
   //    se paga.
   //
-  // Es la misma suma que factura el panel de Facturación, y por eso sale de la
-  // misma función: lo que el cliente ve acá y lo que se le cobra no pueden
-  // contestarse con dos cuentas distintas. Ver `facturable` en
-  // lib/consumos-wpp.ts.
+  // Se suman las dos partes que la tarjeta ya muestra, en vez de usar el
+  // `mensajes_pagados` que viene hecho, para que el cliente pueda verificar la
+  // cuenta mirando los recuadros de arriba. Los dos valores deberían ser
+  // idénticos; si alguna vez no lo son, el panel de Facturación lo marca y el
+  // arreglo va en la API externa.
   //
   // Consecuencia a tener presente: este número ya NO es el total grande de la
   // tarjeta. Por eso el recuadro del costo explica abajo de qué se compone.
-  const { total: unidadesFacturables } = facturable({
-    plantillas: recordatoriosEnviados,
-    servicio,
-    // Sólo se usa como respaldo cuando el proxy no manda el desglose, y acá
-    // ese respaldo no existe: la tarjeta recibe las partes, no el total.
-    mensajesPagados: recordatoriosEnviados,
-    formatoViejo: false,
-  })
+  const unidadesFacturables = recordatoriosEnviados + (servicio?.pagados ?? 0)
 
   return (
     <Card className="border-purple-200 bg-purple-50/30">

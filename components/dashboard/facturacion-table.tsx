@@ -26,6 +26,15 @@ interface FacturacionCliente {
   recordatorios?: number
   serviciosPagados?: number
   /**
+   * `true` si el proxy devolvió partes que no suman su propio total.
+   *
+   * Viene calculado del servidor sobre los valores crudos. La tabla no lo
+   * deduce comparando las columnas que muestra: con varias sedes están
+   * prorrateadas y redondeadas, y la comparación acusaría a la API externa de
+   * una inconsistencia que en realidad introdujo nuestro redondeo.
+   */
+  desgloseInconsistente?: boolean
+  /**
    * Presente cuando el mes está cerrado: trae el precio y el dólar con los que
    * se facturó. Ver lib/facturacion-cierre.ts.
    */
@@ -234,6 +243,16 @@ export function FacturacionTable({
   const hayDesglose = clientes.some((c) => c.recordatorios !== undefined)
   const totalRecordatorios = clientes.reduce((sum, c) => sum + (c.recordatorios || 0), 0)
   const totalServiciosPagados = clientes.reduce((sum, c) => sum + (c.serviciosPagados || 0), 0)
+  // Las clínicas cuyo desglose no cierra, una sola vez cada una. Se agrupa por
+  // `clienteIdBase` y no por nombre: con sedes, el nombre de cada fila lleva el
+  // sufijo de la sede, así que el mismo cliente se listaría tres veces.
+  const inconsistentes = Array.from(
+    new Map(
+      clientes
+        .filter((c) => c.desgloseInconsistente)
+        .map((c) => [c.clienteIdBase, c.nombreCliente.split(" - ")[0]] as const),
+    ).values(),
+  )
 
   async function reabrir() {
     if (
@@ -299,9 +318,12 @@ export function FacturacionTable({
             {hayDesglose && (
               <span className="mt-1 block text-xs">
                 Recordatorios enviados + mensajes de servicio pagos = {cantidadLabel.toLowerCase()}
-                {totalRecordatorios + totalServiciosPagados !== totalGeneral && (
+                {/* Se nombran las clínicas, no se avisa en general: el reporte a
+                    la API externa necesita saber de qué cliente hablamos. */}
+                {inconsistentes.length > 0 && (
                   <span className="ml-1 font-medium text-destructive">
-                    (atención: el desglose no suma el total — revisar los datos del proxy)
+                    — el desglose no suma el total en {inconsistentes.join(", ")}. Lo facturado es
+                    el total que informa la API; hay que corregirlo del lado del servicio externo.
                   </span>
                 )}
               </span>
