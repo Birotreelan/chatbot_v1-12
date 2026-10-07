@@ -54,6 +54,23 @@ export interface CierreDeMes {
   periodo: string
   /** Unidades cobradas, ya con la regla del período aplicada. */
   unidades: number
+  /**
+   * De dónde salen esas unidades, cuando la regla lo permite (desde 10/2026).
+   *
+   * Se congela junto con el total: si el desglose se recalculara, un mes
+   * cerrado podría mostrar partes que no suman el total guardado. Y si no se
+   * guardara, el mes cerrado perdería el detalle y habría que explicar el
+   * total sin poder abrirlo.
+   *
+   * Ausente en los cierres anteriores a este cambio y en la regla vieja, donde
+   * el total incluía conversaciones iniciadas y el desglose no cerraba.
+   */
+  desglose?: {
+    /** Plantillas despachadas: los recordatorios. */
+    recordatorios: number
+    /** Mensajes de servicio que salieron de la franja sin cargo. */
+    serviciosPagados: number
+  }
   /** El precio por unidad vigente al cerrar. `null` si no estaba cargado. */
   precioUnitarioUsd: number | null
   /** La cotización usada. `null` si la API no respondió al cerrar. */
@@ -68,7 +85,13 @@ export interface CierreDeMes {
    * mes congelado de una clínica con sedes volvería como una sola fila con el
    * total, y el desglose que se facturó se perdería.
    */
-  sedes?: Array<{ nombre: string; interacciones: number }>
+  sedes?: Array<{
+    nombre: string
+    interacciones: number
+    /** El desglose de ESTA sede, prorrateado. Ver la ruta de interacciones. */
+    recordatorios?: number
+    serviciosPagados?: number
+  }>
 }
 
 function clave(clienteId: string, periodo: string): string {

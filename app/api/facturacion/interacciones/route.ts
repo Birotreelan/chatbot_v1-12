@@ -34,6 +34,41 @@ interface FacturacionClienteRow {
    * el cliente. Ver lib/facturacion-cierre.ts.
    */
   cierre?: CierreDeMes
+  /**
+   * De dónde salen las unidades, desde octubre 2026. Ausente con la regla
+   * anterior, donde el total incluía conversaciones iniciadas y las dos partes
+   * no sumaban el total.
+   */
+  recordatorios?: number
+  serviciosPagados?: number
+}
+
+/**
+ * El desglose de UNA sede, prorrateado.
+ *
+ * El total del cliente se reparte entre sedes por porcentaje, así que el
+ * desglose tiene que repartirse igual. Los recordatorios se prorratean y los
+ * servicios pagos salen por RESTA contra el total de esa sede: si se
+ * prorratearan los dos por separado, los redondeos harían que las partes no
+ * sumen el total de la fila, y una tabla donde 12 + 7 da 20 es una tabla en la
+ * que uno deja de confiar.
+ */
+function desgloseDeLaSede(
+  interaccionesDeLaSede: number,
+  recordatoriosDelCliente: number,
+  totalDelCliente: number,
+  regla: string,
+): { recordatorios?: number; serviciosPagados?: number } {
+  if (regla !== "solo_enviados") return {}
+  if (totalDelCliente <= 0) return { recordatorios: 0, serviciosPagados: 0 }
+
+  const proporcion = interaccionesDeLaSede / totalDelCliente
+  const recordatorios = Math.min(
+    interaccionesDeLaSede,
+    Math.round(recordatoriosDelCliente * proporcion),
+  )
+
+  return { recordatorios, serviciosPagados: interaccionesDeLaSede - recordatorios }
 }
 
 export async function GET(request: Request) {
@@ -96,6 +131,8 @@ export async function GET(request: Request) {
                 clienteIdBase: clienteId,
                 nombreCliente: `${config.displayName} - ${sede.nombre}`,
                 totalInteracciones: sede.interacciones,
+                recordatorios: sede.recordatorios,
+                serviciosPagados: sede.serviciosPagados,
                 cierre: cerrado,
               }))
             }
@@ -106,6 +143,8 @@ export async function GET(request: Request) {
                 clienteIdBase: clienteId,
                 nombreCliente: config.displayName,
                 totalInteracciones: cerrado.unidades,
+                recordatorios: cerrado.desglose?.recordatorios,
+                serviciosPagados: cerrado.desglose?.serviciosPagados,
                 cierre: cerrado,
               },
             ]
@@ -114,6 +153,20 @@ export async function GET(request: Request) {
 
         const consumo = await getConsumoDeWpp(clienteId, fechaInicio, fechaFin)
         const mensajesPagados = consumo?.mensajesPagados ?? 0
+
+        // ── El desglose (7/10/2026) ───────────────────────────────────────
+        //
+        // Las dos partes de lo facturable: los recordatorios (plantillas) y los
+        // mensajes de servicio que salieron de la franja sin cargo.
+        //
+        // `serviciosPagados` se deriva por RESTA y no se lee de
+        // `servicio.pagados` directamente. El motivo es que lo que se factura
+        // es `mensajesPagados`, y si las dos partes se leyeran por separado
+        // podrían no sumarlo —el proxy las calcula por su cuenta— y la tabla
+        // mostraría un desglose que no cierra con su propio total. Restando, el
+        // desglose siempre suma.
+        const recordatorios = consumo?.plantillas ?? 0
+        const serviciosPagados = Math.max(0, mensajesPagados - recordatorios)
 
         let stats = await getAppointmentStatsByClienteIdFiltered(clienteId, fechaInicio, fechaFin)
         if (!stats && config.id !== clienteId) {
@@ -162,6 +215,10 @@ export async function GET(request: Request) {
             await guardarCierre(clienteId, {
               periodo,
               unidades: totalInteracciones,
+              // Sólo con la regla nueva: con la anterior el total incluía
+              // conversaciones iniciadas y las dos partes no lo sumaban.
+              desglose:
+                regla === "solo_enviados" ? { recordatorios, serviciosPagados } : undefined,
               precioUnitarioUsd: precio,
               dolarVenta: dolar,
               regla,
@@ -169,6 +226,7 @@ export async function GET(request: Request) {
               sedes: reparto?.map((sede) => ({
                 nombre: sede.nombre,
                 interacciones: sede.interacciones,
+                ...desgloseDeLaSede(sede.interacciones, recordatorios, mensajesPagados, regla),
               })),
             })
           })()
@@ -182,6 +240,7 @@ export async function GET(request: Request) {
             clienteIdBase: clienteId,
             nombreCliente: `${config.displayName} - ${sede.nombre}`,
             totalInteracciones: sede.interacciones,
+            ...desgloseDeLaSede(sede.interacciones, recordatorios, mensajesPagados, regla),
           }))
         }
 
@@ -191,6 +250,7 @@ export async function GET(request: Request) {
             clienteIdBase: clienteId,
             nombreCliente: config.displayName,
             totalInteracciones,
+            ...(regla === "solo_enviados" ? { recordatorios, serviciosPagados } : {}),
           },
         ]
       }),

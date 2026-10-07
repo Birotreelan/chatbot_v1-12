@@ -15,6 +15,17 @@ interface FacturacionCliente {
   nombreCliente: string
   totalInteracciones: number
   /**
+   * Las dos partes del total, desde octubre 2026. Ausentes en los meses con la
+   * regla anterior, donde el total incluía las conversaciones iniciadas y el
+   * desglose no habría cerrado.
+   *
+   * Que vengan del servidor y no se calculen acá es deliberado: son los mismos
+   * números que se congelan en el cierre, así que un mes cerrado muestra el
+   * desglose con el que se facturó y no uno reconstruido hoy.
+   */
+  recordatorios?: number
+  serviciosPagados?: number
+  /**
    * Presente cuando el mes está cerrado: trae el precio y el dólar con los que
    * se facturó. Ver lib/facturacion-cierre.ts.
    */
@@ -212,6 +223,18 @@ export function FacturacionTable({
   // la primera vez que alguien lo abre, así que es la misma condición.
   const cierre = clientes.find((c) => c.cierre)?.cierre
   const totalGeneral = clientes.reduce((sum, c) => sum + (c.totalInteracciones || 0), 0)
+
+  // ── Las dos columnas del desglose ─────────────────────────────────────────
+  //
+  // Se muestran si las filas traen el desglose, y no comparando el mes contra
+  // una fecha escrita acá. La diferencia importa: el que decide si el desglose
+  // existe es la regla del período, que vive en facturacion-reglas.ts, y un
+  // `month >= "2026-10"` suelto en este archivo sería una segunda copia de esa
+  // decisión que el día del próximo cambio nadie va a recordar actualizar.
+  const hayDesglose = clientes.some((c) => c.recordatorios !== undefined)
+  const totalRecordatorios = clientes.reduce((sum, c) => sum + (c.recordatorios || 0), 0)
+  const totalServiciosPagados = clientes.reduce((sum, c) => sum + (c.serviciosPagados || 0), 0)
+
   async function reabrir() {
     if (
       !confirm(
@@ -270,6 +293,19 @@ export function FacturacionTable({
             ) : (
               <>{cantidadLabel} por clínica en el período seleccionado</>
             )}
+            {/* La relación entre las columnas, escrita. Si no se dice, dos
+                columnas nuevas al lado del total se leen como tres cosas
+                distintas y nadie sabe cuál se factura. */}
+            {hayDesglose && (
+              <span className="mt-1 block text-xs">
+                Recordatorios enviados + mensajes de servicio pagos = {cantidadLabel.toLowerCase()}
+                {totalRecordatorios + totalServiciosPagados !== totalGeneral && (
+                  <span className="ml-1 font-medium text-destructive">
+                    (atención: el desglose no suma el total — revisar los datos del proxy)
+                  </span>
+                )}
+              </span>
+            )}
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
@@ -302,6 +338,16 @@ export function FacturacionTable({
                 <TableHead>Cliente</TableHead>
                 <TableHead>Alias</TableHead>
                 <TableHead>CUIT</TableHead>
+                {hayDesglose && (
+                  <>
+                    <TableHead className="text-right font-normal text-muted-foreground">
+                      Recordatorios enviados
+                    </TableHead>
+                    <TableHead className="text-right font-normal text-muted-foreground">
+                      Mensajes de servicio pagos
+                    </TableHead>
+                  </>
+                )}
                 <TableHead className="text-right">{cantidadLabel}</TableHead>
                 <TableHead className="text-right">Valor por unidad (USD)</TableHead>
                 <TableHead className="text-right">Valor Total Dólares</TableHead>
@@ -380,6 +426,24 @@ export function FacturacionTable({
                         })}
                       </div>
                     </TableCell>
+                    {hayDesglose && (
+                      <>
+                        {/* El guión, y no un 0, cuando esta fila no trae
+                            desglose: un cero diría "este cliente no envió
+                            recordatorios", que es un dato, y acá lo que pasa
+                            es que no sabemos. */}
+                        <TableCell className="text-right text-muted-foreground">
+                          {cliente.recordatorios !== undefined
+                            ? cliente.recordatorios.toLocaleString("es-AR")
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {cliente.serviciosPagados !== undefined
+                            ? cliente.serviciosPagados.toLocaleString("es-AR")
+                            : "—"}
+                        </TableCell>
+                      </>
+                    )}
                     <TableCell className="text-right">
                       {totalInteracciones.toLocaleString("es-AR")}
                     </TableCell>
@@ -421,6 +485,16 @@ export function FacturacionTable({
                 <TableCell>Total general</TableCell>
                 <TableCell />
                 <TableCell />
+                {hayDesglose && (
+                  <>
+                    <TableCell className="text-right">
+                      {totalRecordatorios.toLocaleString("es-AR")}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {totalServiciosPagados.toLocaleString("es-AR")}
+                    </TableCell>
+                  </>
+                )}
                 <TableCell className="text-right">{totalGeneral.toLocaleString("es-AR")}</TableCell>
                 <TableCell />
                 <TableCell className="text-right">{formatoUSDMoney.format(totalGeneralValorUSD)}</TableCell>
