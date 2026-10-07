@@ -72,6 +72,24 @@ export const REGLAS: ReglaDeFacturacion[] = [
   },
 ]
 
+/**
+ * Lo que cuesta cada mensaje que Meta SÍ cobra (7/10/2026).
+ *
+ * Es el precio por mensaje con cargo, en dólares, y se aplica sobre
+ * `plantillas + servicio.pagados` — que es exactamente `mensajes_pagados`, o
+ * sea el consumo real frente a Meta. Los mensajes de servicio gratuitos quedan
+ * afuera: a nosotros no nos cuestan, aunque se le facturen al cliente.
+ *
+ * ── Por qué está declarado acá y no escrito en la tabla ────────────────────
+ *
+ * Porque es un precio y los precios cambian. El día que Meta lo mueva, va a
+ * haber que decidir desde qué mes rige, igual que con las reglas de arriba, y
+ * entonces conviene que haya un solo lugar donde buscarlo. Si cambia, lo más
+ * probable es que haya que guardarlo en el cierre de cada mes, como ya se hace
+ * con el precio unitario y el dólar.
+ */
+export const COSTO_POR_MENSAJE_CON_CARGO_USD = 0.0318
+
 /** Qué regla rige para este período ("YYYY-MM"). */
 export function reglaDelPeriodo(periodo: string): ReglaDeFacturacion {
   // De la más nueva a la más vieja: la primera que ya haya arrancado es la que

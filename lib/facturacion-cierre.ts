@@ -74,6 +74,18 @@ export interface CierreDeMes {
      * este número ya no es `servicio.pagados`.
      */
     serviciosFacturados: number
+    /**
+     * Los mensajes que Meta sí nos cobra: `mensajes_pagados`, o sea
+     * `plantillas + servicio.pagados`. Es la base del costo de monotributo.
+     *
+     * Se congela con el resto por el mismo motivo: si se recalculara, el costo
+     * de un mes ya facturado cambiaría al cambiar los datos del proxy, y el
+     * margen que se calculó ese día dejaría de ser reproducible.
+     *
+     * Ausente en los cierres anteriores a este campo, donde la columna muestra
+     * un guion en lugar de un costo inventado.
+     */
+    mensajesConCargoDeMeta?: number
   }
   /** El precio por unidad vigente al cerrar. `null` si no estaba cargado. */
   precioUnitarioUsd: number | null
@@ -95,6 +107,7 @@ export interface CierreDeMes {
     /** El desglose de ESTA sede, prorrateado. Ver la ruta de interacciones. */
     recordatorios?: number
     serviciosFacturados?: number
+    mensajesConCargoDeMeta?: number
   }>
 }
 

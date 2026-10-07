@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { monthValueToRange } from "./month-selector"
-import { reglaPorId } from "@/lib/facturacion-reglas"
+import { COSTO_POR_MENSAJE_CON_CARGO_USD, reglaPorId } from "@/lib/facturacion-reglas"
 
 interface FacturacionCliente {
   clienteId: string
@@ -26,6 +26,11 @@ interface FacturacionCliente {
   recordatorios?: number
   /** TODOS los mensajes de servicio del período, con cargo o sin él. */
   serviciosFacturados?: number
+  /**
+   * Los mensajes que Meta sí cobra. Base del costo de monotributo: es nuestro
+   * costo, no algo que se le facture al cliente.
+   */
+  mensajesConCargoDeMeta?: number
   /**
    * Presente cuando el mes está cerrado: trae el precio y el dólar con los que
    * se facturó. Ver lib/facturacion-cierre.ts.
@@ -236,6 +241,16 @@ export function FacturacionTable({
   const totalRecordatorios = clientes.reduce((sum, c) => sum + (c.recordatorios || 0), 0)
   const totalServicios = clientes.reduce((sum, c) => sum + (c.serviciosFacturados || 0), 0)
 
+  // ── El costo de monotributo ───────────────────────────────────────────────
+  //
+  // Corre sólo sobre los mensajes que Meta nos cobra, así que su base NO es el
+  // total de la fila: los mensajes de servicio gratuitos se le facturan al
+  // cliente y a nosotros no nos cuestan. Por eso esta columna no cierra con las
+  // otras tres, y el encabezado lo aclara.
+  const hayCosto = clientes.some((c) => c.mensajesConCargoDeMeta !== undefined)
+  const totalConCargo = clientes.reduce((sum, c) => sum + (c.mensajesConCargoDeMeta || 0), 0)
+  const totalCostoUSD = totalConCargo * COSTO_POR_MENSAJE_CON_CARGO_USD
+
   async function reabrir() {
     if (
       !confirm(
@@ -346,6 +361,17 @@ export function FacturacionTable({
                   </>
                 )}
                 <TableHead className="text-right">{cantidadLabel}</TableHead>
+                {hayCosto && (
+                  <TableHead className="text-right font-normal text-muted-foreground">
+                    Costo monotributo
+                    {/* Se dice sobre qué corre. Al lado de tres columnas que
+                        suman entre sí, una cuarta con otra base se lee como un
+                        error de la tabla si no está explicado. */}
+                    <span className="block text-[10px] font-normal">
+                      US$ {COSTO_POR_MENSAJE_CON_CARGO_USD} × mensajes con cargo de Meta
+                    </span>
+                  </TableHead>
+                )}
                 <TableHead className="text-right">Valor por unidad (USD)</TableHead>
                 <TableHead className="text-right">Valor Total Dólares</TableHead>
                 <TableHead className="text-right">Valor Total Pesos</TableHead>
@@ -444,6 +470,25 @@ export function FacturacionTable({
                     <TableCell className="text-right">
                       {totalInteracciones.toLocaleString("es-AR")}
                     </TableCell>
+                    {hayCosto && (
+                      <TableCell className="text-right text-muted-foreground">
+                        {cliente.mensajesConCargoDeMeta !== undefined ? (
+                          <>
+                            {formatoUSDMoney.format(
+                              cliente.mensajesConCargoDeMeta * COSTO_POR_MENSAJE_CON_CARGO_USD,
+                            )}
+                            {/* La cantidad va a la vista y no sólo el monto: sin
+                                ella, el único modo de saber sobre cuántos
+                                mensajes se calculó es dividir a mano. */}
+                            <span className="block text-[10px]">
+                              {cliente.mensajesConCargoDeMeta.toLocaleString("es-AR")} con cargo
+                            </span>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell className="text-right">
                       {/* En un mes cerrado el precio no se edita: el total ya
                           no depende de él. Un campo editable que no cambia
@@ -493,6 +538,14 @@ export function FacturacionTable({
                   </>
                 )}
                 <TableCell className="text-right">{totalGeneral.toLocaleString("es-AR")}</TableCell>
+                {hayCosto && (
+                  <TableCell className="text-right">
+                    {formatoUSDMoney.format(totalCostoUSD)}
+                    <span className="block text-[10px] font-normal text-muted-foreground">
+                      {totalConCargo.toLocaleString("es-AR")} con cargo
+                    </span>
+                  </TableCell>
+                )}
                 <TableCell />
                 <TableCell className="text-right">{formatoUSDMoney.format(totalGeneralValorUSD)}</TableCell>
                 <TableCell className="text-right">{formatoARS.format(totalGeneralValorARS)}</TableCell>

@@ -42,6 +42,11 @@ interface FacturacionClienteRow {
   recordatorios?: number
   /** TODOS los mensajes de servicio, con cargo o sin él. */
   serviciosFacturados?: number
+  /**
+   * Los mensajes que Meta sí cobra (`mensajes_pagados`). No se factura, es
+   * nuestro costo: la tabla lo multiplica por el precio por mensaje con cargo.
+   */
+  mensajesConCargoDeMeta?: number
 }
 
 /**
@@ -65,11 +70,14 @@ function desgloseDeLaSede(
   interaccionesDeLaSede: number,
   recordatoriosDelCliente: number,
   serviciosDelCliente: number | null,
+  conCargoDelCliente: number,
   totalDelCliente: number,
   regla: string,
-): { recordatorios?: number; serviciosFacturados?: number } {
+): { recordatorios?: number; serviciosFacturados?: number; mensajesConCargoDeMeta?: number } {
   if (regla !== "solo_enviados" || serviciosDelCliente === null) return {}
-  if (totalDelCliente <= 0) return { recordatorios: 0, serviciosFacturados: 0 }
+  if (totalDelCliente <= 0) {
+    return { recordatorios: 0, serviciosFacturados: 0, mensajesConCargoDeMeta: 0 }
+  }
 
   const proporcion = interaccionesDeLaSede / totalDelCliente
   const recordatorios = Math.min(
@@ -77,7 +85,15 @@ function desgloseDeLaSede(
     Math.round(recordatoriosDelCliente * proporcion),
   )
 
-  return { recordatorios, serviciosFacturados: interaccionesDeLaSede - recordatorios }
+  return {
+    recordatorios,
+    serviciosFacturados: interaccionesDeLaSede - recordatorios,
+    // El costo también se reparte: una sede que facturó la mitad de las
+    // unidades generó aproximadamente la mitad del costo. Se prorratea y no se
+    // deriva de las otras dos, porque no es una parte del total de la fila:
+    // los mensajes gratuitos están en el total y no están en el costo.
+    mensajesConCargoDeMeta: Math.round(conCargoDelCliente * proporcion),
+  }
 }
 
 export async function GET(request: Request) {
@@ -134,6 +150,7 @@ export async function GET(request: Request) {
                 totalInteracciones: sede.interacciones,
                 recordatorios: sede.recordatorios,
                 serviciosFacturados: sede.serviciosFacturados,
+                mensajesConCargoDeMeta: sede.mensajesConCargoDeMeta,
                 cierre: cerrado,
               }))
             }
@@ -146,6 +163,7 @@ export async function GET(request: Request) {
                 totalInteracciones: cerrado.unidades,
                 recordatorios: cerrado.desglose?.recordatorios,
                 serviciosFacturados: cerrado.desglose?.serviciosFacturados,
+                mensajesConCargoDeMeta: cerrado.desglose?.mensajesConCargoDeMeta,
                 cierre: cerrado,
               },
             ]
@@ -160,13 +178,14 @@ export async function GET(request: Request) {
         // (`servicio.total`), gratuitos incluidos. Las partes se replican de la
         // API y el total es su suma, así que las columnas del panel siempre
         // cierran. No es `mensajes_pagados`: ver lib/consumos-wpp.ts.
-        const { recordatorios, serviciosFacturados, total: totalFacturable } = facturable(consumo)
+        const { recordatorios, serviciosFacturados, total: totalFacturable, segunMeta } =
+          facturable(consumo)
 
         // El desglose sólo viaja con la regla nueva, y sólo si el proxy mandó
         // las dos partes.
         const desglose =
           regla === "solo_enviados" && serviciosFacturados !== null
-            ? { recordatorios, serviciosFacturados }
+            ? { recordatorios, serviciosFacturados, mensajesConCargoDeMeta: segunMeta }
             : undefined
 
         let stats = await getAppointmentStatsByClienteIdFiltered(clienteId, fechaInicio, fechaFin)
@@ -226,7 +245,7 @@ export async function GET(request: Request) {
               sedes: reparto?.map((sede) => ({
                 nombre: sede.nombre,
                 interacciones: sede.interacciones,
-                ...desgloseDeLaSede(sede.interacciones, recordatorios, serviciosFacturados, totalFacturable, regla),
+                ...desgloseDeLaSede(sede.interacciones, recordatorios, serviciosFacturados, segunMeta, totalFacturable, regla),
               })),
             })
           })()
@@ -240,7 +259,7 @@ export async function GET(request: Request) {
             clienteIdBase: clienteId,
             nombreCliente: `${config.displayName} - ${sede.nombre}`,
             totalInteracciones: sede.interacciones,
-            ...desgloseDeLaSede(sede.interacciones, recordatorios, serviciosFacturados, totalFacturable, regla),
+            ...desgloseDeLaSede(sede.interacciones, recordatorios, serviciosFacturados, segunMeta, totalFacturable, regla),
           }))
         }
 
