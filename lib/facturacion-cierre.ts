@@ -74,19 +74,25 @@ export interface CierreDeMes {
      * este número ya no es `servicio.pagados`.
      */
     serviciosFacturados: number
-    /**
-     * Los mensajes que Meta sí nos cobra: `mensajes_pagados`, o sea
-     * `plantillas + servicio.pagados`. Es la base del costo de monotributo.
-     *
-     * Se congela con el resto por el mismo motivo: si se recalculara, el costo
-     * de un mes ya facturado cambiaría al cambiar los datos del proxy, y el
-     * margen que se calculó ese día dejaría de ser reproducible.
-     *
-     * Ausente en los cierres anteriores a este campo, donde la columna muestra
-     * un guion en lugar de un costo inventado.
-     */
-    mensajesConCargoDeMeta?: number
   }
+  /**
+   * Los mensajes que Meta sí nos cobra: `mensajes_pagados`, o sea
+   * `plantillas + servicio.pagados`. Es la base del costo de monotributo.
+   *
+   * Va FUERA de `desglose` a propósito. `desglose` son las partes de lo que se
+   * le factura al cliente y suman el total; esto es nuestro costo y no suma con
+   * nada —los mensajes de servicio gratuitos están en el total facturado y no
+   * están acá—. Además así lo pueden guardar los clientes "sin IA", que no
+   * tienen desglose porque su endpoint no lo manda.
+   *
+   * Se congela con el resto por el mismo motivo que todo lo demás: si se
+   * recalculara, el costo de un mes ya facturado cambiaría al cambiar los datos
+   * del proxy, y el margen que se calculó ese día dejaría de ser reproducible.
+   *
+   * Ausente en los cierres anteriores a este campo, donde la columna muestra un
+   * guion en lugar de un costo inventado.
+   */
+  mensajesConCargoDeMeta?: number
   /** El precio por unidad vigente al cerrar. `null` si no estaba cargado. */
   precioUnitarioUsd: number | null
   /** La cotización usada. `null` si la API no respondió al cerrar. */

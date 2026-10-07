@@ -25,12 +25,32 @@ interface FacturacionClienteRow {
    * unidad. Ver lib/facturacion-cierre.ts.
    */
   cierre?: CierreDeMes
+  /**
+   * Los mensajes que Meta sí nos cobra, base del costo de monotributo.
+   *
+   * Para estos clientes es el total mismo: lo que se les factura ES
+   * `mensajes_pagados`. Se manda igual, como campo propio, porque la tabla es
+   * el mismo componente que la de clientes con IA, donde las dos cosas no
+   * coinciden —ahí el total incluye los mensajes de servicio gratuitos, que no
+   * tienen costo—. Si acá se dejara vacío y la tabla cayera al total, el día
+   * que estos clientes empiecen a facturar como los otros el costo se
+   * calcularía sobre la base equivocada sin que nada avise.
+   */
+  mensajesConCargoDeMeta?: number
 }
 
 interface ClienteSinIAExterno {
   cliente: string
   cliente_id: string
   mensajes_pagados: number
+  // El endpoint sin IA NO manda `plantillas` ni `servicio`. Por eso esta tabla
+  // no tiene las columnas de desglose que tiene la de clientes con IA: no hay
+  // con qué separar recordatorios de mensajes de servicio.
+  //
+  // Si el servicio externo los agrega, no alcanza con leerlos: habría que
+  // decidir antes si a estos clientes se les empiezan a cobrar los mensajes de
+  // servicio gratuitos, como se hace con los de IA desde octubre. Es una
+  // decisión de facturación, no un dato que aparezca.
 }
 
 interface ConsumosSinIAResponse {
@@ -98,6 +118,7 @@ export async function GET(request: Request) {
             clienteIdBase: c.cliente_id,
             nombreCliente: c.cliente,
             totalInteracciones: c.mensajes_pagados || 0,
+            mensajesConCargoDeMeta: c.mensajes_pagados || 0,
           }))
 
         // El cierre de cada fila: el guardado si ya existe, o uno nuevo con el
@@ -112,13 +133,21 @@ export async function GET(request: Request) {
                 : null
 
               if (guardado) {
-                return { ...fila, totalInteracciones: guardado.unidades, cierre: guardado }
+                return {
+                  ...fila,
+                  totalInteracciones: guardado.unidades,
+                  // Del cierre, no del dato de hoy: es lo que hace que el costo
+                  // de un mes ya facturado no se mueva.
+                  mensajesConCargoDeMeta: guardado.mensajesConCargoDeMeta,
+                  cierre: guardado,
+                }
               }
 
               const precio = await getPrecioUnidad(fila.clienteId).catch(() => null)
               const nuevo: CierreDeMes = {
                 periodo,
                 unidades: fila.totalInteracciones,
+                mensajesConCargoDeMeta: fila.mensajesConCargoDeMeta,
                 precioUnitarioUsd: precio,
                 dolarVenta: dolar,
                 regla,

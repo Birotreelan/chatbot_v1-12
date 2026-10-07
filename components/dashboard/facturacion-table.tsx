@@ -368,7 +368,10 @@ export function FacturacionTable({
                         suman entre sí, una cuarta con otra base se lee como un
                         error de la tabla si no está explicado. */}
                     <span className="block text-[10px] font-normal">
-                      US$ {COSTO_POR_MENSAJE_CON_CARGO_USD} × mensajes con cargo de Meta
+                      US$ {COSTO_POR_MENSAJE_CON_CARGO_USD} ×{" "}
+                      {totalConCargo === totalGeneral
+                        ? cantidadLabel.toLowerCase()
+                        : "mensajes con cargo de Meta"}
                     </span>
                   </TableHead>
                 )}
@@ -479,10 +482,18 @@ export function FacturacionTable({
                             )}
                             {/* La cantidad va a la vista y no sólo el monto: sin
                                 ella, el único modo de saber sobre cuántos
-                                mensajes se calculó es dividir a mano. */}
-                            <span className="block text-[10px]">
-                              {cliente.mensajesConCargoDeMeta.toLocaleString("es-AR")} con cargo
-                            </span>
+                                mensajes se calculó es dividir a mano.
+
+                                Pero sólo si difiere del total de la fila. En la
+                                tabla de clientes sin IA coinciden —lo que se
+                                factura ES lo que Meta cobra—, y repetir el
+                                mismo número al lado manda a buscar una
+                                diferencia que no existe. */}
+                            {cliente.mensajesConCargoDeMeta !== totalInteracciones && (
+                              <span className="block text-[10px]">
+                                {cliente.mensajesConCargoDeMeta.toLocaleString("es-AR")} con cargo
+                              </span>
+                            )}
                           </>
                         ) : (
                           "—"
@@ -541,9 +552,11 @@ export function FacturacionTable({
                 {hayCosto && (
                   <TableCell className="text-right">
                     {formatoUSDMoney.format(totalCostoUSD)}
-                    <span className="block text-[10px] font-normal text-muted-foreground">
-                      {totalConCargo.toLocaleString("es-AR")} con cargo
-                    </span>
+                    {totalConCargo !== totalGeneral && (
+                      <span className="block text-[10px] font-normal text-muted-foreground">
+                        {totalConCargo.toLocaleString("es-AR")} con cargo
+                      </span>
+                    )}
                   </TableCell>
                 )}
                 <TableCell />

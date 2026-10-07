@@ -163,7 +163,7 @@ export async function GET(request: Request) {
                 totalInteracciones: cerrado.unidades,
                 recordatorios: cerrado.desglose?.recordatorios,
                 serviciosFacturados: cerrado.desglose?.serviciosFacturados,
-                mensajesConCargoDeMeta: cerrado.desglose?.mensajesConCargoDeMeta,
+                mensajesConCargoDeMeta: cerrado.mensajesConCargoDeMeta,
                 cierre: cerrado,
               },
             ]
@@ -198,7 +198,7 @@ export async function GET(request: Request) {
         // las dos partes.
         const desglose =
           regla === "solo_enviados" && serviciosFacturados !== null
-            ? { recordatorios, serviciosFacturados, mensajesConCargoDeMeta: segunMeta }
+            ? { recordatorios, serviciosFacturados }
             : undefined
 
         let stats = await getAppointmentStatsByClienteIdFiltered(clienteId, fechaInicio, fechaFin)
@@ -251,6 +251,7 @@ export async function GET(request: Request) {
               // Sólo con la regla nueva: con la anterior el total incluía
               // conversaciones iniciadas y las dos partes no lo sumaban.
               desglose,
+              mensajesConCargoDeMeta: segunMeta,
               precioUnitarioUsd: precio,
               dolarVenta: dolar,
               regla,
