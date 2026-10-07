@@ -284,6 +284,14 @@ export async function GET(request: Request) {
             nombreCliente: config.displayName,
             totalInteracciones,
             ...(desglose ?? {}),
+            // Va acá y no dentro de `desglose`: el costo existe siempre, con
+            // regla nueva o vieja. Faltaba, y el síntoma era que la columna
+            // mostraba un guion en todos los clientes de una sola sede —o sea
+            // en casi todos— mientras las clínicas con sedes sí mostraban
+            // costo, porque esas filas lo traen de `desgloseDeLaSede`. El total
+            // de la tabla sumaba una décima parte de lo real sin que nada
+            // fallara.
+            mensajesConCargoDeMeta: segunMeta,
           },
         ]
       }),
