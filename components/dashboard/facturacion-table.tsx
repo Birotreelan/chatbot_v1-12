@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { monthValueToRange } from "./month-selector"
+import { reglaPorId } from "@/lib/facturacion-reglas"
 
 interface FacturacionCliente {
   clienteId: string
@@ -260,9 +261,10 @@ export function FacturacionTable({
               <>
                 Mes cerrado el {new Date(cierre.cerradoEl).toLocaleDateString("es-AR")} con el dólar
                 a ${cierre.dolarVenta?.toLocaleString("es-AR") ?? "—"}
-                {cierre.regla === "con_conversaciones"
-                  ? " · incluye las conversaciones iniciadas por pacientes"
-                  : " · sólo mensajes enviados"}
+                {/* La descripción sale del registro de reglas y no de un
+                    ternario acá: con el próximo cambio, este archivo no se
+                    toca. Ver lib/facturacion-reglas.ts. */}
+                {reglaPorId(cierre.regla) ? ` · ${reglaPorId(cierre.regla)!.nombre}` : ""}
                 . Estos valores ya no cambian.
               </>
             ) : (

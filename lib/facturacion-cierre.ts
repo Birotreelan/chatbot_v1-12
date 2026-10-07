@@ -34,22 +34,21 @@
  */
 
 import { getRedisClient } from "./redis"
+import { idDeLaReglaDelPeriodo, type ReglaDeCalculo } from "./facturacion-reglas"
+
+export { idDeLaReglaDelPeriodo as reglaDelPeriodo }
+export type { ReglaDeCalculo }
 
 const PREFIJO = "facturacion:cierre:"
 
 /**
- * La regla de cálculo con la que se cerró el mes.
+ * La regla con la que se cerró el mes queda escrita en el cierre a propósito:
+ * dentro de un año, mirando un mes viejo, es lo que explica por qué ese total
+ * no se puede reproducir con el código de entonces.
  *
- * Queda escrita en el cierre a propósito: dentro de un año, mirando un mes
- * viejo, esto es lo que explica por qué ese total no se puede reproducir con el
- * código de entonces.
+ * El tipo y el corte por fecha viven en lib/facturacion-reglas.ts, que es el
+ * único lugar donde se declaran las reglas y sus vigencias.
  */
-export type ReglaDeCalculo =
-  /** Hasta septiembre 2026: facturable + conversaciones iniciadas. */
-  | "con_conversaciones"
-  /** Desde octubre 2026: sólo lo que Meta cobra por mandar. */
-  | "solo_enviados"
-
 export interface CierreDeMes {
   /** "2026-09" */
   periodo: string
@@ -92,18 +91,6 @@ export function periodoDe(fechaInicio: string): string {
 export function mesTerminado(periodo: string, ahora: Date = new Date()): boolean {
   const actual = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`
   return periodo < actual
-}
-
-/**
- * Qué regla corresponde a este período.
- *
- * El corte es el 1/10/2026, cuando se dejó de facturar las conversaciones
- * iniciadas por el paciente. Septiembre y todo lo anterior se siguen
- * calculando como se calculaban: si se les aplicara la regla nueva, bajarían de
- * golpe y dejarían de coincidir con las facturas ya emitidas.
- */
-export function reglaDelPeriodo(periodo: string): ReglaDeCalculo {
-  return periodo >= "2026-10" ? "solo_enviados" : "con_conversaciones"
 }
 
 export async function leerCierre(clienteId: string, periodo: string): Promise<CierreDeMes | null> {
