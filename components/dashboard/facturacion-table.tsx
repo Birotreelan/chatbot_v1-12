@@ -13,6 +13,17 @@ interface FacturacionCliente {
   clienteIdBase: string
   nombreCliente: string
   totalInteracciones: number
+  /**
+   * Presente cuando el mes está cerrado: trae el precio y el dólar con los que
+   * se facturó. Ver lib/facturacion-cierre.ts.
+   */
+  cierre?: {
+    periodo: string
+    precioUnitarioUsd: number | null
+    dolarVenta: number | null
+    regla: "con_conversaciones" | "solo_enviados"
+    cerradoEl: string
+  }
 }
 
 const formatoUSDMoney = new Intl.NumberFormat("es-AR", { style: "currency", currency: "USD", maximumFractionDigits: 2 })
@@ -196,24 +207,80 @@ export function FacturacionTable({
   // datos (servicio externo) no trae el campo para algún cliente puntual —
   // ver bug reportado 2026-08-13 (crasheaba toda la tabla con
   // "undefined is not an object (evaluating 'e.totalInteracciones.toLocaleString')").
+  // El mes está cerrado si CUALQUIER fila trae cierre: se cierran todas juntas
+  // la primera vez que alguien lo abre, así que es la misma condición.
+  const cierre = clientes.find((c) => c.cierre)?.cierre
   const totalGeneral = clientes.reduce((sum, c) => sum + (c.totalInteracciones || 0), 0)
+  async function reabrir() {
+    if (
+      !confirm(
+        "Esto vuelve a calcular el mes con los datos y el dólar de HOY, y reemplaza el cierre guardado. " +
+          "Usalo sólo si el cierre quedó mal. ¿Seguir?",
+      )
+    ) {
+      return
+    }
+    await fetch(`/api/facturacion/cierre?mes=${encodeURIComponent(month)}`, { method: "DELETE" })
+    setLoading(true)
+    loadData()
+  }
+
   const totalGeneralValorUSD = clientes.reduce((sum, c) => {
-    const precio = precios[c.clienteIdBase] ?? 0
+    const precio = c.cierre ? (c.cierre.precioUnitarioUsd ?? 0) : (precios[c.clienteIdBase] ?? 0)
     return sum + (c.totalInteracciones || 0) * precio
   }, 0)
-  const totalGeneralValorARS = dolarVenta ? totalGeneralValorUSD * dolarVenta : 0
+
+  // El total en pesos se suma fila por fila y no con una cotización única: en
+  // un mes cerrado cada fila puede tener la suya, y multiplicar el total en
+  // dólares por el dólar de hoy daría un número que no coincide con la suma de
+  // lo que muestra cada renglón.
+  const totalGeneralValorARS = clientes.reduce((sum, c) => {
+    const precio = c.cierre ? (c.cierre.precioUnitarioUsd ?? 0) : (precios[c.clienteIdBase] ?? 0)
+    const cotizacion = c.cierre ? c.cierre.dolarVenta : dolarVenta
+    return sum + (c.totalInteracciones || 0) * precio * (cotizacion || 0)
+  }, 0)
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>{title}</CardTitle>
-          <CardDescription>{cantidadLabel} por clínica en el período seleccionado</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            {title}
+            {/* Que el mes esté cerrado tiene que verse: explica por qué el
+                precio no se edita y por qué el total no cambia aunque se
+                actualice. Sin el cartel, eso se lee como un error. */}
+            {cierre && (
+              <span className="rounded-md border border-primary/40 bg-primary/5 px-2 py-0.5 text-xs font-normal text-primary">
+                Cerrado
+              </span>
+            )}
+          </CardTitle>
+          <CardDescription>
+            {cierre ? (
+              <>
+                Mes cerrado el {new Date(cierre.cerradoEl).toLocaleDateString("es-AR")} con el dólar
+                a ${cierre.dolarVenta?.toLocaleString("es-AR") ?? "—"}
+                {cierre.regla === "con_conversaciones"
+                  ? " · incluye las conversaciones iniciadas por pacientes"
+                  : " · sólo mensajes enviados"}
+                . Estos valores ya no cambian.
+              </>
+            ) : (
+              <>{cantidadLabel} por clínica en el período seleccionado</>
+            )}
+          </CardDescription>
         </div>
-        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading || refreshing}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
-          Actualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          {cierre && (
+            <Button variant="outline" size="sm" onClick={reabrir} disabled={loading || refreshing}>
+              Reabrir mes
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading || refreshing}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
+            Actualizar
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -241,10 +308,18 @@ export function FacturacionTable({
             </TableHeader>
             <TableBody>
               {clientes.map((cliente) => {
-                const precio = precios[cliente.clienteIdBase] ?? 0
+                // ── Un mes cerrado usa SUS valores, no los de hoy ───────
+                //
+                // Es el punto del congelado: si acá se aplicara el precio
+                // actual o el dólar del día, el total de un mes ya facturado
+                // volvería a moverse y el cierre no serviría de nada.
+                const precio = cliente.cierre
+                  ? (cliente.cierre.precioUnitarioUsd ?? 0)
+                  : (precios[cliente.clienteIdBase] ?? 0)
+                const cotizacion = cliente.cierre ? cliente.cierre.dolarVenta : dolarVenta
                 const totalInteracciones = cliente.totalInteracciones || 0
                 const valorTotalUSD = totalInteracciones * precio
-                const valorTotalARS = dolarVenta ? valorTotalUSD * dolarVenta : null
+                const valorTotalARS = cotizacion ? valorTotalUSD * cotizacion : null
                 return (
                   <TableRow key={cliente.clienteId}>
                     <TableCell className="font-medium">{cliente.nombreCliente}</TableCell>
@@ -307,16 +382,31 @@ export function FacturacionTable({
                       {totalInteracciones.toLocaleString("es-AR")}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        className="w-28 ml-auto text-right"
-                        value={precios[cliente.clienteIdBase] ?? ""}
-                        onChange={(e) => handlePrecioChange(cliente.clienteIdBase, e.target.value)}
-                        onBlur={() => handlePrecioBlur(cliente.clienteIdBase)}
-                        disabled={guardando[cliente.clienteIdBase]}
-                      />
+                      {/* En un mes cerrado el precio no se edita: el total ya
+                          no depende de él. Un campo editable que no cambia
+                          nada es peor que uno bloqueado —se toca, no pasa
+                          nada, y uno cree que el sistema falla—. */}
+                      {cliente.cierre ? (
+                        <span
+                          className="block text-right text-muted-foreground"
+                          title={`Precio con el que se facturó ${cliente.cierre.periodo}`}
+                        >
+                          {cliente.cierre.precioUnitarioUsd !== null
+                            ? formatoUSDMoney.format(cliente.cierre.precioUnitarioUsd)
+                            : "—"}
+                        </span>
+                      ) : (
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="w-28 ml-auto text-right"
+                          value={precios[cliente.clienteIdBase] ?? ""}
+                          onChange={(e) => handlePrecioChange(cliente.clienteIdBase, e.target.value)}
+                          onBlur={() => handlePrecioBlur(cliente.clienteIdBase)}
+                          disabled={guardando[cliente.clienteIdBase]}
+                        />
+                      )}
                     </TableCell>
                     <TableCell className="text-right">{formatoUSDMoney.format(valorTotalUSD)}</TableCell>
                     <TableCell className="text-right">
