@@ -24,16 +24,8 @@ interface FacturacionCliente {
    * desglose con el que se facturó y no uno reconstruido hoy.
    */
   recordatorios?: number
-  serviciosPagados?: number
-  /**
-   * `true` si el proxy devolvió partes que no suman su propio total.
-   *
-   * Viene calculado del servidor sobre los valores crudos. La tabla no lo
-   * deduce comparando las columnas que muestra: con varias sedes están
-   * prorrateadas y redondeadas, y la comparación acusaría a la API externa de
-   * una inconsistencia que en realidad introdujo nuestro redondeo.
-   */
-  desgloseInconsistente?: boolean
+  /** TODOS los mensajes de servicio del período, con cargo o sin él. */
+  serviciosFacturados?: number
   /**
    * Presente cuando el mes está cerrado: trae el precio y el dólar con los que
    * se facturó. Ver lib/facturacion-cierre.ts.
@@ -242,17 +234,7 @@ export function FacturacionTable({
   // decisión que el día del próximo cambio nadie va a recordar actualizar.
   const hayDesglose = clientes.some((c) => c.recordatorios !== undefined)
   const totalRecordatorios = clientes.reduce((sum, c) => sum + (c.recordatorios || 0), 0)
-  const totalServiciosPagados = clientes.reduce((sum, c) => sum + (c.serviciosPagados || 0), 0)
-  // Las clínicas cuyo desglose no cierra, una sola vez cada una. Se agrupa por
-  // `clienteIdBase` y no por nombre: con sedes, el nombre de cada fila lleva el
-  // sufijo de la sede, así que el mismo cliente se listaría tres veces.
-  const inconsistentes = Array.from(
-    new Map(
-      clientes
-        .filter((c) => c.desgloseInconsistente)
-        .map((c) => [c.clienteIdBase, c.nombreCliente.split(" - ")[0]] as const),
-    ).values(),
-  )
+  const totalServicios = clientes.reduce((sum, c) => sum + (c.serviciosFacturados || 0), 0)
 
   async function reabrir() {
     if (
@@ -317,15 +299,8 @@ export function FacturacionTable({
                 distintas y nadie sabe cuál se factura. */}
             {hayDesglose && (
               <span className="mt-1 block text-xs">
-                Recordatorios enviados + mensajes de servicio pagos = {cantidadLabel.toLowerCase()}
-                {/* Se nombran las clínicas, no se avisa en general: el reporte a
-                    la API externa necesita saber de qué cliente hablamos. */}
-                {inconsistentes.length > 0 && (
-                  <span className="ml-1 font-medium text-destructive">
-                    — el desglose no suma el total en {inconsistentes.join(", ")}. Lo facturado es
-                    el total que informa la API; hay que corregirlo del lado del servicio externo.
-                  </span>
-                )}
+                Recordatorios enviados + mensajes de servicio = {cantidadLabel.toLowerCase()}.
+                {" "}Los mensajes de servicio se cobran completos, con cargo de Meta o sin él.
               </span>
             )}
           </CardDescription>
@@ -366,7 +341,7 @@ export function FacturacionTable({
                       Recordatorios enviados
                     </TableHead>
                     <TableHead className="text-right font-normal text-muted-foreground">
-                      Mensajes de servicio pagos
+                      Mensajes de servicio
                     </TableHead>
                   </>
                 )}
@@ -460,8 +435,8 @@ export function FacturacionTable({
                             : "—"}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
-                          {cliente.serviciosPagados !== undefined
-                            ? cliente.serviciosPagados.toLocaleString("es-AR")
+                          {cliente.serviciosFacturados !== undefined
+                            ? cliente.serviciosFacturados.toLocaleString("es-AR")
                             : "—"}
                         </TableCell>
                       </>
@@ -513,7 +488,7 @@ export function FacturacionTable({
                       {totalRecordatorios.toLocaleString("es-AR")}
                     </TableCell>
                     <TableCell className="text-right">
-                      {totalServiciosPagados.toLocaleString("es-AR")}
+                      {totalServicios.toLocaleString("es-AR")}
                     </TableCell>
                   </>
                 )}

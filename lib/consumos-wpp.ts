@@ -32,8 +32,9 @@
  *
  *  - Estadísticas: "Recordatorios enviados" = `plantillas`, y el total de
  *    interacciones = plantillas + conversaciones iniciadas.
- *  - Facturación, desde octubre 2026: `plantillas + servicio.pagados`, que es
- *    lo que se cobra. Ver `facturable` más abajo.
+ *  - Facturación, desde octubre 2026: `plantillas + servicio.total`, o sea los
+ *    recordatorios más TODOS los mensajes de servicio, con cargo o sin él. Ver
+ *    `facturable` más abajo: deliberadamente no es `mensajes_pagados`.
  *
  * Decisión de Nicolás (1/10/2026): los dos paneles dejan de mostrar el mismo
  * total a propósito —Estadísticas informa actividad, Facturación cobra—, y por
@@ -108,51 +109,64 @@ export function leerConsumo(crudo: any): ConsumoDeWpp | null {
 }
 
 /**
- * Lo que se cobra y sus partes, tal como llegan (7/10/2026).
+ * Lo que se cobra y sus partes (7/10/2026).
  *
- * ── Se replica la API, no se corrige ───────────────────────────────────────
+ * ── La fórmula ─────────────────────────────────────────────────────────────
  *
- * Los tres números salen de la respuesta sin tocarlos: `plantillas`,
- * `servicio.pagados` y `mensajes_pagados`. La relación entre ellos tiene que
- * ser `plantillas + servicio.pagados === mensajes_pagados`, y en las
- * respuestas reales se cumple.
+ *     recordatorios (plantillas) + TODOS los mensajes de servicio
  *
- * Probamos derivar las partes por resta para que la suma cerrara siempre. Es
- * peor: una inconsistencia del proxy quedaba disimulada en números que
- * encajaban, el panel se veía bien y el error seguía ahí, facturándose.
- * Mostrando los tres como llegan, si alguna vez no coinciden se ve en el
- * front y se corrige donde está el problema, que es la API externa.
+ * Los mensajes de servicio entran completos: los que Meta cobra y los que
+ * entran en la franja sin cargo. Decisión de Nicolás del 7/10/2026.
  *
- * `coincide` es esa verificación hecha una sola vez, acá, sobre los valores
- * crudos. La pantalla no la rehace comparando lo que muestra: con varias sedes
- * los números van prorrateados y redondeados, y el redondeo solo haría aparecer
- * inconsistencias que no existen — un diagnóstico que acusa a la otra parte de
- * algo que está haciendo bien es el peor error posible en un diagnóstico.
+ * ── Esto ya no es `mensajes_pagados` ───────────────────────────────────────
  *
- * `serviciosPagados` es `null`, y no 0, cuando el proxy no manda el desglose:
- * un cero ahí se leería como "este mes no hubo mensajes de servicio con cargo",
+ * Importa tenerlo presente. `mensajes_pagados` es lo que Meta nos cobra
+ * —plantillas + servicio.pagados— y hasta este cambio era también lo que
+ * facturábamos. Ahora facturamos más que eso: la diferencia es exactamente
+ * `servicio.gratis`. Los dos números van a diferir SIEMPRE que haya mensajes
+ * de servicio gratuitos, y eso no es un error ni una inconsistencia del proxy.
+ *
+ * Por eso ya no hay una bandera que compare el total con `mensajes_pagados`:
+ * cuando la había, con la fórmula nueva se encendería todos los meses. Una
+ * alarma que suena siempre no informa nada, y encima mandaría a reportarle a
+ * la API externa un problema inexistente. La coherencia interna de la
+ * respuesta del proxy se sigue controlando, pero en el log de `getConsumoDeWpp`,
+ * que es donde corresponde.
+ *
+ * ── Qué se replica y qué se calcula ────────────────────────────────────────
+ *
+ * Las partes se replican de la API sin tocarlas: `plantillas` y
+ * `servicio.total`. El total es la suma de esas dos, así que las columnas del
+ * panel siempre cierran con él sin necesidad de ajustar nada.
+ *
+ * `serviciosFacturados` es `null`, y no 0, cuando el proxy no manda el
+ * desglose: un cero ahí se leería como "este mes no hubo mensajes de servicio",
  * que es un dato, y lo que pasa es que no lo sabemos.
  */
 export function facturable(consumo: ConsumoDeWpp | null): {
   recordatorios: number
-  serviciosPagados: number | null
-  /** `mensajes_pagados`, tal como llega: es lo que se factura. */
+  /** Todos los mensajes de servicio: `servicio.total`. */
+  serviciosFacturados: number | null
+  /** Lo que se cobra: recordatorios + mensajes de servicio. */
   total: number
-  /** `false` si las partes no suman el total que informa el proxy. */
-  coincide: boolean
+  /** Lo que Meta nos cobra, para comparar. No es lo que se factura. */
+  segunMeta: number
 } {
-  if (!consumo) return { recordatorios: 0, serviciosPagados: null, total: 0, coincide: true }
+  if (!consumo) {
+    return { recordatorios: 0, serviciosFacturados: null, total: 0, segunMeta: 0 }
+  }
 
   const recordatorios = consumo.plantillas
-  const serviciosPagados = consumo.servicio ? consumo.servicio.pagados : null
+  const serviciosFacturados = consumo.servicio ? consumo.servicio.total : null
 
   return {
     recordatorios,
-    serviciosPagados,
-    total: consumo.mensajesPagados,
-    // Sin desglose no hay nada que contrastar: no se acusa de inconsistente a
-    // una respuesta que simplemente no trae el dato.
-    coincide: serviciosPagados === null || recordatorios + serviciosPagados === consumo.mensajesPagados,
+    serviciosFacturados,
+    // Sin el desglose no hay con qué sumar: queda `mensajes_pagados`, que es lo
+    // único que informa la respuesta. Cobra de menos —le faltan los gratuitos—
+    // y es preferible a inventar un total.
+    total: serviciosFacturados === null ? consumo.mensajesPagados : recordatorios + serviciosFacturados,
+    segunMeta: consumo.mensajesPagados,
   }
 }
 
@@ -181,22 +195,22 @@ export async function getConsumoDeWpp(
 
     const consumo = leerConsumo(await respuesta.json())
 
-    // ── ¿Las dos cuentas coinciden? ────────────────────────────────────────
+    // ── ¿La respuesta es coherente consigo misma? ──────────────────────────
     //
     // `plantillas + servicio.pagados` tiene que dar `mensajes_pagados`: son la
     // misma cosa contada de dos formas, y en las respuestas reales coinciden.
     //
-    // El log existe para el caso en que dejen de coincidir. Facturamos la suma
-    // de las partes, así que una divergencia no rompe nada ni cambia el total
-    // visible — y por eso justamente pasaría inadvertida. Si aparece, es un
-    // cambio de contrato del proxy y hay que mirarlo antes de facturar el mes.
+    // Es una verificación de la API, no de lo que facturamos —desde el
+    // 7/10/2026 cobramos también los mensajes de servicio gratuitos, así que
+    // nuestro total es mayor a propósito—. Si este log aparece, es un cambio de
+    // contrato del proxy y hay que mirarlo antes de facturar el mes.
     if (consumo && !consumo.formatoViejo && consumo.servicio) {
       const suma = consumo.plantillas + consumo.servicio.pagados
       if (suma !== consumo.mensajesPagados) {
         console.warn(
           `[CONSUMOS_WPP] ${clienteId}: plantillas (${consumo.plantillas}) + servicio.pagados ` +
             `(${consumo.servicio.pagados}) = ${suma}, pero mensajes_pagados dice ` +
-            `${consumo.mensajesPagados}. Se factura ${suma}.`,
+            `${consumo.mensajesPagados}. Respuesta incoherente del proxy — revisar antes de facturar.`,
         )
       }
     }

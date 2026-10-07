@@ -109,15 +109,15 @@ export function TarjetaDeInteracciones({
   //  - Los mensajes de servicio sin cargo. Cobrarlos sería cobrar algo que no
   //    se paga.
   //
-  // Se suman las dos partes que la tarjeta ya muestra, en vez de usar el
-  // `mensajes_pagados` que viene hecho, para que el cliente pueda verificar la
-  // cuenta mirando los recuadros de arriba. Los dos valores deberían ser
-  // idénticos; si alguna vez no lo son, el panel de Facturación lo marca y el
-  // arreglo va en la API externa.
+  // Los mensajes de servicio entran COMPLETOS desde el 7/10/2026: los que Meta
+  // cobra y los de la franja sin cargo. Por eso es `servicio.total` y no
+  // `servicio.pagados`.
   //
-  // Consecuencia a tener presente: este número ya NO es el total grande de la
-  // tarjeta. Por eso el recuadro del costo explica abajo de qué se compone.
-  const unidadesFacturables = recordatoriosEnviados + (servicio?.pagados ?? 0)
+  // Ojo con el recuadro de al lado: sigue mostrando el detalle "X sin cargo · Y
+  // con cargo", que es el consumo real de Meta. Que haya mensajes sin cargo ahí
+  // y sin embargo se cobren acá no es una contradicción, pero tiene que estar
+  // dicho — lo dice el recuadro del costo, abajo.
+  const unidadesFacturables = recordatoriosEnviados + (servicio?.total ?? 0)
 
   return (
     <Card className="border-purple-200 bg-purple-50/30">
@@ -166,7 +166,7 @@ export function TarjetaDeInteracciones({
             clienteId={clienteId}
             unidades={unidadesFacturables}
             recordatorios={recordatoriosEnviados}
-            serviciosConCargo={servicio?.pagados ?? 0}
+            mensajesDeServicio={servicio?.total ?? 0}
             cargandoInteracciones={cargando}
           />
         </div>

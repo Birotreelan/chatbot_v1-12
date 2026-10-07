@@ -40,19 +40,19 @@ export function CostoAproximado({
   clienteId,
   unidades,
   recordatorios,
-  serviciosConCargo = 0,
+  mensajesDeServicio = 0,
   cargandoInteracciones,
 }: {
   clienteId: string
   /**
-   * Las unidades que se cobran: recordatorios + mensajes de servicio con
-   * cargo. Ver `unidadesFacturables` en tarjeta-de-interacciones.tsx.
+   * Las unidades que se cobran: recordatorios + TODOS los mensajes de
+   * servicio. Ver `unidadesFacturables` en tarjeta-de-interacciones.tsx.
    */
   unidades: number
   /** Cuántas de esas unidades son recordatorios. */
   recordatorios: number
-  /** Cuántas son mensajes de servicio con cargo. */
-  serviciosConCargo?: number
+  /** Cuántas son mensajes de servicio, con cargo de Meta o sin él. */
+  mensajesDeServicio?: number
   /** El total todavía se está trayendo: no mostrar un costo de cero. */
   cargandoInteracciones?: boolean
 }) {
@@ -114,9 +114,13 @@ export function CostoAproximado({
               nunca: sin esta línea, el cliente divide el costo por el total
               que ve y le da cualquier cosa. Con ella, la cuenta se verifica
               contra los recuadros de la izquierda. */}
+          {/* Dice "de servicio", sin calificar, porque se cobran todos. El
+              recuadro de al lado muestra cuántos tuvieron cargo de Meta y
+              cuántos no; si acá dijera "con cargo", la cuenta no cerraría
+              contra ese detalle y parecería un error del panel. */}
           {unidades} unidad{unidades === 1 ? "" : "es"} cobrables: {recordatorios} recordatorio
-          {recordatorios === 1 ? "" : "s"} + {serviciosConCargo} mensaje
-          {serviciosConCargo === 1 ? "" : "s"} de servicio con cargo
+          {recordatorios === 1 ? "" : "s"} + {mensajesDeServicio} mensaje
+          {mensajesDeServicio === 1 ? "" : "s"} de servicio
           <br />
           {totalPesos !== null ? (
             <>

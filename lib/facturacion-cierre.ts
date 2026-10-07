@@ -68,8 +68,12 @@ export interface CierreDeMes {
   desglose?: {
     /** Plantillas despachadas: los recordatorios. */
     recordatorios: number
-    /** Mensajes de servicio que salieron de la franja sin cargo. */
-    serviciosPagados: number
+    /**
+     * TODOS los mensajes de servicio del período: `servicio.total`, con cargo
+     * o sin él. Desde el 7/10/2026 se cobran los gratuitos también, así que
+     * este número ya no es `servicio.pagados`.
+     */
+    serviciosFacturados: number
   }
   /** El precio por unidad vigente al cerrar. `null` si no estaba cargado. */
   precioUnitarioUsd: number | null
@@ -90,7 +94,7 @@ export interface CierreDeMes {
     interacciones: number
     /** El desglose de ESTA sede, prorrateado. Ver la ruta de interacciones. */
     recordatorios?: number
-    serviciosPagados?: number
+    serviciosFacturados?: number
   }>
 }
 

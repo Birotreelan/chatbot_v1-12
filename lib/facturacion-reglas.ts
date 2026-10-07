@@ -66,9 +66,9 @@ export const REGLAS: ReglaDeFacturacion[] = [
     desde: "2026-10",
     nombre: "Desde octubre 2026",
     queSeCuenta:
-      "Sólo los mensajes facturables de WhatsApp: plantillas enviadas + mensajes de servicio con cargo.",
+      "Todos los mensajes enviados por WhatsApp: recordatorios (plantillas) + mensajes de servicio, tengan cargo de Meta o no.",
     queCambio:
-      "Dejaron de contarse las conversaciones iniciadas por los pacientes. WhatsApp cobra los mensajes que se envían, no los que entran, así que facturarlas cobraba algo que no tiene costo.",
+      "Dos cambios. Dejaron de contarse las conversaciones iniciadas por los pacientes: WhatsApp cobra los mensajes que se envían, no los que entran. Y empezaron a contarse todos los mensajes de servicio, incluidos los que caen en la franja sin cargo de Meta.",
   },
 ]
 
