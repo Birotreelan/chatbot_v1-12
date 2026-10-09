@@ -29,6 +29,17 @@ const pesos = new Intl.NumberFormat("es-AR", {
   maximumFractionDigits: 0,
 })
 
+/** Miles con punto. Un "3258" suelto se lee peor que "3.258". */
+const num = (n: number) => n.toLocaleString("es-AR")
+
+/** El precio por unidad lleva 3 decimales: con 2, US$ 0,075 se ve como 0,08. */
+const precioUnitario = new Intl.NumberFormat("es-AR", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 3,
+  maximumFractionDigits: 4,
+})
+
 const dolares = new Intl.NumberFormat("es-AR", {
   style: "currency",
   currency: "USD",
@@ -108,28 +119,27 @@ export function CostoAproximado({
 
       {!esperando && costo && (
         <p className="mt-1 text-xs text-muted-foreground">
-          {/* La composición va SIEMPRE, no sólo cuando hay mensajes con cargo
-              (1/10/2026). Desde que el costo dejó de calcularse sobre el total
-              de interacciones, el número de arriba y el de acá no coinciden
-              nunca: sin esta línea, el cliente divide el costo por el total
-              que ve y le da cualquier cosa. Con ella, la cuenta se verifica
-              contra los recuadros de la izquierda. */}
-          {/* Dice "de servicio", sin calificar, porque se cobran todos. El
-              recuadro de al lado muestra cuántos tuvieron cargo de Meta y
-              cuántos no; si acá dijera "con cargo", la cuenta no cerraría
-              contra ese detalle y parecería un error del panel. */}
-          {unidades} unidad{unidades === 1 ? "" : "es"} cobrables: {recordatorios} recordatorio
-          {recordatorios === 1 ? "" : "s"} + {mensajesDeServicio} mensaje
-          {mensajesDeServicio === 1 ? "" : "s"} de servicio
+          {/* La cuenta completa, escrita (9/10/2026).
+              Se muestra siempre, no sólo cuando hay mensajes de servicio: es
+              lo que permite verificar el costo contra los dos recuadros de la
+              izquierda, sumando y multiplicando a mano. Sin ella, el único
+              camino para entender el número es dividirlo por algo y adivinar
+              cuál era el "algo".
+
+              Antes decía "unidades cobrables", que sugería que había unidades
+              NO cobrables. Ya no las hay: se cobran todas. */}
+          {num(recordatorios)} recordatorio{recordatorios === 1 ? "" : "s"} +{" "}
+          {num(mensajesDeServicio)} mensaje{mensajesDeServicio === 1 ? "" : "s"} de servicio ={" "}
+          {num(unidades)} unidad{unidades === 1 ? "" : "es"}
           <br />
+          {num(unidades)} × {precioUnitario.format(costo.precioUnitarioUsd)} ={" "}
+          {dolares.format(totalUsd)}
           {totalPesos !== null ? (
-            <>
-              {dolares.format(totalUsd)} · dólar venta {pesos.format(costo.dolarVenta as number)}
-            </>
+            <> · dólar venta {pesos.format(costo.dolarVenta as number)}</>
           ) : (
             // Se dice por qué está en dólares. Sin esto, la clínica que un día
             // ve pesos y otro ve dólares va a pensar que algo se rompió.
-            <>No pudimos obtener la cotización del dólar</>
+            <> · no pudimos obtener la cotización del dólar</>
           )}
         </p>
       )}

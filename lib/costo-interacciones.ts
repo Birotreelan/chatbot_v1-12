@@ -24,14 +24,23 @@ import { getPrecioUnidad } from "./facturacion-precios"
 import { getDolarVenta } from "./facturacion-dolar"
 
 /**
- * Precio por interacción en dólares, cuando la clínica no tiene uno cargado.
+ * Precio por unidad en dólares, cuando la clínica no tiene uno cargado.
  *
- * Una interacción es un recordatorio enviado o una conversación iniciada por el
- * paciente: la misma suma que el panel muestra arriba. Desde el 1/10/2026 Meta
- * cobra por mensaje, así que este número es el que tiene que moverse si cambia
- * la tarifa.
+ * Una unidad es un recordatorio enviado o un mensaje de servicio. Se cobran
+ * todas: los mensajes de servicio entran completos, tengan cargo de Meta o no.
+ *
+ * ── Por qué 0,075 y por qué estaba en 0,15 (9/10/2026) ─────────────────────
+ *
+ * 0,075 es el precio final definido para el cliente. El 0,15 anterior venía de
+ * cuando la unidad era otra cosa —se contaban también las conversaciones
+ * iniciadas por el paciente— y quedó sin actualizar al cambiar la fórmula.
+ *
+ * Esto es un DEFAULT: sólo lo ven las clínicas a las que todavía no se les
+ * cargó el precio en /dashboard/facturacion. Importa igual, porque mientras
+ * estuvo desactualizado esas clínicas vieron el doble de lo que se les factura,
+ * y un panel que informa de más no falla: convence.
  */
-export const PRECIO_POR_INTERACCION_USD = 0.15
+export const PRECIO_POR_INTERACCION_USD = 0.075
 
 export interface CostoDeLasInteracciones {
   /** Precio unitario efectivo en dólares (el del cliente, o el default). */

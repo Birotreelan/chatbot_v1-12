@@ -46,6 +46,9 @@ export interface MensajesDeServicio {
   pagados: number
 }
 
+/** Miles con punto: 16742 se lee mal, 16.742 no. */
+const num = (n: number) => n.toLocaleString("es-AR")
+
 /** Un valor de la tarjeta: el número, o el spinner mientras no esté. */
 function Valor({ cargando, children }: { cargando: boolean; children: React.ReactNode }) {
   if (cargando) {
@@ -62,13 +65,11 @@ function Valor({ cargando, children }: { cargando: boolean; children: React.Reac
 function Recuadro({
   icono: Icono,
   etiqueta,
-  detalle,
   cargando,
   children,
 }: {
   icono: typeof Send
   etiqueta: string
-  detalle?: React.ReactNode
   cargando: boolean
   children: React.ReactNode
 }) {
@@ -77,7 +78,6 @@ function Recuadro({
       <Icono className="h-6 w-6 text-purple-400 mx-auto mb-2" />
       <Valor cargando={cargando}>{children}</Valor>
       <div className="text-sm text-muted-foreground mt-1">{etiqueta}</div>
-      {!cargando && detalle && <p className="mt-1 text-xs text-muted-foreground">{detalle}</p>}
     </div>
   )
 }
@@ -97,26 +97,21 @@ export function TarjetaDeInteracciones({
   cargando: boolean
 }) {
 
-  // ── Qué se cobra (1/10/2026) ────────────────────────────────────────────
+  // ── Qué se cobra (9/10/2026) ────────────────────────────────────────────
   //
-  // Sólo lo que Meta cobra por mandar: los recordatorios (plantillas) y los
-  // mensajes de servicio que salieron de la franja sin cargo.
+  //     recordatorios enviados + mensajes de servicio
   //
-  // Quedan afuera dos cosas, y las dos a propósito:
+  // Todo, sin distinciones. Los mensajes de servicio entran completos: que Meta
+  // no nos cobre los primeros 1.000 de cada cliente es un dato de NUESTRA
+  // relación con Meta, no de la relación con la clínica.
   //
-  //  - Las conversaciones iniciadas por el paciente. Meta cobra lo que se
-  //    manda, no lo que entra.
-  //  - Los mensajes de servicio sin cargo. Cobrarlos sería cobrar algo que no
-  //    se paga.
+  // Lo único que queda afuera son las conversaciones iniciadas por el paciente,
+  // que no son mensajes enviados y nunca se facturaron bajo esta regla.
   //
-  // Los mensajes de servicio entran COMPLETOS desde el 7/10/2026: los que Meta
-  // cobra y los de la franja sin cargo. Por eso es `servicio.total` y no
-  // `servicio.pagados`.
-  //
-  // Ojo con el recuadro de al lado: sigue mostrando el detalle "X sin cargo · Y
-  // con cargo", que es el consumo real de Meta. Que haya mensajes sin cargo ahí
-  // y sin embargo se cobren acá no es una contradicción, pero tiene que estar
-  // dicho — lo dice el recuadro del costo, abajo.
+  // Es el mismo total que muestra el panel de Facturación para el período, con
+  // el mismo precio por unidad. Los dos números tienen que coincidir: la
+  // clínica los compara, y ésa es la única verificación externa que tenemos de
+  // que el panel no miente.
   const unidadesFacturables = recordatoriosEnviados + (servicio?.total ?? 0)
 
   return (
@@ -139,26 +134,21 @@ export function TarjetaDeInteracciones({
       <CardContent>
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           <Recuadro icono={Send} etiqueta="Recordatorios enviados" cargando={cargando}>
-            {recordatoriosEnviados}
+            {num(recordatoriosEnviados)}
           </Recuadro>
 
           {/* Sólo si el proxy manda el desglose. Un recuadro con tres ceros
               sería peor que su ausencia: se leería como "no hubo mensajes de
-              servicio" cuando en realidad no sabemos. */}
+              servicio" cuando en realidad no sabemos.
+
+              Sin el detalle "X sin cargo · Y con cargo" (9/10/2026): describía
+              la franja gratuita de Meta, que es un dato NUESTRO. A la clínica
+              se le cobran todos los mensajes de servicio por igual, así que
+              tenerlo a la vista invitaba a la pregunta razonable de por qué se
+              le factura algo rotulado "sin cargo". */}
           {(cargando || servicio) && (
-            <Recuadro
-              icono={MessagesSquare}
-              etiqueta="Mensajes de servicio"
-              cargando={cargando}
-              detalle={
-                servicio ? (
-                  <>
-                    {servicio.gratis} sin cargo · {servicio.pagados} con cargo
-                  </>
-                ) : undefined
-              }
-            >
-              {servicio?.total ?? 0}
+            <Recuadro icono={MessagesSquare} etiqueta="Mensajes de servicio" cargando={cargando}>
+              {num(servicio?.total ?? 0)}
             </Recuadro>
           )}
 
