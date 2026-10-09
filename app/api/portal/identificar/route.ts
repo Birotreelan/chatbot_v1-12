@@ -106,19 +106,21 @@ export async function POST(request: Request) {
   if (cuerpo.accion === "alta") {
     // El DNI vuelve a validarse acá aunque ya haya pasado por el paso 1. Esta
     // ruta es pública: el paso 1 no es un requisito que se pueda dar por hecho.
+    const obraSocialId = cuerpo.obraSocialId ? String(cuerpo.obraSocialId) : undefined
+    const obraSocialNombre = cuerpo.obraSocialNombre ? String(cuerpo.obraSocialNombre) : undefined
+
     const validacion = validarAlta({
       dni: cuerpo.dni ?? contexto.identidad?.dni,
       nombre: cuerpo.nombre,
       apellido: cuerpo.apellido,
       email: cuerpo.email,
+      obraSocialId,
+      obraSocialNombre,
     })
 
     if (!validacion.ok) {
       return NextResponse.json({ ok: false, errores: validacion.errores }, { status: 400 })
     }
-
-    const obraSocialId = cuerpo.obraSocialId ? String(cuerpo.obraSocialId) : undefined
-    const obraSocialNombre = cuerpo.obraSocialNombre ? String(cuerpo.obraSocialNombre) : undefined
 
     // El chequeo se rehace del lado del servidor. La pantalla ya marca las
     // obras sociales que no permiten turnos online, pero eso es una ayuda

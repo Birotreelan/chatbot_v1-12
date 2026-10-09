@@ -201,7 +201,26 @@ export async function POST(request: Request) {
     nombre: ident?.nombre || contexto.pacienteNombres || contexto.pacienteNombre,
     apellido: ident?.apellido || contexto.pacienteApellido,
     deudorId: ident?.obraSocialId || contexto.obraSocialId,
-    deudorNombre: ident?.obraSocialNombre,
+    // El fallback al contexto faltaba SÓLO acá (9/10/2026). `deudorId` lo
+    // tenía y `deudorNombre` no, así que el paciente que el bot ya había
+    // identificado reservaba con el id de su obra social y sin el nombre.
+    // No es simetría por prolijidad: `set_turno` recibe los dos campos, y
+    // mandar uno vacío deja la ficha a medias del lado de la clínica.
+    deudorNombre: ident?.obraSocialNombre || contexto.obraSocialNombre,
+  }
+
+  // ── Reservar sin obra social es un turno que alguien va a tener que
+  //    corregir a mano ────────────────────────────────────────────────────
+  //
+  // No se bloquea la reserva: dejar a un paciente sin turno por un dato que
+  // podemos reclamar después es peor que el turno incompleto. Pero tiene que
+  // quedar en el log, porque el síntoma del lado de la clínica —"este
+  // paciente figura sin obra social"— no apunta a ninguna parte.
+  if (!datosDelPaciente.deudorId) {
+    console.warn(
+      `[PORTAL] Reserva SIN obra social para ${contexto.phone} ` +
+        `(dni ${dniParaReservar}, alta nueva: ${!ident?.tieneFicha})`,
+    )
   }
 
   // Un alta sin nombre o sin DNI crearía una ficha inservible. Antes que eso,

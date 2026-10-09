@@ -208,6 +208,26 @@ export function DarseDeAlta({
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault()
+
+    // ── La obra social, antes de salir (9/10/2026) ────────────────────────
+    //
+    // El servidor también la exige, pero el error tiene que verse ACÁ: el que
+    // escribió "osde" y no tocó la opción de la lista no sabe que no eligió
+    // nada — el campo muestra lo que tipeó, igual que si hubiera elegido.
+    //
+    // Por eso son dos mensajes distintos y no uno: "no escribiste nada" y
+    // "escribiste pero no elegiste" se arreglan de maneras distintas, y el
+    // segundo es el que estaba haciendo que los turnos se reservaran sin obra
+    // social.
+    if (!elegida) {
+      setErrores({
+        obraSocial: busquedaOS.trim()
+          ? "Tocá tu obra social en la lista de abajo para elegirla."
+          : "Elegí tu obra social: escribí las primeras letras y tocala en la lista.",
+      })
+      return
+    }
+
     setCargando(true)
     setErrores({})
     try {
@@ -277,15 +297,51 @@ export function DarseDeAlta({
         />
       </Campo>
 
-      <Campo etiqueta={paraFamiliar ? "Obra social del paciente (opcional)" : "Obra social (opcional)"}>
-        <input
-          autoComplete="off"
-          value={elegida ? elegida.nombre : busquedaOS}
-          onChange={(e) => buscarOS(e.target.value)}
-          placeholder="Escribí las primeras letras"
-          className={CLASES_CAMPO}
-        />
+      {/* ── Elegida vs. escrita ──────────────────────────────────────────────
+          Hasta el 9/10/2026 los dos estados se veían IGUAL: un input con el
+          texto adentro. El paciente escribía "osde", no tocaba la opción, y
+          continuaba convencido de haber elegido — pero `elegida` seguía en
+          null y el turno se reservaba sin `Deudor_Id`.
+
+          Ahora la elección se ve como tal: deja de ser un campo de texto y
+          pasa a ser el nombre confirmado con un botón para cambiarlo. Es la
+          diferencia entre pedirle al paciente que recuerde un paso y mostrarle
+          en qué estado está. */}
+      <Campo
+        etiqueta={paraFamiliar ? "Obra social del paciente" : "Obra social"}
+        error={errores.obraSocial}
+      >
+        {elegida ? (
+          <div className="flex min-h-[52px] items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3">
+            <span className="text-[15px] font-medium sm:text-base">{elegida.nombre}</span>
+            <button
+              type="button"
+              className="shrink-0 text-[14px] text-primary underline underline-offset-2"
+              onClick={() => {
+                setElegida(null)
+                setBusquedaOS("")
+                setOpcionesOS([])
+              }}
+            >
+              Cambiar
+            </button>
+          </div>
+        ) : (
+          <input
+            autoComplete="off"
+            value={busquedaOS}
+            onChange={(e) => buscarOS(e.target.value)}
+            placeholder="Escribí las primeras letras"
+            className={CLASES_CAMPO}
+          />
+        )}
       </Campo>
+
+      {/* Se dice qué falta hacer mientras la lista está abierta. Sin esto, la
+          lista parece un autocompletado decorativo. */}
+      {!elegida && busquedaOS.trim().length >= 2 && opcionesOS.length > 0 && (
+        <p className="-mt-2 text-[13px] text-muted-foreground">Tocá la tuya para elegirla:</p>
+      )}
 
       {!elegida && opcionesOS.length > 0 && (
         <div className="-mt-2 space-y-2">

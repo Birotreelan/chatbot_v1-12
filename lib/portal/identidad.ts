@@ -71,6 +71,7 @@ export interface ErroresDelAlta {
   nombre?: string
   apellido?: string
   email?: string
+  obraSocial?: string
 }
 
 export interface AltaValidada {
@@ -92,6 +93,8 @@ export function validarAlta(datos: {
   nombre?: unknown
   apellido?: unknown
   email?: unknown
+  obraSocialId?: unknown
+  obraSocialNombre?: unknown
 }): { ok: true; datos: AltaValidada } | { ok: false; errores: ErroresDelAlta } {
   const dni = normalizarDNI(datos.dni)
   const nombre = normalizarNombre(datos.nombre)
@@ -103,6 +106,22 @@ export function validarAlta(datos: {
   if (!nombre) errores.nombre = "Escribí tu nombre."
   if (!apellido) errores.apellido = "Escribí tu apellido."
   if (!email) errores.email = "Revisá el email: parece que falta algo."
+
+  // ── La obra social es obligatoria (9/10/2026) ──────────────────────────
+  //
+  // Era opcional, y con eso se perdía silenciosamente: el turno se reservaba
+  // sin `Deudor_Id`, así que en el sistema de la clínica el paciente nuevo
+  // quedaba sin obra social. Nadie se enteraba hasta que llegaba.
+  //
+  // Se exigen las DOS cosas, id y nombre. El id es lo que la clínica usa para
+  // facturar; el nombre solo no alcanza y además delata el caso que causó el
+  // problema: el paciente escribió "osde" en el buscador y nunca tocó la
+  // opción de la lista, así que el formulario mandó un nombre sin id.
+  const obraSocialId = String(datos.obraSocialId ?? "").trim()
+  const obraSocialNombre = String(datos.obraSocialNombre ?? "").trim()
+  if (!obraSocialId || !obraSocialNombre) {
+    errores.obraSocial = "Elegí tu obra social tocándola en la lista."
+  }
 
   if (Object.keys(errores).length > 0) return { ok: false, errores }
 
