@@ -19,6 +19,17 @@ export interface WhatsAppConfig {
   escalationPhoneNumber?: string
   /** Si es false, el cliente se omite de ambos reportes de /facturacion. Default true. */
   mostrarEnFacturacion?: boolean
+  /**
+   * Nombre de la plantilla que reabre la ventana de 24 h, si en esta cuenta
+   * quedó registrada con un nombre distinto del habitual.
+   *
+   * Normalmente vacío: el texto es universal y se da de alta con el mismo
+   * nombre en todas las cuentas. Existe para el caso en que un alta vuelva
+   * rechazada y haya que reintentarla con otro nombre, porque Meta no permite
+   * reusar el nombre de una plantilla rechazada hasta que se la borra.
+   * Ver lib/reapertura.ts.
+   */
+  plantillaReapertura?: string
 
   // Configuración de opciones de búsqueda disponibles para pacientes
   enableSearchByProfessional?: boolean

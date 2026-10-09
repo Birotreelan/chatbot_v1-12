@@ -13,7 +13,15 @@ import {
 } from "@/lib/human-support"
 import { getConversationMessages, getAllConversationMessages, saveConversationMessage, getConversationLastActivity } from "@/lib/conversations"
 import { getWhatsAppConfigById, getThreadForUser } from "@/lib/db"
-import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
+import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp-api"
+import { setConversationPaused } from "@/lib/conversations"
+import {
+  loQueVeElPaciente,
+  plantillaDeReapertura,
+  puedeInvitar,
+  registrarInvitacion,
+  validarMotivo,
+} from "@/lib/reapertura"
 import { estadoVentana } from "@/lib/ventana-atencion"
 import { interpretarErrorCrudo } from "@/lib/whatsapp-media"
 import { nanoid } from "nanoid"
@@ -136,7 +144,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { action, sessionId, message, note, phoneNumber, configId } = body
+    const { action, sessionId, message, note, phoneNumber, configId, motivo } = body
 
     console.log("[v0] [API SUPPORT ACTIONS] Datos recibidos:", { action, sessionId })
 
@@ -161,6 +169,9 @@ export async function POST(request: Request) {
 
       case "message":
         return await handleMessage(sessionId, userSession, message)
+
+      case "reabrir":
+        return await handleReabrir(sessionId, userSession, motivo)
 
       default:
         return NextResponse.json({ success: false, error: `Acción no válida: ${action}` }, { status: 400 })
@@ -420,6 +431,151 @@ El agente cerró la sesión. Retomá la conversación teniendo en cuenta lo que 
     })
   } catch (error: any) {
     console.error("[CLOSE] Error:", error)
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+  }
+}
+
+/**
+ * Reabre la ventana de 24 h invitando al paciente a autorizar la conversación.
+ *
+ * ── El orden de las operaciones no es casual ───────────────────────────────
+ *
+ * La pausa del bot va ANTES del envío. El botón «Aceptar conversación» llega al
+ * webhook como un mensaje entrante cualquiera, y si el bot está despierto lo
+ * procesa: el paciente autoriza la conversación y recibe el menú automático en
+ * lugar del agente que lo estaba esperando. Pausar después del envío deja una
+ * ventana de unos segundos en la que eso puede pasar — y pasa, porque el
+ * paciente que está mirando el teléfono toca el botón al instante.
+ *
+ * El registro de la invitación va DESPUÉS del envío confirmado. Si se guardara
+ * antes y el envío fallara, el límite de 24 h bloquearía un reintento legítimo
+ * por algo que nunca salió.
+ *
+ * Ver lib/reapertura.ts para el texto, la validación del motivo y el límite.
+ */
+async function handleReabrir(sessionId: string, session: SessionData, motivoCrudo: unknown) {
+  try {
+    if (session.role !== "support_agent") {
+      return NextResponse.json(
+        { success: false, error: "Se requiere rol de agente de soporte" },
+        { status: 403 },
+      )
+    }
+
+    // Se valida en el servidor aunque el formulario ya lo haya hecho: este
+    // endpoint es alcanzable sin pasar por la pantalla, y lo que está en juego
+    // es la categoría de la plantilla de todos los clientes.
+    const validado = validarMotivo(motivoCrudo)
+    if (!validado.ok) {
+      return NextResponse.json({ success: false, error: validado.error }, { status: 400 })
+    }
+
+    const supportSession = await getSupportSession(sessionId)
+    if (!supportSession) {
+      return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
+    }
+    if (supportSession.assignedTo !== session.userId) {
+      return NextResponse.json(
+        { success: false, error: "No estás asignado a esta sesión" },
+        { status: 403 },
+      )
+    }
+
+    const { configId, phoneNumber } = supportSession
+
+    const permiso = await puedeInvitar(configId, phoneNumber)
+    if (!permiso.puede) {
+      return NextResponse.json({ success: false, error: permiso.motivo }, { status: 429 })
+    }
+
+    const config = await getWhatsAppConfigById(configId)
+    if (!config) {
+      return NextResponse.json(
+        { success: false, error: "Configuración no encontrada" },
+        { status: 404 },
+      )
+    }
+
+    // El bot se calla antes de que el paciente pueda tocar el botón.
+    await setConversationPaused(configId, phoneNumber, true).catch((error) => {
+      console.error("[REABRIR] No se pudo pausar el bot:", error)
+    })
+
+    const nombreClinica = config.displayName || "la clínica"
+    const resultado = await sendWhatsAppTemplate(
+      config.phoneNumberId,
+      config.accessToken,
+      phoneNumber,
+      plantillaDeReapertura({
+        nombre: config.plantillaReapertura,
+        nombreClinica,
+        motivo: validado.motivo,
+      }),
+      config.wabaId,
+    )
+
+    if (resultado?.pausado) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Los envíos de este cliente están pausados, así que la invitación no se envió. " +
+            "Reanudalos desde la lista de configuraciones.",
+          enviosPausados: true,
+        },
+        { status: 409 },
+      )
+    }
+
+    if (resultado?.error || !resultado?.messages?.length) {
+      // El error crudo de Meta acá suele ser el de plantilla inexistente o no
+      // aprobada, que es exactamente lo que va a pasar en las cuentas donde
+      // todavía no se dio de alta. Conviene que se lea.
+      const detalle =
+        resultado?.error?.message || resultado?.error?.error_data?.details || "Error desconocido"
+      console.error("[REABRIR] WhatsApp rechazó la plantilla:", detalle)
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            `WhatsApp rechazó el envío: ${detalle}. ` +
+            "Si la plantilla todavía no está aprobada en esta cuenta, no se puede reabrir la " +
+            "conversación hasta que lo esté.",
+        },
+        { status: 502 },
+      )
+    }
+
+    await registrarInvitacion(configId, phoneNumber, {
+      enviadaEl: new Date().toISOString(),
+      motivo: validado.motivo,
+      agente: session.userId,
+    })
+
+    // Queda en el hilo, con el texto completo. El agente que entre después
+    // —o el mismo, mañana— tiene que poder ver qué se le mandó al paciente sin
+    // reconstruirlo: es un mensaje que salió a nombre de la clínica.
+    await saveConversationMessage({
+      id: nanoid(),
+      role: "assistant",
+      content:
+        `[Plantilla de autorización enviada]\n\n${loQueVeElPaciente(nombreClinica, validado.motivo)}`,
+      timestamp: new Date().toISOString(),
+      phoneNumber,
+      configId,
+      messageType: "agent",
+    })
+
+    console.log(`[REABRIR] ${configId}/${phoneNumber} invitado por ${session.userId}`)
+
+    return NextResponse.json({
+      success: true,
+      mensaje:
+        "Invitación enviada. Cuando el paciente toque «Aceptar conversación» vas a poder " +
+        "escribirle normalmente.",
+    })
+  } catch (error: any) {
+    console.error("[REABRIR] Error:", error)
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }

@@ -9,6 +9,7 @@ import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { registrarMensajeEntrante } from "./ventana-atencion"
+import { PAYLOAD_BOTON_REAPERTURA, registrarRespuesta } from "./reapertura"
 import {
   leerMediaDelWebhook,
   describirArchivoRecibido,
@@ -3207,6 +3208,55 @@ export async function handleMessage(value: any) {
     // "cerrada" o "desconocida" con la ventana abierta. La función se traga sus
     // propios errores, así que esto nunca interrumpe la atención al paciente.
     await registrarMensajeEntrante(config.id, userPhoneNumber, message.timestamp)
+
+    // ============================================================================
+    // «ACEPTAR CONVERSACIÓN»: EL BOT NO CONTESTA (9/10/2026)
+    // ============================================================================
+    // El paciente acaba de autorizar que la clínica le escriba, tocando el botón
+    // de la plantilla de reapertura. Ese toque tiene un solo propósito: abrir la
+    // ventana de 24 h, que es exactamente lo que acaba de hacer la línea de
+    // arriba. No es una pregunta, no pide nada, y no hay que responderlo.
+    //
+    // Sin este corte, el bot trata el toque como un mensaje cualquiera. Y es
+    // peor que una respuesta de más: `extractMessageContent` devuelve el TEXTO
+    // del botón —"Aceptar conversación"— antes que el payload, así que lo que
+    // llega al detector de menú es una frase en español que puede matchear con
+    // cualquier opción. El paciente autoriza la conversación y recibe el menú
+    // automático en lugar del agente que lo estaba esperando.
+    //
+    // Por eso se lee `message.button.payload` directamente y no el contenido ya
+    // extraído: el payload es el único dato que identifica este toque sin
+    // ambigüedad, y la extracción lo tapa.
+    //
+    // El `handleReabrir` del panel ya pausó el bot antes de enviar la plantilla,
+    // así que en el camino normal esta guarda es redundante. Está igual porque
+    // las dos protecciones fallan distinto: la pausa se puede haber perdido
+    // —Redis caído al pausar, conversación reanudada a mano, invitación enviada
+    // desde otra parte en el futuro— y el costo de equivocarse lo paga el
+    // paciente, que queda hablando con un menú.
+    if (message.type === "button" && message.button?.payload === PAYLOAD_BOTON_REAPERTURA) {
+      console.info(`[REAPERTURA] ${userPhoneNumber} aceptó la conversación; el bot no responde`)
+
+      // Se guarda para que el panel lo muestre en el hilo. Sin esto, el agente
+      // ve que la ventana se abrió pero no por qué, y el historial salta del
+      // envío de la plantilla a su propia respuesta.
+      await saveConversationMessage({
+        id: messageId,
+        role: "user",
+        content: "Aceptó la conversación",
+        timestamp: new Date().toISOString(),
+        phoneNumber: userPhoneNumber,
+        configId: config.id,
+      }).catch((error) => console.error("[REAPERTURA] No se pudo guardar la aceptación:", error))
+
+      // Marca la invitación como respondida. Es lo que permite medir cuántas
+      // plantillas se pagan y nadie contesta.
+      await registrarRespuesta(config.id, userPhoneNumber).catch((error) =>
+        console.error("[REAPERTURA] No se pudo registrar la respuesta:", error),
+      )
+
+      return
+    }
 
     // Ignorar stickers, reacciones e iconos (mensajes de texto compuestos únicamente por emojis)
     if (message.type === "sticker" || message.type === "reaction") {

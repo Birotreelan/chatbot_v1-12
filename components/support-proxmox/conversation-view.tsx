@@ -154,6 +154,36 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
   }
 
   /**
+   * Pide al paciente autorización para escribirle, cuando la ventana de 24 h ya
+   * se cerró (9/10/2026).
+   *
+   * Lanza en vez de mostrar un `alert`: el formulario vive dentro del cuadro de
+   * mensaje y muestra el error ahí, al lado del campo que hay que corregir. Un
+   * alert obligaría a cerrarlo para volver a ver el motivo que escribió.
+   */
+  async function handleReabrir(motivo: string) {
+    let url = `/api/support/actions`
+    if (ssoSessionId) {
+      url += `?_sid=${encodeURIComponent(ssoSessionId)}`
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      credentials: "include",
+      body: JSON.stringify({ action: "reabrir", sessionId, motivo }),
+    })
+
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || !data?.success) {
+      throw new Error(data?.error || "No se pudo enviar la invitación.")
+    }
+
+    // Recarga para que aparezca en el hilo la plantilla que se envió.
+    await loadSession()
+  }
+
+  /**
    * Envía un archivo al paciente (15/9/2026).
    *
    * Va por su propia ruta (/api/support/media) porque el cuerpo es multipart y
@@ -358,6 +388,8 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
               onSend={handleSendMessage}
               onSendFile={handleSendFile}
               ventana={estadoVentanaActual}
+              onReabrir={handleReabrir}
+              nombreClinica={session?.displayName}
             />
           </div>
         </div>
