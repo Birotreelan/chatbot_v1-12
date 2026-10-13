@@ -31,7 +31,12 @@
 import { NextResponse } from "next/server"
 
 import { marcarVisto, marcarHito } from "@/lib/portal/token"
-import { anotarEnElMonitor, TEXTO_DEL_HITO, type HitoDelPortal } from "@/lib/portal/monitor"
+import {
+  anotarEnElMonitor,
+  marcaDelFormato,
+  TEXTO_DEL_HITO,
+  type HitoDelPortal,
+} from "@/lib/portal/monitor"
 
 export const runtime = "nodejs"
 
@@ -51,10 +56,15 @@ function esHitoConocido(valor: string): valor is HitoDelPortal {
 export async function POST(request: Request) {
   let token = ""
   let hito = "abierto"
+  // El formato llega del navegador igual que el hito, así que se valida con el
+  // mismo criterio: sólo los dos que existen. Cualquier otra cosa cae en
+  // "pantallas", que no agrega marca a la línea.
+  let formato = "pantallas"
   try {
     const cuerpo = await request.json()
     token = String(cuerpo?.token || "")
     hito = String(cuerpo?.hito || "abierto")
+    if (cuerpo?.formato === "chat") formato = "chat"
   } catch {
     // Body ilegible: no hay nada que anotar y nada que avisar.
   }
@@ -76,10 +86,12 @@ export async function POST(request: Request) {
     await anotarEnElMonitor({
       configId: contexto.configId,
       phoneNumber: contexto.phone,
-      texto: contexto.demo ? textos.demo : textos.real,
+      texto: `${contexto.demo ? textos.demo : textos.real}${marcaDelFormato(formato)}`,
     })
 
-    console.log(`[PORTAL] ${contexto.phone} — hito "${hito}" (${contexto.intencion})`)
+    console.log(
+      `[PORTAL] ${contexto.phone} — hito "${hito}" (${contexto.intencion}, ${formato})`,
+    )
   } catch (error) {
     console.error(`[PORTAL] No se pudo anotar el hito "${hito}":`, error)
   }

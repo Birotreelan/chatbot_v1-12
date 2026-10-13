@@ -83,6 +83,14 @@ interface Props {
    */
   encabezado?: ReactNode
   /**
+   * Con qué interfaz se está gestionando, para el hito de "sin horarios".
+   *
+   * Sin esto, el abandono por falta de turnos queda sin formato en el monitor
+   * y no se puede comparar entre pantallas y chat — que es justamente la
+   * causa de abandono más probable y la que más importa comparar.
+   */
+  formato?: "pantallas" | "chat"
+  /**
    * Qué está haciendo el paciente, para que la pantalla final lo diga bien.
    *
    * "Tu turno quedó reservado" después de un cambio de horario no es falso,
@@ -158,6 +166,7 @@ function aISO(fecha: Date): string {
 
 export function SelectorDeTurnos({
   token,
+  formato,
   dias,
   paciente,
   corregirDatosEn,
@@ -334,7 +343,7 @@ export function SelectorDeTurnos({
   if (dias.length === 0) {
     return (
       <>
-        <AnotarHito token={token} hito="sin_horarios" />
+        <AnotarHito token={token} hito="sin_horarios" formato={formato} />
         <Aviso
           titulo="No hay horarios disponibles"
           detalle="No encontramos turnos en los próximos días. Escribinos por WhatsApp y buscamos una alternativa."

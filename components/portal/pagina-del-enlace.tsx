@@ -511,6 +511,7 @@ export async function PaginaDelEnlace({
       nombreCookie={COOKIE_DISPOSITIVO}
       ancho={ancho}
       token={token}
+      formato={formato}
     >
       {avisoDemo}
       {formato === "chat" ? (
@@ -683,7 +684,7 @@ export async function PaginaDelEnlace({
             y el clic— y el paciente merece una frase igual.
             Cuando el proxy explica por qué no hay turnos, se usa SU mensaje:
             sabe cosas que nosotros no. */}
-        {dias.length === 0 && <AnotarHito token={token} hito="sin_horarios" />}
+        {dias.length === 0 && <AnotarHito token={token} hito="sin_horarios" formato={formato} />}
 
         {dias.length === 0 && (
           <Aviso
@@ -699,6 +700,7 @@ export async function PaginaDelEnlace({
         {dias.length > 0 && (
           <SelectorDeTurnos
             token={token}
+            formato={formato}
             dias={dias}
             paciente={datosParaElResumen}
             corregirDatosEn={corregirDatosEn}
@@ -987,7 +989,7 @@ export async function PaginaDelEnlace({
         />
       )}
 
-      {agendaNueva.total === 0 && !conEjemplos && <AnotarHito token={token} hito="sin_horarios" />}
+      {agendaNueva.total === 0 && !conEjemplos && <AnotarHito token={token} hito="sin_horarios" formato={formato} />}
 
       {agendaNueva.total === 0 && !conEjemplos && (
         <Aviso
@@ -999,6 +1001,7 @@ export async function PaginaDelEnlace({
 
       <SelectorDeTurnos
         token={token}
+        formato={formato}
         dias={diasNuevos}
         paciente={datosParaElResumen}
         corregirDatosEn={corregirDatosEn}

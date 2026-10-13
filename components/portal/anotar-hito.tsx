@@ -36,7 +36,20 @@ import { useEffect, useRef } from "react"
 
 import type { HitoDelPortal } from "@/lib/portal/monitor"
 
-export function AnotarHito({ token, hito }: { token?: string; hito: HitoDelPortal }) {
+export function AnotarHito({
+  token,
+  hito,
+  formato,
+}: {
+  token?: string
+  hito: HitoDelPortal
+  /**
+   * Con qué interfaz se está gestionando. Sirve para comparar abandono entre
+   * pantallas y chat desde la misma conversación del monitor, sin un reporte
+   * aparte. Ausente = pantallas, que es lo que no lleva marca.
+   */
+  formato?: "pantallas" | "chat"
+}) {
   const yaSeAvisó = useRef(false)
 
   useEffect(() => {
@@ -47,9 +60,9 @@ export function AnotarHito({ token, hito }: { token?: string; hito: HitoDelPorta
       method: "POST",
       keepalive: true,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, hito }),
+      body: JSON.stringify({ token, hito, formato }),
     }).catch(() => {})
-  }, [token, hito])
+  }, [token, hito, formato])
 
   return null
 }

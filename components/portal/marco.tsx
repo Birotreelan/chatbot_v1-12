@@ -134,6 +134,7 @@ export function Marco({
   nombreCookie,
   ancho = "normal",
   token,
+  formato,
 }: {
   marca: MarcaDelPortal
   children: ReactNode
@@ -153,6 +154,8 @@ export function Marco({
   /** Se emite en la primera visita, para reconocer el dispositivo después. */
   cookieNueva?: string | null
   nombreCookie?: string
+  /** Para que el hito "abierto" diga con qué interfaz se abrió. */
+  formato?: "pantallas" | "chat"
 }) {
   const columna = ancho === "amplio" ? COLUMNA_AMPLIA : COLUMNA
 
@@ -178,7 +181,7 @@ export function Marco({
         />
       )}
 
-      <AnotarHito token={token} hito="abierto" />
+      <AnotarHito token={token} hito="abierto" formato={formato} />
 
       {/* La banda ocupa todo el ancho —es el borde superior de la pantalla—
           pero su CONTENIDO va en la misma columna que el resto (29/9/2026).

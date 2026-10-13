@@ -34,6 +34,21 @@ import { saveConversationMessage } from "../conversations"
 /** El prefijo por el que el panel reconoce estas líneas. */
 const PREFIJO = "[Portal]"
 
+/**
+ * Distingue el formato del enlace en la línea del monitor (13/10/2026).
+ *
+ * Sólo el chat lleva marca. Las líneas del formato de pantallas quedan
+ * EXACTAMENTE como estaban, a propósito: son las que están en producción y las
+ * que Nicolás ya sabe leer de un vistazo. Agregarle "(pantallas)" a todas
+ * cambiaría miles de líneas existentes para no distinguir nada nuevo.
+ *
+ * Con esto se puede comparar abandono entre los dos formatos sin un reporte
+ * aparte: la misma conversación dice con qué interfaz se gestionó.
+ */
+export function marcaDelFormato(formato?: string): string {
+  return formato === "chat" ? " (chat)" : ""
+}
+
 export type HitoDelPortal = "abierto" | "sin_horarios"
 
 /**
