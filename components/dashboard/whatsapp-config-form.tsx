@@ -423,49 +423,42 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </p>
               )}
 
-              {/* ── El formato del enlace (13/10/2026) ──────────────────────
-                  Va DENTRO del `clientePortalWeb === true` a propósito: el
-                  formato sólo existe si hay enlace. Mostrarlo con el switch
-                  apagado ofrecería elegir entre dos cosas que no van a pasar.
+              {/* ── Cliente Chatbot por Enlace (13/10/2026) ─────────────────
+                  Switch propio y NO un formato del portal, para poder migrar
+                  cliente por cliente y volver atrás con un click: el portal
+                  sigue siendo exactamente el que está en producción.
 
-                  Es una decisión de presentación: los dos formatos usan la
-                  misma máquina de pasos, el mismo token y los mismos
-                  endpoints. Lo dice la bajada, porque desde el formulario
-                  parecen dos productos distintos. */}
-              {formData.clientePortalWeb === true && (
-                <div className="space-y-2 p-2 rounded-md bg-muted/30">
-                  <Label className="text-sm font-medium">Formato del enlace</Label>
-                  <div className="flex gap-2">
-                    {[
-                      { valor: "pantallas", titulo: "Pantallas", detalle: "Una pantalla por paso" },
-                      { valor: "chat", titulo: "Chat", detalle: "Los mismos pasos, conversados" },
-                    ].map((opcion) => {
-                      const elegido =
-                        (formData.formatoDelEnlace || "pantallas") === opcion.valor
-                      return (
-                        <button
-                          key={opcion.valor}
-                          type="button"
-                          onClick={() => updateFormData("formatoDelEnlace", opcion.valor)}
-                          className={`flex-1 rounded-md border px-3 py-2 text-left transition-colors ${
-                            elegido
-                              ? "border-primary bg-primary/10"
-                              : "border-input hover:bg-accent"
-                          }`}
-                        >
-                          <span className="block text-sm font-medium">{opcion.titulo}</span>
-                          <span className="block text-xs text-muted-foreground">
-                            {opcion.detalle}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
+                  Va fuera del bloque `clientePortalWeb === true` porque es su
+                  reemplazo, no su opción: el flujo previsto es prender este y
+                  apagar el otro. */}
+              <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                <Switch
+                  id="clienteChatbotEnlace"
+                  checked={formData.clienteChatbotEnlace === true}
+                  onCheckedChange={(checked) => updateFormData("clienteChatbotEnlace", checked)}
+                />
+                <div className="flex-1">
+                  <Label htmlFor="clienteChatbotEnlace" className="text-sm font-medium">
+                    Cliente Chatbot por Enlace
+                  </Label>
                   <p className="text-xs text-muted-foreground">
-                    Cambia sólo cómo se ve el enlace. El momento en que se deriva, los datos que
-                    lleva y lo que el paciente puede hacer son los mismos en los dos formatos.
+                    El mismo enlace externo que el portal, pero el paciente lo ve como una
+                    conversación en vez de pantallas. Deriva en los mismos momentos, con los
+                    mismos datos y las mismas opciones.
                   </p>
                 </div>
+              </div>
+
+              {/* El empate. Gana el portal, y hay que decirlo: un switch
+                  prendido que no hace nada es peor que uno apagado, porque
+                  quien lo prendió se queda esperando el cambio. */}
+              {formData.clientePortalWeb === true && formData.clienteChatbotEnlace === true && (
+                <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs">
+                  <strong>Están los dos prendidos.</strong> El paciente va a seguir viendo el
+                  portal web: ante el empate gana el que está en producción. Para pasar al chat,
+                  apagá <em>Cliente Portal Web</em>. Mientras tanto podés probar el chat desde el
+                  generador de enlaces de prueba, sin cambiarle nada al cliente.
+                </p>
               )}
 
               {formData.clientePortalWeb === true && (

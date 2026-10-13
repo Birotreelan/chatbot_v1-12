@@ -375,8 +375,22 @@ function sellarEncendidoDelPortal(
   config: WhatsAppConfig,
   updates: Partial<WhatsAppConfig>,
 ): Partial<WhatsAppConfig> {
-  const seEstaPrendiendo = updates.clientePortalWeb === true && config.clientePortalWeb !== true
-  return seEstaPrendiendo ? { clientePortalWebDesde: new Date().toISOString() } : {}
+  const ahora = new Date().toISOString()
+  const sello: Partial<WhatsAppConfig> = {}
+
+  if (updates.clientePortalWeb === true && config.clientePortalWeb !== true) {
+    sello.clientePortalWebDesde = ahora
+  }
+
+  // El chatbot por enlace necesita su propia ventana (13/10/2026). Un cliente
+  // que viene del portal ya consumió la suya hace meses: sin un sello aparte,
+  // cambiar de formato interrumpiría los flujos a medio llenar que el portal
+  // sí había protegido en su momento.
+  if (updates.clienteChatbotEnlace === true && config.clienteChatbotEnlace !== true) {
+    sello.clienteChatbotEnlaceDesde = ahora
+  }
+
+  return sello
 }
 
 export async function updateWhatsAppConfig(

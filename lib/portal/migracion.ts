@@ -57,11 +57,22 @@ const VENTANA_MS = 24 * 60 * 60 * 1000
  * conversacional viejo que proteger.
  */
 export function enVentanaDeMigracion(
-  config: { clientePortalWebDesde?: string } | null | undefined,
+  config:
+    | { clientePortalWebDesde?: string; clienteChatbotEnlaceDesde?: string }
+    | null
+    | undefined,
   ahora: Date = new Date(),
 ): boolean {
-  const desde = config?.clientePortalWebDesde
-  if (!desde) return false
+  // El más reciente de los dos (13/10/2026). Cada switch sella su propio
+  // encendido, y lo que protege la ventana es el ÚLTIMO cambio: un cliente que
+  // tuvo el portal en agosto y pasa al chat hoy está migrando hoy, no en
+  // agosto. Tomar el del portal lo dejaría sin protección.
+  const sellos = [config?.clientePortalWebDesde, config?.clienteChatbotEnlaceDesde]
+    .map((s) => (s ? Date.parse(s) : Number.NaN))
+    .filter((n) => !Number.isNaN(n))
+
+  if (sellos.length === 0) return false
+  const desde = new Date(Math.max(...sellos)).toISOString()
 
   const encendido = Date.parse(desde)
   if (Number.isNaN(encendido)) return false
@@ -89,7 +100,13 @@ export function enVentanaDeMigracion(
  * que sigue trabajando con el motor viejo sin que nadie se entere.
  */
 export async function sigueEnElChatPorMigracion(params: {
-  config: { clientePortalWeb?: boolean; clientePortalWebDesde?: string; id?: string }
+  config: {
+    clientePortalWeb?: boolean
+    clientePortalWebDesde?: string
+    clienteChatbotEnlace?: boolean
+    clienteChatbotEnlaceDesde?: string
+    id?: string
+  }
   userPhoneNumber: string
 }): Promise<boolean> {
   if (!enVentanaDeMigracion(params.config)) return false

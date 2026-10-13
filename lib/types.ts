@@ -151,26 +151,46 @@ export interface WhatsAppConfig {
   clientePortalWebDesde?: string
 
   /**
-   * Con qué formato se ve el enlace externo (13/10/2026).
+   * Cliente Chatbot por Enlace (13/10/2026).
    *
-   *   "pantallas" (default) → /p/<token>, una pantalla por paso.
-   *   "chat"                → /c/<token>, los mismos pasos como conversación.
+   * El enlace externo se ve como una CONVERSACIÓN en lugar de pantallas:
+   * /c/<token> en vez de /p/<token>. Todo lo demás es idéntico — la misma
+   * máquina de pasos (`decidirPaso` en lib/portal/pasos.ts), el mismo token,
+   * las mismas compuertas de derivación y los mismos endpoints. Cambia cómo se
+   * dibuja cada paso, no qué pasos hay ni cuándo se deriva.
    *
-   * Es una decisión de PRESENTACIÓN y nada más. Los dos formatos responden a la
-   * misma máquina de pasos (`decidirPaso` en lib/portal/pasos.ts), con el mismo
-   * token, las mismas compuertas de derivación y los mismos endpoints. Lo único
-   * que cambia es cómo se dibuja cada paso.
+   * ── Por qué es un switch aparte y no un formato del portal ───────────────
    *
-   * Por eso NO es un switch aparte de `clientePortalWeb`: ese sigue siendo el
-   * que decide si el cliente usa enlace externo o se queda en el chat de
-   * WhatsApp. Este campo sólo elige el formato cuando ya hay enlace. Separarlos
-   * en dos booleanos permitiría el estado imposible "chat encendido, enlace
-   * apagado", que alguien tendría que recordar que no existe.
+   * Para poder migrar cliente por cliente y volver atrás con un click: el
+   * portal sigue siendo exactamente el que está en producción, y el día que el
+   * chat esté listo se apaga uno y se prende el otro. Un enum guardado
+   * obligaría a tocar el mismo campo que gobierna el portal.
    *
-   * Ausente = "pantallas", que es lo que está en producción. Un cliente al que
-   * nadie le tocó este campo no cambia de comportamiento.
+   * ── Qué pasa si quedan los dos prendidos ─────────────────────────────────
+   *
+   * Gana el PORTAL, y el formulario lo avisa. Es el mismo criterio que con
+   * `clienteFlows`: ante el empate, el que está en producción. Así, prender
+   * este switch por error no le cambia nada a un cliente que está trabajando
+   * — el cambio sólo ocurre cuando alguien apaga el portal a propósito.
+   * Para probar el chat sin apagar el portal está el generador de enlaces de
+   * prueba, que acepta el formato como parámetro.
+   *
+   * Ausente o false = sin cambios.
    */
-  formatoDelEnlace?: "pantallas" | "chat"
+  clienteChatbotEnlace?: boolean
+
+  /**
+   * Cuándo se prendió el chatbot por enlace para este cliente.
+   *
+   * Mismo propósito que `clientePortalWebDesde`: la ventana de 24 h en la que
+   * un paciente con un flujo conversacional a medias lo termina en el chat de
+   * WhatsApp en vez de recibir el enlace. Ver lib/portal/migracion.ts.
+   *
+   * Es un campo propio y no se reusa el del portal porque los dos switches se
+   * prenden en momentos distintos: un cliente que viene del portal ya pasó su
+   * ventana hace meses, y al cambiar de formato necesita una nueva.
+   */
+  clienteChatbotEnlaceDesde?: string
 
   /**
    * Tipos de mensaje que esta clínica NO usa (5/10/2026).

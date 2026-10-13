@@ -171,30 +171,52 @@ export function datosDesdeElContexto(contexto: any): DatosDelPaciente | undefine
 }
 
 /**
- * ¿Este cliente usa el portal?
- *
- * Se consulta con la config ya cargada, para no agregar una lectura más en el
- * camino caliente del webhook. Si ambos switches estuvieran encendidos gana el
- * portal — es el que está en producción, y el formulario del dashboard avisa
- * de la contradicción.
- */
-/**
  * Con qué formato se ve el enlace de este cliente.
  *
- * Se lee con una función y no con `config.formatoDelEnlace` directo por la
- * misma razón que `usaPortal`: el default vive en un solo lugar. Un valor
- * desconocido —guardado a mano, o de una versión futura— cae en "pantallas",
- * que es lo que está en producción, en lugar de emitir un enlace a una ruta
- * que no existe.
+ * ── La regla del empate ───────────────────────────────────────────────────
+ *
+ * Son dos switches independientes y pueden quedar los dos prendidos. Ante el
+ * empate gana el PORTAL, que es el que está en producción — el mismo criterio
+ * que ya se usa con `clienteFlows`.
+ *
+ * No es una preferencia estética: hace que prender el chatbot por error sea
+ * inofensivo. El cliente que está trabajando con el portal sigue igual, y el
+ * cambio ocurre sólo cuando alguien apaga el portal a propósito. Si el empate
+ * lo ganara el chat, un click equivocado le cambiaría la interfaz a todos los
+ * pacientes de esa clínica en el mismo instante.
+ *
+ * La decisión vive acá, en una función, y no repartida en `if`s por el
+ * proyecto: es la clase de regla que, duplicada, termina resuelta distinto en
+ * dos lugares.
  */
 export function formatoDelEnlace(
-  config: { formatoDelEnlace?: string } | null | undefined,
+  config: { clientePortalWeb?: boolean; clienteChatbotEnlace?: boolean } | null | undefined,
 ): FormatoDelEnlace {
-  return config?.formatoDelEnlace === "chat" ? "chat" : "pantallas"
+  if (config?.clientePortalWeb === true) return "pantallas"
+  return config?.clienteChatbotEnlace === true ? "chat" : "pantallas"
 }
 
-export function usaPortal(config: { clientePortalWeb?: boolean } | null | undefined): boolean {
-  return config?.clientePortalWeb === true
+/**
+ * ¿Este cliente resuelve la gestión en un enlace externo?
+ *
+ * El nombre quedó de cuando el portal era el único enlace posible. Desde el
+ * 13/10/2026 la pregunta es más general: `true` si el cliente usa el portal O
+ * el chatbot por enlace, porque para todo lo que este booleano decide —mandar
+ * el enlace en vez de seguir por mensajes, ofrecer el botón, saltear el flujo
+ * conversacional— los dos formatos son lo mismo. El formato recién importa al
+ * armar la URL, y de eso se ocupa `formatoDelEnlace`.
+ *
+ * No se renombró a `usaEnlaceExterno` para no tocar doce llamadores en el
+ * mismo cambio que introduce el switch: el riesgo de un renombre masivo es
+ * peor que el de un nombre que quedó estrecho, y acá está dicho.
+ *
+ * Se consulta con la config ya cargada, para no agregar una lectura más en el
+ * camino caliente del webhook.
+ */
+export function usaPortal(
+  config: { clientePortalWeb?: boolean; clienteChatbotEnlace?: boolean } | null | undefined,
+): boolean {
+  return config?.clientePortalWeb === true || config?.clienteChatbotEnlace === true
 }
 
 /**
