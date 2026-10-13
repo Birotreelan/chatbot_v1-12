@@ -45,7 +45,15 @@ import {
 } from "@/lib/api-tools/api-functions"
 import { getWhatsAppConfigById } from "@/lib/db"
 import { EnlaceDePaso } from "@/components/portal/enlace-de-paso"
-import { Marco, Avance, Aviso, ResumenDelTurno, TituloDePaso, Volver } from "@/components/portal/marco"
+import {
+  Marco,
+  Avance,
+  Aviso,
+  EncabezadoDelPaso,
+  ResumenDelTurno,
+  TituloDePaso,
+  Volver,
+} from "@/components/portal/marco"
 import { AnotarHito } from "@/components/portal/anotar-hito"
 import { lineasDeContactoParaWeb } from "@/lib/utils/escalation-contact"
 import type { AnchoDelMarco } from "@/components/portal/marco"
@@ -443,18 +451,7 @@ export default async function PaginaDelPortal({
             hay a dónde volver. La salida hacia adelante es el botón
             "Continuar" del formulario, que con el DNI sin cambios simplemente
             sigue. */}
-        <Avance actual="Elegir" />
-        <TituloDePaso
-          tipo="dni"
-          sinIcono
-          detalle={
-            paraFamiliar
-              ? "Si ya se atendió en la clínica, con el documento alcanza: recuperamos sus datos automáticamente."
-              : "Si ya te atendiste en la clínica, con tu documento alcanza: recuperamos tus datos automáticamente."
-          }
-        >
-          {paraFamiliar ? "¿Cuál es el DNI de la persona que se va a atender?" : "¿Cuál es tu DNI?"}
-        </TituloDePaso>
+        <EncabezadoDelPaso paso="pedir_dni" paraFamiliar={paraFamiliar} />
         <PedirDNI token={token} paraFamiliar={paraFamiliar} valorInicial={contexto.identidad?.dni} />
       </>,
     )
@@ -469,18 +466,7 @@ export default async function PaginaDelPortal({
             equivocado un dígito no tenía cómo corregirlo: el único camino era
             completar un alta que sabía mal. */}
         <Volver href={urlCon({ paso: "pedir_dni" })} />
-        <Avance actual="Elegir" />
-        <TituloDePaso
-          tipo="datos"
-          sinIcono
-          detalle={
-            paraFamiliar
-              ? "Completá los datos de la persona que se va a atender. Luego vas a poder elegir el turno."
-              : "Completá tus datos para registrarte. Luego vas a poder elegir el turno."
-          }
-        >
-          {paraFamiliar ? "Es su primera vez con nosotros" : "Es tu primera vez con nosotros"}
-        </TituloDePaso>
+        <EncabezadoDelPaso paso="registrar" paraFamiliar={paraFamiliar} />
         <DarseDeAlta
           token={token}
           dni={identidad.dni}
@@ -638,25 +624,7 @@ export default async function PaginaDelPortal({
                     del turno, donde ya quedó claro de qué se trata, y un
                     saludo a mitad de camino suena a que la página empezó dos
                     veces. */}
-                <Avance actual="Elegir" />
-                <TituloDePaso
-                  tipo="agenda"
-                  sinIcono
-                  detalle={
-                    <>
-                      <p>
-                        Seleccioná primero una fecha. Luego te mostraremos los horarios
-                        disponibles para ese día.
-                      </p>
-                      <p>
-                        Tu turno actual sigue vigente: no se cancela hasta que confirmes el
-                        cambio.
-                      </p>
-                    </>
-                  }
-                >
-                  Elegí cuándo querés reprogramar tu turno
-                </TituloDePaso>
+                <EncabezadoDelPaso paso="reprogramar" />
 
                 {/* Si no se pudo identificar al profesional se ofrecen turnos
                     de la sede, y hay que decirlo: el paciente asume que ve los
@@ -693,14 +661,7 @@ export default async function PaginaDelPortal({
     return marco(
       <>
         {volverQuitando() && <Volver href={volverQuitando()!} />}
-        <Avance actual="Elegir" />
-        <TituloDePaso
-          tipo="elegir"
-          sinIcono
-          detalle="Seleccioná el lugar donde querés atenderte. Luego te mostraremos los horarios disponibles en esa sede."
-        >
-          ¿A qué sede querés ir?
-        </TituloDePaso>
+        <EncabezadoDelPaso paso="elegir_sede" />
         <ElegirFiltro token={token} campo="sedeId" opciones={sedesParaElegir} />
       </>,
     )
@@ -724,14 +685,7 @@ export default async function PaginaDelPortal({
         {/* El saludo va una sola vez, en la banda de arriba con el nombre de
             la clínica. Repetirlo en cada título hacía que todas las pantallas
             parecieran la primera. */}
-        <Avance actual="Elegir" />
-        <TituloDePaso
-          tipo="elegir"
-          sinIcono
-          detalle="Elegí cómo preferís buscar tu turno. Cualquiera de las opciones te lleva a los horarios disponibles."
-        >
-          ¿Cómo querés buscar tu turno?
-        </TituloDePaso>
+        <EncabezadoDelPaso paso="elegir_tipo_busqueda" />
         <ElegirFiltro
           token={token}
           campo="tipoBusqueda"
@@ -752,14 +706,7 @@ export default async function PaginaDelPortal({
       return marco(
         <>
           {volverQuitando() && <Volver href={volverQuitando()!} />}
-          <Avance actual="Elegir" />
-          <TituloDePaso
-            tipo="elegir"
-            sinIcono
-            detalle="Seleccioná la especialidad de tu consulta. Luego te mostraremos los horarios de los profesionales que la atienden."
-          >
-            ¿Qué especialidad necesitás?
-          </TituloDePaso>
+          <EncabezadoDelPaso paso="elegir_especialidad" />
           <ElegirFiltro token={token} campo="especialidadId" opciones={opciones} conservar={elegido} />
           {ofreceVerTodos(permisos) && (
             <VerTodos token={token} etiqueta="Ver todos los horarios" conservar={elegido} />
@@ -862,14 +809,7 @@ export default async function PaginaDelPortal({
       return marco(
         <>
           {volverA && <Volver href={volverA} />}
-          <Avance actual="Elegir" />
-          <TituloDePaso
-            tipo="elegir"
-            sinIcono
-            detalle="Seleccioná con quién querés atenderte. Luego te mostraremos sus horarios disponibles."
-          >
-            ¿Con qué profesional querés atenderte?
-          </TituloDePaso>
+          <EncabezadoDelPaso paso="elegir_profesional" />
           <ElegirFiltro token={token} campo="profesionalId" opciones={opciones} conservar={conservar} />
           {/* "Cualquier profesional" y no "Me da igual el profesional": es la
               misma opción que la del paso anterior y tiene que llamarse igual,
@@ -966,22 +906,7 @@ export default async function PaginaDelPortal({
         encabezado={
           <>
             {volverQuitando() && <Volver href={volverQuitando()!} />}
-            <Avance actual="Elegir" />
-            <TituloDePaso
-              tipo="agenda"
-              sinIcono
-              detalle={
-                <>
-                  <p>
-                    Seleccioná primero una fecha. Luego te mostraremos los horarios disponibles
-                    para ese día.
-                  </p>
-                  <p>Antes de confirmar, vas a poder revisar todos los datos de tu turno.</p>
-                </>
-              }
-            >
-              Elegí cuándo querés tu turno
-            </TituloDePaso>
+            <EncabezadoDelPaso paso="elegir_horario" />
 
             {/* Con quién son estos horarios. Es lo que decide si el nombre
                 del profesional hace falta al lado de cada horario, así que

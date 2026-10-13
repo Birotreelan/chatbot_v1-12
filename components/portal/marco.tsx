@@ -67,6 +67,8 @@ import {
   Phone,
   type LucideIcon,
 } from "lucide-react"
+import { encabezadoDelPaso } from "@/lib/portal/contenido"
+import type { Paso } from "@/lib/portal/pasos"
 
 /**
  * El ícono de cada paso.
@@ -723,5 +725,53 @@ export function ResumenDeConfirmacion({
         </div>
       )}
     </Card>
+  )
+}
+
+/**
+ * El encabezado de un paso, tomado del descriptor (13/10/2026).
+ *
+ * Reemplaza los ocho bloques `<Avance/> + <TituloDePaso/>` que estaban
+ * copiados en app/p/[token]/page.tsx, cada uno con su texto adentro. El texto
+ * ahora vive en lib/portal/contenido.ts, que es el que van a compartir las
+ * pantallas y el chat.
+ *
+ * Devuelve `null` para los pasos sin encabezado —`gestionar_turno` y
+ * `derivar_obra_social`—, así que se puede invocar sin preguntar antes.
+ */
+export function EncabezadoDelPaso({
+  paso,
+  paraFamiliar,
+}: {
+  paso: Paso
+  paraFamiliar?: boolean
+}) {
+  const encabezado = encabezadoDelPaso(paso, { paraFamiliar })
+  if (!encabezado) return null
+
+  return (
+    <>
+      <Avance actual={encabezado.avance} />
+      <TituloDePaso
+        tipo={encabezado.tipo}
+        sinIcono
+        detalle={
+          // Un solo párrafo se pasa como string, igual que antes. Con dos,
+          // cada uno va en su `<p>`: un <p> dentro de otro es HTML inválido y
+          // el navegador cierra el primero, dejando el segundo sin estilo.
+          encabezado.detalle.length === 1 ? (
+            encabezado.detalle[0]
+          ) : (
+            <>
+              {encabezado.detalle.map((parrafo, i) => (
+                <p key={i}>{parrafo}</p>
+              ))}
+            </>
+          )
+        }
+      >
+        {encabezado.titulo}
+      </TituloDePaso>
+    </>
   )
 }
