@@ -259,6 +259,18 @@ const RUTA_POR_FORMATO: Record<FormatoDelEnlace, string> = {
   chat: "c",
 }
 
+/**
+ * El segmento de ruta de un formato: "p" o "c".
+ *
+ * Lo necesita la página para armar los enlaces de cada opción. Sin esto, el
+ * `urlCon` del chat apuntaría a /p/ y cada paso devolvería al paciente al
+ * formato de pantallas — el bug más obvio y más fácil de no ver, porque la
+ * primera pantalla del chat se vería perfecta.
+ */
+export function rutaDelFormato(formato: FormatoDelEnlace = "pantallas"): string {
+  return RUTA_POR_FORMATO[formato] || "p"
+}
+
 export function urlDelPortal(
   token: string,
   baseUrl?: string,

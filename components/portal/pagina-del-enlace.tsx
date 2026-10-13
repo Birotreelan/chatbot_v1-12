@@ -1,0 +1,1213 @@
+/**
+ * El enlace del paciente, en los dos formatos (13/10/2026).
+ *
+ * Era `app/p/[token]/page.tsx`. Se movió acá entero, sin cambiarle la lógica,
+ * para que las dos rutas lo compartan:
+ *
+ *   app/p/[token]/page.tsx → formato="pantallas"
+ *   app/c/[token]/page.tsx → formato="chat"
+ *
+ * ── Por qué un componente y no dos páginas ─────────────────────────────────
+ *
+ * Porque todo lo que esta función hace antes de dibujar —resolver el token,
+ * chequear la vigencia, decidir el paso, traer la agenda— es idéntico en los
+ * dos formatos, y son unas doscientas líneas de guardas que ya costaron varios
+ * casos reales: el enlace vencido, el usado dos veces, el dispositivo
+ * distinto, la obra social bloqueada. Duplicarlas sería garantizar que un día
+ * se arregle un borde en uno de los dos formatos y no en el otro.
+ *
+ * El formato recién se mira al final, en `marco()`, que es por donde pasan
+ * TODOS los pasos para dibujarse.
+ *
+ * Se llega acá desde un botón de WhatsApp.
+ *
+ * ── Toda la E/S vive en esta página ────────────────────────────────────────
+ *
+ * Los componentes de abajo no consultan nada: reciben datos y dibujan. Hay dos
+ * razones y ninguna es de estilo.
+ *
+ * La primera es de seguridad: el token se resuelve contra Redis y la agenda se
+ * consulta con las credenciales de la clínica, todo del lado del servidor. Al
+ * navegador le llega HTML ya armado. Si esto fuera una SPA consultando una API,
+ * habría que exponer una API que devuelva turnos de pacientes — y protegerla
+ * sería el problema del token otra vez, pero peor.
+ *
+ * La segunda es que con un solo lugar que hace E/S, el orden de las consultas
+ * se lee de corrido y no hay forma de pedir la lista de profesionales para
+ * después descubrir que ese cliente no deja elegir profesional.
+ *
+ * ── La cookie del dispositivo ──────────────────────────────────────────────
+ *
+ * En la primera apertura se genera un secreto y queda en una cookie; en las
+ * siguientes se compara. NO bloquea: si no coincide, se deja pasar y se anota.
+ * Bloquear dejaría afuera al paciente que tocó "abrir en Chrome" desde el
+ * navegador interno de WhatsApp. Ese falso positivo cuesta más de lo que evita.
+ */
+
+import { cookies } from "next/headers"
+import { randomBytes } from "crypto"
+import { leerEnlace } from "@/lib/portal/token"
+import { permiteGestionar, permiteVerDatos } from "@/lib/portal/vigencia"
+import {
+  decidirPaso,
+  ofreceVerTodos,
+  opcionesDeBusqueda,
+  type TipoDeBusqueda,
+} from "@/lib/portal/pasos"
+import { marcaDelPortal } from "@/lib/portal/marca"
+import { rutaDelFormato, type FormatoDelEnlace } from "@/lib/portal/token"
+import { historialDelChat } from "@/lib/portal/contenido"
+import { Conversacion } from "@/components/portal/chat"
+
+/** La cookie que ata el enlace al dispositivo que lo abrió primero. */
+const COOKIE_DISPOSITIVO = "portal_dispositivo"
+import { agendaParaReprogramar, agendaParaTurnoNuevo, turnosDeEjemplo } from "@/lib/portal/agenda"
+import {
+  obtenerEspecialidades,
+  obtenerTodosLosProfesionales,
+  obtenerTodasLasSedes,
+} from "@/lib/api-tools/api-functions"
+import { getWhatsAppConfigById } from "@/lib/db"
+import { EnlaceDePaso } from "@/components/portal/enlace-de-paso"
+import {
+  Marco,
+  Avance,
+  Aviso,
+  EncabezadoDelPaso,
+  ResumenDelTurno,
+  TituloDePaso,
+  Volver,
+} from "@/components/portal/marco"
+import { AnotarHito } from "@/components/portal/anotar-hito"
+import { lineasDeContactoParaWeb } from "@/lib/utils/escalation-contact"
+import type { AnchoDelMarco } from "@/components/portal/marco"
+import { ElegirFiltro } from "@/components/portal/elegir-filtro"
+import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
+import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
+import { GestionarTurno } from "@/components/portal/gestionar-turno"
+
+export async function PaginaDelEnlace({
+  params,
+  searchParams,
+  formato,
+}: {
+  params: Promise<{ token: string }>
+  formato: FormatoDelEnlace
+  searchParams: Promise<{
+    /** Volver a un paso anterior a propósito. Ver PASOS_REVISITABLES. */
+    paso?: string
+    /** Lo elegido en la pantalla de gestión del turno. */
+    accion?: string
+    sedeId?: string
+    tipoBusqueda?: string
+    especialidadId?: string
+    profesionalId?: string
+    sinFiltro?: string
+  }>
+}) {
+  const { token } = await params
+  const filtrosCrudos = await searchParams
+  const almacen = await cookies()
+
+  let secreto = almacen.get(COOKIE_DISPOSITIVO)?.value
+  let secretoNuevo: string | null = null
+  if (!secreto) {
+    secreto = randomBytes(16).toString("base64url")
+    secretoNuevo = secreto
+  }
+
+  const lectura = await leerEnlace(token, secreto)
+
+  // Un token inexistente y uno vencido hace rato se ven igual desde acá, y está
+  // bien: no hay nada que decirle a quien tiene una URL que no le corresponde.
+  if (!lectura) {
+    return (
+      <Marco marca={marcaDelPortal(null)} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
+        <Aviso
+          tono="atencion"
+          titulo="Este enlace ya no está disponible"
+          detalle="Puede haber vencido o haberse usado. Escribinos por WhatsApp y te mandamos uno nuevo."
+        />
+      </Marco>
+    )
+  }
+
+  const { contexto, estado, dispositivoDistinto } = lectura
+  const config = await getWhatsAppConfigById(contexto.configId)
+  const marca = marcaDelPortal(config)
+  // El nombre para saludar sale del token cuando el bot ya lo conocía, y de lo
+  // que el paciente cargó en el portal cuando no. Sólo el primero: "Hola,
+  // Nicolas" y no "Hola, Nicolas DE SANTIAGO".
+  const nombre = (contexto.pacienteNombre || contexto.identidad?.nombre)
+    ?.trim()
+    .split(/\s+/)[0]
+
+  if (!permiteVerDatos(estado)) {
+    return (
+      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO} token={token}>
+        <Aviso
+          tono="atencion"
+          titulo="Este enlace venció"
+          detalle="Escribinos por WhatsApp y te mandamos uno nuevo."
+        />
+      </Marco>
+    )
+  }
+
+  // Ya gestionó: se muestra lo que quedó, sin botones. El paciente vuelve a
+  // abrir el enlace para chequear, y encontrarse un error lo mandaría a
+  // preguntarle al bot — un mensaje que pagamos y que no debería existir.
+  if (estado === "gestionado" && contexto.resultado) {
+    // ── El título tiene que decir lo mismo que el texto (28/9/2026) ────────
+    //
+    // Acá había tres frases fijas: "Listo", tono de éxito, y "te va a llegar
+    // la confirmación por WhatsApp". Las tres eran ciertas sólo para una
+    // reserva confirmada. A quien había CANCELADO su turno, esta pantalla le
+    // decía "Listo ✓ — te va a llegar la confirmación": el `detalle` decía
+    // "cancelamos tu turno" y el encabezado celebraba lo contrario.
+    //
+    // Y a quien tenía una solicitud pendiente de aprobación le decía "Listo",
+    // que es exactamente lo que la pantalla del selector se cuida de no decir
+    // para que nadie se presente un día que no tiene turno.
+    //
+    // `tipo` y `pendiente` los guarda `consumirEnlace` en el momento en que
+    // pasó. `tipo` puede faltar en enlaces emitidos antes de este cambio: en
+    // ese caso se cae al texto neutro, que no afirma de más.
+    const { tipo, pendiente } = contexto.resultado
+
+    const titulo = pendiente
+      ? "Tu solicitud fue enviada"
+      : tipo === "cancelacion"
+        ? "Turno cancelado"
+        : tipo === "confirmacion"
+          ? "Asistencia confirmada"
+          : tipo === "cambio"
+            ? "Tu turno cambió"
+            : "Listo"
+
+    const pie = pendiente
+      ? "Te avisamos por WhatsApp apenas la clínica la apruebe."
+      : tipo === "cancelacion"
+        ? "Si más adelante querés sacar otro turno, escribinos por WhatsApp."
+        : tipo === "confirmacion"
+          ? "Te esperamos. Si algo cambia, escribinos por WhatsApp."
+          : "Te va a llegar la confirmación por WhatsApp."
+
+    return (
+      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO} token={token}>
+        <Avance actual="Confirmar" />
+        <TituloDePaso tipo="listo" sinIcono>
+          {titulo}
+        </TituloDePaso>
+        {/* Sin `detalle`: el título de arriba ya encabeza, así que el aviso
+            lleva la frase concreta y nada más. Repetir "Turno cancelado" dos
+            veces seguidas no agrega nada y empuja el dato real más abajo. */}
+        <Aviso
+          titulo={contexto.resultado.texto}
+          // Verde salvo en la cancelación: salió bien, pero no es una buena
+          // noticia, y el verde le pone una celebración encima a alguien que
+          // perdió su turno.
+          //
+          // Pendiente de aprobación SÍ va en verde (30/9/2026): el color no
+          // habla del turno sino de lo que el paciente hizo, y su solicitud
+          // salió bien. Lo que falta se lo dice el texto.
+          tono={tipo === "cancelacion" ? "neutro" : "exito"}
+        />
+        {contexto.resultado.turno && (
+          <ResumenDelTurno
+            turno={contexto.resultado.turno}
+            titulo={tipo === "cancelacion" ? "El turno que cancelaste" : undefined}
+          />
+        )}
+        <p className="text-muted-foreground">{pie}</p>
+      </Marco>
+    )
+  }
+
+  // Hoy esto no se alcanza: el vencimiento está apagado y `estadoDelEnlace`
+  // nunca devuelve "vencido" (ver `vencimientoHabilitado`). Se deja porque es
+  // la pantalla que vuelve a hacer falta el día que se encienda, y porque un
+  // enlace que caduca sin explicar por qué es peor que este mensaje.
+  if (!permiteGestionar(estado)) {
+    return (
+      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO} token={token}>
+        <Aviso
+          tono="atencion"
+          titulo="El plazo para gestionar por acá terminó"
+          detalle="Escribinos por WhatsApp y lo resolvemos."
+        />
+        {contexto.turno && <ResumenDelTurno turno={contexto.turno} titulo="Tu turno" />}
+      </Marco>
+    )
+  }
+
+  if (dispositivoDistinto) {
+    console.warn(`[PORTAL] ${contexto.phone} abrió su enlace desde otro dispositivo`)
+  }
+
+  const permisos = {
+    porEspecialidad: config?.enableSearchBySpecialty,
+    porProfesional: config?.enableSearchByProfessional,
+    porCualquiera: config?.enableSearchByAnyDoctor,
+  }
+  const filtros: {
+    accion?: string
+    sedeId?: string
+    sedeResuelta?: boolean
+    tipoBusqueda?: TipoDeBusqueda
+    especialidadId?: string
+    profesionalId?: string
+    sinFiltro: boolean
+  } = {
+    // La del query gana sobre la del token: si el paciente eligió otra sede,
+    // eligió otra sede.
+    accion: filtrosCrudos.accion,
+    sedeId: filtrosCrudos.sedeId || contexto.sedeId,
+    tipoBusqueda: filtrosCrudos.tipoBusqueda as TipoDeBusqueda | undefined,
+    especialidadId: filtrosCrudos.especialidadId,
+    profesionalId: filtrosCrudos.profesionalId,
+    sinFiltro: filtrosCrudos.sinFiltro === "1",
+  }
+
+  /**
+   * Lo elegido hasta ahora, para arrastrarlo en los enlaces de los pasos
+   * siguientes y en el "Volver".
+   *
+   * Sólo va lo que el paciente eligió EN el portal (`filtrosCrudos`), no lo que
+   * venía en el token: si la sede la trajo el enlace, no tiene sentido
+   * repetirla en la URL de cada paso.
+   */
+  const elegido: Record<string, string> = {}
+  if (filtrosCrudos.sedeId) elegido.sedeId = filtrosCrudos.sedeId
+  if (filtrosCrudos.tipoBusqueda) elegido.tipoBusqueda = filtrosCrudos.tipoBusqueda
+  if (filtrosCrudos.especialidadId) elegido.especialidadId = filtrosCrudos.especialidadId
+
+  /**
+   * La URL de este mismo enlace con un subconjunto de lo ya elegido.
+   *
+   * La ruta sale del FORMATO y no está fija en "/p/" (13/10/2026). Si lo
+   * estuviera, cada opción del chat devolvería al paciente al formato de
+   * pantallas: el primer paso se vería bien y el segundo ya no, que es el peor
+   * lugar para que aparezca un error.
+   */
+  const ruta = rutaDelFormato(formato)
+  const urlCon = (campos: Record<string, string>) => {
+    const params = new URLSearchParams(campos)
+    const query = params.toString()
+    return query ? `/${ruta}/${token}?${query}` : `/${ruta}/${token}`
+  }
+
+  /**
+   * A dónde vuelve el "Volver", quitando el último filtro elegido.
+   *
+   * Los pasos son: sede → cómo buscar → (especialidad | profesional) →
+   * horarios. Volver es sacar el último que se puso, y `decidirPaso` recalcula
+   * la pantalla sola. Escribir la cadena una vez acá evita que cada paso
+   * invente la suya — que es lo que había, y por eso dos pasos volvían a
+   * lugares distintos desde la misma situación.
+   *
+   * `null` cuando no hay a dónde volver: el primer paso del portal.
+   */
+  const volverQuitando = (): string | null => {
+    const quedan = { ...elegido }
+    for (const campo of ["profesionalId", "especialidadId", "tipoBusqueda", "sedeId"]) {
+      if (quedan[campo]) {
+        delete quedan[campo]
+        return urlCon(quedan)
+      }
+    }
+
+    // ── Y de ahí para atrás, a los pasos de identidad ─────────────────────
+    //
+    // La cadena no terminaba acá por casualidad: `decidirPaso` sólo avanza, así
+    // que sin un pedido explícito nunca vuelve a pedir el DNI. El que se
+    // equivocó un dígito al darse de alta no tenía cómo arreglarlo y el turno
+    // se reservaba con el DNI equivocado.
+    //
+    // Sólo se ofrece cuando hay algo que corregir: si al paciente lo reconoció
+    // el bot, sus datos vienen de la ficha de la clínica y no se editan desde
+    // acá — mandarlo a una pantalla que no cambia nada sería peor que no
+    // ofrecerla.
+    if (contexto.identidad?.tieneFicha === false) return urlCon({ paso: "registrar" })
+    if (contexto.identidad?.dni) return urlCon({ paso: "pedir_dni" })
+
+    return null
+  }
+  // ── Quién es el paciente ─────────────────────────────────────────────────
+  //
+  // Cuando el bot lo reconoció por su teléfono, el token ya trae DNI y obra
+  // social y estos campos salen de ahí. Cuando no, `contexto.identidad` es lo
+  // que el propio portal fue averiguando: primero el DNI, después la ficha (o
+  // el alta). Se unifican acá para que el resto de la página no tenga que
+  // preguntarse de dónde vino cada dato.
+  const identidad = {
+    dni: contexto.identidad?.dni || contexto.pacienteDNI,
+    fichaConsultada: contexto.identidad?.fichaConsultada,
+    // Si el token ya traía DNI es porque el bot encontró al paciente: tiene ficha.
+    tieneFicha: contexto.identidad?.tieneFicha ?? (contexto.pacienteDNI ? true : undefined),
+    nombre: contexto.identidad?.nombre,
+    apellido: contexto.identidad?.apellido,
+    email: contexto.identidad?.email,
+    obraSocialId: contexto.identidad?.obraSocialId || contexto.obraSocialId,
+    obraSocialNombre: contexto.identidad?.obraSocialNombre,
+    obraSocialBloqueada: contexto.identidad?.obraSocialBloqueada,
+  }
+
+  // Lo que se muestra en el repaso previo a confirmar. El nombre completo, no
+  // el de pila: acá el paciente está verificando que el turno quede a nombre de
+  // quien corresponde, que es justo el caso del turno para un familiar.
+  /**
+   * A dónde va "Corregir mis datos" desde la pantalla de confirmación.
+   *
+   * `null` para el paciente que reconoció el bot: sus datos salen de la ficha
+   * de la clínica y no se editan desde el portal.
+   */
+  const corregirDatosEn =
+    contexto.identidad?.tieneFicha === false
+      ? urlCon({ paso: "registrar" })
+      : contexto.identidad?.dni
+        ? urlCon({ paso: "pedir_dni" })
+        : null
+
+  // Los mismos datos que muestra el bot antes de confirmar.
+  //
+  // Nombre y apellido van separados SÓLO cuando los tenemos separados —el
+  // paciente que se dio de alta acá—. Cuando al paciente lo reconoció el bot
+  // tenemos su nombre completo en una sola cadena y no se parte: "DE SANTIAGO,
+  // Nicolas" partido por el primer espacio daría "DE" como apellido.
+  const datosParaElResumen = {
+    // Los nombres de pila cuando los tenemos separados —del alta o del
+    // `Chatbot_Data`—; el nombre completo sólo como último recurso.
+    nombre: identidad.nombre || contexto.pacienteNombres || contexto.pacienteNombre || undefined,
+    apellido: identidad.apellido || contexto.pacienteApellido,
+    dni: identidad.dni,
+    // Lo que averiguó el portal manda sobre lo que trajo el token, que puede
+    // ser de hace horas. Con el id solo no se puede escribir nada, así que si
+    // no hay nombre la fila no aparece —que es mejor que mostrar un número—.
+    obraSocial: identidad.obraSocialNombre || contexto.obraSocialNombre,
+  }
+
+  const clienteId = contexto.clienteId || ""
+
+  // ── La sede se resuelve antes de decidir el paso (24/9/2026) ─────────────
+  //
+  // El bug que esto arregla: el bloque de la sede se resolvía DESPUÉS, y
+  // cuando la clínica tenía una sola sede (o el proxy no devolvía ninguna) no
+  // renderizaba nada y dejaba seguir. Pero `paso` ya valía "elegir_sede", así
+  // que los `if` de tipo de búsqueda, especialidad y profesional —todos
+  // comparados contra `paso`— daban falso, y la ejecución caía hasta el bloque
+  // de horarios del final.
+  //
+  // Resultado: del DNI a elegir horario de una, salteando tres pasos. Lo que
+  // falló no fue la lógica de `decidirPaso` sino calcularla con información
+  // que todavía no estaba: hay que preguntarle a la clínica cuántas sedes
+  // tiene antes de saber si hay algo que preguntar.
+  let sedesParaElegir: Array<{ id: string; nombre: string; detalle?: string }> = []
+
+  if (decidirPaso(contexto.intencion, permisos, filtros, identidad, filtrosCrudos.paso) === "elegir_sede") {
+    const sedes = (await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes || []
+    sedesParaElegir = sedes
+      .map((sede: any) => ({
+        id: String(sede?.Id ?? ""),
+        nombre: String(sede?.Nombre_Completo ?? "").trim(),
+        detalle: [sede?.Domicilio, sede?.Localidad].filter(Boolean).join(" — ") || undefined,
+      }))
+      .filter((o) => o.id && o.nombre)
+
+    // Con una sola no se pregunta: se usa. Con ninguna tampoco, y se sigue sin
+    // filtrar por sede — es lo que hacía el portal antes de este paso.
+    if (sedesParaElegir.length === 1) {
+      filtros.sedeId = sedesParaElegir[0].id
+      filtros.sedeResuelta = true
+    } else if (sedesParaElegir.length === 0) {
+      filtros.sedeResuelta = true
+    }
+  }
+
+  const paso = decidirPaso(contexto.intencion, permisos, filtros, identidad, filtrosCrudos.paso)
+
+  // El aviso de prueba va arriba de todo y en todas las pantallas. Si alguien
+  // abre este enlace sin saber qué es, tiene que enterarse antes de tocar nada.
+  const avisoDemo = contexto.demo ? (
+    <Aviso
+      titulo="Enlace de prueba"
+      detalle="Podés recorrer todas las pantallas. No se reserva ni se cancela ningún turno real."
+      tono="atencion"
+    />
+  ) : null
+
+  // `ancho` sólo lo pide el paso de agenda, donde el calendario y los horarios
+  // van uno al lado del otro en pantallas grandes. Ver `Marco`.
+  /**
+   * Los pasos ya respondidos, para el historial del chat.
+   *
+   * Se calcula acá —y no dentro de `marco()`— porque hay que resolver los
+   * nombres de lo que el paciente eligió, y eso es E/S: en la URL viajan ids.
+   * Ver la cabecera de este archivo sobre por qué toda la E/S vive en la
+   * página.
+   *
+   * Sólo se consulta lo que hace falta: si el paciente todavía no eligió sede,
+   * no se pide la lista de sedes. En el formato de pantallas no se consulta
+   * nada, porque no hay historial que dibujar.
+   */
+  const historial =
+    formato === "chat"
+      ? historialDelChat({
+          elegido,
+          dni: identidad.dni,
+          seDioDeAlta: contexto.identidad?.tieneFicha === false,
+          puedeCambiarDni: Boolean(contexto.identidad?.dni),
+          nombres: {
+            // `Nombre_Completo` y no `nombre`: es el campo que devuelve el
+            // proxy, el mismo que usa el mapeo de `sedesParaElegir` más
+            // arriba. Lo cazó el typecheck.
+            sede: elegido.sedeId
+              ? ((await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes as any[])?.find(
+                  (s: any) => String(s?.Id ?? "") === elegido.sedeId,
+                )?.Nombre_Completo
+              : undefined,
+            tipoBusqueda: elegido.tipoBusqueda
+              ? opcionesDeBusqueda(permisos).find((o) => o.id === elegido.tipoBusqueda)?.nombre
+              : undefined,
+            especialidad: elegido.especialidadId
+              ? normalizarOpciones(
+                  await obtenerEspecialidades(clienteId).catch(() => null),
+                  "especialidades",
+                ).find((o) => o.id === elegido.especialidadId)?.nombre
+              : undefined,
+            profesional: filtrosCrudos.profesionalId
+              ? normalizarOpciones(
+                  await obtenerTodosLosProfesionales(clienteId).catch(() => null),
+                  "profesionales",
+                ).find((o) => o.id === filtrosCrudos.profesionalId)?.nombre
+              : undefined,
+          },
+        })
+      : []
+
+  /**
+   * El envoltorio de cada paso. TODOS los pasos pasan por acá.
+   *
+   * Es el único lugar donde se mira el formato: el chat recibe exactamente lo
+   * mismo que las pantallas y lo mete en la última burbuja. Por eso un paso
+   * nuevo aparece en los dos formatos sin tocar nada, y por eso el chat no
+   * tiene una lista de pasos propia que se pueda quedar vieja.
+   */
+  const marco = (hijos: React.ReactNode, ancho: AnchoDelMarco = "normal") => (
+    <Marco
+      marca={marca}
+      cookieNueva={secretoNuevo}
+      nombreCookie={COOKIE_DISPOSITIVO}
+      ancho={ancho}
+      token={token}
+    >
+      {avisoDemo}
+      {formato === "chat" ? (
+        <Conversacion
+          historial={historial.map((h) => ({
+            pregunta: h.pregunta,
+            respuesta: h.respuesta,
+            // El "Cambiar" sólo en los pasos revisitables: ofrecerlo en uno
+            // que no vuelve deja al paciente rebotando entre dos pantallas,
+            // que es el bucle del DNI que ya arreglamos una vez.
+            cambiar: h.revisitable ? urlCon({ paso: h.paso }) : undefined,
+          }))}
+        >
+          {hijos}
+        </Conversacion>
+      ) : (
+        hijos
+      )}
+    </Marco>
+  )
+
+  // El turno puede no ser para quien abrió el enlace: la opción 2 del menú es
+  // "Solicitar turno para un familiar". Todo lo que se pida de acá en adelante
+  // es de la persona que se va a atender, y los textos tienen que decirlo — si
+  // dicen "tu DNI", el paciente carga el suyo y el turno queda a nombre
+  // equivocado.
+  const paraFamiliar = contexto.intencion === "familiar"
+
+  // ── Decir quién sos ─────────────────────────────────────────────────────
+  if (paso === "pedir_dni") {
+    return marco(
+      <>
+        {/* SIN "Volver" (5/10/2026).
+            
+            Tenía uno que apuntaba a `urlCon({})`, o sea a la pantalla
+            siguiente. Con el DNI ya resuelto eso era un bucle cerrado:
+            desde la sede, "Volver" traía acá; desde acá, "Volver" devolvía a
+            la sede. El paciente que quería corregir el documento rebotaba
+            entre las dos pantallas sin llegar nunca a ningún lado.
+            
+            Este es el PRIMER paso del portal: no hay nada antes, así que no
+            hay a dónde volver. La salida hacia adelante es el botón
+            "Continuar" del formulario, que con el DNI sin cambios simplemente
+            sigue. */}
+        <EncabezadoDelPaso paso="pedir_dni" paraFamiliar={paraFamiliar} />
+        <PedirDNI token={token} paraFamiliar={paraFamiliar} valorInicial={contexto.identidad?.dni} />
+      </>,
+    )
+  }
+
+  // ── No tiene ficha: alta ────────────────────────────────────────────────
+  if (paso === "registrar") {
+    return marco(
+      <>
+        {/* El paso anterior al alta es el DNI, no la sede (5/10/2026). Antes
+            esto apuntaba a `urlCon({})` —hacia adelante— y el que se había
+            equivocado un dígito no tenía cómo corregirlo: el único camino era
+            completar un alta que sabía mal. */}
+        <Volver href={urlCon({ paso: "pedir_dni" })} />
+        <EncabezadoDelPaso paso="registrar" paraFamiliar={paraFamiliar} />
+        <DarseDeAlta
+          token={token}
+          dni={identidad.dni}
+          paraFamiliar={paraFamiliar}
+          valoresIniciales={contexto.identidad}
+        />
+      </>,
+    )
+  }
+
+  // ── La obra social no saca turnos online ────────────────────────────────
+  //
+  // Se corta ACÁ, antes de mostrar un solo horario. Es la lección del caso
+  // Zelmira: la paciente recorrió sede, profesional y especialidad completas
+  // para enterarse recién al final de que su obra social no podía. Hacerle
+  // elegir un turno que no va a poder sacar es peor que decírselo de entrada.
+  if (paso === "derivar_obra_social") {
+    const nombreOS = identidad.obraSocialNombre
+    const telefonosDeDerivacion = lineasDeContactoParaWeb(config?.escalationPhoneNumber)
+
+    return marco(
+      <>
+        <Aviso
+          tono="atencion"
+          titulo={
+            nombreOS
+              ? `Los turnos de ${nombreOS} se gestionan por teléfono`
+              : "Tu turno se gestiona por teléfono"
+          }
+          // El mismo bloque de contacto que manda el bot por WhatsApp
+          // (1/10/2026). El `escalationPhoneNumber` de estas clínicas no es un
+          // número suelto: es el 0800 y el WhatsApp de cada sede, una línea
+          // por sede. Antes se interpolaba en medio de una oración —"comunicate
+          // al {bloque} y te lo dan enseguida"— y quedaba ilegible.
+          detalle={
+            telefonosDeDerivacion.length > 0 ? (
+              <>
+                <p>Para sacarlo, comunicate con la clínica:</p>
+                <div className="mt-2 space-y-0.5 font-medium text-foreground">
+                  {telefonosDeDerivacion.map((linea, i) => (
+                    <div key={i}>{linea}</div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              "Escribinos por WhatsApp y te pasamos el contacto de la clínica."
+            )
+          }
+        />
+        <p className="text-[15px] text-muted-foreground">
+          Tus datos quedaron guardados, así que no vas a tener que repetirlos.
+        </p>
+      </>,
+    )
+  }
+
+  // ── Qué hacer con el turno ──────────────────────────────────────────────
+  //
+  // Las tres salidas juntas. Ver la nota de `GestionarTurno` sobre por qué
+  // están en una sola pantalla y no en tres mensajes de WhatsApp.
+  if (paso === "gestionar_turno") {
+    return marco(
+      <GestionarTurno
+        token={token}
+        turno={contexto.turno}
+        nombre={nombre}
+        urlParaReagendar={urlCon({ accion: "reagendar" })}
+      />,
+    )
+  }
+
+  // ── Reprogramar ─────────────────────────────────────────────────────────
+  if (paso === "reprogramar") {
+    const agenda = await agendaParaReprogramar({
+      clienteId,
+      phone: contexto.phone,
+      sedeId: contexto.sedeId,
+      profesionalId: contexto.turno?.profesionalId,
+      profesionalNombre: contexto.turno?.profesional,
+      pacienteDNI: contexto.pacienteDNI,
+      obraSocialId: contexto.obraSocialId,
+    })
+
+    // En un enlace de prueba, si la agenda real vino vacía se muestran horarios
+    // inventados para poder seguir probando — y se dice que lo son. Disimularlo
+    // escondería justamente el dato de que la agenda no contestó.
+    const usaEjemplos = contexto.demo === true && agenda.total === 0
+    const dias = usaEjemplos ? turnosDeEjemplo() : agenda.dias
+    const direcciones = dias.length > 0 ? await direccionesDeLasSedes(clienteId) : {}
+
+    return marco(
+      <>
+        {usaEjemplos && (
+          <Aviso
+            titulo="Horarios de ejemplo"
+            detalle="La agenda real no devolvió turnos disponibles, así que estos son inventados para poder seguir probando."
+            tono="atencion"
+          />
+        )}
+        {/* Pantalla vacía nunca (23/9/2026).
+            Antes, con la agenda en cero el selector se dibujaba sin nada y el
+            paciente se quedaba mirando un cuadro blanco. La compuerta de
+            `permiteReprogramarOnline` evita que se llegue acá en el caso
+            conocido, pero hay otros —la agenda se llenó entre el recordatorio
+            y el clic— y el paciente merece una frase igual.
+            Cuando el proxy explica por qué no hay turnos, se usa SU mensaje:
+            sabe cosas que nosotros no. */}
+        {dias.length === 0 && <AnotarHito token={token} hito="sin_horarios" />}
+
+        {dias.length === 0 && (
+          <Aviso
+            tono="atencion"
+            titulo="No hay horarios para reprogramar"
+            detalle={
+              mensajeSinTurnos(agenda.infoSinTurnos) ||
+              "Puede que se hayan ocupado. Escribinos por WhatsApp y te ayudamos."
+            }
+          />
+        )}
+
+        {dias.length > 0 && (
+          <SelectorDeTurnos
+            token={token}
+            dias={dias}
+            paciente={datosParaElResumen}
+            corregirDatosEn={corregirDatosEn}
+            etiquetaConfirmar="Confirmar el cambio"
+            accion="cambiar"
+            reemplazaA={contexto.turno}
+            profesionalFijo={
+              agenda.filtradoPorProfesional ? agenda.profesionalNombre : undefined
+            }
+            direccionesPorSede={direcciones}
+            // Va adentro y no acá arriba porque tiene que irse cuando el
+            // paciente pasa al repaso: el turno viejo y "elegí el nuevo
+            // horario" son de ESTA pantalla, no de las tres.
+            encabezado={
+              <>
+                {/* El turno actual va PRIMERO (28/9/2026).
+                    El orden de arriba abajo es el de la pregunta que el
+                    paciente se hace: "¿cuál es el turno que tengo?" y recién
+                    después "¿cuál elijo?". Con el título arriba, la tarjeta
+                    quedaba entre la instrucción y el calendario, partiendo en
+                    dos lo que hay que hacer. */}
+                {contexto.turno && (
+                  <ResumenDelTurno
+                    turno={contexto.turno}
+                    titulo="Tu turno actual"
+                    detalle="Éste es el turno que vas a reemplazar. Verificá que sea el correcto antes de elegir el nuevo."
+                  />
+                )}
+
+                {/* Sin "Hola, Nicolas": el saludo iba cuando el título era lo
+                    primero de la pantalla. Ahora llega después de la tarjeta
+                    del turno, donde ya quedó claro de qué se trata, y un
+                    saludo a mitad de camino suena a que la página empezó dos
+                    veces. */}
+                <EncabezadoDelPaso paso="reprogramar" />
+
+                {/* Si no se pudo identificar al profesional se ofrecen turnos
+                    de la sede, y hay que decirlo: el paciente asume que ve los
+                    de su médico. */}
+                {!agenda.filtradoPorProfesional && agenda.total > 0 && contexto.turno?.profesional && (
+                  <Aviso
+                    titulo="Estos son todos los horarios de la sede"
+                    detalle={`No pudimos filtrar sólo por ${contexto.turno.profesional}. Mirá el profesional antes de confirmar.`}
+                    tono="atencion"
+                  />
+                )}
+
+                {agenda.filtradoPorProfesional && agenda.profesionalNombre && (
+                  <Aviso
+                    tono="neutro"
+                    titulo={`Horarios disponibles con ${agenda.profesionalNombre}.`}
+                  />
+                )}
+              </>
+            }
+          />
+        )}
+      </>,
+      "amplio",
+    )
+  }
+
+  // ── Elegir sede ─────────────────────────────────────────────────────────
+  //
+  // La lista ya se trajo más arriba: acá sólo se muestra. Separar "averiguar"
+  // de "mostrar" es lo que evita el bug de calcular el paso con datos que
+  // todavía no existían.
+  if (paso === "elegir_sede") {
+    return marco(
+      <>
+        {volverQuitando() && <Volver href={volverQuitando()!} />}
+        <EncabezadoDelPaso paso="elegir_sede" />
+        <ElegirFiltro token={token} campo="sedeId" opciones={sedesParaElegir} />
+      </>,
+    )
+  }
+
+  // ── Cómo querés buscar ──────────────────────────────────────────────────
+  //
+  // Las tres opciones del bot, con los mismos nombres. Son caminos
+  // alternativos: elegir una lleva directo a los horarios filtrados por ella,
+  // no a otro filtro encima.
+  if (paso === "elegir_tipo_busqueda") {
+    const opciones = opcionesDeBusqueda(permisos).map((o) => ({
+      id: o.id,
+      nombre: o.nombre,
+      detalle: o.detalle,
+    }))
+
+    return marco(
+      <>
+        {volverQuitando() && <Volver href={volverQuitando()!} />}
+        {/* El saludo va una sola vez, en la banda de arriba con el nombre de
+            la clínica. Repetirlo en cada título hacía que todas las pantallas
+            parecieran la primera. */}
+        <EncabezadoDelPaso paso="elegir_tipo_busqueda" />
+        <ElegirFiltro
+          token={token}
+          campo="tipoBusqueda"
+          opciones={opciones}
+          conservar={filtrosCrudos.sedeId ? { sedeId: filtrosCrudos.sedeId } : undefined}
+        />
+      </>,
+    )
+  }
+
+  // ── Elegir especialidad ─────────────────────────────────────────────────
+  if (paso === "elegir_especialidad") {
+    const opciones = normalizarOpciones(await obtenerEspecialidades(clienteId).catch(() => null), "especialidades")
+
+    // Sin especialidades no se frena al paciente en una pantalla vacía: se
+    // salta al paso siguiente con un enlace que ya trae el `sinFiltro`.
+    if (opciones.length > 0) {
+      return marco(
+        <>
+          {volverQuitando() && <Volver href={volverQuitando()!} />}
+          <EncabezadoDelPaso paso="elegir_especialidad" />
+          <ElegirFiltro token={token} campo="especialidadId" opciones={opciones} conservar={elegido} />
+          {ofreceVerTodos(permisos) && (
+            <VerTodos token={token} ruta={ruta} etiqueta="Ver todos los horarios" conservar={elegido} />
+          )}
+        </>,
+      )
+    }
+  }
+
+  // ── Elegir profesional ──────────────────────────────────────────────────
+  //
+  // Antes esta condición incluía `paso === "elegir_especialidad"`, para que
+  // cuando no hubiera especialidades se cayera acá. Con los tipos de búsqueda
+  // eso ya no corresponde: quien eligió "por especialidad" y se encuentra con
+  // que no hay ninguna cargada no quiere elegir un profesional — quiere ver
+  // los horarios. El salto ahora lo hace el bloque de especialidad.
+  if (paso === "elegir_profesional") {
+    const listaDeProfesionales = normalizarOpciones(
+      await obtenerTodosLosProfesionales(clienteId).catch(() => null),
+      "profesionales",
+    )
+
+    // ── Quién tiene agenda de verdad (30/9/2026) ─────────────────────────
+    //
+    // La lista de arriba es el directorio de la clínica: están todos, tengan
+    // turnos o no. Elegir a uno sin agenda llevaba a una pantalla con dos
+    // mensajes de error encadenados —"no encontramos horarios con esos
+    // filtros" y "no hay horarios disponibles"—. El portal le ofrecía algo
+    // que ya sabía que no iba a funcionar.
+    //
+    // La disponibilidad sale de UNA consulta de agenda sin filtrar por
+    // profesional: los turnos traen su `profesionalId`, así que el conjunto
+    // de los que aparecen es el de los que tienen algo en los próximos 60
+    // días. Es la misma consulta que se hace un paso después si el paciente
+    // elige "cualquier profesional", así que no es una llamada de más en el
+    // camino, es la misma adelantada.
+    //
+    // Ante un fallo se deja TODO habilitado. Deshabilitar por no haber
+    // podido preguntar sería bloquear al paciente por un problema nuestro;
+    // que toque y se encuentre con el mensaje de siempre es menos malo.
+    const agendaParaSaberQuienTiene =
+      listaDeProfesionales.length > 0
+        ? await agendaParaTurnoNuevo({
+            clienteId,
+            phone: contexto.phone,
+            sedeId: filtros.sedeId,
+            especialidadId: filtros.especialidadId,
+            pacienteDNI: identidad.dni,
+            tieneFicha: identidad.tieneFicha === true,
+            obraSocialId: identidad.obraSocialId,
+          }).catch(() => null)
+        : null
+
+    const conAgenda = new Set(
+      (agendaParaSaberQuienTiene?.dias || [])
+        .flatMap((d) => d.turnos.map((t) => String(t.profesionalId || "")))
+        .filter(Boolean),
+    )
+
+    const opciones = listaDeProfesionales.map((o) => {
+      const sinTurnos = conAgenda.size > 0 && !conAgenda.has(String(o.id))
+      return sinTurnos
+        ? { ...o, deshabilitada: true, detalle: "Sin turnos disponibles por ahora" }
+        : o
+    })
+
+    // Nadie tiene agenda: se dice acá, no después de hacerlo elegir. La
+    // consulta tiene que haber funcionado —si falló, `agendaParaSaberQuienTiene`
+    // es null y no se afirma nada—, y el modo demo se saltea porque ahí la
+    // agenda real está vacía a propósito y los horarios son inventados.
+    if (
+      !contexto.demo &&
+      agendaParaSaberQuienTiene &&
+      agendaParaSaberQuienTiene.total === 0 &&
+      conAgenda.size === 0
+    ) {
+      const volverA = volverQuitando()
+      return marco(
+        <>
+          {volverA && <Volver href={volverA} />}
+          <Avance actual="Elegir" />
+          <Aviso
+            tono="atencion"
+            titulo="No hay turnos disponibles por ahora"
+            detalle={
+              mensajeSinTurnos(agendaParaSaberQuienTiene.infoSinTurnos) ||
+              "Ningún profesional tiene horarios en los próximos 60 días. Escribinos por WhatsApp y buscamos una alternativa."
+            }
+          />
+        </>,
+      )
+    }
+
+    if (opciones.length > 0) {
+      // Se conserva TODO lo elegido, no sólo la especialidad: antes la sede
+      // elegida se perdía al pasar a este paso y la agenda volvía a buscarse
+      // sin ella.
+      const conservar = elegido
+      const volverA = volverQuitando()
+      return marco(
+        <>
+          {volverA && <Volver href={volverA} />}
+          <EncabezadoDelPaso paso="elegir_profesional" />
+          <ElegirFiltro token={token} campo="profesionalId" opciones={opciones} conservar={conservar} />
+          {/* "Cualquier profesional" y no "Me da igual el profesional": es la
+              misma opción que la del paso anterior y tiene que llamarse igual,
+              y además "me da igual" suena a resignación cuando en realidad es
+              la vía más rápida al turno más próximo. */}
+          {ofreceVerTodos(permisos) && (
+            <VerTodos
+              token={token}
+              ruta={ruta}
+              etiqueta="Cualquier profesional"
+              detalle="Para ver los turnos más próximos disponibles"
+              conservar={conservar}
+            />
+          )}
+        </>,
+      )
+    }
+  }
+
+  // ── Elegir horario ──────────────────────────────────────────────────────
+  const agendaNueva = await agendaParaTurnoNuevo({
+    clienteId,
+    phone: contexto.phone,
+    // La sede ELEGIDA, no la del token. Esto decía `contexto.sedeId`: el
+    // paciente elegía una sede y la búsqueda salía con otra (o con ninguna).
+    // El paso se veía y no servía para nada.
+    sedeId: filtros.sedeId,
+    profesionalId: filtros.profesionalId,
+    especialidadId: filtros.especialidadId,
+    // Del contexto unificado, no del token: un paciente que se identificó en
+    // el portal tiene su DNI y su obra social sólo acá.
+    pacienteDNI: identidad.dni,
+    tieneFicha: identidad.tieneFicha === true,
+    obraSocialId: identidad.obraSocialId,
+  })
+
+  const conEjemplos = contexto.demo === true && agendaNueva.total === 0
+  const diasNuevos = conEjemplos ? turnosDeEjemplo() : agendaNueva.dias
+  const direccionesNuevo = diasNuevos.length > 0 ? await direccionesDeLasSedes(clienteId) : {}
+
+  // ── Con quién son estos horarios (30/9/2026) ──────────────────────────────
+  //
+  // `agendaNueva.profesionalNombre` sólo viene cuando la agenda resolvió al
+  // profesional por nombre. Cuando el filtro llegó por `profesionalId` —que es
+  // lo que pasa al venir del enlace de "reagendar con el mismo profesional"—
+  // el id está pero el nombre no, y la pantalla terminaba diciendo "Horarios
+  // disponibles." a secas.
+  //
+  // El nombre está en los turnos. Se usa sólo si TODOS son del mismo: si hay
+  // varios, afirmar uno sería mentir, y ahí el nombre va al lado de cada
+  // horario, que es donde sirve.
+  const profesionalesEnAgenda = new Set(
+    diasNuevos.flatMap((d) => d.turnos.map((t) => t.profesionalNombre)).filter(Boolean),
+  )
+  const profesionalDeLaAgenda =
+    agendaNueva.profesionalNombre ||
+    (profesionalesEnAgenda.size === 1 ? [...profesionalesEnAgenda][0] : undefined)
+
+  return marco(
+    <>
+      {conEjemplos && (
+        <Aviso
+          titulo="Horarios de ejemplo"
+          detalle="La agenda real no devolvió turnos con estos filtros, así que estos son inventados para poder seguir probando."
+          tono="atencion"
+        />
+      )}
+
+      {agendaNueva.total === 0 && !conEjemplos && <AnotarHito token={token} hito="sin_horarios" />}
+
+      {agendaNueva.total === 0 && !conEjemplos && (
+        <Aviso
+          titulo="No encontramos horarios con esos filtros"
+          detalle="Probá sin elegir profesional, o escribinos por WhatsApp."
+          tono="atencion"
+        />
+      )}
+
+      <SelectorDeTurnos
+        token={token}
+        dias={diasNuevos}
+        paciente={datosParaElResumen}
+        corregirDatosEn={corregirDatosEn}
+        etiquetaConfirmar="Confirmar mi turno"
+        direccionesPorSede={direccionesNuevo}
+        // El MISMO valor que decide el aviso azul de arriba. Si el aviso dice
+        // "Horarios disponibles con X", los chips no repiten el nombre; si no
+        // lo dice, cada horario lo lleva. Dos reglas separadas para la misma
+        // pregunta es cómo un día aparecía el nombre y al siguiente no.
+        profesionalFijo={profesionalDeLaAgenda}
+        // El "Volver" va adentro por el mismo motivo que el título: en el
+        // repaso el paso atrás es "Elegir otro horario", y dos formas de
+        // volver que hacen cosas distintas en la misma pantalla es cómo se
+        // pierde el turno que ya se eligió.
+        encabezado={
+          <>
+            {volverQuitando() && <Volver href={volverQuitando()!} />}
+            <EncabezadoDelPaso paso="elegir_horario" />
+
+            {/* Con quién son estos horarios. Es lo que decide si el nombre
+                del profesional hace falta al lado de cada horario, así que
+                conviene que el paciente lo lea antes.
+
+                Si no sabemos con quién son, NO se pone nada: "Horarios
+                disponibles." a secas no dice nada que el título no haya dicho
+                ya, y una línea que no informa es ruido que empuja el
+                calendario más abajo. */}
+            {profesionalDeLaAgenda && (
+              // Resaltado y no en gris: no es una nota al pie, es el filtro
+              // con el que está mirando la agenda. Si no lo registra, elige un
+              // horario creyendo que había más opciones de las que hay.
+              <Aviso tono="neutro" titulo={`Horarios disponibles con ${profesionalDeLaAgenda}.`} />
+            )}
+          </>
+        }
+      />
+    </>,
+    "amplio",
+  )
+}
+
+/**
+ * La dirección de cada sede, por id (28/9/2026).
+ *
+ * El paciente confirma un turno mirando "Sede: OFTALMO Medicina Ocular". Con
+ * una sola sede alcanza; con varias de la misma institución, sede y dirección
+ * son una unidad y el nombre solo no le dice a dónde tiene que ir.
+ *
+ * Sale de la misma llamada que arma la lista de sedes, que ya devuelve el
+ * domicilio. Se resuelve por el `sedeId` del turno ELEGIDO y no por el filtro:
+ * quien buscó sin filtrar por sede puede terminar eligiendo un horario de
+ * cualquiera de ellas.
+ *
+ * Si la llamada falla se devuelve un mapa vacío y la fila no se muestra. Una
+ * dirección equivocada es peor que ninguna: manda a alguien a otro lado.
+ */
+async function direccionesDeLasSedes(clienteId: string): Promise<Record<string, string>> {
+  const sedes = (await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes || []
+  const mapa: Record<string, string> = {}
+  for (const sede of sedes) {
+    const id = String((sede as any)?.Id ?? "")
+    const domicilio = String((sede as any)?.Domicilio ?? "").trim()
+    if (id && domicilio) mapa[id] = domicilio
+  }
+  return mapa
+}
+
+/**
+ * El "por qué no hay turnos" que manda el proxy, si lo mandó (23/9/2026).
+ *
+ * `info_sin_turnos` es la parte de la respuesta que explica un cero. En el caso
+ * que motivó esto decía: "Hay profesionales con agenda disponible pero solo se
+ * pueden reservar por teléfono". Eso es mucho mejor que cualquier texto nuestro,
+ * porque es la razón real y no una suposición.
+ *
+ * Devuelve `null` cuando no vino nada, y ahí el llamador pone su texto genérico.
+ * Lo que no se hace es inventar una causa: un "no hay turnos disponibles" a
+ * secas, cuando en realidad sí los hay pero por teléfono, es información falsa.
+ */
+function mensajeSinTurnos(info: any): string | null {
+  if (!info || typeof info !== "object") return null
+
+  const mensaje = typeof info.mensaje === "string" ? info.mensaje.trim() : ""
+  if (!mensaje) return null
+
+  const soloTelefono = Array.isArray(info.profesionales_disponibles_solo_telefono)
+    ? info.profesionales_disponibles_solo_telefono
+    : []
+
+  const nombres = soloTelefono
+    .map((p: any) => (typeof p?.nombre === "string" ? p.nombre.trim() : ""))
+    .filter(Boolean)
+
+  if (nombres.length > 0) {
+    return `${mensaje} (${nombres.join(", ")}). Escribinos por WhatsApp y te ayudamos.`
+  }
+
+  return `${mensaje} Escribinos por WhatsApp y te ayudamos.`
+}
+
+function VerTodos({
+  token,
+  etiqueta,
+  detalle,
+  conservar,
+  ruta,
+}: {
+  token: string
+  etiqueta: string
+  /** La línea de abajo, igual que en las opciones de la lista. */
+  detalle?: string
+  conservar?: Record<string, string>
+  /** "p" o "c". Ver `rutaDelFormato`: sin esto el chat volvía a las pantallas. */
+  ruta: string
+}) {
+  const params = new URLSearchParams({ ...(conservar || {}), sinFiltro: "1" })
+  return (
+    <EnlaceDePaso
+      href={`/${ruta}/${token}?${params.toString()}`}
+      className="mt-3 flex min-h-[56px] items-center justify-center rounded-xl border bg-card px-4 py-3 text-center text-card-foreground no-underline hover:bg-accent"
+    >
+      <span className="block">
+        <span className="block font-medium">{etiqueta}</span>
+        {detalle && <span className="mt-0.5 block text-sm text-muted-foreground">{detalle}</span>}
+      </span>
+    </EnlaceDePaso>
+  )
+}
+
+/**
+ * Las listas vienen con nombres de campo distintos según el endpoint y la
+ * clínica. Se aceptan las variantes conocidas y se descarta lo que no tenga id
+ * y nombre, en vez de mostrar opciones vacías que no llevan a ningún lado.
+ */
+/**
+ * El primer valor no vacío de una lista de nombres de campo posibles.
+ *
+ * La API devuelve el mismo dato con distinto nombre según el endpoint y la
+ * clínica: `Id`, `id`, `Codigo`, `Subespecialidad_Id`… Probar varios es más
+ * barato que normalizar el proxy de cada cliente.
+ */
+function primerCampo(item: any, campos: string[]): string {
+  for (const campo of campos) {
+    const valor = item?.[campo]
+    if (valor !== undefined && valor !== null && String(valor).trim() !== "") {
+      return String(valor).trim()
+    }
+  }
+  return ""
+}
+
+const CAMPOS_ID = [
+  "id",
+  "Id",
+  "ID",
+  "codigo",
+  "Codigo",
+  "Subespecialidad_Id",
+  "Especialidad_Id",
+  "Profesional_Id",
+  "Sede_Id",
+]
+
+const CAMPOS_NOMBRE = [
+  "nombre",
+  "Nombre",
+  "descripcion",
+  "Descripcion",
+  "Nombre_Completo",
+  "nombre_completo",
+  "Detalle",
+  "detalle",
+  "Subespecialidad",
+  "Especialidad",
+]
+
+/**
+ * Normaliza las listas del proxy (especialidades, profesionales) al par que
+ * necesita el selector.
+ *
+ * ── Lo que se descarta, se dice (24/9/2026) ────────────────────────────────
+ *
+ * Reportado: la lista de subespecialidades del portal traía menos ítems que la
+ * misma request en Postman.
+ *
+ * La versión anterior probaba tres nombres de campo y filtraba en silencio lo
+ * que no encajaba. Un ítem cuyo nombre viniera como `Descripcion` o cuyo id
+ * fuera `Subespecialidad_Id` desaparecía sin dejar rastro: el paciente veía
+ * una lista más corta y nadie se enteraba, porque una lista corta parece una
+ * lista.
+ *
+ * Es el mismo error de siempre con otra ropa — tratar "no supe leerlo" como
+ * "no existe". Ahora se prueban más nombres Y se loguea lo que igual queda
+ * afuera, con las claves del ítem, así la próxima vez el log dice qué campo
+ * falta en vez de que haya que adivinarlo.
+ */
+function normalizarOpciones(respuesta: any, queEs = "opciones"): Array<{ id: string; nombre: string }> {
+  const datos = respuesta?.datos ?? respuesta
+  const lista = Array.isArray(datos)
+    ? datos
+    : datos?.especialidades || datos?.subespecialidades || datos?.profesionales || []
+  if (!Array.isArray(lista)) return []
+
+  const opciones: Array<{ id: string; nombre: string }> = []
+  const descartados: string[] = []
+
+  for (const item of lista) {
+    const id = primerCampo(item, CAMPOS_ID)
+    const nombre = primerCampo(item, CAMPOS_NOMBRE)
+
+    if (id && nombre) {
+      opciones.push({ id, nombre })
+    } else {
+      descartados.push(
+        `{${Object.keys(item || {}).join(", ")}}${id ? "" : " ← sin id"}${nombre ? "" : " ← sin nombre"}`,
+      )
+    }
+  }
+
+  if (descartados.length > 0) {
+    console.warn(
+      `[PORTAL] ⚠️ ${descartados.length} de ${lista.length} ${queEs} quedaron afuera por no encontrarles id o nombre. ` +
+        `Claves de los descartados: ${descartados.slice(0, 5).join(" | ")}`,
+    )
+  }
+
+  return opciones
+}
