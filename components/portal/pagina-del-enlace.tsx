@@ -562,7 +562,7 @@ export async function PaginaDelEnlace({
             "Continuar" del formulario, que con el DNI sin cambios simplemente
             sigue. */}
         <EncabezadoDelPaso formato={formato} paso="pedir_dni" paraFamiliar={paraFamiliar} />
-        <PedirDNI token={token} paraFamiliar={paraFamiliar} valorInicial={contexto.identidad?.dni} />
+        <PedirDNI ruta={ruta} token={token} paraFamiliar={paraFamiliar} valorInicial={contexto.identidad?.dni} />
       </>,
     )
   }
@@ -577,7 +577,7 @@ export async function PaginaDelEnlace({
             completar un alta que sabía mal. */}
         {volverArriba(urlCon({ paso: "pedir_dni" }))}
         <EncabezadoDelPaso formato={formato} paso="registrar" paraFamiliar={paraFamiliar} />
-        <DarseDeAlta
+        <DarseDeAlta ruta={ruta}
           token={token}
           dni={identidad.dni}
           paraFamiliar={paraFamiliar}
@@ -773,7 +773,7 @@ export async function PaginaDelEnlace({
       <>
         {volverArriba(volverQuitando())}
         <EncabezadoDelPaso formato={formato} paso="elegir_sede" />
-        <ElegirFiltro token={token} campo="sedeId" opciones={sedesParaElegir} />
+        <ElegirFiltro ruta={ruta} token={token} campo="sedeId" opciones={sedesParaElegir} />
       </>,
     )
   }
@@ -818,7 +818,7 @@ export async function PaginaDelEnlace({
         <>
           {volverArriba(volverQuitando())}
           <EncabezadoDelPaso formato={formato} paso="elegir_especialidad" />
-          <ElegirFiltro token={token} campo="especialidadId" opciones={opciones} conservar={elegido} />
+          <ElegirFiltro ruta={ruta} token={token} campo="especialidadId" opciones={opciones} conservar={elegido} />
           {ofreceVerTodos(permisos) && (
             <VerTodos token={token} ruta={ruta} etiqueta="Ver todos los horarios" conservar={elegido} />
           )}
@@ -921,7 +921,7 @@ export async function PaginaDelEnlace({
         <>
           {volverArriba(volverA)}
           <EncabezadoDelPaso formato={formato} paso="elegir_profesional" />
-          <ElegirFiltro token={token} campo="profesionalId" opciones={opciones} conservar={conservar} />
+          <ElegirFiltro ruta={ruta} token={token} campo="profesionalId" opciones={opciones} conservar={conservar} />
           {/* "Cualquier profesional" y no "Me da igual el profesional": es la
               misma opción que la del paso anterior y tiene que llamarse igual,
               y además "me da igual" suena a resignación cuando en realidad es

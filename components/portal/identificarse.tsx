@@ -62,7 +62,10 @@ export function PedirDNI({
   token,
   paraFamiliar,
   valorInicial,
+  ruta = "p",
 }: {
+  /** "p" o "c": a dónde volver después de guardar. Ver ElegirFiltro. */
+  ruta?: string
   token: string
   /** El turno es para otra persona: el DNI que va es el de ella. */
   paraFamiliar?: boolean
@@ -101,7 +104,7 @@ export function PedirDNI({
         // `refresh` vuelve a pedir la página al servidor sin parpadeo. Van los
         // dos: si la URL ya estaba limpia, `replace` no hace nada y sin el
         // `refresh` la pantalla se quedaría igual.
-        router.replace(`/p/${token}`)
+        router.replace(`/${ruta}/${token}`)
         router.refresh()
         return
       }
@@ -154,7 +157,10 @@ export function DarseDeAlta({
   dni,
   paraFamiliar,
   valoresIniciales,
+  ruta = "p",
 }: {
+  /** "p" o "c": a dónde volver después de guardar. Ver ElegirFiltro. */
+  ruta?: string
   token: string
   dni?: string
   /** Los datos son de la persona que se atiende, no de quien completa. */
@@ -248,7 +254,7 @@ export function DarseDeAlta({
       const data = await r.json()
       if (data.ok) {
         // Ver el comentario en PedirDNI: navegación del lado del cliente.
-        router.replace(`/p/${token}`)
+        router.replace(`/${ruta}/${token}`)
         router.refresh()
         return
       }

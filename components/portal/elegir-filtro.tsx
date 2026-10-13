@@ -38,8 +38,15 @@ export function ElegirFiltro({
   campo,
   opciones,
   conservar,
+  ruta = "p",
 }: {
   token: string
+  /**
+   * "p" o "c" (13/10/2026). Sin esto, cada opción de la lista devolvía al
+   * paciente al formato de pantallas: el chat se veía bien hasta que tocaba
+   * la primera opción.
+   */
+  ruta?: string
   campo: "sedeId" | "tipoBusqueda" | "especialidadId" | "profesionalId"
   opciones: Array<{
     id: string
@@ -111,7 +118,7 @@ export function ElegirFiltro({
         return (
           <EnlaceDePaso
             key={opcion.id}
-            href={`/p/${token}?${params.toString()}`}
+            href={`/${ruta}/${token}?${params.toString()}`}
             className={`${forma} bg-card text-card-foreground no-underline transition-colors hover:bg-accent active:bg-accent`}
           >
             {contenido}
