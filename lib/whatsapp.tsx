@@ -56,7 +56,7 @@ import {
   formatSupportHoursLines,
   formatSupportHoursForPatient,
 } from "./human-support-schedule"
-import type { HumanSupportMessage, MediaAdjunta } from "./types"
+import type { DaySchedule, HumanSupportMessage, MediaAdjunta } from "./types"
 import { formatScheduleForSystemBlock } from "./utils/schedule-formatter"
 import {
   getAppointmentContext,
@@ -2361,15 +2361,63 @@ function buildHumanUnavailableMessage(escalationPhone?: string, hoursStr?: strin
 }
 
 /**
- * ¿Corresponde ofrecer atención humana en este momento?
- * true solo si la clínica tiene humanSupport activo Y estamos dentro del horario de atención.
+ * ¿Corresponde ofrecer atención humana en este momento, y si no, por qué?
+ *
+ * ── Por qué devuelve un motivo y no un booleano (13/10/2026) ───────────────
+ *
+ * Devolvía `boolean` y no logueaba nada. Cuando una clínica con la atención
+ * humana activada igual derivaba al teléfono, desde los logs era imposible
+ * saber si el "no" venía del flag o del horario: había que ir a mirar Redis.
+ *
+ * El caso que lo destapó: Iglicki Oftalmologia, 13/10 a las 12:27 UTC — que son
+ * las 09:27 en Argentina. Con una grilla que arranca a las 10:00 el bot estaba
+ * haciendo lo correcto, pero no había forma de demostrarlo sin reconstruir la
+ * cadena entera a mano.
+ *
+ * El motivo además decide QUÉ se le dice al paciente: "no atendemos consultas
+ * por acá" y "estamos fuera de horario, volvé de 10 a 18" son mensajes
+ * distintos, y hasta ahora los dos salían iguales.
+ */
+type DisponibilidadHumana =
+  | { disponible: true }
+  /** La clínica no tiene la atención humana habilitada. */
+  | { disponible: false; motivo: "deshabilitado" }
+  /** Está habilitada, pero ahora no hay nadie. Se devuelven los horarios. */
+  | { disponible: false; motivo: "fuera_de_horario"; horarios: DaySchedule[] }
+
+async function disponibilidadHumana(config: any): Promise<DisponibilidadHumana> {
+  const flags = await getEffectiveFeatureFlags(config.id)
+  if (!flags.humanSupport) {
+    console.info(`[HUMANO] ${config.id}: no se ofrece — humanSupport está en false`)
+    return { disponible: false, motivo: "deshabilitado" }
+  }
+
+  const horarios = await getHumanSupportSchedule(config.id)
+  const timezone = config.timezone || "America/Argentina/Buenos_Aires"
+
+  // Una grilla vacía NO cierra la atención: `isWithinHumanSupportHours`
+  // devuelve true sin restricciones configuradas, y así tiene que ser —
+  // interpretar "no configuró horarios" como "no atiende nunca" apagaría la
+  // función para toda clínica que encendió el switch y no tocó la grilla.
+  if (!isWithinHumanSupportHours(horarios, timezone)) {
+    console.info(
+      `[HUMANO] ${config.id}: no se ofrece — fuera del horario de atención ` +
+        `(${horarios.length} día(s) configurado(s), tz ${timezone})`,
+    )
+    return { disponible: false, motivo: "fuera_de_horario", horarios }
+  }
+
+  return { disponible: true }
+}
+
+/**
+ * El si/no, para los llamadores que no necesitan el motivo.
+ *
+ * Se mantiene como envoltorio en vez de duplicar la consulta: el motivo lo
+ * necesita sólo `offerHumanOrSendPhone`, que es el que elige el mensaje.
  */
 async function shouldOfferHuman(config: any): Promise<boolean> {
-  const flags = await getEffectiveFeatureFlags(config.id)
-  if (!flags.humanSupport) return false
-  const schedule = await getHumanSupportSchedule(config.id)
-  const timezone = config.timezone || "America/Argentina/Buenos_Aires"
-  return isWithinHumanSupportHours(schedule, timezone)
+  return (await disponibilidadHumana(config)).disponible
 }
 
 /**
@@ -2412,8 +2460,12 @@ const HUMAN_OFFER_BUTTONS: Array<{ id: string; title: string }> = [
  * en horario, ofrece primero hablar con una persona (un solo botón: "1. Requiero atención
  * humana"; el teléfono ya se menciona en el cuerpo del mensaje como alternativa). Si el
  * paciente no elige "1" (ni presiona el botón), se envía el mensaje original con el
- * teléfono como respuesta por defecto (declineMessage). Si `shouldOfferHuman` da false,
- * envía directamente el mensaje con el teléfono, como veníamos haciendo.
+ * teléfono como respuesta por defecto (declineMessage).
+ *
+ * Si NO se puede ofrecer, el mensaje depende del motivo (13/10/2026):
+ *
+ *  - fuera de horario → se dice eso, con los horarios reales de la clínica.
+ *  - atención humana deshabilitada → `phoneMessage`, como veníamos haciendo.
  */
 async function offerHumanOrSendPhone(
   ctx: DirectResponseContext,
@@ -2421,7 +2473,31 @@ async function offerHumanOrSendPhone(
   phoneMessage: string,
   phase = "derive-phone",
 ): Promise<void> {
-  if (await shouldOfferHuman(config)) {
+  const disponibilidad = await disponibilidadHumana(config)
+
+  // ── Fuera de horario NO es "no atendemos consultas" (13/10/2026) ─────────
+  //
+  // Antes los dos casos caían al mismo `phoneMessage`. El paciente que
+  // escribía a las 09:27 recibía "este canal es exclusivo para la gestión de
+  // turnos médicos", cuando la clínica SÍ atiende consultas — dos horas más
+  // tarde. Es el peor tipo de respuesta: cierra una puerta que está abierta.
+  //
+  // `handleDeriveToHuman` ya distinguía los dos casos cuando el paciente pedía
+  // un humano explícitamente. Acá faltaba, y es el camino por el que pasa la
+  // opción "otra consulta" del menú, que es mucho más transitado.
+  if (!disponibilidad.disponible && disponibilidad.motivo === "fuera_de_horario") {
+    await sendDirectResponse(
+      ctx,
+      buildHumanOffHoursMessage(
+        config.escalationPhoneNumber,
+        formatSupportHoursLines(disponibilidad.horarios),
+      ),
+      `${phase}-fuera-de-horario`,
+    )
+    return
+  }
+
+  if (disponibilidad.disponible) {
     const clinicName = config.displayName || "la clínica"
     const escalationPhone = config.escalationPhoneNumber
     const intro = `Actualmente estás hablando con Iris, un asistente virtual de inteligencia artificial que solo está preparado para la gestión de turnos con profesionales.\n\n`
