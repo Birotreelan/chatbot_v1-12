@@ -243,6 +243,22 @@ export function generarToken(): string {
  * `/p/` y no `/portal/turnos/` a propósito: cuanto más corta, menos ruido en la
  * barra del navegador y menos posibilidad de que se corte al compartirla.
  */
+/**
+ * El formato con el que se ve el enlace. Ver `WhatsAppConfig.formatoDelEnlace`.
+ *
+ * Vive acá y no en el contexto del token porque es una propiedad del CLIENTE,
+ * no del enlace: si mañana la clínica cambia de formato, los enlaces que ya
+ * emitió deberían seguir abriéndose donde se emitieron —de ahí que el formato
+ * quede grabado en la URL— pero no hay que poder elegirlo enlace por enlace.
+ */
+export type FormatoDelEnlace = "pantallas" | "chat"
+
+/** La ruta de cada formato. Un solo lugar donde vive esta correspondencia. */
+const RUTA_POR_FORMATO: Record<FormatoDelEnlace, string> = {
+  pantallas: "p",
+  chat: "c",
+}
+
 export function urlDelPortal(
   token: string,
   baseUrl?: string,
@@ -256,8 +272,14 @@ export function urlDelPortal(
    * puede cambiarlo. Guardarlos en el token los volvería inamovibles.
    */
   filtros?: Record<string, string | undefined>,
+  /**
+   * Ausente = "pantallas". El default está acá y no en el llamador para que un
+   * camino que todavía no conozca el formato siga emitiendo el enlace que está
+   * en producción, en lugar de uno roto.
+   */
+  formato: FormatoDelEnlace = "pantallas",
 ): string {
-  const base = `${baseDelPortal(baseUrl)}/p/${token}`
+  const base = `${baseDelPortal(baseUrl)}/${RUTA_POR_FORMATO[formato] || "p"}/${token}`
 
   const params = new URLSearchParams()
   for (const [clave, valor] of Object.entries(filtros || {})) {
@@ -304,6 +326,11 @@ export async function emitirEnlace(params: {
   demo?: boolean
   /** Filtros que el enlace deja ya aplicados. Ver `urlDelPortal`. */
   filtros?: Record<string, string | undefined>
+  /**
+   * Formato del enlace. Sale de `config.formatoDelEnlace`; ausente =
+   * "pantallas". Ver `urlDelPortal`.
+   */
+  formato?: FormatoDelEnlace
 }): Promise<EnlaceEmitido | null> {
   const redis = getRedisClient()
   if (!redis) return null
@@ -343,7 +370,11 @@ export async function emitirEnlace(params: {
     `[PORTAL] Enlace emitido para ${params.phone} (${params.intencion}, ${params.origen}), vence ${venceAccion}`,
   )
 
-  return { token, url: urlDelPortal(token, params.baseUrl, params.filtros), contexto }
+  return {
+    token,
+    url: urlDelPortal(token, params.baseUrl, params.filtros, params.formato),
+    contexto,
+  }
 }
 
 export interface LecturaDelEnlace {

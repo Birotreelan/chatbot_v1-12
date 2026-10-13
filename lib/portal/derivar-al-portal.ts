@@ -20,7 +20,7 @@
  * forma de que activar este switch no pueda romper nada.
  */
 
-import { emitirEnlace, type TurnoDelPortal } from "./token"
+import { emitirEnlace, type FormatoDelEnlace, type TurnoDelPortal } from "./token"
 import {
   construirMensajeConEnlace,
   enviarMensajeConEnlace,
@@ -178,6 +178,21 @@ export function datosDesdeElContexto(contexto: any): DatosDelPaciente | undefine
  * portal — es el que está en producción, y el formulario del dashboard avisa
  * de la contradicción.
  */
+/**
+ * Con qué formato se ve el enlace de este cliente.
+ *
+ * Se lee con una función y no con `config.formatoDelEnlace` directo por la
+ * misma razón que `usaPortal`: el default vive en un solo lugar. Un valor
+ * desconocido —guardado a mano, o de una versión futura— cae en "pantallas",
+ * que es lo que está en producción, en lugar de emitir un enlace a una ruta
+ * que no existe.
+ */
+export function formatoDelEnlace(
+  config: { formatoDelEnlace?: string } | null | undefined,
+): FormatoDelEnlace {
+  return config?.formatoDelEnlace === "chat" ? "chat" : "pantallas"
+}
+
 export function usaPortal(config: { clientePortalWeb?: boolean } | null | undefined): boolean {
   return config?.clientePortalWeb === true
 }
@@ -387,6 +402,10 @@ export async function derivarAlPortal(params: {
       sedeId: paciente?.sedeId,
       turno: paciente?.turno,
       filtros: params.filtros,
+      // El formato sale del cliente, no de este envío: la misma derivación, el
+      // mismo token y las mismas compuertas se ven como pantallas o como chat
+      // según lo que la clínica tenga configurado. Ver `formatoDelEnlace`.
+      formato: formatoDelEnlace(config),
     })
 
     if (!enlace) {

@@ -151,6 +151,28 @@ export interface WhatsAppConfig {
   clientePortalWebDesde?: string
 
   /**
+   * Con qué formato se ve el enlace externo (13/10/2026).
+   *
+   *   "pantallas" (default) → /p/<token>, una pantalla por paso.
+   *   "chat"                → /c/<token>, los mismos pasos como conversación.
+   *
+   * Es una decisión de PRESENTACIÓN y nada más. Los dos formatos responden a la
+   * misma máquina de pasos (`decidirPaso` en lib/portal/pasos.ts), con el mismo
+   * token, las mismas compuertas de derivación y los mismos endpoints. Lo único
+   * que cambia es cómo se dibuja cada paso.
+   *
+   * Por eso NO es un switch aparte de `clientePortalWeb`: ese sigue siendo el
+   * que decide si el cliente usa enlace externo o se queda en el chat de
+   * WhatsApp. Este campo sólo elige el formato cuando ya hay enlace. Separarlos
+   * en dos booleanos permitiría el estado imposible "chat encendido, enlace
+   * apagado", que alguien tendría que recordar que no existe.
+   *
+   * Ausente = "pantallas", que es lo que está en producción. Un cliente al que
+   * nadie le tocó este campo no cambia de comportamiento.
+   */
+  formatoDelEnlace?: "pantallas" | "chat"
+
+  /**
    * Tipos de mensaje que esta clínica NO usa (5/10/2026).
    *
    * El tablero de integración compara lo que llega contra el catálogo de

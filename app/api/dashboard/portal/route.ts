@@ -17,6 +17,7 @@ import { NextResponse } from "next/server"
 import { requireAuthFromRequest } from "@/lib/auth"
 import { getWhatsAppConfigById } from "@/lib/db"
 import { emitirEnlace } from "@/lib/portal/token"
+import { formatoDelEnlace } from "@/lib/portal/derivar-al-portal"
 import { buscarPacientePorDNI, obtenerTurnosPaciente } from "@/lib/api-tools/api-functions"
 import { normalizePhoneNumber } from "@/lib/utils"
 
@@ -44,6 +45,14 @@ export async function POST(request: Request) {
 
   const intencion = cuerpo.intencion === "nuevo_turno" ? "nuevo_turno" : "reagendar"
   const demo = cuerpo.demo !== false
+
+  // Override explícito del formato, sólo para la prueba: permite ver cómo queda
+  // el chat en un cliente configurado con pantallas (y al revés) sin cambiarle
+  // la configuración a un cliente en producción.
+  const formatoPedido =
+    cuerpo.formato === "chat" || cuerpo.formato === "pantallas"
+      ? (cuerpo.formato as "chat" | "pantallas")
+      : undefined
   const dni = String(cuerpo.dni || "").replace(/\D/g, "")
   const telefono = normalizePhoneNumber(String(cuerpo.telefono || "5490000000000"))
 
@@ -126,6 +135,11 @@ export async function POST(request: Request) {
     sedeId,
     turno,
     demo,
+    // El enlace de prueba se emite con el formato que tenga configurado el
+    // cliente: si no, uno probaría las pantallas y el paciente recibiría el
+    // chat. El `formato` del query string lo pisa, para poder ver los dos sin
+    // tocar la configuración.
+    formato: formatoPedido || formatoDelEnlace(config),
   })
 
   if (!enlace) {

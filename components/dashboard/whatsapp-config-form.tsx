@@ -423,6 +423,51 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </p>
               )}
 
+              {/* ── El formato del enlace (13/10/2026) ──────────────────────
+                  Va DENTRO del `clientePortalWeb === true` a propósito: el
+                  formato sólo existe si hay enlace. Mostrarlo con el switch
+                  apagado ofrecería elegir entre dos cosas que no van a pasar.
+
+                  Es una decisión de presentación: los dos formatos usan la
+                  misma máquina de pasos, el mismo token y los mismos
+                  endpoints. Lo dice la bajada, porque desde el formulario
+                  parecen dos productos distintos. */}
+              {formData.clientePortalWeb === true && (
+                <div className="space-y-2 p-2 rounded-md bg-muted/30">
+                  <Label className="text-sm font-medium">Formato del enlace</Label>
+                  <div className="flex gap-2">
+                    {[
+                      { valor: "pantallas", titulo: "Pantallas", detalle: "Una pantalla por paso" },
+                      { valor: "chat", titulo: "Chat", detalle: "Los mismos pasos, conversados" },
+                    ].map((opcion) => {
+                      const elegido =
+                        (formData.formatoDelEnlace || "pantallas") === opcion.valor
+                      return (
+                        <button
+                          key={opcion.valor}
+                          type="button"
+                          onClick={() => updateFormData("formatoDelEnlace", opcion.valor)}
+                          className={`flex-1 rounded-md border px-3 py-2 text-left transition-colors ${
+                            elegido
+                              ? "border-primary bg-primary/10"
+                              : "border-input hover:bg-accent"
+                          }`}
+                        >
+                          <span className="block text-sm font-medium">{opcion.titulo}</span>
+                          <span className="block text-xs text-muted-foreground">
+                            {opcion.detalle}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Cambia sólo cómo se ve el enlace. El momento en que se deriva, los datos que
+                    lleva y lo que el paciente puede hacer son los mismos en los dos formatos.
+                  </p>
+                </div>
+              )}
+
               {formData.clientePortalWeb === true && (
                 <div className="space-y-2 p-2 rounded-md bg-muted/30">
                   <Label htmlFor="textoEnlacePortal" className="text-sm font-medium">
