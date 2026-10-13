@@ -56,7 +56,7 @@ import {
 } from "@/lib/portal/pasos"
 import { marcaDelPortal } from "@/lib/portal/marca"
 import { rutaDelFormato, type FormatoDelEnlace } from "@/lib/portal/token"
-import { historialDelChat } from "@/lib/portal/contenido"
+import { historialDelChat, saludoDelChat } from "@/lib/portal/contenido"
 import { Conversacion } from "@/components/portal/chat"
 
 /** La cookie que ata el enlace al dispositivo que lo abrió primero. */
@@ -291,6 +291,17 @@ export async function PaginaDelEnlace({
    * lugar para que aparezca un error.
    */
   const ruta = rutaDelFormato(formato)
+
+  /**
+   * El "Volver" de arriba, sólo en el formato de pantallas.
+   *
+   * En el chat ya hay un "Cambiar" en cada burbuja revisitable, y dos formas
+   * de volver en la misma vista es exactamente cómo se pierde lo que el
+   * paciente ya eligió — la nota del paso de horarios dice lo mismo sobre
+   * tener dos "volver" que hacen cosas distintas.
+   */
+  const volverArriba = (href: string | null | undefined) =>
+    formato === "chat" ? null : href ? <Volver href={href} /> : null
   const urlCon = (campos: Record<string, string>) => {
     const params = new URLSearchParams(campos)
     const query = params.toString()
@@ -504,6 +515,11 @@ export async function PaginaDelEnlace({
       {avisoDemo}
       {formato === "chat" ? (
         <Conversacion
+          saludo={saludoDelChat({
+            nombre,
+            clinica: config?.displayName,
+            paraFamiliar: contexto.intencion === "familiar",
+          })}
           historial={historial.map((h) => ({
             pregunta: h.pregunta,
             respuesta: h.respuesta,
@@ -544,7 +560,7 @@ export async function PaginaDelEnlace({
             hay a dónde volver. La salida hacia adelante es el botón
             "Continuar" del formulario, que con el DNI sin cambios simplemente
             sigue. */}
-        <EncabezadoDelPaso paso="pedir_dni" paraFamiliar={paraFamiliar} />
+        <EncabezadoDelPaso formato={formato} paso="pedir_dni" paraFamiliar={paraFamiliar} />
         <PedirDNI token={token} paraFamiliar={paraFamiliar} valorInicial={contexto.identidad?.dni} />
       </>,
     )
@@ -558,8 +574,8 @@ export async function PaginaDelEnlace({
             esto apuntaba a `urlCon({})` —hacia adelante— y el que se había
             equivocado un dígito no tenía cómo corregirlo: el único camino era
             completar un alta que sabía mal. */}
-        <Volver href={urlCon({ paso: "pedir_dni" })} />
-        <EncabezadoDelPaso paso="registrar" paraFamiliar={paraFamiliar} />
+        {volverArriba(urlCon({ paso: "pedir_dni" }))}
+        <EncabezadoDelPaso formato={formato} paso="registrar" paraFamiliar={paraFamiliar} />
         <DarseDeAlta
           token={token}
           dni={identidad.dni}
@@ -717,7 +733,7 @@ export async function PaginaDelEnlace({
                     del turno, donde ya quedó claro de qué se trata, y un
                     saludo a mitad de camino suena a que la página empezó dos
                     veces. */}
-                <EncabezadoDelPaso paso="reprogramar" />
+                <EncabezadoDelPaso formato={formato} paso="reprogramar" />
 
                 {/* Si no se pudo identificar al profesional se ofrecen turnos
                     de la sede, y hay que decirlo: el paciente asume que ve los
@@ -753,8 +769,8 @@ export async function PaginaDelEnlace({
   if (paso === "elegir_sede") {
     return marco(
       <>
-        {volverQuitando() && <Volver href={volverQuitando()!} />}
-        <EncabezadoDelPaso paso="elegir_sede" />
+        {volverArriba(volverQuitando())}
+        <EncabezadoDelPaso formato={formato} paso="elegir_sede" />
         <ElegirFiltro token={token} campo="sedeId" opciones={sedesParaElegir} />
       </>,
     )
@@ -774,11 +790,11 @@ export async function PaginaDelEnlace({
 
     return marco(
       <>
-        {volverQuitando() && <Volver href={volverQuitando()!} />}
+        {volverArriba(volverQuitando())}
         {/* El saludo va una sola vez, en la banda de arriba con el nombre de
             la clínica. Repetirlo en cada título hacía que todas las pantallas
             parecieran la primera. */}
-        <EncabezadoDelPaso paso="elegir_tipo_busqueda" />
+        <EncabezadoDelPaso formato={formato} paso="elegir_tipo_busqueda" />
         <ElegirFiltro
           token={token}
           campo="tipoBusqueda"
@@ -798,8 +814,8 @@ export async function PaginaDelEnlace({
     if (opciones.length > 0) {
       return marco(
         <>
-          {volverQuitando() && <Volver href={volverQuitando()!} />}
-          <EncabezadoDelPaso paso="elegir_especialidad" />
+          {volverArriba(volverQuitando())}
+          <EncabezadoDelPaso formato={formato} paso="elegir_especialidad" />
           <ElegirFiltro token={token} campo="especialidadId" opciones={opciones} conservar={elegido} />
           {ofreceVerTodos(permisos) && (
             <VerTodos token={token} ruta={ruta} etiqueta="Ver todos los horarios" conservar={elegido} />
@@ -879,7 +895,7 @@ export async function PaginaDelEnlace({
       const volverA = volverQuitando()
       return marco(
         <>
-          {volverA && <Volver href={volverA} />}
+          {volverArriba(volverA)}
           <Avance actual="Elegir" />
           <Aviso
             tono="atencion"
@@ -901,8 +917,8 @@ export async function PaginaDelEnlace({
       const volverA = volverQuitando()
       return marco(
         <>
-          {volverA && <Volver href={volverA} />}
-          <EncabezadoDelPaso paso="elegir_profesional" />
+          {volverArriba(volverA)}
+          <EncabezadoDelPaso formato={formato} paso="elegir_profesional" />
           <ElegirFiltro token={token} campo="profesionalId" opciones={opciones} conservar={conservar} />
           {/* "Cualquier profesional" y no "Me da igual el profesional": es la
               misma opción que la del paso anterior y tiene que llamarse igual,
@@ -999,8 +1015,8 @@ export async function PaginaDelEnlace({
         // pierde el turno que ya se eligió.
         encabezado={
           <>
-            {volverQuitando() && <Volver href={volverQuitando()!} />}
-            <EncabezadoDelPaso paso="elegir_horario" />
+            {volverArriba(volverQuitando())}
+            <EncabezadoDelPaso formato={formato} paso="elegir_horario" />
 
             {/* Con quién son estos horarios. Es lo que decide si el nombre
                 del profesional hace falta al lado de cada horario, así que

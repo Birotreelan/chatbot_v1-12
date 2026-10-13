@@ -742,16 +742,26 @@ export function ResumenDeConfirmacion({
 export function EncabezadoDelPaso({
   paso,
   paraFamiliar,
+  formato = "pantallas",
 }: {
   paso: Paso
   paraFamiliar?: boolean
+  /**
+   * En el chat NO se dibuja el indicador de avance (13/10/2026).
+   *
+   * El historial de burbujas ya dice dónde está el paciente y cuánto hizo:
+   * agregarle arriba un "Elegir · Revisar · Confirmar" sería la segunda señal
+   * de "estás acá" compitiendo con la primera, que es el mismo argumento por
+   * el que `TituloDePaso` se dibuja con `sinIcono` cuando hay avance.
+   */
+  formato?: "pantallas" | "chat"
 }) {
   const encabezado = encabezadoDelPaso(paso, { paraFamiliar })
   if (!encabezado) return null
 
   return (
     <>
-      <Avance actual={encabezado.avance} />
+      {formato === "pantallas" && <Avance actual={encabezado.avance} />}
       <TituloDePaso
         tipo={encabezado.tipo}
         sinIcono

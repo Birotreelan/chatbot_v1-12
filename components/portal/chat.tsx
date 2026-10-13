@@ -84,13 +84,21 @@ function Burbuja({
  */
 export function Conversacion({
   historial,
+  saludo,
   children,
 }: {
   historial: RespuestaDada[]
+  /** La primera burbuja. Ver `saludoDelChat` sobre por qué existe. */
+  saludo?: string
   children: ReactNode
 }) {
   return (
     <div className="space-y-3">
+      {saludo && (
+        <Burbuja de="asistente">
+          <p>{saludo}</p>
+        </Burbuja>
+      )}
       {historial.map((paso, i) => (
         <div key={i} className="space-y-1.5">
           <Burbuja de="asistente">

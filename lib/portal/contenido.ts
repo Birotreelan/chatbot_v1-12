@@ -279,3 +279,36 @@ export function historialDelChat(params: {
 
   return historial
 }
+
+/**
+ * El saludo con el que arranca la conversación del chat.
+ *
+ * ── Por qué hay un saludo y en las pantallas no ───────────────────────────
+ *
+ * Porque una conversación que empieza con una pregunta a secas se lee como un
+ * formulario disfrazado. La pantalla puede arrancar con el título del paso
+ * —tiene el encabezado de la clínica arriba, que ya da contexto—; una burbuja
+ * suelta que dice "¿Cuál es tu DNI?" no.
+ *
+ * Dice de dónde viene el enlace a propósito. El paciente lo abrió desde
+ * WhatsApp y está a un toque de volver ahí: recordarle que es la misma gestión
+ * evita el "¿esto es de la clínica?" que termina en un mensaje preguntándole al
+ * bot — un mensaje que pagamos.
+ *
+ * `nombre` es el primero solo, como en el resto del portal: "Hola, Nicolas" y
+ * no "Hola, Nicolas DE SANTIAGO".
+ */
+export function saludoDelChat(params: {
+  nombre?: string
+  clinica?: string
+  /** El turno es para otra persona. Cambia a quién se le habla. */
+  paraFamiliar?: boolean
+}): string {
+  const quien = params.nombre ? `Hola, ${params.nombre}` : "Hola"
+  const donde = params.clinica ? ` de ${params.clinica}` : ""
+  const que = params.paraFamiliar
+    ? "Seguimos por acá con el turno de tu familiar."
+    : "Seguimos por acá con tu turno."
+
+  return `${quien}. Soy el asistente${donde} y continuamos la conversación de WhatsApp. ${que}`
+}
