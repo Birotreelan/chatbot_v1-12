@@ -1,16 +1,19 @@
 /**
  * app/c/[token]/page.tsx — el enlace en formato de chat.
  *
- * Misma lógica que /p/[token]: el token, las guardas de vigencia, la máquina de
- * pasos y las consultas a la agenda viven en
- * components/portal/pagina-del-enlace.tsx. Esta ruta sólo fija el formato.
+ * A diferencia de /p/[token], esto NO comparte la máquina de pasos del portal:
+ * corre el motor conversacional, el mismo que corre el bot en WhatsApp. Lo
+ * único compartido son las guardas de vigencia del enlace
+ * (`components/portal/pantalla-terminal.tsx`), que tienen que contestar igual
+ * en los dos formatos.
  *
- * Lo que cambia es cómo se dibuja cada paso: en vez de una pantalla por paso,
- * una conversación donde el paso actual es la última burbuja y los anteriores
- * quedan arriba como historial.
+ * Ver `components/enlace/pagina-del-chat.tsx`.
+ *
+ * No recibe `searchParams`: en el chat el estado no viaja en la URL —lo tiene
+ * el motor, contra la clave `web_<token>`—, así que no hay filtros que leer.
  */
 
-import { PaginaDelEnlace } from "@/components/portal/pagina-del-enlace"
+import { PaginaDelChat } from "@/components/enlace/pagina-del-chat"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -21,13 +24,11 @@ export const metadata = {
   title: "Gestión de turnos",
 }
 
-export default async function PaginaDelChat({
+export default async function PaginaDelChatbot({
   params,
-  searchParams,
 }: {
   params: Promise<{ token: string }>
-  searchParams: Promise<Record<string, string | undefined>>
 }) {
   // Como función y no como JSX: ver la nota en app/p/[token]/page.tsx.
-  return PaginaDelEnlace({ params, searchParams, formato: "chat" })
+  return PaginaDelChat({ params })
 }

@@ -1,23 +1,28 @@
 /**
- * El enlace del paciente, en los dos formatos (13/10/2026).
+ * El enlace del paciente en formato de PANTALLAS: el portal web (13/10/2026).
  *
- * Era `app/p/[token]/page.tsx`. Se movió acá entero, sin cambiarle la lógica,
- * para que las dos rutas lo compartan:
+ * Era `app/p/[token]/page.tsx`. Sigue siendo esa página y nada más —
+ * `app/p/[token]/page.tsx` es su único llamador—; está como componente porque
+ * durante unos días hubo un segundo formato que la reusaba.
  *
- *   app/p/[token]/page.tsx → formato="pantallas"
- *   app/c/[token]/page.tsx → formato="chat"
+ * ── Lo que pasó con el chat (14/10/2026) ───────────────────────────────────
  *
- * ── Por qué un componente y no dos páginas ─────────────────────────────────
+ * `app/c/[token]/page.tsx` dibujaba ESTA máquina de pasos como burbujas. Se
+ * veía como un chat y no lo era: los pasos del portal no son los del bot, así
+ * que el paciente derivado desde WhatsApp se encontraba con un flujo distinto
+ * del que venía teniendo, con el mismo aspecto. Ahora el chat tiene su propia
+ * página y corre el motor conversacional de verdad — ver
+ * `components/enlace/pagina-del-chat.tsx` y `lib/enlace/conversacion.ts`.
  *
- * Porque todo lo que esta función hace antes de dibujar —resolver el token,
- * chequear la vigencia, decidir el paso, traer la agenda— es idéntico en los
- * dos formatos, y son unas doscientas líneas de guardas que ya costaron varios
- * casos reales: el enlace vencido, el usado dos veces, el dispositivo
- * distinto, la obra social bloqueada. Duplicarlas sería garantizar que un día
- * se arregle un borde en uno de los dos formatos y no en el otro.
+ * Lo que las dos páginas SÍ comparten es lo que tiene que contestar igual en
+ * las dos: las guardas de vigencia del enlace, en
+ * `components/portal/pantalla-terminal.tsx`. Son los bordes que ya costaron
+ * casos reales —el enlace vencido, el usado dos veces, el fuera de plazo— y
+ * duplicarlos sería garantizar que un día se arregle uno y no el otro.
  *
- * El formato recién se mira al final, en `marco()`, que es por donde pasan
- * TODOS los pasos para dibujarse.
+ * `formato` quedó, acotado a "pantallas": es lo que el monitor usa para marcar
+ * con qué interfaz se abrió el enlace. Está tipado así a propósito, para que
+ * nadie vuelva a pasarle "chat" y renderice el híbrido sin darse cuenta.
  *
  * Se llega acá desde un botón de WhatsApp.
  *
@@ -47,7 +52,6 @@
 import { cookies } from "next/headers"
 import { randomBytes } from "crypto"
 import { leerEnlace } from "@/lib/portal/token"
-import { permiteGestionar, permiteVerDatos } from "@/lib/portal/vigencia"
 import {
   decidirPaso,
   ofreceVerTodos,
@@ -56,8 +60,7 @@ import {
 } from "@/lib/portal/pasos"
 import { marcaDelPortal } from "@/lib/portal/marca"
 import { rutaDelFormato, type FormatoDelEnlace } from "@/lib/portal/token"
-import { historialDelChat, saludoDelChat } from "@/lib/portal/contenido"
-import { Conversacion } from "@/components/portal/chat"
+import { pantallaTerminal } from "@/components/portal/pantalla-terminal"
 
 /** La cookie que ata el enlace al dispositivo que lo abrió primero. */
 const COOKIE_DISPOSITIVO = "portal_dispositivo"
@@ -75,7 +78,6 @@ import {
   Aviso,
   EncabezadoDelPaso,
   ResumenDelTurno,
-  TituloDePaso,
   Volver,
 } from "@/components/portal/marco"
 import { AnotarHito } from "@/components/portal/anotar-hito"
@@ -92,7 +94,8 @@ export async function PaginaDelEnlace({
   formato,
 }: {
   params: Promise<{ token: string }>
-  formato: FormatoDelEnlace
+  /** Siempre "pantallas". Ver la cabecera: el chat tiene su propia página. */
+  formato: Extract<FormatoDelEnlace, "pantallas">
   searchParams: Promise<{
     /** Volver a un paso anterior a propósito. Ver PASOS_REVISITABLES. */
     paso?: string
@@ -118,17 +121,21 @@ export async function PaginaDelEnlace({
 
   const lectura = await leerEnlace(token, secreto)
 
-  // Un token inexistente y uno vencido hace rato se ven igual desde acá, y está
-  // bien: no hay nada que decirle a quien tiene una URL que no le corresponde.
+  // Las cuatro pantallas sin salida —enlace inexistente, vencido, ya
+  // gestionado, fuera de plazo— viven en `pantallaTerminal`, compartidas con la
+  // página del chat. Ver la cabecera de ese archivo.
   if (!lectura) {
     return (
-      <Marco marca={marcaDelPortal(null)} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO}>
-        <Aviso
-          tono="atencion"
-          titulo="Este enlace ya no está disponible"
-          detalle="Puede haber vencido o haberse usado. Escribinos por WhatsApp y te mandamos uno nuevo."
-        />
-      </Marco>
+      <>
+        {pantallaTerminal({
+          lectura: null,
+          marca: marcaDelPortal(null),
+          token,
+          cookieNueva: secretoNuevo,
+          nombreCookie: COOKIE_DISPOSITIVO,
+          formato,
+        })}
+      </>
     )
   }
 
@@ -142,104 +149,15 @@ export async function PaginaDelEnlace({
     ?.trim()
     .split(/\s+/)[0]
 
-  if (!permiteVerDatos(estado)) {
-    return (
-      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO} token={token}>
-        <Aviso
-          tono="atencion"
-          titulo="Este enlace venció"
-          detalle="Escribinos por WhatsApp y te mandamos uno nuevo."
-        />
-      </Marco>
-    )
-  }
-
-  // Ya gestionó: se muestra lo que quedó, sin botones. El paciente vuelve a
-  // abrir el enlace para chequear, y encontrarse un error lo mandaría a
-  // preguntarle al bot — un mensaje que pagamos y que no debería existir.
-  if (estado === "gestionado" && contexto.resultado) {
-    // ── El título tiene que decir lo mismo que el texto (28/9/2026) ────────
-    //
-    // Acá había tres frases fijas: "Listo", tono de éxito, y "te va a llegar
-    // la confirmación por WhatsApp". Las tres eran ciertas sólo para una
-    // reserva confirmada. A quien había CANCELADO su turno, esta pantalla le
-    // decía "Listo ✓ — te va a llegar la confirmación": el `detalle` decía
-    // "cancelamos tu turno" y el encabezado celebraba lo contrario.
-    //
-    // Y a quien tenía una solicitud pendiente de aprobación le decía "Listo",
-    // que es exactamente lo que la pantalla del selector se cuida de no decir
-    // para que nadie se presente un día que no tiene turno.
-    //
-    // `tipo` y `pendiente` los guarda `consumirEnlace` en el momento en que
-    // pasó. `tipo` puede faltar en enlaces emitidos antes de este cambio: en
-    // ese caso se cae al texto neutro, que no afirma de más.
-    const { tipo, pendiente } = contexto.resultado
-
-    const titulo = pendiente
-      ? "Tu solicitud fue enviada"
-      : tipo === "cancelacion"
-        ? "Turno cancelado"
-        : tipo === "confirmacion"
-          ? "Asistencia confirmada"
-          : tipo === "cambio"
-            ? "Tu turno cambió"
-            : "Listo"
-
-    const pie = pendiente
-      ? "Te avisamos por WhatsApp apenas la clínica la apruebe."
-      : tipo === "cancelacion"
-        ? "Si más adelante querés sacar otro turno, escribinos por WhatsApp."
-        : tipo === "confirmacion"
-          ? "Te esperamos. Si algo cambia, escribinos por WhatsApp."
-          : "Te va a llegar la confirmación por WhatsApp."
-
-    return (
-      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO} token={token}>
-        <Avance actual="Confirmar" />
-        <TituloDePaso tipo="listo" sinIcono>
-          {titulo}
-        </TituloDePaso>
-        {/* Sin `detalle`: el título de arriba ya encabeza, así que el aviso
-            lleva la frase concreta y nada más. Repetir "Turno cancelado" dos
-            veces seguidas no agrega nada y empuja el dato real más abajo. */}
-        <Aviso
-          titulo={contexto.resultado.texto}
-          // Verde salvo en la cancelación: salió bien, pero no es una buena
-          // noticia, y el verde le pone una celebración encima a alguien que
-          // perdió su turno.
-          //
-          // Pendiente de aprobación SÍ va en verde (30/9/2026): el color no
-          // habla del turno sino de lo que el paciente hizo, y su solicitud
-          // salió bien. Lo que falta se lo dice el texto.
-          tono={tipo === "cancelacion" ? "neutro" : "exito"}
-        />
-        {contexto.resultado.turno && (
-          <ResumenDelTurno
-            turno={contexto.resultado.turno}
-            titulo={tipo === "cancelacion" ? "El turno que cancelaste" : undefined}
-          />
-        )}
-        <p className="text-muted-foreground">{pie}</p>
-      </Marco>
-    )
-  }
-
-  // Hoy esto no se alcanza: el vencimiento está apagado y `estadoDelEnlace`
-  // nunca devuelve "vencido" (ver `vencimientoHabilitado`). Se deja porque es
-  // la pantalla que vuelve a hacer falta el día que se encienda, y porque un
-  // enlace que caduca sin explicar por qué es peor que este mensaje.
-  if (!permiteGestionar(estado)) {
-    return (
-      <Marco marca={marca} cookieNueva={secretoNuevo} nombreCookie={COOKIE_DISPOSITIVO} token={token}>
-        <Aviso
-          tono="atencion"
-          titulo="El plazo para gestionar por acá terminó"
-          detalle="Escribinos por WhatsApp y lo resolvemos."
-        />
-        {contexto.turno && <ResumenDelTurno turno={contexto.turno} titulo="Tu turno" />}
-      </Marco>
-    )
-  }
+  const terminal = pantallaTerminal({
+    lectura,
+    marca,
+    token,
+    cookieNueva: secretoNuevo,
+    nombreCookie: COOKIE_DISPOSITIVO,
+    formato,
+  })
+  if (terminal) return <>{terminal}</>
 
   if (dispositivoDistinto) {
     console.warn(`[PORTAL] ${contexto.phone} abrió su enlace desde otro dispositivo`)
@@ -282,26 +200,12 @@ export async function PaginaDelEnlace({
   if (filtrosCrudos.tipoBusqueda) elegido.tipoBusqueda = filtrosCrudos.tipoBusqueda
   if (filtrosCrudos.especialidadId) elegido.especialidadId = filtrosCrudos.especialidadId
 
-  /**
-   * La URL de este mismo enlace con un subconjunto de lo ya elegido.
-   *
-   * La ruta sale del FORMATO y no está fija en "/p/" (13/10/2026). Si lo
-   * estuviera, cada opción del chat devolvería al paciente al formato de
-   * pantallas: el primer paso se vería bien y el segundo ya no, que es el peor
-   * lugar para que aparezca un error.
-   */
+  /** La URL de este mismo enlace con un subconjunto de lo ya elegido. */
   const ruta = rutaDelFormato(formato)
 
-  /**
-   * El "Volver" de arriba, sólo en el formato de pantallas.
-   *
-   * En el chat ya hay un "Cambiar" en cada burbuja revisitable, y dos formas
-   * de volver en la misma vista es exactamente cómo se pierde lo que el
-   * paciente ya eligió — la nota del paso de horarios dice lo mismo sobre
-   * tener dos "volver" que hacen cosas distintas.
-   */
+  /** El "Volver" de arriba. `null` cuando no hay a dónde volver. */
   const volverArriba = (href: string | null | undefined) =>
-    formato === "chat" ? null : href ? <Volver href={href} /> : null
+    href ? <Volver href={href} /> : null
   const urlCon = (campos: Record<string, string>) => {
     const params = new URLSearchParams(campos)
     const query = params.toString()
@@ -449,61 +353,7 @@ export async function PaginaDelEnlace({
 
   // `ancho` sólo lo pide el paso de agenda, donde el calendario y los horarios
   // van uno al lado del otro en pantallas grandes. Ver `Marco`.
-  /**
-   * Los pasos ya respondidos, para el historial del chat.
-   *
-   * Se calcula acá —y no dentro de `marco()`— porque hay que resolver los
-   * nombres de lo que el paciente eligió, y eso es E/S: en la URL viajan ids.
-   * Ver la cabecera de este archivo sobre por qué toda la E/S vive en la
-   * página.
-   *
-   * Sólo se consulta lo que hace falta: si el paciente todavía no eligió sede,
-   * no se pide la lista de sedes. En el formato de pantallas no se consulta
-   * nada, porque no hay historial que dibujar.
-   */
-  const historial =
-    formato === "chat"
-      ? historialDelChat({
-          elegido,
-          dni: identidad.dni,
-          seDioDeAlta: contexto.identidad?.tieneFicha === false,
-          puedeCambiarDni: Boolean(contexto.identidad?.dni),
-          nombres: {
-            // `Nombre_Completo` y no `nombre`: es el campo que devuelve el
-            // proxy, el mismo que usa el mapeo de `sedesParaElegir` más
-            // arriba. Lo cazó el typecheck.
-            sede: elegido.sedeId
-              ? ((await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes as any[])?.find(
-                  (s: any) => String(s?.Id ?? "") === elegido.sedeId,
-                )?.Nombre_Completo
-              : undefined,
-            tipoBusqueda: elegido.tipoBusqueda
-              ? opcionesDeBusqueda(permisos).find((o) => o.id === elegido.tipoBusqueda)?.nombre
-              : undefined,
-            especialidad: elegido.especialidadId
-              ? normalizarOpciones(
-                  await obtenerEspecialidades(clienteId).catch(() => null),
-                  "especialidades",
-                ).find((o) => o.id === elegido.especialidadId)?.nombre
-              : undefined,
-            profesional: filtrosCrudos.profesionalId
-              ? normalizarOpciones(
-                  await obtenerTodosLosProfesionales(clienteId).catch(() => null),
-                  "profesionales",
-                ).find((o) => o.id === filtrosCrudos.profesionalId)?.nombre
-              : undefined,
-          },
-        })
-      : []
-
-  /**
-   * El envoltorio de cada paso. TODOS los pasos pasan por acá.
-   *
-   * Es el único lugar donde se mira el formato: el chat recibe exactamente lo
-   * mismo que las pantallas y lo mete en la última burbuja. Por eso un paso
-   * nuevo aparece en los dos formatos sin tocar nada, y por eso el chat no
-   * tiene una lista de pasos propia que se pueda quedar vieja.
-   */
+  /** El envoltorio de cada paso. TODOS los pasos pasan por acá. */
   const marco = (hijos: React.ReactNode, ancho: AnchoDelMarco = "normal") => (
     <Marco
       marca={marca}
@@ -514,27 +364,7 @@ export async function PaginaDelEnlace({
       formato={formato}
     >
       {avisoDemo}
-      {formato === "chat" ? (
-        <Conversacion
-          saludo={saludoDelChat({
-            nombre,
-            clinica: config?.displayName,
-            paraFamiliar: contexto.intencion === "familiar",
-          })}
-          historial={historial.map((h) => ({
-            pregunta: h.pregunta,
-            respuesta: h.respuesta,
-            // El "Cambiar" sólo en los pasos revisitables: ofrecerlo en uno
-            // que no vuelve deja al paciente rebotando entre dos pantallas,
-            // que es el bucle del DNI que ya arreglamos una vez.
-            cambiar: h.revisitable ? urlCon({ paso: h.paso }) : undefined,
-          }))}
-        >
-          {hijos}
-        </Conversacion>
-      ) : (
-        hijos
-      )}
+      {hijos}
     </Marco>
   )
 

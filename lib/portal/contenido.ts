@@ -193,92 +193,13 @@ export function encabezadoDelPaso(
   }
 }
 
-// ─── El historial del chat ──────────────────────────────────────────────────
-
-/**
- * Una pregunta ya respondida, para dibujarla como par de burbujas.
- *
- * La `pregunta` es una versión CORTA del título del paso, no el título entero:
- * en el historial alcanza con recordar de qué se trataba, y repetir el párrafo
- * completo de cada paso dejaría la conversación ilegible a los tres pasos.
- */
-export interface PasoRespondido {
-  paso: Paso
-  pregunta: string
-  respuesta: string
-  /** `true` si el paciente puede volver a este paso. Ver PASOS_REVISITABLES. */
-  revisitable: boolean
-}
-
-/** Las preguntas, en versión corta, para el historial. */
-const PREGUNTA_CORTA: Partial<Record<Paso, string>> = {
-  pedir_dni: "Tu DNI",
-  registrar: "Tus datos",
-  elegir_sede: "¿A qué sede querés ir?",
-  elegir_tipo_busqueda: "¿Cómo querés buscar tu turno?",
-  elegir_especialidad: "¿Qué especialidad necesitás?",
-  elegir_profesional: "¿Con qué profesional querés atenderte?",
-}
-
-/**
- * Los pasos ya respondidos, derivados del estado.
- *
- * ── Por qué se derivan y no se guardan ────────────────────────────────────
- *
- * Porque el estado ya existe: los filtros viven en la query string y la
- * identidad en el token. Guardar además una transcripción daría dos respuestas
- * a la misma pregunta —"¿qué eligió el paciente?"— y un refresh o un "atrás"
- * del navegador podría mostrar una conversación que no coincide con el estado
- * real. Es el mismo criterio que `decidirPaso`: una sola autoridad.
- *
- * ── Por qué los nombres entran por parámetro ──────────────────────────────
- *
- * La URL tiene ids (`sedeId=00e3...`), y el historial necesita nombres ("Sede
- * Calle 56"). Resolverlos es E/S, y en este proyecto la E/S vive en la página
- * —ver la cabecera de pagina-del-enlace.tsx—. Esta función es pura: recibe los
- * nombres ya resueltos y arma el texto. Si no se pudo resolver alguno, se
- * omite la burbuja en lugar de mostrar un id: un identificador crudo en medio
- * de una conversación no le dice nada al paciente y parece un error.
- */
-export function historialDelChat(params: {
-  /** Lo que el paciente ya eligió, tal como viaja en la URL. */
-  elegido: Record<string, string | undefined>
-  /** DNI resuelto, del token o cargado en el enlace. */
-  dni?: string
-  /** `true` si el paciente se dio de alta en este enlace. */
-  seDioDeAlta?: boolean
-  /** Nombres ya resueltos, por id. */
-  nombres: {
-    sede?: string
-    tipoBusqueda?: string
-    especialidad?: string
-    profesional?: string
-  }
-  /** Para decidir si ofrecer "Cambiar". */
-  puedeCambiarDni?: boolean
-}): PasoRespondido[] {
-  const historial: PasoRespondido[] = []
-
-  const agregar = (paso: Paso, respuesta: string | undefined, revisitable: boolean) => {
-    if (!respuesta) return
-    const pregunta = PREGUNTA_CORTA[paso]
-    if (!pregunta) return
-    historial.push({ paso, pregunta, respuesta, revisitable })
-  }
-
-  // El orden es el de la cadena de pasos, no el de los campos: así la
-  // conversación se lee en el orden en que pasó.
-  agregar("pedir_dni", params.dni, params.puedeCambiarDni === true)
-  if (params.seDioDeAlta) {
-    agregar("registrar", "Datos cargados", true)
-  }
-  agregar("elegir_sede", params.nombres.sede, true)
-  agregar("elegir_tipo_busqueda", params.nombres.tipoBusqueda, false)
-  agregar("elegir_especialidad", params.nombres.especialidad, false)
-  agregar("elegir_profesional", params.nombres.profesional, false)
-
-  return historial
-}
+// ─── El saludo del chat ─────────────────────────────────────────────────────
+//
+// Acá vivía además `historialDelChat`, que derivaba la conversación del chat a
+// partir de los filtros de la URL. Se borró el 14/10/2026 junto con el chat
+// derivado: ahora el chat corre el motor conversacional y su historial es la
+// transcripción real (`lib/enlace/transcripcion.ts`), no una proyección del
+// estado del portal.
 
 /**
  * El saludo con el que arranca la conversación del chat.
