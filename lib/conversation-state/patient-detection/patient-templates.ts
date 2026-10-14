@@ -282,7 +282,7 @@ function buildSoloCirugiaGreeting(
 
   if (permitirNuevoTurno === false) {
     mensaje += `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n`
-    mensaje += fraseDerivacion('Para otras consultas, comunicate', escalationPhoneNumber)
+    mensaje += fraseDerivacion('Para otras consultas, comunicate con la clínica', escalationPhoneNumber)
     return mensaje
   }
 
@@ -553,7 +553,7 @@ export function buildNewPatientGreeting(
     return (
       `Gracias por comunicarte con ${clinicName}.\n\n` +
       `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
-      fraseDerivacion('Para otras consultas, comunicate', escalationPhoneNumber)
+      fraseDerivacion('Para otras consultas, comunicate con la clínica', escalationPhoneNumber)
     )
   }
 
@@ -634,7 +634,7 @@ export function buildClinicInfoAnswerMessage(
   let message = `${respuesta}\n\n`
 
   if (escalationPhoneNumber) {
-    message += `${fraseDerivacion('Si necesitás algo más, podés comunicarte', escalationPhoneNumber)}\n\n`
+    message += `${fraseDerivacion('Si necesitás algo más, podés comunicarte con la clínica', escalationPhoneNumber)}\n\n`
   }
 
   message += `Si en algún momento necesitás gestionar un turno, escribime y con gusto te ayudo.`
@@ -785,7 +785,7 @@ export function buildPostActionMenu(
       // por este medio, derivar directamente sin ofrecer menú.
       return (
         `Este canal está habilitado exclusivamente para la gestión automática de turnos.\n\n` +
-        fraseDerivacion('Para otras consultas, comunicate', escalationPhoneNumber)
+        fraseDerivacion('Para otras consultas, comunicate con la clínica', escalationPhoneNumber)
       )
     }
     // Menú renumerado, en sincronía con el action map de patient-flow-handler.ts.

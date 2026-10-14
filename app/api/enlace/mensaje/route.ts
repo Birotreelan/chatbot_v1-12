@@ -26,6 +26,7 @@ import { permiteGestionar } from "@/lib/portal/vigencia"
 import { getWhatsAppConfigById } from "@/lib/db"
 import { continuarConversacion } from "@/lib/enlace/conversacion"
 import { agregarALaTranscripcion, mensaje } from "@/lib/enlace/transcripcion"
+import { telefonoParaMensajes } from "@/lib/utils/escalation-contact"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
     token,
     contexto,
     texto,
-    escalationPhoneNumber: config?.escalationPhoneNumber,
+    escalationPhoneNumber: telefonoParaMensajes(config),
     permitirNuevoTurno: config?.permitirNuevoTurno,
   })
 

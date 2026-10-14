@@ -356,6 +356,49 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </p>
               </div>
 
+              {/* ── Silenciar el teléfono sin perderlo (14/10/2026) ──────────
+                  Pedido de Nicolás: que los mensajes deriven a la atención
+                  humana y no ofrezcan ningún número. El dato de arriba queda
+                  guardado; esto sólo decide si el bot lo menciona.
+
+                  Bloqueado cuando la atención humana está apagada: sin humano
+                  y sin teléfono, el paciente que pregunta algo fuera de los
+                  turnos se queda sin ninguna salida. Las dos excepciones que
+                  el código ya hace —fuera de horario y atención humana
+                  deshabilitada— están en `telefonoParaMensajes`. */}
+              <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                <Switch
+                  id="ofrecerTelefonoDeDerivacion"
+                  checked={formData.ofrecerTelefonoDeDerivacion !== false}
+                  disabled={!humanSupportFlags.humanSupport}
+                  onCheckedChange={(checked) =>
+                    updateFormData("ofrecerTelefonoDeDerivacion", checked)
+                  }
+                />
+                <div className="flex-1">
+                  <Label
+                    htmlFor="ofrecerTelefonoDeDerivacion"
+                    className="text-sm font-medium"
+                  >
+                    Ofrecer el teléfono al paciente
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {!humanSupportFlags.humanSupport
+                      ? "Requiere la atención humana habilitada (pestaña Funcionalidades). Sin humano al que derivar, el teléfono es la única salida que le queda al paciente."
+                      : formData.ofrecerTelefonoDeDerivacion === false
+                        ? "Apagado: los mensajes derivan a la atención humana por este mismo canal y no mencionan ningún número. Se sigue dando el teléfono fuera del horario de atención, donde no hay nadie a quien derivar."
+                        : "Encendido: los mensajes mencionan los datos de arriba además de ofrecer la atención humana."}
+                  </p>
+                  {!formData.escalationPhoneNumber?.trim() &&
+                    humanSupportFlags.humanSupport && (
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        No hay datos de derivación cargados, así que ningún mensaje ofrece
+                        teléfono — el switch no cambia nada todavía.
+                      </p>
+                    )}
+                </div>
+              </div>
+
               <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
                 <Switch
                   id="clienteProxmox"

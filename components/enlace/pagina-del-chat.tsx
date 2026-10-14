@@ -45,6 +45,7 @@ import {
   mensaje,
 } from "@/lib/enlace/transcripcion"
 import { iniciarConversacion } from "@/lib/enlace/conversacion"
+import { telefonoParaMensajes } from "@/lib/utils/escalation-contact"
 
 /** La misma cookie que el portal: es el mismo enlace, visto de otra forma. */
 const COOKIE_DISPOSITIVO = "portal_dispositivo"
@@ -165,7 +166,7 @@ export async function PaginaDelChat({ params }: { params: Promise<{ token: strin
     const respuesta = await iniciarConversacion({
       token,
       contexto,
-      escalationPhoneNumber: config?.escalationPhoneNumber,
+      escalationPhoneNumber: telefonoParaMensajes(config),
       permitirNuevoTurno: config?.permitirNuevoTurno,
     })
 

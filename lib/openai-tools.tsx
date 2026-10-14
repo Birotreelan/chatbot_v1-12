@@ -1,7 +1,7 @@
 import OpenAI from "openai"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { resolveProxyUrl } from "@/lib/proxy-url-resolver"
-import { contactoDerivacionEnLinea } from "@/lib/utils/escalation-contact"
+import { contactoDerivacionEnLinea, telefonoParaMensajes} from "@/lib/utils/escalation-contact"
 import { getWhatsAppConfigByPhoneId, updateThreadId } from "@/lib/db"
 import { safelyAddMessageToThread } from "./thread-manager"
 import {
@@ -458,7 +458,7 @@ Nombre: ${config.displayName}
 FechaHora: ${fechaHora}
 PrimerMensaje: true
 TipoMensaje: assistant_switch
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(config.escalationPhoneNumber)}` : ""}
+PacienteCelular: ${userPhoneNumber}${telefonoParaMensajes(config) ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(telefonoParaMensajes(config))}` : ""}
 FuncionOrigen: ${functionName}${scheduleInfo}
 [/SISTEMA]
 

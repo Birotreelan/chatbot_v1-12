@@ -5,6 +5,7 @@ import { rateLimit } from "@/lib/rate-limit"
 import { looksLikeDNI, checkDniRateLimit, DNI_RATE_LIMIT_MESSAGE } from "@/lib/dni-rate-limit"
 import { isWidgetOriginAllowed } from "@/lib/widget-domain-validation"
 import { hasReachedReservationLimit, recordReservation, RESERVATION_LIMIT_MESSAGE } from "@/lib/reservation-limit"
+import { telefonoParaMensajes } from "@/lib/utils/escalation-contact"
 
 /**
  * Endpoint del widget embebible (chat en el sitio web de cada clínica).
@@ -73,7 +74,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, response: RESERVATION_LIMIT_MESSAGE })
     }
 
-    const result = await processWidgetMessage(session_id, message, config.cliente_id, config.escalationPhoneNumber, config.permitirNuevoTurno)
+    const result = await processWidgetMessage(session_id, message, config.cliente_id, telefonoParaMensajes(config), config.permitirNuevoTurno)
 
     if (result.reserved) {
       await recordReservation(ip)

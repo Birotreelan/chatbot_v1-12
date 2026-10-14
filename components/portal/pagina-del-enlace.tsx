@@ -81,7 +81,7 @@ import {
   Volver,
 } from "@/components/portal/marco"
 import { AnotarHito } from "@/components/portal/anotar-hito"
-import { lineasDeContactoParaWeb } from "@/lib/utils/escalation-contact"
+import { lineasDeContactoParaWeb, telefonoParaMensajes} from "@/lib/utils/escalation-contact"
 import type { AnchoDelMarco } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
@@ -425,7 +425,7 @@ export async function PaginaDelEnlace({
   // elegir un turno que no va a poder sacar es peor que decírselo de entrada.
   if (paso === "derivar_obra_social") {
     const nombreOS = identidad.obraSocialNombre
-    const telefonosDeDerivacion = lineasDeContactoParaWeb(config?.escalationPhoneNumber)
+    const telefonosDeDerivacion = lineasDeContactoParaWeb(telefonoParaMensajes(config))
 
     return marco(
       <>

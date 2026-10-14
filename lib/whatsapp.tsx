@@ -2,7 +2,7 @@ import { getWhatsAppConfigByPhoneId, getWhatsAppConfigById, updateWhatsAppStats,
 import { sendWhatsAppMessage, sendWhatsAppInteractive, sendWhatsAppList } from "@/lib/whatsapp-api"
 import { downloadWhatsAppMedia, transcribeAudio } from "@/lib/audio-transcription"
 import { saveConversationAudio } from "@/lib/conversation-audio"
-import { llevaDatosDeContacto, fraseDerivacion, esContactoMultilinea, contactoDerivacionEnLinea } from "@/lib/utils/escalation-contact"
+import { llevaDatosDeContacto, fraseDerivacion, esContactoMultilinea, contactoDerivacionEnLinea, telefonoParaMensajes } from "@/lib/utils/escalation-contact"
 import { getArgentinaDateTime, formatDateWithDayOfWeek } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
@@ -1009,7 +1009,7 @@ async function handlePendingFlowResponse(
       if (!resultadoConfirm.exito) {
         await sendDirectResponse(
           ctx,
-          mensajeFalloConfirmacion(resultadoConfirm.motivo ?? "falla_tecnica", config.escalationPhoneNumber),
+          mensajeFalloConfirmacion(resultadoConfirm.motivo ?? "falla_tecnica", telefonoParaMensajes(config)),
           "confirm_flow_error"
         )
         return true
@@ -1363,7 +1363,7 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
               obraSocialId: identified?.obraSocialId,
               obraSocialNombre: identified?.obraSocialNombre,
             },
-            config.escalationPhoneNumber,
+            telefonoParaMensajes(config),
             undefined,
             'whatsapp',
             config.permitirNuevoTurno
@@ -2208,7 +2208,7 @@ async function startCancelDoubleConfirm(
     await sendDirectResponse(
       ctxDirect,
       `Actualmente no es posible cancelar turnos por este medio.\n\n` +
-        fraseDerivacion('Para cancelar tu turno, por favor contactanos', config.escalationPhoneNumber),
+        fraseDerivacion('Para cancelar tu turno, por favor contactanos', telefonoParaMensajes(config)),
       "cancelacion-no-permitida",
       undefined,
       // El paciente ya sabe que por acá no se puede: repetírselo cada vez que
@@ -2489,7 +2489,10 @@ async function offerHumanOrSendPhone(
     await sendDirectResponse(
       ctx,
       buildHumanOffHoursMessage(
-        config.escalationPhoneNumber,
+        // `ultimaSalida`: fuera de horario no hay a quién derivar, así que el
+        // teléfono va aunque el cliente lo tenga apagado. Ver
+        // `telefonoParaMensajes`.
+        telefonoParaMensajes(config, { ultimaSalida: true }),
         formatSupportHoursLines(disponibilidad.horarios),
       ),
       `${phase}-fuera-de-horario`,
@@ -2499,19 +2502,35 @@ async function offerHumanOrSendPhone(
 
   if (disponibilidad.disponible) {
     const clinicName = config.displayName || "la clínica"
-    const escalationPhone = config.escalationPhoneNumber
+    const escalationPhone = telefonoParaMensajes(config)
     const intro = `Actualmente estás hablando con Iris, un asistente virtual de inteligencia artificial que solo está preparado para la gestión de turnos con profesionales.\n\n`
     const cierre =
       `Por favor respondé presionando 1 o el botón aquí debajo si deseas hablar con el personal de ${clinicName}:\n\n` +
       `1. Requiero atención humana.`
 
-    // Con datos de contacto de varias líneas no se puede meter todo en el medio
-    // de la oración: se corta la frase y el bloque va aparte. Con una sola línea
-    // el texto queda EXACTAMENTE como antes.
-    const cuerpo = esContactoMultilinea(escalationPhone)
-      ? `Para otro tipo de consultas puedo derivarte a la atención humana de ${clinicName} y te atenderán en breve por este mismo canal.\n\n` +
-        `${fraseDerivacion('También podés contactarnos', escalationPhone)}\n\n`
-      : `Para otro tipo de consultas puedo derivarte a la atención humana de ${clinicName} y te atenderán en breve por este mismo canal o puedes contactarnos al ${escalationPhone ? `*${escalationPhone}*` : "la clínica"}.\n\n`
+    /**
+     * La oferta tiene tres formas según el contacto del cliente.
+     *
+     * Las dos primeras ya existían: con datos de varias líneas no se puede
+     * meter todo en el medio de la oración —se corta la frase y el bloque va
+     * aparte— y con una sola línea el teléfono va embebido.
+     *
+     * La tercera es nueva (14/10/2026): sin teléfono, la frase termina en "por
+     * este mismo canal" y no se menciona ningún número. Es el pedido de
+     * Nicolás: que el mensaje derive a la atención humana y nada más.
+     *
+     * Antes esta rama no existía y el ternario de abajo armaba "o puedes
+     * contactarnos al la clínica" — el fallback estaba escrito como
+     * sustantivo y la oración ya traía el "al". Lo veía cualquier cliente con
+     * el campo sin cargar.
+     */
+    const derivacion = `Para otro tipo de consultas puedo derivarte a la atención humana de ${clinicName} y te atenderán en breve por este mismo canal`
+
+    const cuerpo = !escalationPhone
+      ? `${derivacion}.\n\n`
+      : esContactoMultilinea(escalationPhone)
+        ? `${derivacion}.\n\n${fraseDerivacion('También podés contactarnos', escalationPhone)}\n\n`
+        : `${derivacion} o puedes contactarnos al *${escalationPhone}*.\n\n`
 
     const offerMessage = intro + cuerpo + cierre
     await sendHumanOffer(ctx, config, offerMessage, phoneMessage, HUMAN_OFFER_BUTTONS)
@@ -2548,7 +2567,10 @@ async function handleDeriveToHuman(
 
   try {
     const flags = await getEffectiveFeatureFlags(config.id)
-    const escalationPhone = config.escalationPhoneNumber
+    // `ultimaSalida`: este local sólo alimenta los dos mensajes de "no hay
+    // humano" —deshabilitado y fuera de horario—, donde el teléfono es el
+    // único camino que le queda al paciente. Ver `telefonoParaMensajes`.
+    const escalationPhone = telefonoParaMensajes(config, { ultimaSalida: true })
 
     // Fallback 1: soporte humano deshabilitado para esta clínica → derivar al teléfono.
     if (!flags.humanSupport) {
@@ -2585,7 +2607,7 @@ async function handleDeriveToHuman(
     logger.error("Error derivando a atención humana — fallback a teléfono", error as Error)
     await sendDirectResponse(
       ctxDirect,
-      buildHumanUnavailableMessage(config.escalationPhoneNumber),
+      buildHumanUnavailableMessage(telefonoParaMensajes(config, { ultimaSalida: true })),
       "derive-human-error",
     ).catch(() => {})
     return true
@@ -2677,7 +2699,7 @@ async function runPrimaryDispatcherNoFlow(
       phoneNumber: userPhoneNumber,
       configId: config.id,
       clienteId: config.cliente_id,
-      escalationPhone: config.escalationPhoneNumber,
+      escalationPhone: telefonoParaMensajes(config),
       clinicName: config.displayName,
     }
     const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
@@ -2733,7 +2755,7 @@ async function runPrimaryDispatcherNoFlow(
       // Se pasa el mensaje del paciente como `firstMessage`: permite resolver
       // la desambiguación cuando el DNI ya venía en ese primer mensaje, sin
       // volver a pedírselo (ver patient-flow-integration.ts, caso Luis 28/8/2026).
-      const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
+      const detResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config), config.clientePortalWeb)
       // Antes devolvía `true` (mensaje "manejado") incondicionalmente, aunque
       // detResult.handled fuera false (flag directPatientDetection OFF) — el
       // caller cortaba con `if (handled) return` sin haber enviado nada al
@@ -2761,7 +2783,7 @@ async function runPrimaryDispatcherNoFlow(
           ? `Necesito turno de ${action.slots.especialidad}`
           : undefined
       const existingResult = await initializeExistingPatientFlow(
-        userPhoneNumber, '', patient.name ?? '', patient.dni ?? '', undefined, config.cliente_id, undefined, config.escalationPhoneNumber, initialMsg, 'whatsapp', config.permitirNuevoTurno
+        userPhoneNumber, '', patient.name ?? '', patient.dni ?? '', undefined, config.cliente_id, undefined, telefonoParaMensajes(config), initialMsg, 'whatsapp', config.permitirNuevoTurno
       )
       if (existingResult?.handled && existingResult.message) {
         await sendExistingPatientResult(ctxDirect, existingResult, "router-primary-existing")
@@ -2942,7 +2964,7 @@ async function runInterjectionInActiveFlow(
       phoneNumber: userPhoneNumber,
       configId: config.id,
       clienteId: config.cliente_id,
-      escalationPhone: config.escalationPhoneNumber,
+      escalationPhone: telefonoParaMensajes(config),
       clinicName: config.displayName,
     }
     const execResult = await executeDispatcherDecision(dispatcherResult, dispatcherCtx, executorDeps)
@@ -3096,7 +3118,7 @@ async function runInterjectionInActiveFlow(
       let menuMsg = await returnPatientToMenu(userPhoneNumber)
       let menuButtons: Array<{ id: string; title: string }> | undefined
       if (!menuMsg) {
-        const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
+        const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config), config.clientePortalWeb)
         menuMsg = det?.handled && det.message ? det.message : null
         menuButtons = (det as any)?.buttons
       }
@@ -3156,7 +3178,7 @@ async function runInterjectionInActiveFlow(
       if (!menuMsg) {
         const det = await initializePatientDetection(
           userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined,
-          config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber,
+          config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config),
           config.clientePortalWeb,
         )
         menuMsg = det?.handled && det.message ? det.message : null
@@ -4324,7 +4346,7 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
         // dice eso — pedirle que reintente sería mandarlo a un callejón sin salida.
         await sendDirectResponse(
           ctxConfirmBtn,
-          mensajeFalloConfirmacion(motivoFalloBtn, config.escalationPhoneNumber),
+          mensajeFalloConfirmacion(motivoFalloBtn, telefonoParaMensajes(config)),
           motivoFalloBtn === "turno_no_encontrado"
             ? "button_confirm_turno_no_encontrado"
             : "button_confirm_proxy_default_error"
@@ -4972,7 +4994,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           phone: userPhoneNumber,
           configId: config.id,
           clienteId: config.cliente_id,
-          escalationPhone: config.escalationPhoneNumber,
+          escalationPhone: telefonoParaMensajes(config),
         })
         if (decision) {
           const eff = decision.effect
@@ -5154,7 +5176,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         const trimmedNorm = trimmed.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
         const isCancelled = clinicaFollowup.kind !== 'confirmed'
         // Teléfono para derivar: el Número de Derivación de la config; el del template es fallback.
-        const clinicaPhone = config.escalationPhoneNumber || clinicaFollowup.telefonoContacto || ''
+        const clinicaPhone = telefonoParaMensajes(config) || clinicaFollowup.telefonoContacto || ''
 
         // ¿El paciente está haciendo una pregunta / pidiendo el motivo? (no una elección 1/2)
         const looksLikeQuestion =
@@ -5288,10 +5310,11 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           if (admiteReagendamiento) {
             responseMsg += '\n\nSi querés, podemos ayudarte a buscar un nuevo turno disponible.'
             // Guardar estado de oferta con el Número de Derivación de la config
-            // (config.escalationPhoneNumber). El teléfono del template es solo fallback.
+            // (config.escalationPhoneNumber, filtrado por `telefonoParaMensajes`).
+            // El teléfono del template es solo fallback.
             await saveClinicaCancellationOffer(userPhoneNumber, config.id, {
               kind: 'cancelled',
-              telefonoContacto: config.escalationPhoneNumber || telefonoContacto || '',
+              telefonoContacto: telefonoParaMensajes(config) || telefonoContacto || '',
             })
             let interactiveSent = false
             try {
@@ -5310,7 +5333,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             if (!interactiveSent) { /* stats handled by sendDirectResponse fallback */ }
           } else {
             // Derivación con el Número de Derivación de la config; el del template es fallback.
-            const derivPhone = config.escalationPhoneNumber || telefonoContacto
+            const derivPhone = telefonoParaMensajes(config) || telefonoContacto
             if (derivPhone) responseMsg += `\n\nPara consultas, podés comunicarte con la clínica al ${derivPhone}.`
             // sendDirectResponse handles saveConversationMessage, appendToHistory, updateWhatsAppStats internally
             await sendDirectResponse(clinicaInfoCtx, responseMsg, "clinica_cancellation_info")
@@ -5330,7 +5353,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // Usamos el Número de Derivación de la config; el del template es solo fallback.
           await saveClinicaCancellationOffer(userPhoneNumber, config.id, {
             kind: 'confirmed',
-            telefonoContacto: config.escalationPhoneNumber || telefonoContacto || '',
+            telefonoContacto: telefonoParaMensajes(config) || telefonoContacto || '',
           })
           void recordDiag(config.id, DIAG.CLINICA_TURNO_CONFIRMADO)
           await sendDirectResponse(clinicaInfoCtx, responseMsg, "clinica_confirmation_info")
@@ -5465,7 +5488,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 })
                 await sendDirectResponse(
                   confirmCtx,
-                  mensajeFalloConfirmacion(motivoFalloTexto, config.escalationPhoneNumber),
+                  mensajeFalloConfirmacion(motivoFalloTexto, telefonoParaMensajes(config)),
                   motivoFalloTexto === "turno_no_encontrado"
                     ? "direct_confirm_turno_no_encontrado"
                     : "direct_confirm_proxy_error"
@@ -5861,7 +5884,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         config.id,
         appointmentData,
         undefined, // conversationHistory - puede agregarse después si es necesario
-        config.escalationPhoneNumber, // Número de derivación para consultas que no podemos responder
+        telefonoParaMensajes(config), // Número de derivación para consultas que no podemos responder
         appointmentAlreadyConfirmed,
         hayConfirmacionPendiente
       )
@@ -5967,7 +5990,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // Se pasa config.id (configId para flags/logging) y config.cliente_id (clienteId para API)
           const detectionTemplateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
           const detectionHasReminder = detectionTemplateSentAt !== null
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, detectionHasReminder, isWidgetPresetMessage, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, detectionHasReminder, isWidgetPresetMessage, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config), config.clientePortalWeb)
 
           console.log("[v0] [SPRINT9A] initializePatientDetection result:", JSON.stringify({ handled: detectionResult.handled, action: detectionResult.action, shouldCallOpenAI: detectionResult.shouldCallOpenAI }))
           
@@ -6003,7 +6026,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           const rehydrationTemplateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
           const rehydrationHasReminder = rehydrationTemplateSentAt !== null
-          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, rehydrationHasReminder, isWidgetPresetMessage, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
+          const detectionResult = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, rehydrationHasReminder, isWidgetPresetMessage, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config), config.clientePortalWeb)
 
           if (detectionResult.handled && detectionResult.message) {
             const detectionCtx: DirectResponseContext = {
@@ -6054,7 +6077,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             userPhoneNumber,
             userMessage,
             config.cliente_id,
-            config.escalationPhoneNumber,
+            telefonoParaMensajes(config),
             {
               enableSearchByProfessional: config.enableSearchByProfessional !== false,
               enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
@@ -6067,7 +6090,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             userPhoneNumber,
             userMessage,
             config.cliente_id,
-            config.escalationPhoneNumber,
+            telefonoParaMensajes(config),
             {
               enableSearchByProfessional: config.enableSearchByProfessional !== false,
               enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
@@ -6156,7 +6179,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           // Paciente ingresó DNI para desambiguar múltiples pacientes
           const dniResult = await handleDNIForMultiplePatients(
             userPhoneNumber, userMessage, config.id, config.cliente_id, config.displayName,
-            config.escalationPhoneNumber
+            telefonoParaMensajes(config)
           )
           if (dniResult.handled && dniResult.message) {
             await sendDirectResponse(detectionCtx, dniResult.message, "dni_disambiguation")
@@ -6232,12 +6255,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
             if (respuestaClinicInfo.respondida && respuestaClinicInfo.texto) {
               const clinicInfoMessage = await import('./conversation-state/patient-detection/patient-templates').then(
-                m => m.buildClinicInfoAnswerMessage(respuestaClinicInfo.texto!, config.escalationPhoneNumber)
+                m => m.buildClinicInfoAnswerMessage(respuestaClinicInfo.texto!, telefonoParaMensajes(config))
               )
               await sendDirectResponse(detectionCtx, clinicInfoMessage, "contact_intent_consulta_respondida")
             } else {
               const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
-                m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
+                m => m.buildOtherInquiryMessage(telefonoParaMensajes(config), config.displayName)
               )
               await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "contact_intent_consulta")
             }
@@ -6300,7 +6323,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             undefined,
             config.permitirNuevoTurno,
             config.permitirCancelacion,
-            config.escalationPhoneNumber
+            telefonoParaMensajes(config)
           ,
             config.clientePortalWeb
           )
@@ -6328,7 +6351,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               undefined,
               config.permitirNuevoTurno,
               config.permitirCancelacion,
-              config.escalationPhoneNumber
+              telefonoParaMensajes(config)
             ,
             config.clientePortalWeb
           )
@@ -6348,7 +6371,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
           if (!patientResponse.exito || !patientResponse.datos) {
             // Familiar NO encontrado → iniciar flujo de paciente nuevo con ese DNI (modo familiar)
-            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, true, userMessage, 'whatsapp', config.permitirNuevoTurno, config.escalationPhoneNumber)
+            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, true, userMessage, 'whatsapp', config.permitirNuevoTurno, telefonoParaMensajes(config))
             if (newPatientResult?.handled && newPatientResult.message) {
               await sendExistingPatientResult(detectionCtx, newPatientResult, "familiar_new_patient")
               await completePatientDetectionFlow(userPhoneNumber, config.id)
@@ -6392,7 +6415,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 obraSocialId: familiarObraSocialId,
                 obraSocialNombre: familiarObraSocialNombre,
               },
-              config.escalationPhoneNumber,
+              telefonoParaMensajes(config),
               userMessage,
               'whatsapp',
               config.permitirNuevoTurno
@@ -6454,7 +6477,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 obraSocialId: pacienteObraSocialId,
                 obraSocialNombre: pacienteObraSocialNombre,
               },
-              config.escalationPhoneNumber,
+              telefonoParaMensajes(config),
               userMessage,
               'whatsapp',
               config.permitirNuevoTurno
@@ -6467,7 +6490,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             }
           } else {
             // No encontrado tampoco por DNI → recién ahí es efectivamente un paciente nuevo
-            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, false, userMessage, 'whatsapp', config.permitirNuevoTurno, config.escalationPhoneNumber)
+            const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, false, userMessage, 'whatsapp', config.permitirNuevoTurno, telefonoParaMensajes(config))
             if (newPatientResult?.handled && newPatientResult.message) {
               await sendExistingPatientResult(detectionCtx, newPatientResult, "new_patient_flow")
               await completePatientDetectionFlow(userPhoneNumber, config.id)
@@ -6501,7 +6524,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             undefined,
             config.permitirNuevoTurno,
             config.permitirCancelacion,
-            config.escalationPhoneNumber
+            telefonoParaMensajes(config)
           ,
             config.clientePortalWeb
           )
@@ -6548,12 +6571,12 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
               if (respuestaClinicInfo.respondida && respuestaClinicInfo.texto) {
                 const clinicInfoMessage = await import('./conversation-state/patient-detection/patient-templates').then(
-                  m => m.buildClinicInfoAnswerMessage(respuestaClinicInfo.texto!, config.escalationPhoneNumber)
+                  m => m.buildClinicInfoAnswerMessage(respuestaClinicInfo.texto!, telefonoParaMensajes(config))
                 )
                 await sendDirectResponse(detectionCtx, clinicInfoMessage, "other_inquiry_respondida_clinic_info")
               } else {
                 const otherInquiryMessage = await import('./conversation-state/patient-detection/patient-templates').then(
-                  m => m.buildOtherInquiryMessage(config.escalationPhoneNumber, config.displayName)
+                  m => m.buildOtherInquiryMessage(telefonoParaMensajes(config), config.displayName)
                 )
                 await offerHumanOrSendPhone(detectionCtx, config, otherInquiryMessage, "other_inquiry_existing_patient")
               }
@@ -6617,7 +6640,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   userPhoneNumber,
                   userMessage,
                   config.cliente_id,
-                  config.escalationPhoneNumber,
+                  telefonoParaMensajes(config),
                   {
                     enableSearchByProfessional: config.enableSearchByProfessional !== false,
                     enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
@@ -6642,7 +6665,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 config.cliente_id,
                 // No pasar additionalPatientData - serán recuperados del estado de detección en initializeExistingPatientFlow
                 undefined,
-                config.escalationPhoneNumber,
+                telefonoParaMensajes(config),
                 userMessage, // Para entity extraction del mensaje que disparó el flujo
                 'whatsapp',
                 config.permitirNuevoTurno
@@ -6662,7 +6685,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               await sendDirectResponse(
                 detectionCtx,
                 `Actualmente no es posible cancelar turnos por este medio.\n\n` +
-                  fraseDerivacion('Para cancelar tu turno, por favor contactanos', config.escalationPhoneNumber),
+                  fraseDerivacion('Para cancelar tu turno, por favor contactanos', telefonoParaMensajes(config)),
                 "cancelacion-no-permitida",
                 undefined,
                 { unaVezPorVentana: "cancelacion_no_permitida" },
@@ -6754,7 +6777,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                   } else {
                     await sendDirectResponse(
                       detectionCtx,
-                      mensajeFalloConfirmacion(resultadoConfirmDetect.motivo ?? "falla_tecnica", config.escalationPhoneNumber),
+                      mensajeFalloConfirmacion(resultadoConfirmDetect.motivo ?? "falla_tecnica", telefonoParaMensajes(config)),
                       "confirm_flow_error"
                     )
                   }
@@ -7245,7 +7268,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               phoneNumber: userPhoneNumber,
               configId: config.id,
               clienteId: config.cliente_id,
-              escalationPhone: config.escalationPhoneNumber,
+              escalationPhone: telefonoParaMensajes(config),
               clinicName: config.displayName,
             }
 
@@ -7290,7 +7313,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
 
             if (action.type === 'init_patient_detection') {
               const detResult = await initializePatientDetection(
-                userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
+                userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config)
               ,
             config.clientePortalWeb
           )
@@ -7327,7 +7350,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 undefined,
                 config.cliente_id,
                 undefined,
-                config.escalationPhoneNumber,
+                telefonoParaMensajes(config),
                 initialMsg,
                 'whatsapp',
                 config.permitirNuevoTurno
@@ -7365,7 +7388,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               // Reserva para un familiar → pedir DNI del familiar si hay detección activa.
               if (await requestFamiliarDni(userPhoneNumber, config, dispatcherCtxDirect)) return
               // Sin detección activa → menú normal (el paciente puede elegir "2").
-              const detFam = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
+              const detFam = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config), config.clientePortalWeb)
               if (detFam?.handled) {
                 if (detFam.message) {
                   await sendDirectResponse(dispatcherCtxDirect, detFam.message, "ai-dispatcher-familiar")
@@ -7383,7 +7406,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               // Si el DNI ingresado no existe en el sistema, patient-detection
               // derivará automáticamente al flujo de paciente nuevo.
               const detResult = await initializePatientDetection(
-                userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
+                userPhoneNumber, config.id, config.cliente_id, config.displayName, userMessage, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config)
               ,
             config.clientePortalWeb
           )
@@ -7403,7 +7426,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               if (flowType === 'existing_patient') {
                 const existRes = await handleExistingPatientMessage(
                   userPhoneNumber, userMessage, config.cliente_id,
-                  config.escalationPhoneNumber,
+                  telefonoParaMensajes(config),
                   {
                     enableSearchByProfessional: config.enableSearchByProfessional !== false,
                     enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
@@ -7419,7 +7442,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               }
               if (flowType === 'new_patient') {
                 const newRes = await handleNewPatientMessage(
-                  userPhoneNumber, userMessage, config.cliente_id, config.escalationPhoneNumber
+                  userPhoneNumber, userMessage, config.cliente_id, telefonoParaMensajes(config)
                 )
                 if (newRes?.handled && newRes.message) {
                   await sendExistingPatientResult(dispatcherCtxDirect, newRes, "ai-dispatcher-continue-new")
@@ -7430,7 +7453,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               if (flowType === 'patient_detection') {
                 const detRes = await handlePatientDetectionMessage(
                   userPhoneNumber, userMessage, config.id, config.cliente_id,
-                  config.displayName, config.escalationPhoneNumber
+                  config.displayName, telefonoParaMensajes(config)
                 )
                 if (detRes?.handled && detRes.message) {
                   await sendDirectResponse(dispatcherCtxDirect, detRes.message, "ai-dispatcher-continue-detection")
@@ -7475,7 +7498,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               // que "hoal" sin contestar, 6/8/2026). Ahora cae a OpenAI.
               if (!cedeALaCascada) {
                 const noFlowResult = await initializePatientDetection(
-                  userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
+                  userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config)
                 ,
             config.clientePortalWeb
           )
@@ -7497,7 +7520,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               createConversationLogger(userPhoneNumber, config.id, "ai-dispatcher")
                 .info('[Dispatcher] Passthrough — mostrando menú principal')
               const passthroughResult = await initializePatientDetection(
-                userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
+                userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config)
               ,
             config.clientePortalWeb
           )
@@ -7523,7 +7546,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
               clienteId: config.cliente_id,
             }
             const errorResult = await initializePatientDetection(
-              userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber
+              userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config)
             ,
             config.clientePortalWeb
           )
@@ -7594,7 +7617,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             let menuMsg: string | null = await returnPatientToMenu(userPhoneNumber)
             let menuButtons: Array<{ id: string; title: string }> | undefined
             if (!menuMsg) {
-              const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
+              const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config), config.clientePortalWeb)
               menuMsg = det?.handled && det.message ? det.message : null
               menuButtons = (det as any)?.buttons
             }
@@ -7617,7 +7640,7 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await sendDirectResponse(ctxFallback, fbMsg, "router-fallback-resume", btns || undefined)
             return
           } else {
-            const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, config.escalationPhoneNumber, config.clientePortalWeb)
+            const det = await initializePatientDetection(userPhoneNumber, config.id, config.cliente_id, config.displayName, undefined, undefined, undefined, config.permitirNuevoTurno, config.permitirCancelacion, telefonoParaMensajes(config), config.clientePortalWeb)
             if (det?.handled && det.message) {
               await sendDirectResponse(ctxFallback, det.message, "router-fallback-menu", (det as any).buttons)
             }
@@ -7668,7 +7691,7 @@ export async function processIndividualMessage(
         await sendDirectResponse(
           { phoneNumberId, accessToken: config.accessToken, userPhoneNumber, configId: config.id, clienteId: config.cliente_id },
           `Actualmente no es posible reagendar turnos por este medio.\n\n` +
-            fraseDerivacion('Para reagendar tu turno, por favor contactanos', config.escalationPhoneNumber),
+            fraseDerivacion('Para reagendar tu turno, por favor contactanos', telefonoParaMensajes(config)),
           "reagendamiento-no-permitido",
           undefined,
           { unaVezPorVentana: "reagendamiento_no_permitido" },
@@ -7855,7 +7878,7 @@ Nombre: ${config.displayName}
 FechaHora: ${fechaHora}
 PrimerMensaje: true
 TipoMensaje: assistant_switch
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(config.escalationPhoneNumber)}` : ""}
+PacienteCelular: ${userPhoneNumber}${telefonoParaMensajes(config) ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(telefonoParaMensajes(config))}` : ""}
 FuncionOrigen: route_to_reagendamiento${scheduleInfo}
 [/SISTEMA]
 
@@ -7954,7 +7977,7 @@ Hola, quisiera reagendar mi turno.`
                 sedeId: fc.sedeId,
                 searchType: fc.searchType,
               },
-              config.escalationPhoneNumber,
+              telefonoParaMensajes(config),
               {
                 enableSearchByProfessional: config.enableSearchByProfessional !== false,
                 enableSearchBySpecialty: config.enableSearchBySpecialty !== false,
@@ -8014,7 +8037,7 @@ Hola, quisiera reagendar mi turno.`
         await sendDirectResponse(
           ctxRescheduleError,
           `Tuvimos un problema procesando tu pedido de reagendar el turno. Por favor escribime "turno" para intentar de nuevo.\n\n` +
-            fraseDerivacion('También podés comunicarte directamente con la clínica', config.escalationPhoneNumber),
+            fraseDerivacion('También podés comunicarte directamente con la clínica', telefonoParaMensajes(config)),
           "reschedule-flow-error",
         )
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
@@ -8153,7 +8176,7 @@ Nombre: ${config.displayName}
 FechaHora: ${getArgentinaDateTime()}
 PrimerMensaje: ${threadResult.isNewThread}
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(config.escalationPhoneNumber)}` : ""}${scheduleInfo}
+PacienteCelular: ${userPhoneNumber}${telefonoParaMensajes(config) ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(telefonoParaMensajes(config))}` : ""}${scheduleInfo}
 [/SISTEMA]
 
 ${userMessage}`
@@ -8166,7 +8189,7 @@ FechaHora: ${getArgentinaDateTime()}
 PrimerMensaje: true
 ThreadReseteado: true
 TipoMensaje: ${messageType}
-PacienteCelular: ${userPhoneNumber}${config.escalationPhoneNumber ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(config.escalationPhoneNumber)}` : ""}${scheduleInfo}
+PacienteCelular: ${userPhoneNumber}${telefonoParaMensajes(config) ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(telefonoParaMensajes(config))}` : ""}${scheduleInfo}
 [/SISTEMA]
 
 ${userMessage}`

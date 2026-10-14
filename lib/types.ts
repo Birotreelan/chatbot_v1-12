@@ -17,6 +17,30 @@ export interface WhatsAppConfig {
   cliente_id?: string
   proxy?: string
   escalationPhoneNumber?: string
+  /**
+   * ¿Los mensajes al paciente ofrecen este teléfono? (14/10/2026)
+   *
+   * `false` → el bot no lo menciona: deriva a la atención humana por el mismo
+   * canal y nada más. El número SIGUE guardado acá, porque el switch se
+   * apaga y se prende y perder el dato obligaría a volver a cargarlo.
+   *
+   * ── Por qué un switch y no el campo vacío ───────────────────────────────
+   *
+   * Porque vacío ya significa otra cosa: "todavía no se configuró". Un switch
+   * deja ver la diferencia en el panel —hay un número guardado y está
+   * silenciado, o no hay número— y permite volver a prenderlo sin recargar el
+   * dato. Con el campo vacío como única señal, apagar el teléfono y perderlo
+   * serían la misma acción.
+   *
+   * `undefined` se lee como `true`: ningún cliente actual cambia de mensajes
+   * al desplegarse esto.
+   *
+   * Se consulta SIEMPRE por `telefonoParaMensajes` (lib/utils/escalation-contact.ts),
+   * no leyendo este campo a mano. Las dos excepciones —fuera de horario y
+   * atención humana deshabilitada, donde el teléfono es la única salida— están
+   * marcadas ahí.
+   */
+  ofrecerTelefonoDeDerivacion?: boolean
   /** Si es false, el cliente se omite de ambos reportes de /facturacion. Default true. */
   mostrarEnFacturacion?: boolean
   /**

@@ -26,6 +26,78 @@
 export const CONTACTO_DERIVACION_PLACEHOLDER = "[NÚMERO DE DERIVACIÓN]"
 
 /**
+ * El teléfono que los mensajes al paciente pueden mencionar (14/10/2026).
+ *
+ * Es el ÚNICO lugar que decide si el teléfono se muestra. Todo lo que redacta
+ * un mensaje llama a esto en vez de leer `config.escalationPhoneNumber`
+ * directamente, y por eso apagar el switch alcanza para que el número
+ * desaparezca de los cuarenta mensajes que lo mencionan sin tocar ninguno.
+ *
+ * ── Qué devuelve ───────────────────────────────────────────────────────────
+ *
+ * El valor configurado, o `undefined` cuando el cliente tiene el switch
+ * apagado. `undefined` es lo que ya recibe hoy un cliente sin el campo
+ * cargado, así que las frases que lo manejan —y son todas— no cambian.
+ *
+ * ── Las dos excepciones ────────────────────────────────────────────────────
+ *
+ * `ultimaSalida: true` devuelve el teléfono aunque el switch esté apagado. Se
+ * usa en los dos mensajes donde no hay a quién derivar: fuera del horario de
+ * atención, y con la atención humana deshabilitada para el cliente. Ahí el
+ * switch diría "no le des el teléfono" y la alternativa sería no darle nada —
+ * un mensaje que le cierra la única puerta que le quedaba.
+ *
+ * Decidido con Nicolás el 14/10/2026: "todos los mensajes, menos cuando no hay
+ * humano".
+ */
+export function telefonoParaMensajes(
+  config?: { escalationPhoneNumber?: string; ofrecerTelefonoDeDerivacion?: boolean } | null,
+  opciones?: { ultimaSalida?: boolean },
+): string | undefined {
+  const valor = config?.escalationPhoneNumber
+
+  if (opciones?.ultimaSalida) return valor
+
+  // `undefined` se lee como `true`: el switch es nuevo y ninguna config
+  // existente lo tiene guardado. Sólo un `false` explícito apaga el teléfono.
+  if (config?.ofrecerTelefonoDeDerivacion === false) return SIN_TELEFONO
+
+  return valor
+}
+
+/**
+ * "Este cliente no muestra teléfono", distinto de "este cliente todavía no lo
+ * cargó".
+ *
+ * ── Por qué es la cadena vacía y no un valor propio ────────────────────────
+ *
+ * Porque tiene que ser FALSY. Decenas de mensajes interpolan el teléfono con
+ * un ternario —`${telefono ? \`al *${telefono}*\` : ""}`— sin pasar por las
+ * funciones de este módulo. Un centinela tipo `"__sin_telefono__"` sería
+ * truthy y esos mensajes lo imprimirían tal cual al paciente. La cadena vacía
+ * cae sola en la rama correcta de todos ellos.
+ *
+ * ── Qué pasó con el placeholder ───────────────────────────────────────────
+ *
+ * `[NÚMERO DE DERIVACIÓN]` sigue existiendo, pero sólo para `undefined` o
+ * `null` — nunca para la cadena vacía, que es lo que guarda el panel cuando la
+ * clínica no cargó nada. En la práctica, entonces, el cliente sin teléfono
+ * cargado ya no se lo manda al paciente: se comporta como si estuviera
+ * apagado.
+ *
+ * Es a propósito. El placeholder estaba pensado como aviso para nosotros y
+ * terminaba en el chat del paciente, que es el peor lugar para un recordatorio
+ * de configuración. El aviso vive ahora donde corresponde: en el panel, al
+ * lado del switch.
+ */
+export const SIN_TELEFONO = ""
+
+/** ¿Este valor viene de un cliente que apagó el teléfono a propósito? */
+function desactivado(valor?: string | null): boolean {
+  return valor === SIN_TELEFONO
+}
+
+/**
  * Separa el valor en líneas, respetando el formato que escribió la clínica.
  *
  * Las líneas en blanco INTERMEDIAS se conservan: son separación de párrafos
@@ -110,6 +182,11 @@ export function llevaDatosDeContacto(mensaje: string, valor?: string | null): bo
 
 /** true si la clínica cargó más de una línea (modo bloque). */
 export function esContactoMultilinea(valor?: string | null): boolean {
+  // Apagado no es multilínea: no hay bloque que abrir. Sin esto, el mensaje
+  // del ofrecimiento de humano elegiría igual la rama de una sola línea, que
+  // es la correcta — pero dejarlo implícito invita a un error el día que
+  // alguien agregue una tercera rama.
+  if (desactivado(valor)) return false
   return lineasDeContacto(valor).length > 1
 }
 
@@ -138,6 +215,15 @@ export function fraseDerivacion(
   const lineas = lineasDeContacto(valor)
   const base = fraseSinContacto.replace(/[\s:.]+$/, "")
 
+  // Teléfono apagado: la frase se cierra y listo. Casi todas terminan en "con
+  // la clínica" o "contactanos", así que quedan completas solas ("Para esa
+  // consulta comunicate directamente con la clínica."). Las dos que quedaban
+  // demasiado peladas —"Para otras consultas, comunicate." y "Si necesitás
+  // algo más, podés comunicarte."— se corrigieron en sus llamadores.
+  if (desactivado(valor)) {
+    return `${base}.`
+  }
+
   if (lineas.length === 0) {
     // Sin dato cargado: se mantiene el placeholder que ya usaba el sistema, para
     // que sea evidente en el mensaje que falta configurarlo.
@@ -158,6 +244,7 @@ export function fraseDerivacion(
  * Una línea → `*0800-345-9393*` (igual que antes). Varias → el bloque tal cual.
  */
 export function contactoDerivacion(valor?: string | null): string {
+  if (desactivado(valor)) return ""
   const lineas = lineasDeContacto(valor)
   if (lineas.length === 0) return `*${CONTACTO_DERIVACION_PLACEHOLDER}*`
   if (lineas.length === 1) return `*${lineas[0]}*`
@@ -171,6 +258,7 @@ export function contactoDerivacion(valor?: string | null): string {
  * " | " para no romper el renglón.
  */
 export function contactoDerivacionEnLinea(valor?: string | null): string {
+  if (desactivado(valor)) return ""
   // Acá sí se descartan las líneas en blanco: el objetivo es que todo entre en
   // un renglón, así que un separador vacío ("A |  | B") sólo agregaría ruido.
   const lineas = lineasDeContacto(valor).filter((linea) => linea.length > 0)

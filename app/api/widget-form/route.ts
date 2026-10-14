@@ -7,6 +7,7 @@ import { isWidgetOriginAllowed } from "@/lib/widget-domain-validation"
 import { hasReachedReservationLimit, recordReservation, RESERVATION_LIMIT_MESSAGE } from "@/lib/reservation-limit"
 import { verifyTurnstileToken } from "@/lib/turnstile"
 import { markAwaitingConfirmation, isAwaitingConfirmation, clearAwaitingConfirmation } from "@/lib/widget-confirmation-gate"
+import { telefonoParaMensajes } from "@/lib/utils/escalation-contact"
 
 // Mismas palabras que reconoce como "sí" el motor compartido
 // (lib/conversation-state/shared/confirmation-handler.ts). Sólo cuando el
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
           session_id,
           "",
           config.cliente_id,
-          config.escalationPhoneNumber,
+          telefonoParaMensajes(config),
           false,
           config.permitirNuevoTurno,
         )
@@ -145,7 +146,7 @@ export async function POST(request: NextRequest) {
       session_id,
       typeof message === "string" ? message : "",
       config.cliente_id,
-      config.escalationPhoneNumber,
+      telefonoParaMensajes(config),
       init === true,
       config.permitirNuevoTurno,
     )

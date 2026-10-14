@@ -35,6 +35,7 @@ import { estaBloqueadaLaObraSocial } from "./identidad"
 import { sigueEnElChatPorMigracion } from "./migracion"
 import { presentarSiCorresponde } from "../conversation-state/presentacion-inicial"
 import { nanoid } from "nanoid"
+import { telefonoParaMensajes } from "@/lib/utils/escalation-contact"
 
 export interface DatosDelPaciente {
   pacienteId?: string
@@ -381,7 +382,7 @@ export async function derivarAlPortal(params: {
   // liberar un horario, que es justo lo que la clínica quiere que pase.
   if (params.intencion === "reagendar" && !permiteReprogramarOnline(paciente, config)) {
     try {
-      const cuerpoBase = textoSoloPorTelefono(paciente?.turno, config.escalationPhoneNumber)
+      const cuerpoBase = textoSoloPorTelefono(paciente?.turno, telefonoParaMensajes(config))
       const cuerpo = await presentarSiCorresponde(cuerpoBase, config.id, params.userPhoneNumber)
 
       await sendWhatsAppMessage(params.phoneNumberId, config.accessToken, params.userPhoneNumber, cuerpo)
