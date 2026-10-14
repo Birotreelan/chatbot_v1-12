@@ -626,9 +626,6 @@ export async function PaginaDelEnlace({
             )
           }
         />
-        <p className="text-[15px] text-muted-foreground">
-          Tus datos quedaron guardados, así que no vas a tener que repetirlos.
-        </p>
       </>,
     )
   }
