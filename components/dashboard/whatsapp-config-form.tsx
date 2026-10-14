@@ -89,6 +89,19 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
   })
   const [flagsLoading, setFlagsLoading] = useState(false)
   const [flagsSaving, setFlagsSaving] = useState(false)
+  /**
+   * ¿Llegamos a LEER los flags de este cliente? (14/10/2026)
+   *
+   * Distinto de `!flagsLoading`: acá importa si la lectura salió bien, no si
+   * terminó. `humanSupportFlags` arranca en `false`, así que sin este dato un
+   * fetch fallido y una atención humana apagada se ven idénticos — y es
+   * exactamente lo que pasó: la ruta por cliente no existía, el fetch devolvía
+   * 404 y el formulario mostraba "apagado" para todos los clientes.
+   *
+   * Lo que depende de esto falla ABIERTO: si no pudimos leer, no se bloquea
+   * nada. Bloquear por una lectura que falló es el error que esto arregla.
+   */
+  const [flagsLeidos, setFlagsLeidos] = useState(false)
 
   useEffect(() => {
     if (config) {
@@ -104,16 +117,24 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     if (!config?.id) return
     setFlagsLoading(true)
     fetch(`/api/dashboard/feature-flags/${config.id}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.flags) {
-          setHumanSupportFlags({
-            humanSupport: !!data.flags.humanSupport,
-            humanSupportOfferToPatient: !!data.flags.humanSupportOfferToPatient,
-          })
-        }
+      .then(async (r) => {
+        // `fetch` no lanza con un 404: hay que mirar el status a mano. Sin
+        // esto el error era invisible — ver `flagsLeidos`.
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
       })
-      .catch(console.error)
+      .then((data) => {
+        if (!data?.flags) throw new Error("Respuesta sin flags")
+        setHumanSupportFlags({
+          humanSupport: !!data.flags.humanSupport,
+          humanSupportOfferToPatient: !!data.flags.humanSupportOfferToPatient,
+        })
+        setFlagsLeidos(true)
+      })
+      .catch((err) => {
+        console.error("[CONFIG] No se pudieron leer los flags del cliente:", err)
+        setFlagsLeidos(false)
+      })
       .finally(() => setFlagsLoading(false))
   }, [config?.id])
 
@@ -121,11 +142,14 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     if (!config?.id) return
     setFlagsSaving(true)
     try {
-      await fetch(`/api/dashboard/feature-flags/${config.id}`, {
+      const r = await fetch(`/api/dashboard/feature-flags/${config.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ flags: { [key]: value } }),
       })
+      // Igual que en la lectura: un 404 no lanza. Esto se guardaba "bien"
+      // contra una ruta que no existía y el switch se movía igual.
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
       setHumanSupportFlags((prev) => ({ ...prev, [key]: value }))
     } catch (err) {
       toast({ title: "Error", description: "No se pudo guardar la configuración.", variant: "destructive" })
@@ -365,12 +389,17 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                   y sin teléfono, el paciente que pregunta algo fuera de los
                   turnos se queda sin ninguna salida. Las dos excepciones que
                   el código ya hace —fuera de horario y atención humana
-                  deshabilitada— están en `telefonoParaMensajes`. */}
+                  deshabilitada— están en `telefonoParaMensajes`.
+
+                  `flagsLeidos &&` no es defensa de más: sin eso el switch
+                  aparecía bloqueado en clientes que SÍ tienen la atención
+                  humana encendida, porque la ruta que devuelve los flags no
+                  existía y el 404 se leía como "apagado". Ver `flagsLeidos`. */}
               <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
                 <Switch
                   id="ofrecerTelefonoDeDerivacion"
                   checked={formData.ofrecerTelefonoDeDerivacion !== false}
-                  disabled={!humanSupportFlags.humanSupport}
+                  disabled={flagsLeidos && !humanSupportFlags.humanSupport}
                   onCheckedChange={(checked) =>
                     updateFormData("ofrecerTelefonoDeDerivacion", checked)
                   }
@@ -383,14 +412,14 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                     Ofrecer el teléfono al paciente
                   </Label>
                   <p className="text-xs text-muted-foreground">
-                    {!humanSupportFlags.humanSupport
+                    {flagsLeidos && !humanSupportFlags.humanSupport
                       ? "Requiere la atención humana habilitada (pestaña Funcionalidades). Sin humano al que derivar, el teléfono es la única salida que le queda al paciente."
                       : formData.ofrecerTelefonoDeDerivacion === false
                         ? "Apagado: los mensajes derivan a la atención humana por este mismo canal y no mencionan ningún número. Se sigue dando el teléfono fuera del horario de atención, donde no hay nadie a quien derivar."
                         : "Encendido: los mensajes mencionan los datos de arriba además de ofrecer la atención humana."}
                   </p>
                   {!formData.escalationPhoneNumber?.trim() &&
-                    humanSupportFlags.humanSupport && (
+                    !(flagsLeidos && !humanSupportFlags.humanSupport) && (
                       <p className="text-xs text-amber-600 dark:text-amber-500">
                         No hay datos de derivación cargados, así que ningún mensaje ofrece
                         teléfono — el switch no cambia nada todavía.
