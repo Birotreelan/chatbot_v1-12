@@ -5021,7 +5021,109 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await sendDirectResponse(routerCtx, eff.message, "router_clinica", eff.buttons)
             return
           }
-          // 'init_booking' / 'clear_state_and_passthrough' / 'noop':
+          /**
+           * `init_booking` — el paciente aceptó buscar un turno nuevo (15/10/2026).
+           *
+           * ── El efecto que no hacía nada ──────────────────────────────────
+           *
+           * Acá sólo había un comentario que decía "dejamos caer al pipeline
+           * normal". Pero caer al pipeline con el mensaje "1" y sin contexto
+           * no inicia ninguna reserva: el pipeline no encuentra flujo activo
+           * ni `appointmentContext` —el handler del template de la clínica lo
+           * borra a propósito, ver "Siempre limpiar el contexto" más abajo— y
+           * arranca `initializePatientDetection`, que manda el menú de
+           * bienvenida.
+           *
+           * Caso Maximo Suppes (tel. 2923448224, 15/10/2026 08:44): la clínica
+           * le canceló el turno, el bot le ofreció buscar otro, tocó "Sí,
+           * quiero turno" y recibió "¡bienvenido de nuevo!" con el menú de
+           * siempre. El router había hecho todo bien —`aceptar_nuevo_turno`,
+           * confianza 1—; del otro lado no había nadie escuchando.
+           *
+           * ── Por qué esto, y no un mensaje propio ─────────────────────────
+           *
+           * Porque `initializeExistingPatientFlow` ya sabe todo lo que hay que
+           * decirle: si la obra social no permite turnos online lo dice, y si
+           * el paciente llegó al máximo de turnos activos también —y ESE era
+           * el caso de Maximo, que tenía `limite_turnos.alcanzado: true`—. Un
+           * mensaje escrito acá sería una segunda respuesta a la misma
+           * pregunta, y la que se quedaría vieja.
+           *
+           * Se busca por teléfono con `useCache: false`. `get_paciente` ya está
+           * en `NO_CACHE_ACTIONS`, así que es redundante hoy — se deja explícito
+           * porque acá importa más que en otros lados: el turno se acaba de
+           * cancelar y una foto de hace cinco minutos diría que el límite sigue
+           * alcanzado cuando ya se liberó.
+           *
+           * Si no se lo puede identificar, o el flujo no contesta, se cae al
+           * pipeline como antes. No es la mejor respuesta, pero es una: el
+           * menú al menos le pide el DNI. Lo que no puede pasar es quedarse
+           * mudo.
+           */
+          if (eff.type === 'init_booking') {
+            const bookingCtx: DirectResponseContext = {
+              phoneNumberId: value.metadata.phone_number_id,
+              accessToken: config.accessToken,
+              userPhoneNumber,
+              configId: config.id,
+              clienteId: config.cliente_id,
+            }
+
+            try {
+              const ficha = await buscarPaciente(config.cliente_id, { telefono: userPhoneNumber }, false)
+              const paciente = ficha.exito ? (ficha.datos as any) : null
+              const dni = String(paciente?.Nrodoc || paciente?.dni || "").trim()
+
+              if (paciente && dni) {
+                const nombres = String(paciente.Nombres || paciente.nombres || "").trim()
+                const apellido = String(paciente.Apellido || paciente.apellido || "").trim()
+                const emailCrudo = String(paciente.Mail || paciente.mail || "").trim()
+                const email = emailCrudo === "-" || emailCrudo === "NO USA" ? "" : emailCrudo
+
+                // Igual que en "cancelar y solicitar uno nuevo": si queda un
+                // estado de detección activo, la próxima selección de sede se
+                // enruta a detección y se pierde la reserva a medio hacer.
+                await clearPatientDetectionFlow(userPhoneNumber, config.id)
+
+                const reserva = await initializeExistingPatientFlow(
+                  userPhoneNumber,
+                  String(paciente.Id || paciente.id || ""),
+                  [nombres, apellido].filter(Boolean).join(" "),
+                  dni,
+                  email || undefined,
+                  config.cliente_id,
+                  {
+                    patientFirstName: nombres || undefined,
+                    patientLastName: apellido || undefined,
+                    obraSocialId: String(paciente.Deudor_Id || "").trim() || undefined,
+                    obraSocialNombre: String(paciente.Deudor_Nombre || "").trim() || undefined,
+                  },
+                  telefonoParaMensajes(config),
+                  undefined,
+                  'whatsapp',
+                  config.permitirNuevoTurno,
+                )
+
+                if (reserva?.handled && reserva.message) {
+                  await sendExistingPatientResult(bookingCtx, reserva, "router_clinica_init_booking")
+                  await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                  return
+                }
+
+                console.warn(
+                  `[ROUTER_CLINICA] init_booking sin respuesta del flujo para ${userPhoneNumber} (handled: ${reserva?.handled}) — cae al pipeline`,
+                )
+              } else {
+                console.warn(
+                  `[ROUTER_CLINICA] init_booking sin ficha por teléfono para ${userPhoneNumber} — cae al pipeline`,
+                )
+              }
+            } catch (error) {
+              console.error("[ROUTER_CLINICA] init_booking falló, cae al pipeline:", error)
+            }
+          }
+
+          // 'clear_state_and_passthrough' / 'noop' (y los fallos de arriba):
           // execute() ya limpió el estado → dejamos caer al pipeline normal (Sprint 9, etc.).
         }
       }

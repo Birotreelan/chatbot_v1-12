@@ -302,7 +302,11 @@ export async function initializeNewPatientFlow(
   // feature flags de Redis: esto es una decisión de negocio por cliente, no
   // un rollout de funcionalidad.
   if (permitirNuevoTurno === false) {
-    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+    // Se pasa tal cual: `fraseDerivacion` decide qué hacer con la ausencia
+    // (15/10/2026). Antes se sustituía acá por el placeholder, y con el switch
+    // "Ofrecer el teléfono al paciente" apagado eso le mandaba
+    // "[NÚMERO DE DERIVACIÓN]" al paciente — justo lo que el switch evita.
+    const numeroDerivacion = escalationPhoneNumber
     logger.info('Nuevo turno deshabilitado por configuración del cliente')
     return {
       handled: true,
@@ -943,7 +947,7 @@ async function handleObraSocialPhase(
       
       // 🆕 VALIDAR SI PERMITE TURNOS ONLINE
       if (obraSocial.permite_turnos_online === false) {
-        const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+        const numeroDerivacion = escalationPhoneNumber // ver la nota de arriba
         logger.warn('Obra social no permite turnos online', { 
           obraSocialId: obraSocial.id, 
           nombre: obraSocial.nombre 
@@ -1069,7 +1073,7 @@ async function handleObraSocialSelectionPhase(
     if (selectedOption) {
       // 🆕 VALIDAR SI PERMITE TURNOS ONLINE
       if (selectedOption.permite_turnos_online === false) {
-        const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+        const numeroDerivacion = escalationPhoneNumber // ver la nota de arriba
         logger.warn('Obra social seleccionada no permite turnos online', { 
           id: selectedOption.id, 
           nombre: selectedOption.nombre 

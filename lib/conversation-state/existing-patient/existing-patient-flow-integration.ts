@@ -11,6 +11,8 @@ import { getDetectedPatientInfo } from '../patient-detection/patient-flow-handle
 import { validarObraSocial, buscarPaciente } from '@/lib/api-tools/api-functions' // 🆕 IMPORT PARA VALIDAR OBRA SOCIAL / LIMITE DE TURNOS
 import { getFirstName } from '@/lib/utils/name-utils'
 import { fraseDerivacion } from '@/lib/utils/escalation-contact'
+import { describirTurnos } from '../descripcion-turnos'
+import { formatDateWithDayOfWeek } from '@/lib/utils/date-utils'
 import { extractEntities } from '../entity-extractor'
 import { getHistory } from '../conversation-history'
 
@@ -381,7 +383,11 @@ export async function initializeExistingPatientFlow(
   logger.info('Initializing existing patient flow', { patientId, patientName })
 
   if (permitirNuevoTurno === false) {
-    const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+    // Se pasa tal cual: `fraseDerivacion` decide qué hacer con la ausencia
+    // (15/10/2026). Antes se sustituía acá por el placeholder, y con el switch
+    // "Ofrecer el teléfono al paciente" apagado eso le mandaba
+    // "[NÚMERO DE DERIVACIÓN]" al paciente — justo lo que el switch evita.
+    const numeroDerivacion = escalationPhoneNumber
     logger.info('Nuevo turno deshabilitado por configuración del cliente')
     return {
       handled: true,
@@ -451,7 +457,7 @@ export async function initializeExistingPatientFlow(
     )
 
     if (resultadoOS.estado === 'bloqueada') {
-      const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+      const numeroDerivacion = escalationPhoneNumber // ver la nota de arriba
       logger.warn('Obra social de paciente existente no permite turnos online', {
         obraSocialId: finalObraSocialId,
         obraSocialNombre: finalObraSocialNombre,
@@ -489,9 +495,44 @@ export async function initializeExistingPatientFlow(
 
         const firstName = getFirstName(finalPatientFirstName || patientName)
         const saludo = firstName ? `Hola ${firstName}. ` : ''
+
+        /**
+         * Decir CUÁL es el turno que ocupa el cupo (15/10/2026).
+         *
+         * El texto decía sólo "Ya tenés 1 turno(s) activo(s)". Dicho así, al
+         * paciente al que la clínica le acaba de cancelar un turno y que
+         * aceptó buscar otro, el mensaje le suena a contradicción: le avisamos
+         * que no tiene turno y un segundo después que ya tiene uno.
+         *
+         * Nombrarlo cierra la duda — y si el que ocupa el cupo es justamente
+         * el que le cancelaron, el paciente lo ve y puede decírselo a la
+         * clínica, que es información que nosotros no tenemos cómo conseguir.
+         *
+         * Se reusa `describirTurnos`, el mismo que arma la frase del menú, así
+         * que un turno se lee como frase y varios como lista. Si el proxy no
+         * mandó los turnos, se omite la aclaración en vez de inventarla.
+         */
+        const cuales = describirTurnos(
+          { turnos: limiteCheck.turnosProximos || [] },
+          formatDateWithDayOfWeek,
+        )
+
+        const plural = limiteTurnos.activos === 1
+          ? `Ya tenés un turno activo`
+          : `Ya tenés ${limiteTurnos.activos} turnos activos`
+        const maximo = limiteTurnos.maximo === 1
+          ? 'y el máximo permitido es uno'
+          : `y el máximo permitido es ${limiteTurnos.maximo}`
+
         return {
           handled: true,
-          message: `${saludo}Ya tenés ${limiteTurnos.activos} turno(s) activo(s), el máximo permitido es ${limiteTurnos.maximo}. Para agendar uno nuevo, primero cancelá o completá alguno de tus turnos pendientes.`,
+          message:
+            `${saludo}${plural} ${maximo}.` +
+            // El punto final sólo cuando la descripción es una frase. Con
+            // varios turnos `describirTurnos` devuelve una lista con viñetas,
+            // y el punto quedaba pegado al último renglón.
+            (cuales ? `\n\nTenés ${cuales}${cuales.includes('\n') ? '' : '.'}` : '') +
+            `\n\nPara agendar uno nuevo, primero cancelá o completá alguno de tus turnos pendientes.`,
           action: 'limite_turnos_alcanzado',
         }
       }
@@ -2305,7 +2346,7 @@ async function handleModifyObraSocialPhase(
     }
 
     if (obraSocial.permite_turnos_online === false) {
-      const numeroDerivacion = escalationPhoneNumber || '[NÚMERO DE DERIVACIÓN]'
+      const numeroDerivacion = escalationPhoneNumber // ver la nota de arriba
       logger.warn('Obra social indicada por el paciente no permite turnos online', {
         obraSocialId: obraSocial.id,
         nombre: obraSocial.nombre,
