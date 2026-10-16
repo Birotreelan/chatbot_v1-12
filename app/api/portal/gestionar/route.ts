@@ -1,4 +1,27 @@
 /**
+ * Completa los huecos de `base` con lo que traiga `encima`, SIN que un valor
+ * ausente pise uno bueno (16/10/2026).
+ *
+ * Existe porque `{ ...ficha, ...identidad }` no hace esto.
+ * `IdentidadDelPaciente` trae todas sus claves siempre, con `undefined` cuando
+ * no hay dato —`obraSocialId: x ? String(x) : undefined`—, y en un spread una
+ * clave presente con valor `undefined` PISA la de abajo. Parecía completar
+ * huecos y podía abrirlos.
+ *
+ * Se descarta `undefined`, `null` y la cadena vacía. `false` y `0` se
+ * conservan: son respuestas, no ausencias — `tieneFicha: false` significa que
+ * se consultó y no hay ficha, que es distinto de no haber consultado.
+ */
+function completarHuecos<T extends object>(base: T, encima?: Partial<T> | null): T {
+  if (!encima) return base
+  const salida = { ...(base as Record<string, unknown>) }
+  for (const [clave, valor] of Object.entries(encima)) {
+    if (valor !== undefined && valor !== null && valor !== "") salida[clave] = valor
+  }
+  return salida as T
+}
+
+/**
  * La única ruta del portal que toca turnos de verdad (22/9/2026).
  *
  * ── Primero cancelar, después reservar (28/9/2026) ─────────────────────────
@@ -168,17 +191,54 @@ export async function POST(request: Request) {
   // que identificó el bot no hace falta preguntar nada.
   const apellidoConocido = ident?.apellido || contexto.pacienteApellido
 
-  // Sólo si NO lo tenemos se va a buscar la ficha. Es el respaldo para los
-  // enlaces emitidos antes de este arreglo y para los casos donde la clínica
-  // no manda `Chatbot_Data`.
-  if (!apellidoConocido && dniParaReservar) {
+  /**
+   * La obra social del token, si vino.
+   *
+   * Se calcula ANTES de ir a la ficha porque decide si hay que ir.
+   */
+  const obraSocialConocida = ident?.obraSocialId || contexto.obraSocialId
+
+  /**
+   * ── Se va a buscar la ficha por el apellido Y por la obra social ─────────
+   *
+   * Antes esta consulta se disparaba sólo cuando faltaba el apellido
+   * (16/10/2026). Con la obra social ausente no se consultaba nada y la
+   * reserva salía sin ella — aunque teníamos el DNI en la mano y
+   * `resolverPorDNI` devuelve `obraSocialId` y `obraSocialNombre` leyendo
+   * `Deudor_Id` / `Deudor_Nombre` de la ficha.
+   *
+   * O sea: el dato existía del lado de la clínica, lo podíamos pedir, y no lo
+   * pedíamos. Caso reportado el 16/10/2026 en Instituto Santa Lucía: el
+   * paciente llega por el menú, entra al portal, elige "Cambiarlo de horario"
+   * y el turno nuevo queda sin obra social.
+   *
+   * No importa por dónde se haya perdido antes —el `Chatbot_Data` sin la obra
+   * social, un token viejo, un flujo que no la propaga—: si al momento de
+   * reservar no la tenemos y tenemos el DNI, se pregunta.
+   */
+  const faltaObraSocial = !obraSocialConocida
+  if ((!apellidoConocido || faltaObraSocial) && dniParaReservar) {
     const ficha = await resolverPorDNI(contexto.clienteId, dniParaReservar)
     if (ficha?.tieneFicha) {
-      // La ficha completa los huecos; lo que el paciente haya cargado en el
-      // portal manda por encima, porque es más reciente.
-      ident = { ...ficha, ...(contexto.identidad || {}) }
+      /**
+       * La ficha completa los huecos; lo que el paciente cargó en el portal
+       * manda por encima, porque es más reciente.
+       *
+       * ── Por qué no un spread (16/10/2026) ──────────────────────────────
+       *
+       * Acá había `{ ...ficha, ...(contexto.identidad || {}) }`. Y
+       * `IdentidadDelPaciente` trae las claves SIEMPRE, con `undefined` cuando
+       * no hay dato: `obraSocialId: x ? String(x) : undefined`. Entonces un
+       * `undefined` explícito de la identidad del portal PISABA el valor bueno
+       * que acababa de traer la ficha. El spread parecía "completar huecos" y
+       * en realidad podía abrirlos.
+       */
+      ident = completarHuecos(ficha, contexto.identidad)
     } else {
-      console.warn(`[PORTAL] No se pudo traer la ficha de ${contexto.phone} para completar el apellido`)
+      console.warn(
+        `[PORTAL] No se pudo traer la ficha de ${contexto.phone} ` +
+          `(faltaba ${[!apellidoConocido && "apellido", faltaObraSocial && "obra social"].filter(Boolean).join(" y ")})`,
+      )
     }
   }
 
@@ -217,9 +277,32 @@ export async function POST(request: Request) {
   // quedar en el log, porque el síntoma del lado de la clínica —"este
   // paciente figura sin obra social"— no apunta a ninguna parte.
   if (!datosDelPaciente.deudorId) {
+    /**
+     * ── Un aviso que diga de dónde salió el hueco (16/10/2026) ────────────
+     *
+     * Decía `alta nueva: ${!ident?.tieneFicha}`, y eso daba `true` en dos
+     * situaciones con arreglos distintos: un paciente realmente nuevo, y uno
+     * existente del que NO tenemos identidad del portal. Al diagnosticar el
+     * caso de Instituto Santa Lucía, el aviso no alcanzaba para distinguirlos
+     * y hubo que reconstruir la cadena entera a mano.
+     *
+     * Ahora dice qué tenemos y qué no en cada eslabón, que es lo que permite
+     * saber dónde se cortó sin salir de los logs.
+     */
     console.warn(
-      `[PORTAL] Reserva SIN obra social para ${contexto.phone} ` +
-        `(dni ${dniParaReservar}, alta nueva: ${!ident?.tieneFicha})`,
+      `[PORTAL] Reserva SIN obra social para ${contexto.phone} — ` +
+        `dni ${dniParaReservar || "(sin dni)"}, ` +
+        `token ${contexto.obraSocialId ? "con" : "sin"} obra social, ` +
+        `identidad del portal ${
+          !contexto.identidad
+            ? "ausente"
+            : contexto.identidad.obraSocialId
+              ? "con obra social"
+              : "sin obra social"
+        }, ` +
+        `ficha ${
+          ident?.fichaConsultada ? (ident.tieneFicha ? "consultada y existe" : "consultada y no existe") : "no consultada"
+        }`,
     )
   }
 

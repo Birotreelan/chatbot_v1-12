@@ -807,6 +807,46 @@ export async function processDNIForDisambiguation(
 }
 
 /**
+ * Los datos del paciente que viajan al llamador cuando elige una opción del
+ * menú (16/10/2026).
+ *
+ * ── El olvido que esto cierra ──────────────────────────────────────────────
+ *
+ * Había tres `data: { ... }` armados a mano, y los tres copiaban nombre, DNI y
+ * turnos del estado pero NO la obra social. El estado sí la tenía —se guarda
+ * al identificar al paciente, leyendo `Deudor_Id` y `Deudor_Nombre` del
+ * proxy—; simplemente no se copiaba en ese salto.
+ *
+ * `PatientDetectionResult.patientInfo` declara `obraSocialId` y
+ * `obraSocialNombre` como opcionales, así que el typecheck no tenía nada que
+ * decir: los campos existían en el tipo, el dato existía en el estado, y el
+ * único paso entre los dos los dejaba afuera.
+ *
+ * Caso reportado (tel. 3413121395, Instituto Santa Lucía, 16/10/2026): el
+ * paciente elige "Cancelar el turno médico y solicitar uno nuevo", se le manda
+ * el enlace del portal, elige "Cambiarlo de horario" y el turno nuevo queda sin
+ * obra social. En los logs se ve que el proxy había devuelto
+ * `Deudor_Nombre: 'PAMI'` nueve segundos antes.
+ *
+ * El camino completo del dato: estado de detección → ESTO → `patientInfo` en
+ * whatsapp.tsx → `chatbotData.paciente.obra_social_id` → `datosDesdeElContexto`
+ * → token del portal → `set_turno`. Se cortaba en el segundo paso.
+ */
+function datosDelPacienteDetectado(state: PatientDetectionState) {
+  return {
+    patientId: state.patientId,
+    patientName: state.patientName,
+    patientDNI: state.patientDNI,
+    patientLastName: state.patientLastName,
+    patientFirstName: state.patientFirstName,
+    obraSocialId: state.obraSocialId,
+    obraSocialNombre: state.obraSocialNombre,
+    turnos: state.turnos,
+    turnosQx: state.turnosQx,
+  }
+}
+
+/**
  * Procesa mensaje del usuario durante el flujo de detección
  */
 export async function processPatientDetectionMessage(
@@ -923,13 +963,7 @@ export async function processPatientDetectionMessage(
             handled: true,
             action: 'other_inquiry_intent',
             nextPhase: 'action_processing',
-            data: {
-              patientId: state.patientId,
-              patientName: state.patientName,
-              patientFirstName: firstName,
-              patientDNI: state.patientDNI,
-              turnos: state.turnos,
-            },
+            data: { ...datosDelPacienteDetectado(state), patientFirstName: firstName },
           }
         } else if (selection === 0) {
           // "Volver al menú anterior" → limpiar contexto post-acción y mostrar menú completo
@@ -1051,15 +1085,7 @@ export async function processPatientDetectionMessage(
           handled: true,
           action,
           nextPhase: 'action_processing',
-          data: {
-            patientId: state.patientId,
-            patientName: state.patientName,
-            patientDNI: state.patientDNI,
-            patientLastName: state.patientLastName,
-            patientFirstName: state.patientFirstName,
-            turnos: state.turnos,
-            turnosQx: state.turnosQx,
-          },
+          data: datosDelPacienteDetectado(state),
         }
       }
     } else if (state.phase === 'awaiting_initial_response') {
@@ -1216,15 +1242,7 @@ export async function processPatientDetectionMessage(
             handled: true,
             action,
             nextPhase: 'action_processing',
-            data: {
-              patientId: state.patientId,
-              patientName: state.patientName,
-              patientDNI: state.patientDNI,
-              patientLastName: state.patientLastName,
-              patientFirstName: state.patientFirstName,
-              turnos: state.turnos,
-              turnosQx: state.turnosQx,
-            },
+            data: datosDelPacienteDetectado(state),
           }
         }
       }
