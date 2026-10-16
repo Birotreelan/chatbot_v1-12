@@ -40,6 +40,12 @@ export function DashboardNav() {
             <Link href="/dashboard/facturacion" className="text-foreground/60 hover:text-foreground">
               Facturación
             </Link>
+            {/* Servicio sólo existe acá, dentro del dashboard. No se agrega a
+                FacturacionNav: el área /facturacion es la del rol
+                billing_agent, y esta pestaña no le corresponde. */}
+            <Link href="/dashboard/servicio" className="text-foreground/60 hover:text-foreground">
+              Servicio
+            </Link>
             <Link href="/dashboard/config/new" className="text-foreground/60 hover:text-foreground">
               Nuevo Número
             </Link>
