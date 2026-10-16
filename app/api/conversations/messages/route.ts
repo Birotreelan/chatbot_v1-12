@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server"
 import { getConversationMessages, getAllConversationMessages } from "@/lib/conversations"
+import { exigirSuperAdmin, esDenegado } from "@/lib/conversations-auth"
 
 export async function GET(request: Request) {
   try {
+    // Sin esto, con un configId y un teléfono se leía la conversación de
+    // cualquier paciente. Ver lib/conversations-auth.ts.
+    const acceso = await exigirSuperAdmin(request)
+    if (esDenegado(acceso)) return acceso.respuesta
+
     const { searchParams } = new URL(request.url)
     const configId = searchParams.get("configId")
     const phoneNumber = searchParams.get("phoneNumber")

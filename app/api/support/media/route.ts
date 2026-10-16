@@ -26,7 +26,7 @@
 import { NextResponse } from "next/server"
 import { getSessionFromRequest } from "@/lib/auth"
 import { getSupportSession, saveSupportMessage } from "@/lib/human-support"
-import { getConversationMessages, saveConversationMessage } from "@/lib/conversations"
+import { saveConversationMessage } from "@/lib/conversations"
 import { getWhatsAppConfigById } from "@/lib/db"
 import { estadoVentana } from "@/lib/ventana-atencion"
 import {
@@ -34,21 +34,15 @@ import {
   detectarTipoReal,
   uploadWhatsAppMedia,
   sendWhatsAppMedia,
-  descargarMediaParaPanel,
-  cabeceraContentDisposition,
   formatearTamano,
   ErrorDeWhatsApp,
   DIAS_RETENCION_WHATSAPP,
-  DIAS_RETENCION_ENTRANTE,
-  LIMITE_DESCARGA_PANEL,
 } from "@/lib/whatsapp-media"
 import type { HumanSupportMessage, MediaAdjunta } from "@/lib/types"
+import { servirMediaDeLaConversacion } from "@/lib/media-de-conversacion"
 import { nanoid } from "nanoid"
 
 export const runtime = "nodejs"
-
-/** Cuántos mensajes del historial miramos para validar que un media_id sea de esta conversación. */
-const MENSAJES_A_REVISAR = 100
 
 // ─── POST: el agente envía un archivo ────────────────────────────────────────
 
@@ -249,114 +243,19 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, ventana })
     }
 
-    // El media_id tiene que pertenecer a ESTA conversación. Sin esta
-    // comprobación, un agente autenticado podría pedir cualquier archivo de
-    // cualquier otro paciente con solo conocer su id.
-    const media = await buscarMediaEnLaConversacion(
-      supportSession.configId,
-      supportSession.phoneNumber,
+    // La comprobación de pertenencia, la descarga y las cabeceras viven en
+    // lib/media-de-conversacion.ts, compartidas con el Monitor del dashboard.
+    // Acá queda sólo lo que es propio de este panel: autorizar por la sesión
+    // de atención y su tenant, que es lo de arriba.
+    return await servirMediaDeLaConversacion({
+      configId: supportSession.configId,
+      phoneNumber: supportSession.phoneNumber,
       mediaId,
-    )
-    if (!media) {
-      return NextResponse.json(
-        { success: false, error: "El archivo no pertenece a esta conversación" },
-        { status: 403 },
-      )
-    }
-
-    const config = await getWhatsAppConfigById(supportSession.configId)
-    if (!config) {
-      return NextResponse.json({ success: false, error: "Configuración no encontrada" }, { status: 404 })
-    }
-
-    const descarga = await descargarMediaParaPanel(mediaId, config.accessToken)
-
-    if (descarga.estado === "demasiado_grande") {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            `El archivo pesa ${formatearTamano(descarga.tamanoBytes)} y no se puede abrir desde el panel ` +
-            `(el máximo es ${formatearTamano(LIMITE_DESCARGA_PANEL)}). Pedile al paciente que lo reenvíe más liviano.`,
-          demasiadoGrande: true,
-        },
-        { status: 413 },
-      )
-    }
-
-    if (descarga.estado !== "ok") {
-      // Lo esperable pasado el plazo de retención. No es un error del sistema.
-      const dias = media.direccion === "entrante" ? DIAS_RETENCION_ENTRANTE : DIAS_RETENCION_WHATSAPP
-      return NextResponse.json(
-        {
-          success: false,
-          error: `El archivo ya no está disponible. WhatsApp lo conserva ${dias} días.`,
-          caducado: true,
-        },
-        { status: 404 },
-      )
-    }
-
-    const { buffer } = descarga
-
-    // ── Con qué tipo se sirve (21/9/2026) ────────────────────────────────────
-    //
-    // Nunca con el mime declarado. Cuando el archivo lo subió un agente, el POST
-    // ya verificó el contenido contra la declaración; pero desde que el paciente
-    // también manda archivos, el mime del historial puede venir de alguien que
-    // lo eligió a propósito. Servir `image/svg+xml` o `text/html` incrustado
-    // ejecutaría en el origen del panel, con la sesión del agente, un archivo
-    // que eligió un tercero.
-    //
-    // Entonces: se mira el contenido. Si es uno de los tres que sabemos
-    // reconocer, se sirve incrustado con ESE tipo. Cualquier otra cosa se baja
-    // como binario opaco, que es lo que el agente pidió poder hacer sin que el
-    // navegador la interprete.
-    const tipoReal = detectarTipoReal(buffer)
-
-    // `?descargar=1` fuerza la descarga (botón de descarga del panel). Existe
-    // porque el atributo `download` del <a> es solo una sugerencia y los
-    // navegadores no lo respetan igual cuando el servidor manda `inline`:
-    // decidirlo del lado del servidor es lo único que se comporta igual en
-    // todos. También sirve para los tipos que sí se previsualizan — un agente
-    // puede querer guardar el PDF, no abrirlo.
-    const forzarDescarga = searchParams.get("descargar") === "1"
-    const incrustable = tipoReal !== null && !forzarDescarga
-
-    return new NextResponse(new Uint8Array(buffer), {
-      status: 200,
-      headers: {
-        "Content-Type": incrustable ? tipoReal! : "application/octet-stream",
-        "Content-Length": String(buffer.length),
-        // Interpolar el nombre acá directamente devolvía 500 con el archivo ya
-        // descargado en cuanto tenía un acento o un espacio fino de macOS: las
-        // cabeceras HTTP son Latin-1. Ver cabeceraContentDisposition.
-        "Content-Disposition": cabeceraContentDisposition(
-          media.nombreArchivo,
-          incrustable ? "inline" : "attachment",
-        ),
-        // Sin esto, un navegador puede adivinar el tipo por el contenido y
-        // renderizar como HTML algo que mandamos como binario.
-        "X-Content-Type-Options": "nosniff",
-        // Son datos clínicos: no deben quedar en caches compartidas.
-        "Cache-Control": "private, max-age=300",
-      },
+      forzarDescarga: searchParams.get("descargar") === "1",
+      etiqueta: "SUPPORT_MEDIA",
     })
   } catch (error: any) {
     console.error("[SUPPORT_MEDIA] ❌ Error en GET:", error)
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
-}
-
-async function buscarMediaEnLaConversacion(
-  configId: string,
-  phoneNumber: string,
-  mediaId: string,
-): Promise<MediaAdjunta | null> {
-  const { messages } = await getConversationMessages(configId, phoneNumber, MENSAJES_A_REVISAR, 0)
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const media = (messages[i] as any)?.media as MediaAdjunta | undefined
-    if (media?.mediaId === mediaId) return media
-  }
-  return null
 }

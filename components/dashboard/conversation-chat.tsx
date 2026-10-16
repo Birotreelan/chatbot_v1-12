@@ -10,6 +10,8 @@ import { es } from "date-fns/locale"
 import { User, Bot, Pause, Play, Send, Loader2, Mic } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { MonitorPatientPanel } from "@/components/dashboard/monitor-patient-panel"
+import { AdjuntoDelMensaje, textoSinMarcador } from "@/components/adjunto-del-mensaje"
+import type { MediaAdjunta } from "@/lib/types"
 
 interface Message {
   id: string
@@ -22,6 +24,13 @@ interface Message {
    * verificar qué dijo realmente cuando la transcripción no cierra.
    */
   audioMessageId?: string
+  /**
+   * Archivo que mandó el paciente (16/10/2026). El webhook ya lo venía
+   * guardando; el Monitor lo ignoraba y mostraba sólo el marcador de texto
+   * "[Imagen recibida: ...]", que no sirve para nada: el archivo existía y no
+   * había forma de verlo desde acá.
+   */
+  media?: MediaAdjunta
 }
 
 interface ConversationChatProps {
@@ -30,6 +39,18 @@ interface ConversationChatProps {
 }
 
 export function ConversationChat({ configId, phoneNumber }: ConversationChatProps) {
+  /**
+   * De dónde sale el archivo de un mensaje.
+   *
+   * El componente del adjunto no sabe de endpoints: lo mismo dibuja un archivo
+   * del panel de atención que del Monitor, y lo que cambia entre los dos es
+   * quién autoriza. Ver components/adjunto-del-mensaje.tsx.
+   */
+  const urlDelArchivo = (mediaId: string, descargar = false) =>
+    `/api/conversations/media?configId=${encodeURIComponent(configId)}` +
+    `&phoneNumber=${encodeURIComponent(phoneNumber)}` +
+    `&mediaId=${encodeURIComponent(mediaId)}${descargar ? "&descargar=1" : ""}`
+
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(true)
   const [isPaused, setIsPaused] = useState(false)
@@ -312,7 +333,21 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
                         />
                       </div>
                     )}
-                    <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                    {message.media && (
+                      <AdjuntoDelMensaje
+                        media={message.media}
+                        url={urlDelArchivo(message.media.mediaId)}
+                        urlDescarga={urlDelArchivo(message.media.mediaId, true)}
+                      />
+                    )}
+                    {(() => {
+                      // Con el archivo dibujado, el marcador "[Imagen recibida: …]"
+                      // sobra. Sin archivo se deja el texto tal cual: ahí el
+                      // marcador es lo único que cuenta que hubo uno.
+                      const texto = message.media ? textoSinMarcador(message.content) : message.content
+                      if (!texto) return null
+                      return <p className="text-sm whitespace-pre-wrap break-words">{texto}</p>
+                    })()}
                     <p
                       className={cn(
                         "text-xs mt-1",
