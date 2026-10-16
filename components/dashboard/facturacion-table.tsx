@@ -92,6 +92,14 @@ interface FacturacionTableProps {
    * lib/servicio-calculo.ts.
    */
   usarValoresPropios?: boolean
+  /**
+   * Las dos columnas de resultado: ingresos menos costo, en dólares y en pesos.
+   *
+   * Sólo Servicio. En Facturación no corresponde: esa pestaña muestra lo que se
+   * le factura al cliente, y el costo de Meta es nuestro — restarlo ahí
+   * mezclaría dos cosas que se miran por separado.
+   */
+  mostrarMargen?: boolean
 }
 
 export function FacturacionTable({
@@ -106,6 +114,7 @@ export function FacturacionTable({
   apiPathPrecios = "/api/facturacion/precios",
   cerrarMes = true,
   usarValoresPropios = false,
+  mostrarMargen = false,
 }: FacturacionTableProps) {
   const [clientes, setClientes] = useState<FacturacionCliente[]>([])
   const [loading, setLoading] = useState(true)
@@ -329,10 +338,30 @@ export function FacturacionTable({
    */
   const valoresDeLaFila = (c: FacturacionCliente) => {
     const congelado = Boolean(c.cierre) && !usarValoresPropios
+    const precio = congelado ? (c.cierre!.precioUnitarioUsd ?? 0) : (precios[c.clienteIdBase] ?? 0)
+    const cotizacion = congelado ? c.cierre!.dolarVenta : dolarVenta
+
+    const ingresoUSD = (c.totalInteracciones || 0) * precio
+
+    // `null` y no 0 cuando la fila no trae `mensajesConCargoDeMeta`: con 0 el
+    // margen diría "ingresos enteros, costo cero", que es una afirmación. Lo
+    // que pasa es que no sabemos cuánto costó — el mismo criterio que la
+    // columna de costo, que ahí muestra un guión.
+    const costoUSD =
+      c.mensajesConCargoDeMeta !== undefined
+        ? c.mensajesConCargoDeMeta * COSTO_POR_MENSAJE_CON_CARGO_USD
+        : null
+    const margenUSD = costoUSD === null ? null : ingresoUSD - costoUSD
+
     return {
       congelado,
-      precio: congelado ? (c.cierre!.precioUnitarioUsd ?? 0) : (precios[c.clienteIdBase] ?? 0),
-      cotizacion: congelado ? c.cierre!.dolarVenta : dolarVenta,
+      precio,
+      cotizacion,
+      ingresoUSD,
+      ingresoARS: cotizacion ? ingresoUSD * cotizacion : null,
+      costoUSD,
+      margenUSD,
+      margenARS: margenUSD !== null && cotizacion ? margenUSD * cotizacion : null,
     }
   }
 
@@ -408,9 +437,23 @@ export function FacturacionTable({
   // dólares por el dólar de hoy daría un número que no coincide con la suma de
   // lo que muestra cada renglón.
   const totalGeneralValorARS = clientes.reduce((sum, c) => {
-    const { precio, cotizacion } = valoresDeLaFila(c)
-    return sum + (c.totalInteracciones || 0) * precio * (cotizacion || 0)
+    const { ingresoARS } = valoresDeLaFila(c)
+    return sum + (ingresoARS || 0)
   }, 0)
+
+  /**
+   * El resultado del total: la SUMA de los resultados de cada fila, no
+   * "ingreso total menos costo total".
+   *
+   * Dan distinto cuando alguna fila no trae costo: aquella fórmula le restaría
+   * el costo de las demás a una fila cuyo costo no conocemos, y el total no
+   * coincidiría con la columna. Las filas sin costo quedan afuera, y se dice
+   * cuántas son — un total que calla lo que dejó afuera es peor que uno que lo
+   * aclara.
+   */
+  const filasSinCosto = clientes.filter((c) => c.mensajesConCargoDeMeta === undefined).length
+  const totalMargenUSD = clientes.reduce((sum, c) => sum + (valoresDeLaFila(c).margenUSD || 0), 0)
+  const totalMargenARS = clientes.reduce((sum, c) => sum + (valoresDeLaFila(c).margenARS || 0), 0)
 
   return (
     <Card>
@@ -515,6 +558,12 @@ export function FacturacionTable({
                 <TableHead className="text-right">Valor por unidad (USD)</TableHead>
                 <TableHead className="text-right">Valor Total Dólares</TableHead>
                 <TableHead className="text-right">Valor Total Pesos</TableHead>
+                {mostrarMargen && (
+                  <>
+                    <TableHead className="text-right">Ingresos − costos Dólares</TableHead>
+                    <TableHead className="text-right">Ingresos − costos Pesos</TableHead>
+                  </>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -524,7 +573,8 @@ export function FacturacionTable({
                 // Es el punto del congelado: si acá se aplicara el precio
                 // actual o el dólar del día, el total de un mes ya facturado
                 // volvería a moverse y el cierre no serviría de nada.
-                const { precio, cotizacion, congelado } = valoresDeLaFila(cliente)
+                const { precio, cotizacion, congelado, margenUSD, margenARS } =
+                  valoresDeLaFila(cliente)
                 const totalInteracciones = cliente.totalInteracciones || 0
                 const valorTotalUSD = totalInteracciones * precio
                 const valorTotalARS = cotizacion ? valorTotalUSD * cotizacion : null
@@ -683,6 +733,27 @@ export function FacturacionTable({
                     <TableCell className="text-right">
                       {valorTotalARS !== null ? formatoARS.format(valorTotalARS) : "—"}
                     </TableCell>
+                    {mostrarMargen && (
+                      <>
+                        {/* En rojo si da negativo: un resultado bajo cero se
+                            tiene que ver de un vistazo, no leyendo el signo
+                            menos en una tabla de veinte filas. */}
+                        <TableCell
+                          className={`text-right font-medium ${
+                            margenUSD !== null && margenUSD < 0 ? "text-destructive" : ""
+                          }`}
+                        >
+                          {margenUSD !== null ? formatoUSDMoney.format(margenUSD) : "—"}
+                        </TableCell>
+                        <TableCell
+                          className={`text-right ${
+                            margenARS !== null && margenARS < 0 ? "text-destructive" : ""
+                          }`}
+                        >
+                          {margenARS !== null ? formatoARS.format(margenARS) : "—"}
+                        </TableCell>
+                      </>
+                    )}
                   </TableRow>
                 )
               })}
@@ -722,6 +793,25 @@ export function FacturacionTable({
                 <TableCell />
                 <TableCell className="text-right">{formatoUSDMoney.format(totalGeneralValorUSD)}</TableCell>
                 <TableCell className="text-right">{formatoARS.format(totalGeneralValorARS)}</TableCell>
+                {mostrarMargen && (
+                  <>
+                    <TableCell
+                      className={`text-right ${totalMargenUSD < 0 ? "text-destructive" : ""}`}
+                    >
+                      {formatoUSDMoney.format(totalMargenUSD)}
+                      {filasSinCosto > 0 && (
+                        <span className="block text-[10px] font-normal text-muted-foreground">
+                          sin {filasSinCosto} fila{filasSinCosto === 1 ? "" : "s"} sin costo
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right ${totalMargenARS < 0 ? "text-destructive" : ""}`}
+                    >
+                      {formatoARS.format(totalMargenARS)}
+                    </TableCell>
+                  </>
+                )}
               </TableRow>
             </TableBody>
           </Table>

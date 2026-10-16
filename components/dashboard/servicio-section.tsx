@@ -326,6 +326,7 @@ export function ServicioSection() {
         apiPathPrecios="/api/servicio/precios"
         cerrarMes={false}
         usarValoresPropios={valoresPropios}
+        mostrarMargen
       />
 
       <FacturacionTable
@@ -340,6 +341,7 @@ export function ServicioSection() {
         apiPathPrecios="/api/servicio/precios"
         cerrarMes={false}
         usarValoresPropios={valoresPropios}
+        mostrarMargen
       />
     </div>
   )
