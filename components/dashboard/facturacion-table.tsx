@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { monthValueToRange } from "./month-selector"
+import { OBSERVACION_MAX } from "@/lib/servicio-observacion-texto"
 import { COSTO_POR_MENSAJE_CON_CARGO_USD, reglaPorId } from "@/lib/facturacion-reglas"
 
 interface FacturacionCliente {
@@ -53,6 +54,24 @@ interface FacturacionTableProps {
   cantidadLabel?: string
   month: string // formato "YYYY-MM", controlado por el contenedor padre
   dolarVenta: number | null // cotización compartida, controlada por el contenedor padre
+  /**
+   * ── Lo que cambia entre Facturación y Servicio (16/10/2026) ──────────────
+   *
+   * Las dos pestañas usan esta misma tabla. Los defaults de abajo son
+   * exactamente lo que hacía antes de que existiera Servicio, así que
+   * Facturación no pasa ninguno de estos props y no cambia en nada.
+   *
+   * Se eligió parametrizar en vez de copiar la tabla: son 585 líneas, y acá
+   * adentro está el cálculo de lo que se factura. Dos copias significaría
+   * arreglar dos veces cada error de ese cálculo, y descubrir la segunda vez
+   * tarde.
+   */
+  /** Alias y CUIT son de Facturación. Servicio no los muestra. */
+  mostrarAliasYCuit?: boolean
+  /** "Costo monotributo" en Facturación, "Costo" en Servicio. */
+  etiquetaCosto?: string
+  /** Nota libre por cliente. Sólo Servicio. Ver lib/servicio-observaciones.ts. */
+  mostrarObservacion?: boolean
 }
 
 export function FacturacionTable({
@@ -61,6 +80,9 @@ export function FacturacionTable({
   cantidadLabel = "Total de Interacciones",
   month,
   dolarVenta,
+  mostrarAliasYCuit = true,
+  etiquetaCosto = "Costo monotributo",
+  mostrarObservacion = false,
 }: FacturacionTableProps) {
   const [clientes, setClientes] = useState<FacturacionCliente[]>([])
   const [loading, setLoading] = useState(true)
@@ -76,15 +98,22 @@ export function FacturacionTable({
   const [cuit, setCuit] = useState<Record<string, string[]>>({})
   const [guardandoCuit, setGuardandoCuit] = useState<Record<string, boolean>>({})
 
+  const [observacion, setObservacion] = useState<Record<string, string>>({})
+  const [guardandoObservacion, setGuardandoObservacion] = useState<Record<string, boolean>>({})
+
   const loadData = useCallback(async () => {
     try {
       setError(null)
       const { fechaInicio, fechaFin } = monthValueToRange(month)
-      const [interaccionesRes, preciosRes, aliasRes, cuitRes] = await Promise.all([
+      // Alias, CUIT y observaciones sólo se piden si la pestaña los muestra:
+      // son endpoints distintos con guardas distintas, y pedir el de
+      // observaciones desde Facturación daría un 403 en la consola cada vez.
+      const [interaccionesRes, preciosRes, aliasRes, cuitRes, observacionRes] = await Promise.all([
         fetch(`${apiPath}?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`),
         fetch("/api/facturacion/precios"),
-        fetch("/api/facturacion/alias"),
-        fetch("/api/facturacion/cuit"),
+        mostrarAliasYCuit ? fetch("/api/facturacion/alias") : null,
+        mostrarAliasYCuit ? fetch("/api/facturacion/cuit") : null,
+        mostrarObservacion ? fetch("/api/servicio/observaciones") : null,
       ])
 
       if (!interaccionesRes.ok) {
@@ -99,14 +128,19 @@ export function FacturacionTable({
         setPrecios(preciosData.precios || {})
       }
 
-      if (aliasRes.ok) {
+      if (aliasRes?.ok) {
         const aliasData = await aliasRes.json()
         setAlias(aliasData.alias || {})
       }
 
-      if (cuitRes.ok) {
+      if (cuitRes?.ok) {
         const cuitData = await cuitRes.json()
         setCuit(cuitData.cuit || {})
+      }
+
+      if (observacionRes?.ok) {
+        const observacionData = await observacionRes.json()
+        setObservacion(observacionData.observaciones || {})
       }
     } catch (err) {
       console.error("Error cargando facturación:", err)
@@ -115,7 +149,7 @@ export function FacturacionTable({
       setLoading(false)
       setRefreshing(false)
     }
-  }, [month, apiPath])
+  }, [month, apiPath, mostrarAliasYCuit, mostrarObservacion])
 
   useEffect(() => {
     setLoading(true)
@@ -172,6 +206,38 @@ export function FacturacionTable({
       console.error("Error guardando alias:", err)
     } finally {
       setGuardandoAlias((prev) => ({ ...prev, [clienteId]: false }))
+    }
+  }
+
+  /**
+   * La observación de Servicio. Mismo patrón que el alias: se escribe libre y
+   * se guarda al salir del campo.
+   *
+   * Se guarda lo que DEVUELVE el servidor, no lo tipeado: el endpoint recorta a
+   * OBSERVACION_MAX y hace trim, y si la tabla se quedara con el texto original
+   * mostraría algo distinto de lo que está en Redis hasta recargar.
+   */
+  const handleObservacionChange = (clienteId: string, valor: string) => {
+    setObservacion((prev) => ({ ...prev, [clienteId]: valor }))
+  }
+
+  const handleObservacionBlur = async (clienteId: string) => {
+    const valor = observacion[clienteId] ?? ""
+    setGuardandoObservacion((prev) => ({ ...prev, [clienteId]: true }))
+    try {
+      const r = await fetch("/api/servicio/observaciones", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clienteId, observacion: valor }),
+      })
+      if (r.ok) {
+        const data = await r.json()
+        setObservacion((prev) => ({ ...prev, [clienteId]: data.observacion ?? "" }))
+      }
+    } catch (err) {
+      console.error("Error guardando observación:", err)
+    } finally {
+      setGuardandoObservacion((prev) => ({ ...prev, [clienteId]: false }))
     }
   }
 
@@ -361,8 +427,13 @@ export function FacturacionTable({
             <TableHeader>
               <TableRow>
                 <TableHead>Cliente</TableHead>
-                <TableHead>Alias</TableHead>
-                <TableHead>CUIT</TableHead>
+                {mostrarAliasYCuit && (
+                  <>
+                    <TableHead>Alias</TableHead>
+                    <TableHead>CUIT</TableHead>
+                  </>
+                )}
+                {mostrarObservacion && <TableHead>Observación</TableHead>}
                 {hayDesglose && (
                   <>
                     <TableHead className="text-right font-normal text-muted-foreground">
@@ -376,7 +447,7 @@ export function FacturacionTable({
                 <TableHead className="text-right">{etiquetaCantidad}</TableHead>
                 {hayCosto && (
                   <TableHead className="text-right font-normal text-muted-foreground">
-                    Costo monotributo
+                    {etiquetaCosto}
                     {/* Se dice sobre qué corre. Al lado de tres columnas que
                         suman entre sí, una cuarta con otra base se lee como un
                         error de la tabla si no está explicado. */}
@@ -410,61 +481,79 @@ export function FacturacionTable({
                 return (
                   <TableRow key={cliente.clienteId}>
                     <TableCell className="font-medium">{cliente.nombreCliente}</TableCell>
-                    <TableCell>
-                      <Input
-                        type="text"
-                        placeholder="—"
-                        className="w-36"
-                        value={alias[cliente.clienteId] ?? ""}
-                        onChange={(e) => handleAliasChange(cliente.clienteId, e.target.value)}
-                        onBlur={() => handleAliasBlur(cliente.clienteId)}
-                        disabled={guardandoAlias[cliente.clienteId]}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        {getCuitList(cliente.clienteId).map((valor, idx) => {
-                          const lista = getCuitList(cliente.clienteId)
-                          const esUltimo = idx === lista.length - 1
-                          return (
-                            <div key={idx} className="flex items-center gap-1">
-                              <Input
-                                type="text"
-                                placeholder="—"
-                                className="w-32"
-                                value={valor}
-                                onChange={(e) => handleCuitChange(cliente.clienteId, idx, e.target.value)}
-                                onBlur={() => handleCuitBlur(cliente.clienteId)}
-                                disabled={guardandoCuit[cliente.clienteId]}
-                              />
-                              {esUltimo ? (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 shrink-0"
-                                  onClick={() => handleAddCuit(cliente.clienteId)}
-                                  title="Agregar otro CUIT"
-                                >
-                                  <Plus className="h-3.5 w-3.5" />
-                                </Button>
-                              ) : (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 shrink-0"
-                                  onClick={() => handleRemoveCuit(cliente.clienteId, idx)}
-                                  title="Quitar este CUIT"
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </Button>
-                              )}
+                    {mostrarAliasYCuit && (
+                      <>
+                          <TableCell>
+                            <Input
+                              type="text"
+                              placeholder="—"
+                              className="w-36"
+                              value={alias[cliente.clienteId] ?? ""}
+                              onChange={(e) => handleAliasChange(cliente.clienteId, e.target.value)}
+                              onBlur={() => handleAliasBlur(cliente.clienteId)}
+                              disabled={guardandoAlias[cliente.clienteId]}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              {getCuitList(cliente.clienteId).map((valor, idx) => {
+                                const lista = getCuitList(cliente.clienteId)
+                                const esUltimo = idx === lista.length - 1
+                                return (
+                                  <div key={idx} className="flex items-center gap-1">
+                                    <Input
+                                      type="text"
+                                      placeholder="—"
+                                      className="w-32"
+                                      value={valor}
+                                      onChange={(e) => handleCuitChange(cliente.clienteId, idx, e.target.value)}
+                                      onBlur={() => handleCuitBlur(cliente.clienteId)}
+                                      disabled={guardandoCuit[cliente.clienteId]}
+                                    />
+                                    {esUltimo ? (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 shrink-0"
+                                        onClick={() => handleAddCuit(cliente.clienteId)}
+                                        title="Agregar otro CUIT"
+                                      >
+                                        <Plus className="h-3.5 w-3.5" />
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 shrink-0"
+                                        onClick={() => handleRemoveCuit(cliente.clienteId, idx)}
+                                        title="Quitar este CUIT"
+                                      >
+                                        <X className="h-3.5 w-3.5" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                )
+                              })}
                             </div>
-                          )
-                        })}
-                      </div>
-                    </TableCell>
+                          </TableCell>
+                      </>
+                    )}
+                    {mostrarObservacion && (
+                      <TableCell>
+                        <Input
+                          type="text"
+                          placeholder="—"
+                          className="w-56"
+                          maxLength={OBSERVACION_MAX}
+                          value={observacion[cliente.clienteId] ?? ""}
+                          onChange={(e) => handleObservacionChange(cliente.clienteId, e.target.value)}
+                          onBlur={() => handleObservacionBlur(cliente.clienteId)}
+                          disabled={guardandoObservacion[cliente.clienteId]}
+                        />
+                      </TableCell>
+                    )}
                     {hayDesglose && (
                       <>
                         {/* El guión, y no un 0, cuando esta fila no trae
@@ -549,8 +638,16 @@ export function FacturacionTable({
               })}
               <TableRow className="font-semibold bg-muted/50">
                 <TableCell>Total general</TableCell>
-                <TableCell />
-                <TableCell />
+                {/* Las celdas vacías tienen que seguir a las columnas, o la
+                    fila de totales se corre y cada número cae bajo el título
+                    equivocado. */}
+                {mostrarAliasYCuit && (
+                  <>
+                    <TableCell />
+                    <TableCell />
+                  </>
+                )}
+                {mostrarObservacion && <TableCell />}
                 {hayDesglose && (
                   <>
                     <TableCell className="text-right">

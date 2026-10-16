@@ -185,14 +185,28 @@ export function ServicioSection() {
         )}
       </div>
 
-      <FacturacionTable month={month} dolarVenta={dolarVenta} />
+      {/* Servicio no muestra Alias ni CUIT —son de Facturación—, llama "Costo"
+          a lo que allá es "Costo monotributo", y suma una Observación por
+          cliente. Los tres son props de la misma tabla: ver la nota de
+          FacturacionTableProps sobre por qué no se copió. */}
+      <FacturacionTable
+        title="Clientes Wpp con IA"
+        month={month}
+        dolarVenta={dolarVenta}
+        mostrarAliasYCuit={false}
+        etiquetaCosto="Costo"
+        mostrarObservacion
+      />
 
       <FacturacionTable
-        title="Facturación de clientes Wpp sin IA"
+        title="Clientes Wpp sin IA"
         apiPath="/api/facturacion/interacciones-sin-ia"
         cantidadLabel="Mensajes pagados"
         month={month}
         dolarVenta={dolarVenta}
+        mostrarAliasYCuit={false}
+        etiquetaCosto="Costo"
+        mostrarObservacion
       />
     </div>
   )
