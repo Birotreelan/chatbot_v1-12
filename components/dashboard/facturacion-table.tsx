@@ -72,6 +72,26 @@ interface FacturacionTableProps {
   etiquetaCosto?: string
   /** Nota libre por cliente. Sólo Servicio. Ver lib/servicio-observaciones.ts. */
   mostrarObservacion?: boolean
+  /** De dónde salen y a dónde se guardan los valores por unidad. */
+  apiPathPrecios?: string
+  /**
+   * Si mirar un mes terminado lo CIERRA.
+   *
+   * Facturación sí: es quien factura. Servicio no — ver la nota larga en
+   * app/api/facturacion/interacciones/route.ts.
+   */
+  cerrarMes?: boolean
+  /**
+   * Usar el precio y el dólar de ESTA pestaña aunque el mes esté cerrado.
+   *
+   * Las UNIDADES siguen saliendo del cierre igual: es lo que mantiene los
+   * conteos idénticos entre las dos pestañas. Lo único que cambia es por
+   * cuánto se multiplican.
+   *
+   * Lo decide el llamador según el período, no esta tabla: ver
+   * lib/servicio-calculo.ts.
+   */
+  usarValoresPropios?: boolean
 }
 
 export function FacturacionTable({
@@ -83,6 +103,9 @@ export function FacturacionTable({
   mostrarAliasYCuit = true,
   etiquetaCosto = "Costo monotributo",
   mostrarObservacion = false,
+  apiPathPrecios = "/api/facturacion/precios",
+  cerrarMes = true,
+  usarValoresPropios = false,
 }: FacturacionTableProps) {
   const [clientes, setClientes] = useState<FacturacionCliente[]>([])
   const [loading, setLoading] = useState(true)
@@ -109,8 +132,8 @@ export function FacturacionTable({
       // son endpoints distintos con guardas distintas, y pedir el de
       // observaciones desde Facturación daría un 403 en la consola cada vez.
       const [interaccionesRes, preciosRes, aliasRes, cuitRes, observacionRes] = await Promise.all([
-        fetch(`${apiPath}?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}`),
-        fetch("/api/facturacion/precios"),
+        fetch(`${apiPath}?fechaInicio=${fechaInicio}&fechaFin=${fechaFin}${cerrarMes ? "" : "&cerrar=0"}`),
+        fetch(apiPathPrecios),
         mostrarAliasYCuit ? fetch("/api/facturacion/alias") : null,
         mostrarAliasYCuit ? fetch("/api/facturacion/cuit") : null,
         mostrarObservacion ? fetch("/api/servicio/observaciones") : null,
@@ -149,7 +172,7 @@ export function FacturacionTable({
       setLoading(false)
       setRefreshing(false)
     }
-  }, [month, apiPath, mostrarAliasYCuit, mostrarObservacion])
+  }, [month, apiPath, apiPathPrecios, cerrarMes, mostrarAliasYCuit, mostrarObservacion])
 
   useEffect(() => {
     setLoading(true)
@@ -170,7 +193,7 @@ export function FacturacionTable({
     const valor = precios[clienteIdBase] ?? 0
     setGuardando((prev) => ({ ...prev, [clienteIdBase]: true }))
     try {
-      await fetch("/api/facturacion/precios", {
+      await fetch(apiPathPrecios, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clienteId: clienteIdBase, valor }),
@@ -291,9 +314,40 @@ export function FacturacionTable({
   // datos (servicio externo) no trae el campo para algún cliente puntual —
   // ver bug reportado 2026-08-13 (crasheaba toda la tabla con
   // "undefined is not an object (evaluating 'e.totalInteracciones.toLocaleString')").
+  /**
+   * El precio y el dólar con los que se calcula una fila.
+   *
+   * Estaba resuelto a mano en cuatro lugares —los dos totales, la fila y la
+   * celda del precio— con la misma expresión copiada. Al sumar Servicio, que
+   * usa sus propios valores aunque el mes esté cerrado, cuatro copias eran
+   * cuatro oportunidades de que un total dijera una cosa y su fila otra.
+   *
+   * `congelado` es lo que decide todo: un mes cerrado mirado desde Facturación
+   * usa lo que quedó guardado y no se edita. Desde Servicio, con
+   * `usarValoresPropios`, se ignora ese precio —no las unidades— y se usa el
+   * de esta pestaña.
+   */
+  const valoresDeLaFila = (c: FacturacionCliente) => {
+    const congelado = Boolean(c.cierre) && !usarValoresPropios
+    return {
+      congelado,
+      precio: congelado ? (c.cierre!.precioUnitarioUsd ?? 0) : (precios[c.clienteIdBase] ?? 0),
+      cotizacion: congelado ? c.cierre!.dolarVenta : dolarVenta,
+    }
+  }
+
   // El mes está cerrado si CUALQUIER fila trae cierre: se cierran todas juntas
   // la primera vez que alguien lo abre, así que es la misma condición.
-  const cierre = clientes.find((c) => c.cierre)?.cierre
+  //
+  // ── Sólo lo administra la pestaña que cierra (16/10/2026) ────────────────
+  //
+  // Esto gobierna el cartel "Cerrado" y el botón "Reabrir mes", y ese botón
+  // BORRA el cierre guardado. Servicio lee los cierres de Facturación para que
+  // sus conteos coincidan, pero no los administra: sin este `cerrarMes`, desde
+  // la pestaña Servicio se podía borrar el cierre contable de un mes ya
+  // facturado, y el cartel "Cerrado" además contradecía el precio editable que
+  // esa misma pestaña muestra al lado.
+  const cierre = cerrarMes ? clientes.find((c) => c.cierre)?.cierre : undefined
   const totalGeneral = clientes.reduce((sum, c) => sum + (c.totalInteracciones || 0), 0)
 
   // ── Las dos columnas del desglose ─────────────────────────────────────────
@@ -345,7 +399,7 @@ export function FacturacionTable({
   }
 
   const totalGeneralValorUSD = clientes.reduce((sum, c) => {
-    const precio = c.cierre ? (c.cierre.precioUnitarioUsd ?? 0) : (precios[c.clienteIdBase] ?? 0)
+    const { precio } = valoresDeLaFila(c)
     return sum + (c.totalInteracciones || 0) * precio
   }, 0)
 
@@ -354,8 +408,7 @@ export function FacturacionTable({
   // dólares por el dólar de hoy daría un número que no coincide con la suma de
   // lo que muestra cada renglón.
   const totalGeneralValorARS = clientes.reduce((sum, c) => {
-    const precio = c.cierre ? (c.cierre.precioUnitarioUsd ?? 0) : (precios[c.clienteIdBase] ?? 0)
-    const cotizacion = c.cierre ? c.cierre.dolarVenta : dolarVenta
+    const { precio, cotizacion } = valoresDeLaFila(c)
     return sum + (c.totalInteracciones || 0) * precio * (cotizacion || 0)
   }, 0)
 
@@ -471,10 +524,7 @@ export function FacturacionTable({
                 // Es el punto del congelado: si acá se aplicara el precio
                 // actual o el dólar del día, el total de un mes ya facturado
                 // volvería a moverse y el cierre no serviría de nada.
-                const precio = cliente.cierre
-                  ? (cliente.cierre.precioUnitarioUsd ?? 0)
-                  : (precios[cliente.clienteIdBase] ?? 0)
-                const cotizacion = cliente.cierre ? cliente.cierre.dolarVenta : dolarVenta
+                const { precio, cotizacion, congelado } = valoresDeLaFila(cliente)
                 const totalInteracciones = cliente.totalInteracciones || 0
                 const valorTotalUSD = totalInteracciones * precio
                 const valorTotalARS = cotizacion ? valorTotalUSD * cotizacion : null
@@ -607,7 +657,7 @@ export function FacturacionTable({
                           no depende de él. Un campo editable que no cambia
                           nada es peor que uno bloqueado —se toca, no pasa
                           nada, y uno cree que el sistema falla—. */}
-                      {cliente.cierre ? (
+                      {congelado && cliente.cierre ? (
                         <span
                           className="block text-right text-muted-foreground"
                           title={`Precio con el que se facturó ${cliente.cierre.periodo}`}

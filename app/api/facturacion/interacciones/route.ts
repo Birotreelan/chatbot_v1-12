@@ -116,7 +116,25 @@ export async function GET(request: Request) {
 
     const periodo = periodoDe(fechaInicio)
     const regla = reglaDelPeriodo(periodo)
-    const congelable = mesTerminado(periodo)
+    /**
+     * ── Leer el cierre y escribirlo son dos cosas distintas (16/10/2026) ───
+     *
+     * Hasta ahora las gobernaba un solo `congelable`, y estaba bien mientras
+     * Facturación era la única que miraba: si el mes terminó, se lee lo
+     * guardado y, si no hay nada, se guarda.
+     *
+     * La pestaña Servicio pega a este mismo endpoint y NO debe cerrar nada:
+     * bastaba con abrirla en septiembre para congelar el mes —con el precio de
+     * Facturación— desde una pantalla que no factura. Pero sí tiene que LEER
+     * los cierres: es lo que mantiene sus conteos idénticos a los de
+     * Facturación en los meses cerrados.
+     *
+     * Por eso son dos. Separarlas con un solo flag habría hecho que Servicio
+     * recalculara septiembre en vivo, que es justo lo contrario de lo que se
+     * quiere.
+     */
+    const mesCongelable = mesTerminado(periodo)
+    const puedeCerrarElMes = mesCongelable && searchParams.get("cerrar") !== "0"
 
     const configs = await getAllWhatsAppConfigs()
     const clientesConId = configs.filter(
@@ -136,7 +154,7 @@ export async function GET(request: Request) {
         // se consulta nada. Es lo que hace que un total facturado no cambie
         // nunca más: ni por el dólar del día, ni por un cambio de precio, ni
         // por un cambio de la lógica de cálculo. Ver lib/facturacion-cierre.ts.
-        if (congelable) {
+        if (mesCongelable) {
           const cerrado = await leerCierre(clienteId, periodo)
           if (cerrado) {
             // Con sedes se devuelven las mismas filas que se facturaron, con
@@ -239,7 +257,7 @@ export async function GET(request: Request) {
         // Va con `void`: si el guardado falla, el panel igual muestra el
         // número. Un cierre que no se pudo escribir se vuelve a intentar la
         // próxima vez que alguien abra el mes.
-        if (congelable) {
+        if (puedeCerrarElMes) {
           void (async () => {
             const [precio, dolar] = await Promise.all([
               getPrecioUnidad(clienteId).catch(() => null),

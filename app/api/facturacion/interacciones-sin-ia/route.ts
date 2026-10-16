@@ -83,7 +83,25 @@ export async function GET(request: Request) {
 
     const periodo = periodoDe(fechaInicio)
     const regla = reglaDelPeriodo(periodo)
-    const congelable = mesTerminado(periodo)
+    /**
+     * ── Leer el cierre y escribirlo son dos cosas distintas (16/10/2026) ───
+     *
+     * Hasta ahora las gobernaba un solo `congelable`, y estaba bien mientras
+     * Facturación era la única que miraba: si el mes terminó, se lee lo
+     * guardado y, si no hay nada, se guarda.
+     *
+     * La pestaña Servicio pega a este mismo endpoint y NO debe cerrar nada:
+     * bastaba con abrirla en septiembre para congelar el mes —con el precio de
+     * Facturación— desde una pantalla que no factura. Pero sí tiene que LEER
+     * los cierres: es lo que mantiene sus conteos idénticos a los de
+     * Facturación en los meses cerrados.
+     *
+     * Por eso son dos. Separarlas con un solo flag habría hecho que Servicio
+     * recalculara septiembre en vivo, que es justo lo contrario de lo que se
+     * quiere.
+     */
+    const mesCongelable = mesTerminado(periodo)
+    const puedeCerrarElMes = mesCongelable && searchParams.get("cerrar") !== "0"
 
     // ── Un mes cerrado no se recalcula (7/10/2026) ────────────────────────
     //
@@ -96,7 +114,7 @@ export async function GET(request: Request) {
     // a facturar `plantillas + servicio.total` como los clientes con IA. Los
     // meses anteriores siguen con `mensajes_pagados`, y los que ya estaban
     // cerrados ni se recalculan.
-    const yaCerrados = congelable ? await clientesCerrados(periodo) : []
+    const yaCerrados = mesCongelable ? await clientesCerrados(periodo) : []
 
     let filas: FacturacionClienteRow[] = []
     try {
@@ -152,7 +170,12 @@ export async function GET(request: Request) {
 
         // El cierre de cada fila: el guardado si ya existe, o uno nuevo con el
         // precio y el dólar de este momento.
-        if (congelable) {
+        //
+        // Se entra con `mesCongelable` —leer— y se crea sólo con
+        // `puedeCerrarElMes` —escribir—. Servicio entra acá para LEER los
+        // cierres que ya están, y si una fila no tiene, se queda con el número
+        // en vivo en vez de cerrarla.
+        if (mesCongelable) {
           const dolar = await getDolarVenta().catch(() => null)
 
           filas = await Promise.all(
@@ -173,6 +196,11 @@ export async function GET(request: Request) {
                   cierre: guardado,
                 }
               }
+
+              // Sin permiso para cerrar, la fila se devuelve tal como se
+              // calculó: sin `cierre`, que es lo que la tabla lee para saber
+              // si el mes está congelado.
+              if (!puedeCerrarElMes) return fila
 
               const precio = await getPrecioUnidad(fila.clienteId).catch(() => null)
               const nuevo: CierreDeMes = {

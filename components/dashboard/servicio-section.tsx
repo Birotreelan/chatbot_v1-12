@@ -33,6 +33,8 @@ import { useState, useEffect, useCallback } from "react"
 import { MonthSelector, getCurrentMonthValue } from "./month-selector"
 import { esReglaAnterior, reglaDelPeriodo, REGLAS } from "@/lib/facturacion-reglas"
 import { FacturacionTable } from "./facturacion-table"
+import { Input } from "@/components/ui/input"
+import { servicioUsaValoresPropios, SERVICIO_PRECIO_PROPIO_DESDE } from "@/lib/servicio-calculo"
 
 const formatoUSD = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -42,6 +44,18 @@ export function ServicioSection() {
   const [dolarCongelado, setDolarCongelado] = useState<number | null>(null)
   const [mesCerrado, setMesCerrado] = useState(false)
   const [cotizacionDudosa, setCotizacionDudosa] = useState(false)
+
+  /**
+   * El dólar propio de Servicio para este mes: el que alguien fijó, o `null`
+   * si nadie lo hizo y se usa el vivo.
+   *
+   * `textoDolar` es aparte del número porque mientras se tipea "15" el valor
+   * no es todavía un dólar válido, y recalcular toda la tabla con 15 pesos en
+   * cada tecla sería ruido — y dejaría números absurdos a la vista.
+   */
+  const [dolarFijado, setDolarFijado] = useState<number | null>(null)
+  const [textoDolar, setTextoDolar] = useState("")
+  const [guardandoDolar, setGuardandoDolar] = useState(false)
 
   const loadDolar = useCallback(async () => {
     try {
@@ -90,8 +104,67 @@ export function ServicioSection() {
     loadCierre()
   }, [loadCierre])
 
-  // El que se usa para calcular y para mostrar: en un mes cerrado, el suyo.
-  const dolarVenta = mesCerrado ? dolarCongelado : dolarVivo
+  const loadDolarServicio = useCallback(async () => {
+    setDolarFijado(null)
+    setTextoDolar("")
+    if (!servicioUsaValoresPropios(month)) return
+    try {
+      const r = await fetch(`/api/servicio/dolar?mes=${encodeURIComponent(month)}`)
+      if (!r.ok) return
+      const data = await r.json()
+      const fijado = typeof data.fijado === "number" ? data.fijado : null
+      setDolarFijado(fijado)
+      setTextoDolar(fijado !== null ? String(fijado) : "")
+    } catch {
+      // Sin esto se usa el dólar vivo, que es lo mismo que cuando nadie fijó
+      // nada. No hay nada que avisar.
+    }
+  }, [month])
+
+  useEffect(() => {
+    loadDolarServicio()
+  }, [loadDolarServicio])
+
+  const guardarDolar = async () => {
+    const crudo = textoDolar.trim()
+    const valor = crudo === "" ? null : Number(crudo)
+    if (valor !== null && (!Number.isFinite(valor) || valor <= 0)) {
+      // Entrada inválida: se vuelve a lo guardado en vez de mandar basura.
+      setTextoDolar(dolarFijado !== null ? String(dolarFijado) : "")
+      return
+    }
+    setGuardandoDolar(true)
+    try {
+      const r = await fetch("/api/servicio/dolar", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mes: month, valor }),
+      })
+      if (r.ok) {
+        const data = await r.json()
+        const fijado = typeof data.fijado === "number" ? data.fijado : null
+        setDolarFijado(fijado)
+        setTextoDolar(fijado !== null ? String(fijado) : "")
+      }
+    } catch (err) {
+      console.error("Error guardando el dólar de Servicio:", err)
+    } finally {
+      setGuardandoDolar(false)
+    }
+  }
+
+  /**
+   * El dólar con el que calcula esta pestaña.
+   *
+   * Desde octubre de 2026 manda el de Servicio: el fijado si hay uno, y si no
+   * el vivo. Antes de ese corte se usa el del cierre de Facturación, para que
+   * los meses ya facturados den exactamente lo mismo en las dos pestañas.
+   * Ver lib/servicio-calculo.ts.
+   */
+  const valoresPropios = servicioUsaValoresPropios(month)
+  const dolarVenta = valoresPropios
+    ? (dolarFijado ?? dolarVivo)
+    : (mesCerrado ? dolarCongelado : dolarVivo)
 
   const esMesEnCurso = month === getCurrentMonthValue()
 
@@ -106,20 +179,56 @@ export function ServicioSection() {
       <div className="flex items-center gap-3">
         <MonthSelector value={month} onChange={setMonth} />
         {esMesEnCurso && <span className="text-sm font-semibold text-red-600">Consumo en curso</span>}
+        {/* En Servicio el dólar se edita: es uno de los dos valores propios de
+            la pestaña. Vacío = usar el del día. Antes del corte de octubre el
+            campo no aparece, porque esos meses muestran lo de Facturación y
+            dejar un editor que no cambia nada sería mentir. */}
         <div className="ml-auto flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-2">
           <span className="text-sm text-muted-foreground">
-            {mesCerrado ? "Dólar del cierre" : "Dolar Venta"}
+            {valoresPropios ? "Dólar venta" : "Dólar del cierre"}
           </span>
-          <span className="text-sm font-semibold">
-            {dolarVenta ? `$${formatoUSD.format(dolarVenta)}` : "—"}
-          </span>
-          {mesCerrado && (
-            <span
-              className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary"
-              title="La cotización de este mes quedó fija al cerrarse. El dólar de hoy no lo afecta."
-            >
-              fijo
-            </span>
+          {valoresPropios ? (
+            <>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder={dolarVivo ? formatoUSD.format(dolarVivo) : "—"}
+                className="h-8 w-28 text-right"
+                value={textoDolar}
+                onChange={(e) => setTextoDolar(e.target.value)}
+                onBlur={guardarDolar}
+                disabled={guardandoDolar}
+              />
+              <span
+                className={`rounded px-1.5 py-0.5 text-xs ${
+                  dolarFijado !== null
+                    ? "bg-primary/10 text-primary"
+                    : "bg-muted text-muted-foreground"
+                }`}
+                title={
+                  dolarFijado !== null
+                    ? "Este mes usa el valor fijado acá. Borralo para volver al dólar del día."
+                    : "Nadie fijó un valor: se usa el dólar del día."
+                }
+              >
+                {dolarFijado !== null ? "fijado" : "del día"}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-sm font-semibold">
+                {dolarVenta ? `$${formatoUSD.format(dolarVenta)}` : "—"}
+              </span>
+              {mesCerrado && (
+                <span
+                  className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary"
+                  title="La cotización de este mes quedó fija al cerrarse. El dólar de hoy no lo afecta."
+                >
+                  fijo
+                </span>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -159,6 +268,17 @@ export function ServicioSection() {
           </p>
         )}
 
+        {/* El corte propio de Servicio. Sin esto, alguien abre septiembre,
+            ve el mismo total que en Facturación, y no tiene forma de saber si
+            es porque los precios coinciden o porque ese mes no usa el suyo. */}
+        {!valoresPropios && (
+          <p className="mt-2 rounded border border-primary/30 bg-primary/5 px-2 py-1.5 text-xs">
+            Este período se muestra igual que en Facturación: mismo valor por unidad y mismo
+            dólar. Servicio calcula con sus propios valores desde{" "}
+            {SERVICIO_PRECIO_PROPIO_DESDE.replace("-", "/")} en adelante.
+          </p>
+        )}
+
         {conReglaAnterior && (
           <p className="mt-2 text-xs text-muted-foreground">
             Los meses anteriores se siguen mostrando con la regla que tenían: si se recalcularan con
@@ -189,6 +309,13 @@ export function ServicioSection() {
           a lo que allá es "Costo monotributo", y suma una Observación por
           cliente. Los tres son props de la misma tabla: ver la nota de
           FacturacionTableProps sobre por qué no se copió. */}
+      {/* ── Lo que Servicio hace distinto ────────────────────────────────
+          · sus propios precios (`apiPathPrecios`)
+          · no cierra meses (`cerrarMes={false}`): leer no puede congelar un
+            período desde una pestaña que no factura
+          · desde octubre usa su precio y su dólar aunque el mes esté cerrado
+            (`usarValoresPropios`); las UNIDADES siguen saliendo del cierre,
+            que es lo que mantiene los conteos idénticos a Facturación */}
       <FacturacionTable
         title="Clientes Wpp con IA"
         month={month}
@@ -196,6 +323,9 @@ export function ServicioSection() {
         mostrarAliasYCuit={false}
         etiquetaCosto="Costo"
         mostrarObservacion
+        apiPathPrecios="/api/servicio/precios"
+        cerrarMes={false}
+        usarValoresPropios={valoresPropios}
       />
 
       <FacturacionTable
@@ -207,6 +337,9 @@ export function ServicioSection() {
         mostrarAliasYCuit={false}
         etiquetaCosto="Costo"
         mostrarObservacion
+        apiPathPrecios="/api/servicio/precios"
+        cerrarMes={false}
+        usarValoresPropios={valoresPropios}
       />
     </div>
   )
