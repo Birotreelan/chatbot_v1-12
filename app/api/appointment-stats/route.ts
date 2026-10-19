@@ -51,6 +51,20 @@ async function importeDelPeriodo(clienteId: string, consumo: ConsumoDeWpp | null
   return { ...importe, texto: textoDelImporte(importe) }
 }
 
+/**
+ * `NextResponse.json` con el charset declarado (19/10/2026).
+ *
+ * Sin `charset=utf-8` en el Content-Type, el sistema externo que consume esta
+ * ruta leía la respuesta como Latin-1 y el texto de `costoAproximado` llegaba
+ * roto: "16.617 Ã— US$ 0,075 … Â· dÃ³lar venta". El JSON siempre fue UTF-8;
+ * lo que faltaba era decirlo.
+ */
+function json(body: unknown, init?: ResponseInit) {
+  const respuesta = NextResponse.json(body, init)
+  respuesta.headers.set("Content-Type", "application/json; charset=utf-8")
+  return respuesta
+}
+
 // GET - Obtener estadísticas por cliente_id o lista de todos los clientes con sus estadísticas
 export async function GET(request: Request) {
   try {
@@ -106,7 +120,7 @@ export async function GET(request: Request) {
         : null
 
       if (!stats) {
-        return NextResponse.json({
+        return json({
           clienteId,
           clientName: "Sin datos",
           totalConfirmed: 0,
@@ -129,7 +143,7 @@ export async function GET(request: Request) {
         })
       }
 
-      return NextResponse.json({ ...stats, totalTemplatesSentFuente, costoAproximado })
+      return json({ ...stats, totalTemplatesSentFuente, costoAproximado })
     }
 
     // Si no se especifica cliente, devolver resumen de todos los clientes
@@ -164,9 +178,9 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json(clientsWithStats)
+    return json(clientsWithStats)
   } catch (error) {
     console.error("[APPOINTMENT_STATS_API] Error:", error)
-    return NextResponse.json({ error: "Error al obtener estadísticas" }, { status: 500 })
+    return json({ error: "Error al obtener estadísticas" }, { status: 500 })
   }
 }
