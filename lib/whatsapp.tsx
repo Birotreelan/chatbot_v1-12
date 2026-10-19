@@ -8,7 +8,7 @@ import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
-import { registrarMensajeEntrante } from "./ventana-atencion"
+import { registrarMensajeEntrante, normalizarMomento } from "./ventana-atencion"
 import { PAYLOAD_BOTON_REAPERTURA, registrarRespuesta } from "./reapertura"
 import {
   leerMediaDelWebhook,
@@ -3274,6 +3274,31 @@ export async function handleMessage(value: any) {
     /** Archivo que mandó el paciente, si mandó alguno. Ver el bloque ARCHIVO ENTRANTE. */
     const mediaEntrante = extractedContent.media
 
+    /**
+     * Cuándo MANDÓ el paciente su mensaje (19/10/2026).
+     *
+     * ── El mensaje que aparecía después de su propia respuesta ────────────
+     *
+     * Todos los guardados del mensaje del paciente usaban
+     * `new Date().toISOString()`, o sea la hora en que ESTE proceso llega a
+     * guardarlo. Casi siempre da igual, porque se guarda antes de contestar.
+     * Pero en el camino del botón "Cancelar" del recordatorio el orden era al
+     * revés —primero se respondía, después se guardaba— y el panel, que ordena
+     * por timestamp, mostraba la respuesta del bot ANTES del mensaje que la
+     * provocó. Reportado el 19/10/2026 en Clinica de la Visión.
+     *
+     * Arreglar ese caso puntual alcanza para ese caso. Fechar con la hora del
+     * webhook lo arregla por construcción en todos: el paciente mandó su
+     * mensaje antes de que nosotros pudiéramos responderlo, así que su
+     * timestamp es necesariamente anterior al de cualquier respuesta nuestra,
+     * sin importar en qué orden corra el código.
+     *
+     * `normalizarMomento` es el mismo que usa la ventana de 24 h — WhatsApp
+     * manda segundos como string— y cae a la hora actual si el webhook no lo
+     * trae o viene roto.
+     */
+    const momentoDelPaciente = () => normalizarMomento(message.timestamp)
+
     console.info(`[WHATSAPP] Mensaje de ${userPhoneNumber}: "${userMessage.substring(0, 50)}${userMessage.length > 50 ? '...' : ''}" (${message.type})`)
 
     // Obtener la configuración de WhatsApp
@@ -3342,7 +3367,7 @@ export async function handleMessage(value: any) {
         id: messageId,
         role: "user",
         content: "Aceptó la conversación",
-        timestamp: new Date().toISOString(),
+        timestamp: momentoDelPaciente(),
         phoneNumber: userPhoneNumber,
         configId: config.id,
       }).catch((error) => console.error("[REAPERTURA] No se pudo guardar la aceptación:", error))
@@ -3428,7 +3453,7 @@ export async function handleMessage(value: any) {
           id: nanoid(),
           role: "user",
           content: transcription,
-          timestamp: new Date().toISOString(),
+          timestamp: momentoDelPaciente(),
           phoneNumber: userPhoneNumber,
           configId: config.id,
           messageType: "audio",
@@ -3571,7 +3596,7 @@ export async function handleMessage(value: any) {
           id: nanoid(),
           role: "user",
           content: userMessage,
-          timestamp: new Date().toISOString(),
+          timestamp: momentoDelPaciente(),
           phoneNumber: userPhoneNumber,
           configId: config.id,
         })
@@ -3753,6 +3778,23 @@ export async function handleMessage(value: any) {
             turnoIndex: 0,
           })
 
+          // El mensaje del paciente se guarda ANTES de contestarle.
+          //
+          // Acá estaba al revés, y era el único lugar del archivo donde pasaba:
+          // el panel ordena por timestamp y mostraba la doble confirmación
+          // antes del "Cancelar" que la había provocado (reportado el
+          // 19/10/2026, Clinica de la Visión). Con `momentoDelPaciente` el
+          // orden ya no depende de esto —la hora sale del webhook—, pero el
+          // código tiene que leerse en el orden en que pasan las cosas.
+          await saveConversationMessage({
+            id: nanoid(),
+            role: "user",
+            content: userMessage,
+            timestamp: momentoDelPaciente(),
+            phoneNumber: userPhoneNumber,
+            configId: config.id,
+          })
+
           await sendDirectResponse(
             {
               phoneNumberId: value.metadata.phone_number_id,
@@ -3765,15 +3807,6 @@ export async function handleMessage(value: any) {
             "cancel_flow",
             CANCEL_CONFIRM_BUTTONS,
           )
-
-          await saveConversationMessage({
-            id: nanoid(),
-            role: "user",
-            content: userMessage,
-            timestamp: new Date().toISOString(),
-            phoneNumber: userPhoneNumber,
-            configId: config.id,
-          })
           await updateWhatsAppStats(config.id, { messagesReceived: 1, messagesProcessed: 1 })
           return
         }
@@ -3824,7 +3857,7 @@ export async function handleMessage(value: any) {
             id: nanoid(),
             role: "user",
             content: userMessage,
-            timestamp: new Date().toISOString(),
+            timestamp: momentoDelPaciente(),
             phoneNumber: userPhoneNumber,
             configId: config.id,
           })
@@ -4026,7 +4059,7 @@ export async function handleMessage(value: any) {
         id: patientMessageId,
         role: "user",
         content: userMessage,
-        timestamp: new Date().toISOString(),
+        timestamp: momentoDelPaciente(),
         phoneNumber: userPhoneNumber,
         configId: config.id,
       })
@@ -4082,7 +4115,7 @@ export async function handleMessage(value: any) {
           id: nanoid(),
           role: "user",
           content: userMessage,
-          timestamp: new Date().toISOString(),
+          timestamp: momentoDelPaciente(),
           phoneNumber: userPhoneNumber,
           configId: config.id,
         })
@@ -4176,7 +4209,7 @@ export async function handleMessage(value: any) {
         id: nanoid(),
         role: "user",
         content: userMessage,
-        timestamp: new Date().toISOString(),
+        timestamp: momentoDelPaciente(),
         phoneNumber: userPhoneNumber,
         configId: config.id,
       })
@@ -4191,7 +4224,7 @@ export async function handleMessage(value: any) {
         id: nanoid(),
         role: "user",
         content: userMessage,
-        timestamp: new Date().toISOString(),
+        timestamp: momentoDelPaciente(),
         phoneNumber: userPhoneNumber,
         configId: config.id,
       })

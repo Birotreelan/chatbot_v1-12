@@ -177,7 +177,15 @@ async function ultimoMensajeDelPacienteEnHistorial(
   }
 }
 
-function normalizarMomento(timestamp?: string | number): string {
+/**
+ * El timestamp del webhook, en ISO.
+ *
+ * Se exporta desde el 19/10/2026: el historial de la conversación necesita
+ * exactamente esto para fechar el mensaje del paciente con la hora en que lo
+ * MANDÓ y no con la hora en que lo terminamos de procesar. Ver la nota de
+ * `momentoDelPaciente` en lib/whatsapp.tsx.
+ */
+export function normalizarMomento(timestamp?: string | number): string {
   if (timestamp === undefined || timestamp === null) return new Date().toISOString()
 
   // WhatsApp manda el timestamp del webhook en segundos, como string.
