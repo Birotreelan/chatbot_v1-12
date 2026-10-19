@@ -9,6 +9,7 @@ import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { registrarMensajeEntrante, normalizarMomento } from "./ventana-atencion"
+import { estaBloqueado } from "./contactos-bloqueados"
 import { PAYLOAD_BOTON_REAPERTURA, registrarRespuesta } from "./reapertura"
 import {
   leerMediaDelWebhook,
@@ -3331,6 +3332,38 @@ export async function handleMessage(value: any) {
     // "cerrada" o "desconocida" con la ventana abierta. La función se traga sus
     // propios errores, así que esto nunca interrumpe la atención al paciente.
     await registrarMensajeEntrante(config.id, userPhoneNumber, message.timestamp)
+
+    // ============================================================================
+    // CONTACTO BLOQUEADO (19/10/2026)
+    // ============================================================================
+    // La clínica bloqueó este número desde el panel. No se le responde, no
+    // arranca ningún flujo, no se deriva a un humano y no se notifica a nadie.
+    //
+    // El mensaje SÍ se guarda: la clínica tiene que poder ver qué siguió
+    // mandando antes de decidir si lo desbloquea. Lo que se corta es la
+    // respuesta, que además es lo único que cuesta plata.
+    //
+    // Va acá, y no antes, por dos motivos. El registro de la ventana de 24 h
+    // de arriba refleja un hecho de WhatsApp que pasó igual, bloqueado o no;
+    // falsearlo haría que el panel le mienta al agente el día que desbloquee.
+    // Y abajo empiezan los flujos: cualquier corte posterior ya habría dejado
+    // al contacto entrar en alguno.
+    if (await estaBloqueado(config.id, userPhoneNumber)) {
+      console.info(`[BLOQUEO] Mensaje de ${userPhoneNumber} descartado (contacto bloqueado)`)
+      if (userMessage) {
+        await saveConversationMessage({
+          id: nanoid(),
+          role: "user",
+          content: userMessage,
+          timestamp: momentoDelPaciente(),
+          phoneNumber: userPhoneNumber,
+          configId: config.id,
+        })
+      }
+      // Se cuenta como recibido y NO como procesado: no hicimos nada con él.
+      await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+      return
+    }
 
     // ============================================================================
     // «ACEPTAR CONVERSACIÓN»: EL BOT NO CONTESTA (9/10/2026)

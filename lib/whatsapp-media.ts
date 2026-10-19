@@ -25,6 +25,8 @@
  */
 
 import { formatearTamano, LIMITE_DESCARGA_PANEL, type TipoMedia } from "./media-validacion"
+import { envíosPausados, respuestaDeEnvioPausado } from "./pausa-de-envios"
+import { bloqueadoParaEnviar } from "./contactos-bloqueados"
 
 export {
   validarArchivo,
@@ -208,6 +210,21 @@ export async function sendWhatsAppMedia(
   to: string,
   opciones: { mediaId: string; tipo: TipoMedia; caption?: string; nombreArchivo?: string },
 ): Promise<any> {
+  // ── Las dos compuertas (19/10/2026) ──────────────────────────────────────
+  //
+  // Las cuatro funciones de lib/whatsapp-api.ts las tienen desde el 1/10 (la
+  // pausa) y el 19/10 (el bloqueo). Esta es la quinta puerta de salida y no
+  // tenía ninguna: un archivo enviado desde el panel salía igual con el
+  // cliente pausado y con el contacto bloqueado.
+  //
+  // Se agregan las dos juntas porque el agujero era el mismo: la compuerta no
+  // estaba en el embudo, estaba en cuatro de las cinco puertas.
+  if (await envíosPausados(phoneNumberId)) return respuestaDeEnvioPausado(phoneNumberId, to)
+  if (await bloqueadoParaEnviar(phoneNumberId, to)) {
+    console.log(`[BLOQUEO] 🚫 Archivo omitido a ${to} (contacto bloqueado)`)
+    return { bloqueado: true, enviado: false, messages: [] as unknown[] }
+  }
+
   const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${phoneNumberId}/messages`
 
   const MAX_CAPTION = 1024

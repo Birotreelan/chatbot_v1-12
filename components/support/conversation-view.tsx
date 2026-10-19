@@ -11,6 +11,7 @@ import type { HumanSupportSession, HumanSupportMessage } from "@/lib/types"
 import { ArrowLeft, Phone, XCircle, Clock } from "lucide-react"
 import { PatientInfoPanel } from "./patient-info-panel"
 import { Badge } from "@/components/ui/badge"
+import { BotonBloqueo } from "@/components/support/boton-bloqueo"
 
 interface ExtendedSession extends HumanSupportSession {
   messages: HumanSupportMessage[]
@@ -44,6 +45,15 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
   const [ventanaConocida, setVentanaConocida] = useState(false)
   const { getAuthHeaders, sessionId: ssoSessionId } = useSession()
 
+  /**
+   * ¿El contacto de esta sesión está bloqueado? (19/10/2026)
+   *
+   * Se consulta por `configId` + teléfono, que es como se guarda el bloqueo:
+   * es del CONTACTO y no de la sesión, así que sobrevive a cerrarla y vuelve a
+   * aplicar la próxima vez que escriba.
+   */
+  const [bloqueado, setBloqueado] = useState(false)
+
   // OPTIMIZACIÓN BANDWIDTH (2026-07-06):
   // - Poll de 5s → 15s.
   // - Se pausa cuando la pestaña no está visible (una pestaña olvidada consumía GB/día).
@@ -59,6 +69,26 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
     }, 15000)
     return () => clearInterval(interval)
   }, [sessionId])
+
+  useEffect(() => {
+    if (!session?.configId || !session?.phoneNumber) return
+    const ac = new AbortController()
+    ;(async () => {
+      try {
+        let url = `/api/support/bloqueo?configId=${encodeURIComponent(session.configId)}` +
+          `&phoneNumber=${encodeURIComponent(session.phoneNumber)}`
+        if (ssoSessionId) url += `&_sid=${encodeURIComponent(ssoSessionId)}`
+        const r = await fetch(url, { credentials: "include", headers: getAuthHeaders(), signal: ac.signal })
+        if (!r.ok) return
+        const datos = await r.json()
+        setBloqueado(Boolean(datos?.bloqueado))
+      } catch {
+        // Sin el dato se asume no bloqueado: es el estado normal, y el botón
+        // sigue sirviendo porque bloquear es idempotente.
+      }
+    })()
+    return () => ac.abort()
+  }, [session?.configId, session?.phoneNumber, ssoSessionId])
 
   async function loadSession() {
     try {
@@ -330,8 +360,21 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
             <Badge variant="outline" className="text-xs h-5">
               {session.priority === "high" ? "Alta" : session.priority === "medium" ? "Media" : "Baja"}
             </Badge>
+            {bloqueado && (
+              <Badge className="text-xs h-5 bg-amber-100 text-amber-800 border-amber-200">
+                Bloqueado
+              </Badge>
+            )}
           </div>
         </div>
+        <div className="flex items-center gap-1.5">
+        <BotonBloqueo
+          configId={session.configId}
+          phoneNumber={session.phoneNumber}
+          bloqueado={bloqueado}
+          sessionId={ssoSessionId}
+          onCambio={setBloqueado}
+        />
         <Button 
           variant="ghost" 
           size="sm"
@@ -341,6 +384,7 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
           <XCircle className="h-3 w-3 mr-1" />
           Cerrar Atencion
         </Button>
+        </div>
       </div>
 
       {/* Motivo */}

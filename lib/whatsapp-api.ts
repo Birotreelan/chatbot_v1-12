@@ -15,9 +15,29 @@
  * llamadores siguen su curso normal —guardan el mensaje, actualizan el flujo,
  * contestan 200 al webhook— sin tener que tocarlos uno por uno. Lo único que
  * no pasa es el gasto.
+ *
+ * ── La compuerta de bloqueo (19/10/2026) ───────────────────────────────────
+ *
+ * Al lado de la de pausa, y por el mismo motivo: cuando la clínica bloquea un
+ * contacto desde el panel, no le tiene que salir NADA, y eso incluye los
+ * recordatorios. Ponerlo en el webhook habría cortado sólo lo que el bot
+ * contesta, y un contacto bloqueado seguiría recibiendo recordatorios —que
+ * además se pagan— mientras la clínica cree que lo silenció.
+ *
+ * Se distingue de la pausa en la respuesta (`bloqueado: true`) porque son dos
+ * cosas distintas: la pausa es del CLIENTE entero y temporal, el bloqueo es de
+ * UN contacto y lo decidió un agente. Confundirlas en el log haría que un
+ * "envío omitido" no se pueda explicar.
  */
 
 import { envíosPausados, respuestaDeEnvioPausado } from "./pausa-de-envios"
+import { bloqueadoParaEnviar } from "./contactos-bloqueados"
+
+/** Misma forma que `respuestaDeEnvioPausado`: el llamador sigue su curso. */
+function respuestaDeContactoBloqueado(phoneNumberId: string, destino: string) {
+  console.log(`[BLOQUEO] 🚫 Envío omitido a ${destino} (contacto bloqueado en ${phoneNumberId})`)
+  return { bloqueado: true, enviado: false, messages: [] as unknown[] }
+}
 
 /**
  * Enmascara un token/secreto para logging seguro.
@@ -108,6 +128,7 @@ export async function sendWhatsAppMessage(
   // Antes que el troceado: un mensaje largo son varios envíos, y preguntar
   // después implicaría preguntar una vez por fragmento.
   if (await envíosPausados(phoneNumberId)) return respuestaDeEnvioPausado(phoneNumberId, to)
+  if (await bloqueadoParaEnviar(phoneNumberId, to)) return respuestaDeContactoBloqueado(phoneNumberId, to)
 
   // Si el mensaje supera el límite de WhatsApp, enviarlo en fragmentos secuenciales.
   // Esto evita el error 400 "text.body must be at most 4096 characters" que, sin este
@@ -182,6 +203,7 @@ export async function sendWhatsAppInteractive(
   buttons: Array<{ id: string; title: string }>,
 ): Promise<any> {
   if (await envíosPausados(phoneNumberId)) return respuestaDeEnvioPausado(phoneNumberId, to)
+  if (await bloqueadoParaEnviar(phoneNumberId, to)) return respuestaDeContactoBloqueado(phoneNumberId, to)
 
   try {
     const normalizedPhone = normalizePhoneNumber(to)
@@ -250,6 +272,7 @@ export async function sendWhatsAppList(
   sectionTitle: string = "Opciones",
 ): Promise<any> {
   if (await envíosPausados(phoneNumberId)) return respuestaDeEnvioPausado(phoneNumberId, to)
+  if (await bloqueadoParaEnviar(phoneNumberId, to)) return respuestaDeContactoBloqueado(phoneNumberId, to)
 
   try {
     const normalizedPhone = normalizePhoneNumber(to)
@@ -316,6 +339,7 @@ export async function sendWhatsAppTemplate(
   // Los recordatorios entran por acá. Es el envío que más pesa en la factura,
   // así que es el que la pausa tiene que cubrir sí o sí.
   if (await envíosPausados(phoneNumberId)) return respuestaDeEnvioPausado(phoneNumberId, to)
+  if (await bloqueadoParaEnviar(phoneNumberId, to)) return respuestaDeContactoBloqueado(phoneNumberId, to)
 
   try {
     console.log("[v0] [WHATSAPP_API] sendWhatsAppTemplate - accessToken:", maskToken(accessToken))

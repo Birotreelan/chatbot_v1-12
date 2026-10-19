@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import type { HumanSupportMessage } from "@/lib/types"
+import { BotonBloqueo } from "@/components/support/boton-bloqueo"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -286,6 +287,37 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
     }
   }, [selectedContact?.phoneNumber, selectedContact?.configId])
 
+  /**
+   * ¿El contacto abierto está bloqueado? (19/10/2026)
+   *
+   * Se consulta aparte y no viene con la conversación: el bloqueo es un estado
+   * del CONTACTO, no del hilo, y mezclarlo en la respuesta de los mensajes
+   * obligaría a recargar la conversación entera para refrescar un cartel.
+   */
+  const [bloqueado, setBloqueado] = useState(false)
+
+  useEffect(() => {
+    setBloqueado(false)
+    if (!selectedContact) return
+    const ac = new AbortController()
+    ;(async () => {
+      try {
+        let url = `/api/support/bloqueo?configId=${encodeURIComponent(selectedContact.configId)}` +
+          `&phoneNumber=${encodeURIComponent(selectedContact.phoneNumber)}`
+        if (sessionId) url += `&_sid=${encodeURIComponent(sessionId)}`
+        const r = await fetch(url, { credentials: "include", headers: getAuthHeaders(), signal: ac.signal })
+        if (!r.ok) return
+        const datos = await r.json()
+        setBloqueado(Boolean(datos?.bloqueado))
+      } catch {
+        // Sin el dato se muestra "no bloqueado", que es el estado normal. El
+        // botón sigue funcionando: si ya estaba bloqueado, bloquear de nuevo
+        // es idempotente.
+      }
+    })()
+    return () => ac.abort()
+  }, [selectedContact?.phoneNumber, selectedContact?.configId, sessionId])
+
   // ── Intervenir ─────────────────────────────────────────────────────────────
   async function handleIntervene() {
     if (!selectedContact) return
@@ -461,9 +493,25 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
                     Con agente
                   </Badge>
                 )}
+                {/* El cartel va al lado del teléfono y no junto al botón: lo
+                    primero que hay que saber al abrir la conversación es que
+                    lo que se ve ahí no tuvo respuesta a propósito. */}
+                {bloqueado && (
+                  <Badge className="text-[10px] px-1.5 py-0 h-4 bg-amber-100 text-amber-800 border-amber-200 shrink-0">
+                    Bloqueado
+                  </Badge>
+                )}
               </div>
 
-              {/* Action button */}
+              {/* Action buttons */}
+              <div className="flex items-center gap-1.5 shrink-0">
+              <BotonBloqueo
+                configId={selectedContact.configId}
+                phoneNumber={selectedContact.phoneNumber}
+                bloqueado={bloqueado}
+                sessionId={sessionId}
+                onCambio={setBloqueado}
+              />
               {canIntervene && (
                 <Button
                   size="sm"
@@ -479,6 +527,7 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
               {conversation?.activeSession && !isMySession && (
                 <span className="text-xs text-muted-foreground">Atendido por otro agente</span>
               )}
+              </div>
             </div>
 
             {/* Messages */}
