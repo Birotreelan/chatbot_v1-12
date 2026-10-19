@@ -17,6 +17,8 @@
 import { useEffect, useState } from "react"
 import { DollarSign, Loader2 } from "lucide-react"
 
+import { calcularImporteAproximado } from "@/lib/importe-aproximado"
+
 interface Costo {
   precioUnitarioUsd: number
   precioPropio: boolean
@@ -94,8 +96,17 @@ export function CostoAproximado({
 
   const esperando = cargando || cargandoInteracciones
 
-  const totalUsd = costo ? unidades * costo.precioUnitarioUsd : 0
-  const totalPesos = costo?.dolarVenta ? totalUsd * costo.dolarVenta : null
+  // La misma cuenta que devuelve /api/appointment-stats al sistema externo.
+  const importe = costo
+    ? calcularImporteAproximado({
+        recordatorios,
+        mensajesDeServicio: unidades - recordatorios,
+        precioUnitarioUsd: costo.precioUnitarioUsd,
+        dolarVenta: costo.dolarVenta,
+      })
+    : null
+  const totalUsd = importe?.totalUsd ?? 0
+  const totalPesos = importe?.totalPesos ?? null
 
   return (
     <div className="text-center p-4 bg-white rounded-lg border border-purple-100">
