@@ -343,8 +343,12 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
   return (
     <div className="h-[calc(100vh-68px)] flex flex-col">
       {/* Header compacto */}
-      <div className="flex items-center justify-between mb-3 pb-2 border-b">
-        <div className="flex items-center gap-3">
+      {/* Mismo criterio que el encabezado del monitor: envuelve en vez de
+          superponerse, y el bloque de la izquierda lleva `flex-auto` —no
+          `flex-1`— para que el salto de línea se dispare cuando los dos
+          grupos no entran. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 mb-3 pb-2 border-b">
+        <div className="flex min-w-0 flex-auto items-center gap-3">
           <Button 
             variant="ghost" 
             size="sm" 
@@ -367,7 +371,7 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
         <BotonBloqueo
           configId={session.configId}
           phoneNumber={session.phoneNumber}

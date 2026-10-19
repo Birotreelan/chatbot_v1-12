@@ -479,13 +479,30 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
         ) : (
           <>
             {/* Conversation header */}
-            <div className="flex items-center justify-between px-4 py-2.5 border-b bg-muted/20 shrink-0">
-              <div className="flex items-center gap-2 min-w-0">
+            {/* `flex-wrap`: por debajo de unos 420 px el teléfono y los
+                botones ya no entran en un renglón, y sin esto flexbox los
+                superpone —se veía "Bloquear" encima del número—. Con el salto,
+                los controles bajan a una segunda línea y nada se pisa.
+                `overflow-hidden` queda como red para lo que no pueda recortar. */}
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 overflow-hidden px-4 py-2.5 border-b bg-muted/20 shrink-0">
+              {/* `flex-auto` y no `flex-1`: con `flex-1` la base es 0, así que
+                  este bloque nunca "pide" ancho y el renglón no llega a
+                  llenarse — el salto de línea no se dispara y los controles
+                  terminan montados encima del teléfono. Con la base en el
+                  contenido, cuando los dos grupos no entran, el de abajo baja. */}
+              <div className="flex min-w-0 flex-auto items-center gap-2">
                 <Phone className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span className="font-mono text-sm font-semibold truncate">
+                {/* El teléfono NO se recorta: es lo que identifica la
+                    conversación. El que cede es el nombre de la clínica, que
+                    además se repite en toda la pantalla. */}
+                <span className="font-mono text-sm font-semibold shrink-0">
                   {selectedContact.phoneNumber}
                 </span>
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 h-4 min-w-0 max-w-[10rem] truncate"
+                  title={selectedContact.configName}
+                >
                   {selectedContact.configName}
                 </Badge>
                 {selectedContact.isPaused && (
@@ -503,8 +520,16 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
                 )}
               </div>
 
-              {/* Action buttons */}
-              <div className="flex items-center gap-1.5 shrink-0">
+              {/* ── Qué cede cuando no hay lugar (19/10/2026) ──────────────
+                  En orden: primero el nombre de la clínica (se recorta, está
+                  repetido en toda la pantalla), después el texto "Atendido por
+                  otro agente" (es informativo y ya se deduce de que no haya
+                  botón "Intervenir"). Lo que NUNCA cede es el teléfono, que
+                  identifica la conversación, ni los botones, que son los
+                  controles.
+                  El grupo no lleva `shrink-0`: con él, en un panel angosto los
+                  controles se salían de la tarjeta en vez de achicarse. */}
+              <div className="flex min-w-0 items-center gap-1.5">
               <BotonBloqueo
                 configId={selectedContact.configId}
                 phoneNumber={selectedContact.phoneNumber}
@@ -525,7 +550,12 @@ export function ConversationMonitor({ onSessionInitiated, currentUserId, current
                 </Button>
               )}
               {conversation?.activeSession && !isMySession && (
-                <span className="text-xs text-muted-foreground">Atendido por otro agente</span>
+                <span
+                  className="min-w-0 truncate text-xs text-muted-foreground"
+                  title="Atendido por otro agente"
+                >
+                  Atendido por otro agente
+                </span>
               )}
               </div>
             </div>
