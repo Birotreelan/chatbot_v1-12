@@ -482,6 +482,42 @@ export interface HumanSupportSession {
 
   // Mensajes pendientes mientras espera asignación
   pendingMessages: ConversationMessage[]
+
+  /**
+   * Desde cuándo esta conversación espera una respuesta del agente
+   * (20/10/2026). ISO, o ausente si no espera nada.
+   *
+   * ── Qué problema resuelve ───────────────────────────────────────────────
+   *
+   * Reclamo de una agente: "cuando tomo una conversación yo le contesto y la
+   * persona por ahí tarda en contestar, pero el sistema no me avisa cuándo me
+   * contestó: siempre aparece el 1 como pendiente y me tengo que ir fijando a
+   * cada rato".
+   *
+   * El widget contaba SESIONES TOMADAS, así que una conversación asignada
+   * valía 1 desde que se tomaba hasta que se cerraba, contestara el paciente o
+   * no. Y como el ícono sólo se anima cuando el total SUBE, y nunca subía, no
+   * había aviso posible. El número era cierto y no respondía la única pregunta
+   * que la agente se hace.
+   *
+   * ── Por qué un momento y no un booleano ─────────────────────────────────
+   *
+   * Guarda CUÁNDO llegó el primer mensaje sin contestar, no "hay algo nuevo".
+   * Con eso la lista puede decir "espera hace 12 min" y ordenar por antigüedad,
+   * que es lo que sirve para priorizar cuando hay varias. Un booleano las deja
+   * a todas iguales.
+   *
+   * ── Se limpia al RESPONDER, no al abrir ─────────────────────────────────
+   *
+   * Abrir la conversación no alcanza: la agente puede abrirla, distraerse con
+   * otra cosa y perder la única señal que tenía — que es exactamente el
+   * problema que esto viene a resolver. Se limpia cuando manda un mensaje o
+   * cuando cierra la sesión.
+   *
+   * La contrapartida: un "gracias" final queda marcado hasta que conteste o
+   * cierre. Es el lado correcto para equivocarse.
+   */
+  esperaRespuestaDesde?: string | null
 }
 
 /**

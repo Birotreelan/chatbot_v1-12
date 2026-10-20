@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { validateSSOToken, buildSsoUserId } from "@/lib/sso"
-import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
+import { contarAvisosDelAgente } from "@/lib/human-support"
 
 /**
  * API de estado de notificaciones para el widget embebible
@@ -13,7 +13,8 @@ import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
  *   success: true,
  *   pending_count: 5,      // Conversaciones pendientes (compartidas por tenant)
  *   active_count: 2,       // Conversaciones activas del usuario
- *   total: 7,
+ *   esperando_count: 1,    // De las activas, las que esperan que el agente conteste
+ *   total: 6,              // pending_count + esperando_count (ver contarAvisosDelAgente)
  *   user_info: { nombre: "Juan", apellido: "Pérez", usuario_id: "user_101" }
  * }
  */
@@ -67,24 +68,23 @@ export async function GET(request: Request) {
 
     console.log("[Notifications Status API] Token válido - tenantId:", tenantId, "userId:", userId)
 
-    // Obtener conteo de sesiones pendientes (compartidas por tenant)
-    const pendingSessions = await getPendingSessions(tenantId)
-    const pendingCount = pendingSessions.length
+    // El total lo decide lib/human-support (contarAvisosDelAgente), que es el
+    // mismo cálculo que usa el stream SSE: si cada ruta armara el suyo, el
+    // badge cambiaría de criterio en el primer tick.
+    const conteo = await contarAvisosDelAgente(tenantId, userId)
 
-    // Obtener conteo de sesiones activas del usuario
-    const activeSessions = await getAgentActiveSessions(userId)
-    const activeCount = activeSessions.length
-
-    // Contar mensajes no leídos en sesiones activas (opcional - para futuro)
-    // Por ahora solo contamos sesiones, no mensajes individuales
-
-    console.log("[Notifications Status API] Conteos - Pendientes:", pendingCount, "Activas:", activeCount)
+    console.log(
+      "[Notifications Status API] Conteos - Pendientes:", conteo.pending_count,
+      "Activas:", conteo.active_count,
+      "Esperando respuesta:", conteo.esperando_count,
+    )
 
     return NextResponse.json({
       success: true,
-      pending_count: pendingCount,
-      active_count: activeCount,
-      total: pendingCount + activeCount,
+      pending_count: conteo.pending_count,
+      active_count: conteo.active_count,
+      esperando_count: conteo.esperando_count,
+      total: conteo.total,
       user_info: {
         nombre: payload.nombre || "",
         apellido: payload.apellido || "",

@@ -8,7 +8,7 @@ import { useSession } from "./session-provider"
 import type { HumanSupportSession } from "@/lib/types"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
-import { Phone, Clock, ArrowRight, MessageSquare } from "lucide-react"
+import { Phone, Clock, ArrowRight, MessageSquare, CornerDownLeft } from "lucide-react"
 
 interface SessionCardProps {
   session: HumanSupportSession
@@ -100,10 +100,29 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
 
   const isPending = session.status === "pending"
 
+  /**
+   * "El paciente te contestó y vos todavía no" (20/10/2026).
+   *
+   * Es el aviso que faltaba: antes una conversación tomada se veía igual
+   * estuviera al día o con un mensaje sin leer de hace veinte minutos, y la
+   * única forma de saberlo era abrirla una por una.
+   *
+   * Sólo aplica a las asignadas. Una pendiente ya está toda ella esperando: el
+   * cartel sería redundante y le quitaría contraste al que importa.
+   */
+  const espera = !isPending && session.esperaRespuestaDesde ? session.esperaRespuestaDesde : null
+  const esperaHace = espera
+    ? formatDistanceToNow(new Date(espera), { addSuffix: true, locale: es })
+    : null
+
   return (
     <div className={`
       bg-card border rounded-lg p-3 
-      ${isPending ? 'hover:border-primary/50 hover:shadow-sm' : 'border-green-200 bg-green-50/30'}
+      ${isPending
+        ? 'hover:border-primary/50 hover:shadow-sm'
+        : espera
+          ? 'border-amber-300 bg-amber-50/70 shadow-sm'
+          : 'border-green-200 bg-green-50/30'}
       transition-all duration-150
     `}>
       {/* Header row */}
@@ -119,6 +138,14 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
           {priorityConfig[session.priority].label}
         </Badge>
       </div>
+
+      {/* El paciente contestó y espera (20/10/2026) */}
+      {espera && (
+        <div className="flex items-start gap-1.5 mb-2 text-xs font-medium text-amber-800">
+          <CornerDownLeft className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>Te respondió {esperaHace} y espera tu respuesta</span>
+        </div>
+      )}
 
       {/* Reason */}
       <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
@@ -145,12 +172,16 @@ export function SessionCard({ session, onUpdate }: SessionCardProps) {
         ) : (
           <Button 
             onClick={handleView} 
-            variant="outline" 
+            variant={espera ? "default" : "outline"}
             size="sm"
-            className="h-7 text-xs px-3 border-green-300 text-green-700 hover:bg-green-100"
+            className={
+              espera
+                ? "h-7 text-xs px-3 bg-amber-600 text-white hover:bg-amber-700"
+                : "h-7 text-xs px-3 border-green-300 text-green-700 hover:bg-green-100"
+            }
           >
             <MessageSquare className="h-3 w-3 mr-1" />
-            Ver
+            {espera ? "Responder" : "Ver"}
           </Button>
         )}
       </div>

@@ -85,6 +85,9 @@
   var state = {
     pendingCount: 0,
     activeCount: 0,
+    // De mis conversaciones, cuántas esperan que yo conteste (20/10/2026).
+    // El badge es pendingCount + esperandoCount; ver contarAvisosDelAgente.
+    esperandoCount: 0,
     total: 0,
     connected: false,
     eventSource: null,
@@ -399,6 +402,7 @@
     var tooltipHTML = config.showTooltip !== false ? '\
         <div id="notification-widget-tooltip">\
           <div>Pendientes: <strong id="tooltip-pending">0</strong></div>\
+          <div>Esperan tu respuesta: <strong id="tooltip-esperando">0</strong></div>\
           <div>Mis activas: <strong id="tooltip-active">0</strong></div>\
         </div>\
     ' : '';
@@ -465,6 +469,7 @@
     var button = document.getElementById("notification-widget-button");
     var tooltipPending = document.getElementById("tooltip-pending");
     var tooltipActive = document.getElementById("tooltip-active");
+    var tooltipEsperando = document.getElementById("tooltip-esperando");
 
     if (badge) {
       if (state.total > 0) {
@@ -500,6 +505,10 @@
 
     if (tooltipActive) {
       tooltipActive.textContent = state.activeCount;
+    }
+
+    if (tooltipEsperando) {
+      tooltipEsperando.textContent = state.esperandoCount;
     }
   }
 
@@ -602,6 +611,7 @@
 
           state.pendingCount = data.pending_count || 0;
           state.activeCount = data.active_count || 0;
+          state.esperandoCount = data.esperando_count || 0;
           state.total = data.total || 0;
           state.lastUpdate = data.timestamp;
 
@@ -665,6 +675,7 @@
 
                 state.pendingCount = data.pending_count || 0;
                 state.activeCount = data.active_count || 0;
+                state.esperandoCount = data.esperando_count || 0;
                 state.total = data.total || 0;
                 state.connected = true;
                 state.lastUpdate = data.timestamp;
@@ -720,6 +731,7 @@
       return {
         pendingCount: state.pendingCount,
         activeCount: state.activeCount,
+        esperandoCount: state.esperandoCount,
         total: state.total,
         connected: state.connected,
         lastUpdate: state.lastUpdate

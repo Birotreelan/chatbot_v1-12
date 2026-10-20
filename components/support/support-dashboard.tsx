@@ -58,6 +58,19 @@ export function SupportDashboard() {
 
   const pendingSessions = Array.isArray(sessions) ? sessions.filter((s) => s.status === "pending") : []
   const activeSessions = Array.isArray(sessions) ? sessions.filter((s) => s.status === "in_progress") : []
+  /**
+   * Las mías en las que el paciente escribió y todavía no contesté
+   * (20/10/2026).
+   *
+   * El badge de la pestaña usaba pendientes + activas, el mismo criterio que
+   * tenía el widget de WhatsApp y por el mismo motivo equivocado: una
+   * conversación tomada valía 1 hasta cerrarla, respondida o no. Ahora los dos
+   * cuentan lo que espera respuesta (ver contarAvisosDelAgente en
+   * lib/human-support.ts), así que el número del widget y el de la pestaña
+   * dicen lo mismo.
+   */
+  const esperandoSessions = activeSessions.filter((s) => Boolean(s.esperaRespuestaDesde))
+  const avisos = pendingSessions.length + esperandoSessions.length
 
   if (loading) {
     return (
@@ -115,9 +128,9 @@ export function SupportDashboard() {
           <TabsTrigger value="sessions" className="gap-1.5 text-xs">
             <MessageSquare className="h-3.5 w-3.5" />
             Atención humana
-            {pendingSessions.length + activeSessions.length > 0 && (
+            {avisos > 0 && (
               <span className="ml-1 bg-orange-100 text-orange-700 text-[10px] font-medium px-1.5 py-0.5 rounded">
-                {pendingSessions.length + activeSessions.length}
+                {avisos}
               </span>
             )}
           </TabsTrigger>
@@ -171,8 +184,16 @@ export function SupportDashboard() {
                 <span className="bg-green-100 text-green-700 text-xs font-medium px-1.5 py-0.5 rounded">
                   {activeSessions.length}
                 </span>
+                {esperandoSessions.length > 0 && (
+                  <span className="bg-amber-100 text-amber-800 text-xs font-medium px-1.5 py-0.5 rounded">
+                    {esperandoSessions.length} esperando
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-muted-foreground mb-2">Conversaciones que TÚ estás atendiendo</p>
+              <p className="text-xs text-muted-foreground mb-2">
+                Conversaciones que TÚ estás atendiendo. Las que te respondieron y esperan contestación
+                aparecen primero, marcadas en ámbar.
+              </p>
               <div className="flex-1 overflow-y-auto min-h-0">
                 <SessionsList
                   sessions={activeSessions}

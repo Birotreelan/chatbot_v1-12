@@ -351,6 +351,60 @@ export async function getAgentActiveSessions(agentId: string): Promise<HumanSupp
   return sessions
 }
 
+/**
+ * Lo que el widget tiene que mostrar (20/10/2026).
+ *
+ * ── Por qué vive acá y no en las rutas ─────────────────────────────────────
+ *
+ * El número lo calculaban `/api/notifications/status` y
+ * `/api/notifications/stream` por separado, cada una con su `pending + active`.
+ * Cambiar la regla en una sola haría que el badge diga una cosa al abrir la
+ * página y otra treinta segundos después, cuando entra el primer tick del SSE.
+ *
+ * ── Qué cuenta el total ────────────────────────────────────────────────────
+ *
+ * Lo que espera respuesta, que es el reclamo que originó esto: "siempre
+ * aparece el 1 como pendiente pero me tengo que ir fijando a cada rato".
+ * Antes el total era pendientes + asignadas, así que una conversación valía 1
+ * desde que la tomaba hasta que la cerraba, respondida o no. Ahora:
+ *
+ *   · las pendientes, que nadie tomó todavía;
+ *   · las MÍAS en las que el paciente escribió y todavía no le contesté.
+ *
+ * Una conversación tomada y al día no suma. Por eso el número sube cuando el
+ * paciente responde —y recién ahí el widget puede animarse, porque sólo
+ * animaba cuando el total crecía y con el cálculo viejo nunca crecía—.
+ *
+ * `active_count` se sigue devolviendo: el tooltip muestra "Mis activas", que es
+ * otra pregunta ("cuántas tengo abiertas") y sigue siendo útil.
+ */
+export interface ConteoDeAvisos {
+  pending_count: number
+  active_count: number
+  /** De las mías, cuántas esperan que yo conteste. */
+  esperando_count: number
+  total: number
+}
+
+export async function contarAvisosDelAgente(
+  tenantId: string,
+  agentId: string,
+): Promise<ConteoDeAvisos> {
+  const [pendientes, activas] = await Promise.all([
+    getPendingSessions(tenantId),
+    getAgentActiveSessions(agentId),
+  ])
+
+  const esperando = activas.filter((s) => Boolean(s.esperaRespuestaDesde)).length
+
+  return {
+    pending_count: pendientes.length,
+    active_count: activas.length,
+    esperando_count: esperando,
+    total: pendientes.length + esperando,
+  }
+}
+
 // Asignar sesión a un agente (con bloqueo atómico para evitar race conditions)
 export async function assignSessionToAgent(sessionId: string, agentId: string): Promise<boolean> {
   const redis = getRedisClient()
@@ -431,6 +485,10 @@ export async function closeSession(sessionId: string, note?: string): Promise<bo
   // Actualizar sesión
   session.status = "resolved"
   session.resolvedAt = now
+  // Cerrada no espera nada (20/10/2026). Se limpia acá y no con
+  // `limpiarEsperaRespuesta` para no releer y reescribir la sesión que esta
+  // misma función está guardando dos líneas más abajo.
+  session.esperaRespuestaDesde = null
 
   const sessionKey = `${SUPPORT_SESSION_PREFIX}${sessionId}`
   await redis.set(sessionKey, JSON.stringify(session))
@@ -521,6 +579,48 @@ export async function addPendingMessageToSession(sessionId: string, message: Con
   return true
 }
 
+/**
+ * Marca que esta conversación espera una respuesta del agente (20/10/2026).
+ *
+ * Conserva el momento del PRIMER mensaje sin contestar: si el paciente manda
+ * cuatro seguidos, "espera hace 12 min" tiene que contar desde el primero y no
+ * reiniciarse con cada uno. Por eso no se pisa si ya estaba marcada.
+ */
+export async function marcarEsperaRespuesta(sessionId: string, momento?: string): Promise<void> {
+  try {
+    const redis = getRedisClient()
+    if (!redis) return
+
+    const session = await getSupportSession(sessionId)
+    // Sólo las asignadas: una pendiente ya se cuenta por su lado, y marcarla
+    // la haría sumar dos veces en el widget.
+    if (!session || session.status !== "in_progress") return
+    if (session.esperaRespuestaDesde) return
+
+    session.esperaRespuestaDesde = momento || new Date().toISOString()
+    await redis.set(`${SUPPORT_SESSION_PREFIX}${sessionId}`, JSON.stringify(session))
+    console.log(`[HUMAN_SUPPORT] ⏳ ${sessionId} espera respuesta desde ${session.esperaRespuestaDesde}`)
+  } catch (error) {
+    console.error("[HUMAN_SUPPORT] No se pudo marcar la espera de respuesta:", error)
+  }
+}
+
+/** Ya no espera nada: el agente respondió o cerró la conversación. */
+export async function limpiarEsperaRespuesta(sessionId: string): Promise<void> {
+  try {
+    const redis = getRedisClient()
+    if (!redis) return
+
+    const session = await getSupportSession(sessionId)
+    if (!session || !session.esperaRespuestaDesde) return
+
+    session.esperaRespuestaDesde = null
+    await redis.set(`${SUPPORT_SESSION_PREFIX}${sessionId}`, JSON.stringify(session))
+  } catch (error) {
+    console.error("[HUMAN_SUPPORT] No se pudo limpiar la espera de respuesta:", error)
+  }
+}
+
 // Guardar mensaje de la sesión de soporte
 export async function saveSupportMessage(message: HumanSupportMessage): Promise<void> {
   const redis = getRedisClient()
@@ -530,6 +630,22 @@ export async function saveSupportMessage(message: HumanSupportMessage): Promise<
   await redis.rpush(messagesKey, JSON.stringify(message))
   await redis.expire(messagesKey, RESOLVED_SESSION_TTL)
   await touchSupportSessionActivity(message.sessionId)
+
+  // ── La espera se decide acá y no en los llamadores (20/10/2026) ──────────
+  //
+  // Esta función es el único punto por el que pasan los mensajes de los dos
+  // lados: el del paciente entra por el webhook y el del agente por el panel.
+  // Resolver la marca en cada llamador sería repetir la regla en varios
+  // lugares y olvidarla en el próximo que se agregue.
+  //
+  // `assistant` y `system` no la tocan: son mensajes del bot o avisos
+  // internos, y ninguno de los dos es una respuesta que la agente deba dar ni
+  // una pregunta que deba contestar.
+  if (message.role === "user") {
+    await marcarEsperaRespuesta(message.sessionId, message.timestamp)
+  } else if (message.role === "agent") {
+    await limpiarEsperaRespuesta(message.sessionId)
+  }
 
   console.log(`[HUMAN_SUPPORT] 💬 Mensaje guardado en sesión ${message.sessionId}`)
 }

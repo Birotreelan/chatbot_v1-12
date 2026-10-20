@@ -1,5 +1,5 @@
 import { validateSSOToken, buildSsoUserId, renovarTokenSSO } from "@/lib/sso"
-import { getPendingSessions, getAgentActiveSessions } from "@/lib/human-support"
+import { contarAvisosDelAgente, type ConteoDeAvisos } from "@/lib/human-support"
 import { getRedisClient } from "@/lib/redis"
 
 // Cache TTL para los conteos SSE (segundos).
@@ -19,7 +19,7 @@ const SSE_COUNTS_CACHE_PREFIX = "sse_counts:"
  * GET /api/notifications/stream?sso_token=xxx
  * 
  * Envía eventos SSE cada 10 segundos con el estado actual:
- * data: {"pending_count":5,"active_count":2,"total":7,"timestamp":1234567890}
+ * data: {"pending_count":5,"active_count":2,"esperando_count":1,"total":6,"timestamp":1234567890}
  */
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -81,32 +81,33 @@ export async function GET(request: Request) {
           // a los demás usuarios del mismo tenant durante la ventana de cache (20s).
           const cacheKey = `${SSE_COUNTS_CACHE_PREFIX}${tenantId}:${userId}`
 
-          let pending_count: number
-          let active_count: number
+          let conteo: ConteoDeAvisos
 
           // Intentar servir desde cache Redis (evita re-leer sesiones en reconexiones frecuentes)
           const cached = redis ? await redis.get(cacheKey).catch(() => null) : null
           if (cached) {
-            const counts = typeof cached === "string" ? JSON.parse(cached) : cached
-            pending_count = counts.pending_count ?? 0
-            active_count = counts.active_count ?? 0
+            const counts = typeof cached === "string" ? JSON.parse(cached) : (cached as Partial<ConteoDeAvisos>)
+            const pending_count = counts.pending_count ?? 0
+            const active_count = counts.active_count ?? 0
+            // `esperando_count` puede faltar en una entrada cacheada por la
+            // versión anterior (20/10/2026). Recalcular el total desde los dos
+            // campos, en vez de leer `counts.total`, evita servir durante 35
+            // segundos un total con el criterio viejo después de un deploy.
+            const esperando_count = counts.esperando_count ?? 0
+            conteo = { pending_count, active_count, esperando_count, total: pending_count + esperando_count }
           } else {
             // Cache miss → leer sesiones y guardar resultado
-            const [pendingSessions, activeSessions] = await Promise.all([
-              getPendingSessions(tenantId),
-              getAgentActiveSessions(userId),
-            ])
-            pending_count = pendingSessions.length
-            active_count = activeSessions.length
+            conteo = await contarAvisosDelAgente(tenantId, userId)
             if (redis) {
-              redis.setex(cacheKey, SSE_COUNTS_CACHE_TTL, JSON.stringify({ pending_count, active_count })).catch(() => {})
+              redis.setex(cacheKey, SSE_COUNTS_CACHE_TTL, JSON.stringify(conteo)).catch(() => {})
             }
           }
 
           const data = {
-            pending_count,
-            active_count,
-            total: pending_count + active_count,
+            pending_count: conteo.pending_count,
+            active_count: conteo.active_count,
+            esperando_count: conteo.esperando_count,
+            total: conteo.total,
             timestamp: Date.now()
           }
 
@@ -114,7 +115,7 @@ export async function GET(request: Request) {
           const message = `data: ${JSON.stringify(data)}\n\n`
           controller.enqueue(encoder.encode(message))
 
-          console.log("[Notifications Stream] Enviado update - Pendientes:", data.pending_count, "Activas:", data.active_count)
+          console.log("[Notifications Stream] Enviado update - Pendientes:", data.pending_count, "Activas:", data.active_count, "Esperando:", data.esperando_count)
         } catch (error) {
           console.error("[Notifications Stream] Error obteniendo datos:", error)
           // No cerrar la conexión por errores temporales
