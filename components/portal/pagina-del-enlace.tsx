@@ -87,6 +87,7 @@ import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
 import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
 import { GestionarTurno } from "@/components/portal/gestionar-turno"
+import { reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
 
 export async function PaginaDelEnlace({
   params,
@@ -879,16 +880,34 @@ export async function PaginaDelEnlace({
             }
             detalle={
               mensajeSinTurnos(agendaNueva.infoSinTurnos) ||
-              (filtros.profesionalId
-                ? "Puede que tenga la agenda completa. Probá con todos los horarios o escribinos por WhatsApp."
-                : "No encontramos turnos en los próximos días. Escribinos por WhatsApp y buscamos una alternativa.")
+              (!filtros.profesionalId
+                ? "No encontramos turnos en los próximos días. Escribinos por WhatsApp y buscamos una alternativa."
+                : reemplazaElTurnoPrevio(contexto.intencion)
+                  ? // Reagendando: no se le sugiere cambiar de profesional.
+                    "Puede que tenga la agenda completa. Escribinos por WhatsApp y buscamos un horario con el mismo profesional."
+                  : "Puede que tenga la agenda completa. Probá con todos los horarios o escribinos por WhatsApp.")
             }
           />
 
-          {/* El consejo como botón y no como frase: "probá sin elegir
+          {/* ── Sólo cuando vino a sacar un turno, no a mover uno ─────────
+              El consejo como botón y no como frase: "probá sin elegir
               profesional" obligaba al paciente a descubrir solo cómo se hace
-              eso, y la única forma era el "Volver" de arriba. */}
-          {filtros.profesionalId && ofreceVerTodos(permisos) && (
+              eso, y la única forma era el "Volver" de arriba.
+
+              Pero NO se ofrece si está reagendando (26/10/2026). El que viene
+              de "Cambiarlo de horario" quiere el mismo turno en otro momento,
+              con SU médico: ofrecerle la agenda de cualquier otro profesional
+              es ofrecerle otra cosa, y encima la más fácil de aceptar sin
+              darse cuenta. Si ese profesional no tiene horarios, la salida es
+              la clínica, no otro médico.
+
+              `reemplazaElTurnoPrevio` es la misma función que decide si hay que
+              cancelar el turno viejo al reservar: una sola respuesta a "¿esto
+              reemplaza un turno?", que es justamente lo que ya se había
+              unificado el 25/9. */}
+          {filtros.profesionalId &&
+            !reemplazaElTurnoPrevio(contexto.intencion) &&
+            ofreceVerTodos(permisos) && (
             <VerTodos
               token={token}
               ruta={ruta}
