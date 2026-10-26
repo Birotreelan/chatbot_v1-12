@@ -806,6 +806,51 @@ export async function PaginaDelEnlace({
     agendaNueva.profesionalNombre ||
     (profesionalesEnAgenda.size === 1 ? [...profesionalesEnAgenda][0] : undefined)
 
+  /**
+   * ── Una sola frase cuando no hay horarios (26/10/2026) ───────────────────
+   *
+   * Acá se dibujaban las dos: el aviso de esta pantalla ("No encontramos
+   * horarios con esos filtros") y, abajo, el del propio SelectorDeTurnos ("No
+   * hay horarios disponibles — No encontramos turnos en los próximos días"),
+   * porque el selector se renderizaba igual con la lista vacía. El paciente
+   * leía dos carteles que decían lo mismo con distintas palabras y le daban
+   * consejos distintos.
+   *
+   * Peor: los dos anotaban el hito `sin_horarios`, así que cada pantalla vacía
+   * contaba doble en el monitoreo.
+   *
+   * La rama de reprogramar ya hacía lo correcto —`dias.length > 0 &&
+   * <SelectorDeTurnos>`— y además usaba el mensaje del proxy. Esta rama se
+   * había quedado atrás. Ahora hacen lo mismo.
+   */
+  const sinHorarios = agendaNueva.total === 0 && !conEjemplos
+
+  const encabezadoDeLosHorarios = (
+    <>
+      {volverArriba(volverQuitando())}
+      <EncabezadoDelPaso formato={formato} paso="elegir_horario" />
+
+      {/* Con quién son estos horarios. Es lo que decide si el nombre
+          del profesional hace falta al lado de cada horario, así que
+          conviene que el paciente lo lea antes.
+
+          Si no sabemos con quién son, NO se pone nada: "Horarios
+          disponibles." a secas no dice nada que el título no haya dicho
+          ya, y una línea que no informa es ruido que empuja el
+          calendario más abajo. */}
+      {profesionalDeLaAgenda && !sinHorarios && (
+        // Resaltado y no en gris: no es una nota al pie, es el filtro
+        // con el que está mirando la agenda. Si no lo registra, elige un
+        // horario creyendo que había más opciones de las que hay.
+        <Aviso tono="neutro" titulo={`Horarios disponibles con ${profesionalDeLaAgenda}.`} />
+      )}
+    </>
+  )
+
+  /** Lo mismo que el filtro de arriba, pero sin el profesional. */
+  const sinElProfesional = { ...elegido }
+  delete sinElProfesional.profesionalId
+
   return marco(
     <>
       {conEjemplos && (
@@ -816,55 +861,64 @@ export async function PaginaDelEnlace({
         />
       )}
 
-      {agendaNueva.total === 0 && !conEjemplos && <AnotarHito token={token} hito="sin_horarios" formato={formato} />}
+      {sinHorarios ? (
+        <>
+          {encabezadoDeLosHorarios}
+          <AnotarHito token={token} hito="sin_horarios" formato={formato} />
 
-      {agendaNueva.total === 0 && !conEjemplos && (
-        <Aviso
-          titulo="No encontramos horarios con esos filtros"
-          detalle="Probá sin elegir profesional, o escribinos por WhatsApp."
-          tono="atencion"
+          {/* El "por qué" del proxy manda sobre cualquier texto nuestro: sabe
+              cosas que nosotros no —"hay agenda pero sólo se reserva por
+              teléfono" es un cero que no se arregla cambiando filtros—. Es la
+              misma función que ya usaba la rama de reprogramar. */}
+          <Aviso
+            tono="atencion"
+            titulo={
+              filtros.profesionalId
+                ? "No encontramos horarios con ese profesional"
+                : "No hay horarios disponibles"
+            }
+            detalle={
+              mensajeSinTurnos(agendaNueva.infoSinTurnos) ||
+              (filtros.profesionalId
+                ? "Puede que tenga la agenda completa. Probá con todos los horarios o escribinos por WhatsApp."
+                : "No encontramos turnos en los próximos días. Escribinos por WhatsApp y buscamos una alternativa.")
+            }
+          />
+
+          {/* El consejo como botón y no como frase: "probá sin elegir
+              profesional" obligaba al paciente a descubrir solo cómo se hace
+              eso, y la única forma era el "Volver" de arriba. */}
+          {filtros.profesionalId && ofreceVerTodos(permisos) && (
+            <VerTodos
+              token={token}
+              ruta={ruta}
+              etiqueta="Ver todos los horarios"
+              detalle="Con cualquier profesional"
+              conservar={sinElProfesional}
+            />
+          )}
+        </>
+      ) : (
+        <SelectorDeTurnos
+          token={token}
+          formato={formato}
+          dias={diasNuevos}
+          paciente={datosParaElResumen}
+          corregirDatosEn={corregirDatosEn}
+          etiquetaConfirmar="Confirmar mi turno"
+          direccionesPorSede={direccionesNuevo}
+          // El MISMO valor que decide el aviso azul de arriba. Si el aviso dice
+          // "Horarios disponibles con X", los chips no repiten el nombre; si no
+          // lo dice, cada horario lo lleva. Dos reglas separadas para la misma
+          // pregunta es cómo un día aparecía el nombre y al siguiente no.
+          profesionalFijo={profesionalDeLaAgenda}
+          // El "Volver" va adentro por el mismo motivo que el título: en el
+          // repaso el paso atrás es "Elegir otro horario", y dos formas de
+          // volver que hacen cosas distintas en la misma pantalla es cómo se
+          // pierde el turno que ya se eligió.
+          encabezado={encabezadoDeLosHorarios}
         />
       )}
-
-      <SelectorDeTurnos
-        token={token}
-        formato={formato}
-        dias={diasNuevos}
-        paciente={datosParaElResumen}
-        corregirDatosEn={corregirDatosEn}
-        etiquetaConfirmar="Confirmar mi turno"
-        direccionesPorSede={direccionesNuevo}
-        // El MISMO valor que decide el aviso azul de arriba. Si el aviso dice
-        // "Horarios disponibles con X", los chips no repiten el nombre; si no
-        // lo dice, cada horario lo lleva. Dos reglas separadas para la misma
-        // pregunta es cómo un día aparecía el nombre y al siguiente no.
-        profesionalFijo={profesionalDeLaAgenda}
-        // El "Volver" va adentro por el mismo motivo que el título: en el
-        // repaso el paso atrás es "Elegir otro horario", y dos formas de
-        // volver que hacen cosas distintas en la misma pantalla es cómo se
-        // pierde el turno que ya se eligió.
-        encabezado={
-          <>
-            {volverArriba(volverQuitando())}
-            <EncabezadoDelPaso formato={formato} paso="elegir_horario" />
-
-            {/* Con quién son estos horarios. Es lo que decide si el nombre
-                del profesional hace falta al lado de cada horario, así que
-                conviene que el paciente lo lea antes.
-
-                Si no sabemos con quién son, NO se pone nada: "Horarios
-                disponibles." a secas no dice nada que el título no haya dicho
-                ya, y una línea que no informa es ruido que empuja el
-                calendario más abajo. */}
-            {profesionalDeLaAgenda && (
-              // Resaltado y no en gris: no es una nota al pie, es el filtro
-              // con el que está mirando la agenda. Si no lo registra, elige un
-              // horario creyendo que había más opciones de las que hay.
-              <Aviso tono="neutro" titulo={`Horarios disponibles con ${profesionalDeLaAgenda}.`} />
-            )}
-          </>
-        }
-      />
     </>,
     "amplio",
   )

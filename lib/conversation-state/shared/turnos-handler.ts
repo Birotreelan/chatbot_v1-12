@@ -88,7 +88,26 @@ export async function searchTurnosFull(
   const fechaDesde = formatDateForApi(today)
   const fechaHasta = formatDateForApi(new Date(today.getTime() + SEARCH_DAYS * 24 * 60 * 60 * 1000))
 
-  logger.info('Buscando turnos (60 días)', { fechaDesde, fechaHasta })
+  // ── Los filtros van en el log (26/10/2026) ────────────────────────────────
+  //
+  // Esta línea registraba `{fechaDesde, fechaHasta}` y nada más: los dos únicos
+  // parámetros que nunca son la causa de un cero. Cuando la búsqueda vuelve
+  // vacía —el caso que de verdad hay que diagnosticar— no quedaba registro de
+  // con qué sede, qué profesional, qué especialidad ni qué obra social se
+  // preguntó, que es exactamente lo que distingue "la clínica no tiene agenda"
+  // de "pedimos con un filtro que el proxy no reconoce".
+  //
+  // El DNI va truncado: sirve para saber si se mandó y cuál, sin dejar el
+  // documento entero en los logs de Vercel.
+  logger.info('Buscando turnos (60 días)', {
+    fechaDesde,
+    fechaHasta,
+    sedeId: params.sedeId || '(sin filtro)',
+    profesionalId: params.profesionalId || '(sin filtro)',
+    especialidadId: params.especialidadId || '(sin filtro)',
+    obraSocialId: params.obraSocialId || '(sin filtro)',
+    pacienteDNI: params.pacienteDNI ? String(params.pacienteDNI).slice(0, 3) + '****' : '(no se manda)',
+  })
 
   try {
     const result = await obtenerTurnos(
@@ -133,6 +152,17 @@ export async function searchTurnosFull(
     }
 
     if (turnosRaw.length === 0) {
+      // El cero también se anota. `obtenerTurnos` ya vuelca la respuesta cruda
+      // del proxy, pero esa línea no lleva el teléfono ni el cliente, así que
+      // en un log con varias conversaciones en paralelo no se sabe de quién es.
+      logger.info('Sin turnos', {
+        sedeId: params.sedeId || '(sin filtro)',
+        profesionalId: params.profesionalId || '(sin filtro)',
+        especialidadId: params.especialidadId || '(sin filtro)',
+        obraSocialId: params.obraSocialId || '(sin filtro)',
+        conDNI: Boolean(params.pacienteDNI),
+        infoSinTurnos: infoSinTurnos ? JSON.stringify(infoSinTurnos).slice(0, 300) : '(el proxy no explicó el cero)',
+      })
       return { success: false, infoSinTurnos, error: 'No se encontraron turnos disponibles en los próximos 60 días' }
     }
 
