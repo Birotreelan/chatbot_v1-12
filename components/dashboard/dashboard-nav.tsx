@@ -61,6 +61,11 @@ export function DashboardNav() {
             <Link href="/dashboard/portal" className="text-foreground/60 hover:text-foreground">
               Portal
             </Link>
+            {/* Mantenimiento: los clientes que cambiaron de cliente_id y
+                quedaron partidos en dos. Ver app/dashboard/ids/page.tsx. */}
+            <Link href="/dashboard/ids" className="text-foreground/60 hover:text-foreground">
+              IDs
+            </Link>
             <Link
               href="/demo"
               className="text-foreground/60 hover:text-foreground"

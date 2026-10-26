@@ -93,6 +93,128 @@ export interface ResultadoDeLaMigracion {
   errores: number
 }
 
+/**
+ * Un id que tiene datos guardados y no es de nadie.
+ *
+ * Se arma comparando lo que hay en Redis contra los `cliente_id` de las
+ * configuraciones vigentes. Si un id tiene estadísticas o precio cargado y
+ * ninguna clínica lo declara como suyo, es de una clínica que cambió de id: lo
+ * que quedó del lado viejo.
+ */
+export interface IdHuerfano {
+  id: string
+  /** Cuántas claves tiene guardadas. */
+  claves: number
+  /** Interacciones que registran sus estadísticas, para reconocerlo. */
+  confirmados: number
+  cancelados: number
+  recordatorios: number
+  /** Última vez que se le escribió algo. ISO, o "" si no se sabe. */
+  ultimaActividad: string
+  /** Si tiene precio, alias o CUIT cargados: son los que facturan en cero. */
+  tieneFacturacion: boolean
+}
+
+/** De qué familias sale un id de cliente. El resto de las claves van por teléfono o configId. */
+const FAMILIAS = [
+  "appointment_stats:",
+  "facturacion:precio_unidad:",
+  "facturacion:alias:",
+  "facturacion:cuit:",
+  "facturacion:cierre:",
+  "servicio:precio_unidad:",
+  "servicio:dolar:",
+  "servicio:observacion:",
+]
+
+/**
+ * El segmento que sigue al prefijo tiene que parecer un id de cliente.
+ *
+ * No todas esas familias llevan siempre un id ahí: `facturacion:cierre:` tiene
+ * también `facturacion:cierre:meses:2026-09`, un índice de períodos. Sin este
+ * filtro, "meses" aparecería en la pantalla como una clínica huérfana con
+ * datos, que es peor que no detectarla: manda a alguien a decidir sobre algo
+ * que no existe.
+ *
+ * Todos los `cliente_id` del sistema son UUID —los viejos v1, los nuevos v4—,
+ * así que alcanza con exigir esa forma.
+ */
+const PARECE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Los ids con datos que ninguna configuración reclama (26/10/2026).
+ *
+ * ── Por qué buscarlos en vez de que alguien los recuerde ──────────────────
+ *
+ * Cuando una clínica cambia de `cliente_id`, el síntoma del lado nuestro es
+ * que la facturación le cobra cero y las estadísticas devuelven vacío. Eso se
+ * nota semanas después, mirando un total, y para entonces nadie sabe cuál era
+ * el id viejo. Pasó con dos clientes en el mismo mes y el segundo lo
+ * descubrimos de casualidad.
+ *
+ * El dato para encontrarlos ya está: los ids que tienen datos y no figuran en
+ * ninguna configuración. No hay que acordarse de nada.
+ *
+ * ── Sólo lectura ───────────────────────────────────────────────────────────
+ *
+ * Esto no migra ni borra. Decidir que dos ids son la misma clínica es una
+ * conclusión que puede estar mal —y fusionar dos clínicas distintas arruina
+ * las estadísticas de las dos—, así que la decisión la toma una persona
+ * mirando los números.
+ */
+export async function idsHuerfanos(clienteIdsVigentes: string[]): Promise<IdHuerfano[]> {
+  const redis = getRedisClient()
+  if (!redis) return []
+
+  const vigentes = new Set(clienteIdsVigentes.filter(Boolean))
+  const porId = new Map<string, number>()
+
+  for (const familia of FAMILIAS) {
+    let cursor = "0"
+    do {
+      const resultado = await redis.scan(cursor, { match: `${familia}*`, count: 200 })
+      cursor = String(resultado[0])
+      for (const clave of resultado[1] as string[]) {
+        // De `appointment_stats:<id>:daily:confirmed` queda `<id>`; de
+        // `facturacion:cierre:<id>:2026-09` también.
+        const resto = clave.slice(familia.length)
+        const id = resto.split(":")[0]
+        if (!id || !PARECE_ID.test(id) || vigentes.has(id)) continue
+        porId.set(id, (porId.get(id) || 0) + 1)
+      }
+    } while (cursor !== "0")
+  }
+
+  const huerfanos: IdHuerfano[] = []
+  for (const [id, claves] of porId) {
+    let confirmados = 0
+    let cancelados = 0
+    let recordatorios = 0
+    let ultimaActividad = ""
+    let tieneFacturacion = false
+
+    try {
+      const stats = (await redis.hgetall(`appointment_stats:${id}`)) as Record<string, unknown> | null
+      if (stats) {
+        confirmados = Number(stats.totalConfirmed) || 0
+        cancelados = Number(stats.totalCancelled) || 0
+        recordatorios = Number(stats.totalTemplatesSent) || 0
+        ultimaActividad = typeof stats.lastUpdated === "string" ? stats.lastUpdated : ""
+      }
+      const precio = await redis.get(`facturacion:precio_unidad:${id}`)
+      const alias = await redis.get(`facturacion:alias:${id}`)
+      tieneFacturacion = Boolean(precio) || Boolean(alias)
+    } catch (error) {
+      console.error(`[MIGRACION] No se pudo describir el id huérfano ${id}:`, error)
+    }
+
+    huerfanos.push({ id, claves, confirmados, cancelados, recordatorios, ultimaActividad, tieneFacturacion })
+  }
+
+  // Los de más volumen primero: son los que más duele dejar partidos.
+  return huerfanos.sort((a, b) => b.confirmados + b.recordatorios - (a.confirmados + a.recordatorios))
+}
+
 /** Todas las claves que contienen ese id, sin importar la familia. */
 export async function clavesDelCliente(clienteId: string): Promise<string[]> {
   const redis = getRedisClient()

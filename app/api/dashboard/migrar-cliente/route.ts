@@ -24,8 +24,10 @@ import { requireAuthFromRequest } from "@/lib/auth"
 import {
   borrarElViejo,
   clavesDelCliente,
+  idsHuerfanos,
   migrarClienteId,
 } from "@/lib/migracion-cliente-id"
+import { getAllWhatsAppConfigs } from "@/lib/db"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -47,6 +49,28 @@ export async function GET(request: Request) {
   if ("error" in acceso) return acceso.error
 
   const { searchParams } = new URL(request.url)
+
+  // ── Sin parámetros: qué ids quedaron sueltos ─────────────────────────────
+  //
+  // Es la pregunta que no se podía hacer antes. El síntoma de un cliente que
+  // cambió de id —factura en cero, estadísticas vacías— se nota semanas
+  // después, cuando ya nadie sabe cuál era el id viejo.
+  if (!searchParams.get("viejo") && !searchParams.get("nuevo")) {
+    const configs = await getAllWhatsAppConfigs()
+    const huerfanos = await idsHuerfanos(configs.map((c) => c.cliente_id || ""))
+    return NextResponse.json({
+      huerfanos,
+      clientes: configs
+        .filter((c) => c.cliente_id)
+        .map((c) => ({
+          clienteId: c.cliente_id,
+          nombre: c.alias || c.displayName,
+          activo: c.active !== false,
+        }))
+        .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre))),
+    })
+  }
+
   const viejo = searchParams.get("viejo") || ""
   const nuevo = searchParams.get("nuevo") || ""
   if (!viejo || !nuevo) {
