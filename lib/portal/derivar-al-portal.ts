@@ -21,6 +21,7 @@
  */
 
 import { emitirEnlace, type FormatoDelEnlace, type TurnoDelPortal } from "./token"
+import { registroDelPortal, enlaceCorto } from "./registro"
 import {
   construirMensajeConEnlace,
   enviarMensajeConEnlace,
@@ -498,7 +499,10 @@ export async function derivarAlPortal(params: {
       messageType: "portal",
     }).catch(() => {})
 
-    console.log(`[PORTAL] Enlace de ${params.intencion} enviado a ${params.userPhoneNumber}`)
+    registroDelPortal({ phone: params.userPhoneNumber, configId: config.id }, "enviar_enlace").info(
+      "Enlace enviado al paciente",
+      { enlace: enlaceCorto(enlace.token), intencion: params.intencion },
+    )
     return true
   } catch (error) {
     console.error("[PORTAL] Falló la derivación al portal; sigue el flujo conversacional:", error)

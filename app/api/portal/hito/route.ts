@@ -31,6 +31,7 @@
 import { NextResponse } from "next/server"
 
 import { marcarVisto, marcarHito } from "@/lib/portal/token"
+import { registroDelPortal, enlaceCorto } from "@/lib/portal/registro"
 import {
   anotarEnElMonitor,
   marcaDelFormato,
@@ -89,9 +90,16 @@ export async function POST(request: Request) {
       texto: `${contexto.demo ? textos.demo : textos.real}${marcaDelFormato(formato)}`,
     })
 
-    console.log(
-      `[PORTAL] ${contexto.phone} — hito "${hito}" (${contexto.intencion}, ${formato})`,
-    )
+    // Con el formato del resto del recorrido (26/10/2026): esta línea decía
+    // `[PORTAL] 3413121395 — hito "sin_horarios" (...)`, sin cliente y sin
+    // momento, así que al filtrar por teléfono aparecía como un cuerpo extraño
+    // en medio de las líneas de la conversación. Mismo contenido, misma forma.
+    registroDelPortal(contexto, "hito").info(`Hito "${hito}"`, {
+      enlace: enlaceCorto(token),
+      intencion: contexto.intencion,
+      formato,
+      ...(contexto.demo ? { demo: true } : {}),
+    })
   } catch (error) {
     console.error(`[PORTAL] No se pudo anotar el hito "${hito}":`, error)
   }

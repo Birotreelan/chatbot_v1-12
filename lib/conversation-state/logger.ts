@@ -18,13 +18,23 @@ export interface LogEntry {
   phase: string
   message: string
   metadata?: Record<string, any>
+  /**
+   * El prefijo de la línea (26/10/2026).
+   *
+   * Era siempre "DIRECT-FLOW". El portal web no tenía ningún registro de lo
+   * que hacía —dos console.warn en todo el archivo— y el rastro de una
+   * conversación se cortaba justo cuando el paciente saltaba de WhatsApp al
+   * navegador. Con esto el portal escribe con la misma forma, así que filtrar
+   * por el teléfono sigue mostrando el recorrido entero, de punta a punta.
+   */
+  origen?: string
 }
 
 /**
  * Log formateado para consola con prefijo distintivo
  */
 function formatLog(entry: LogEntry): string {
-  const prefix = `[DIRECT-FLOW:${entry.phase}]`
+  const prefix = `[${entry.origen || "DIRECT-FLOW"}:${entry.phase}]`
   const timestamp = new Date(entry.timestamp).toISOString()
   const metadata = entry.metadata ? ` | ${JSON.stringify(entry.metadata)}` : ""
   return `${prefix} (${timestamp}) ${entry.phone}@${entry.configId} → ${entry.message}${metadata}`
@@ -38,11 +48,13 @@ export class ConversationLogger {
   private phone: string
   private configId: string
   private phase: string
+  private origen: string
 
-  constructor(phone: string, configId: string, phase: string) {
+  constructor(phone: string, configId: string, phase: string, origen = "DIRECT-FLOW") {
     this.phone = phone
     this.configId = configId
     this.phase = phase
+    this.origen = origen
   }
 
   debug(message: string, metadata?: Record<string, any>) {
@@ -52,6 +64,7 @@ export class ConversationLogger {
       phone: this.phone,
       configId: this.configId,
       phase: this.phase,
+      origen: this.origen,
       message,
       metadata,
     }
@@ -65,6 +78,7 @@ export class ConversationLogger {
       phone: this.phone,
       configId: this.configId,
       phase: this.phase,
+      origen: this.origen,
       message,
       metadata,
     }
@@ -78,6 +92,7 @@ export class ConversationLogger {
       phone: this.phone,
       configId: this.configId,
       phase: this.phase,
+      origen: this.origen,
       message,
       metadata,
     }
@@ -91,6 +106,7 @@ export class ConversationLogger {
       phone: this.phone,
       configId: this.configId,
       phase: this.phase,
+      origen: this.origen,
       message,
       metadata: {
         ...metadata,
@@ -115,7 +131,8 @@ export class ConversationLogger {
 export function createConversationLogger(
   phone: string,
   configId: string,
-  phase: string
+  phase: string,
+  origen?: string,
 ): ConversationLogger {
-  return new ConversationLogger(phone, configId, phase)
+  return new ConversationLogger(phone, configId, phase, origen)
 }

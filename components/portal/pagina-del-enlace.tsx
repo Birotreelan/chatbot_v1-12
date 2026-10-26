@@ -88,6 +88,7 @@ import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
 import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
 import { GestionarTurno } from "@/components/portal/gestionar-turno"
 import { reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
+import { registroDelPortal, datosDeLaVisita } from "@/lib/portal/registro"
 
 export async function PaginaDelEnlace({
   params,
@@ -341,6 +342,19 @@ export async function PaginaDelEnlace({
   }
 
   const paso = decidirPaso(contexto.intencion, permisos, filtros, identidad, filtrosCrudos.paso)
+
+  // ── El recorrido queda en el log (26/10/2026) ─────────────────────────────
+  //
+  // Una línea por render, con el mismo formato que las de WhatsApp, para que
+  // filtrar por el teléfono muestre el recorrido entero: el paciente aprieta un
+  // botón en el chat, abre el enlace, elige sede, profesional y horario, y todo
+  // eso se lee de corrido en vez de cortarse al salir de WhatsApp.
+  //
+  // Va DESPUÉS de resolver la identidad y los filtros a propósito: la línea
+  // tiene que decir con qué datos se decidió el paso, que es lo que después
+  // explica una agenda vacía o un turno sin obra social.
+  const registro = registroDelPortal(contexto, paso)
+  registro.info("Paso del portal", datosDeLaVisita({ token, contexto, identidad, filtros, formato }))
 
   // El aviso de prueba va arriba de todo y en todas las pantallas. Si alguien
   // abre este enlace sin saber qué es, tiene que enterarse antes de tocar nada.

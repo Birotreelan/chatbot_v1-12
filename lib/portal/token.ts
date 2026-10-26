@@ -21,6 +21,7 @@
  */
 
 import { randomBytes, createHash } from "crypto"
+import { registroDelPortal, enlaceCorto } from "./registro"
 import { getRedisClient } from "../redis"
 import type { IdentidadDelPaciente } from "./pasos"
 import {
@@ -378,8 +379,16 @@ export async function emitirEnlace(params: {
   const token = generarToken()
   await redis.setex(clave(token), ttlDeLaClave(venceVisibilidad), JSON.stringify(contexto))
 
-  console.log(
-    `[PORTAL] Enlace emitido para ${params.phone} (${params.intencion}, ${params.origen}), vence ${venceAccion}`,
+  registroDelPortal({ phone: params.phone, configId: params.configId }, "emitir_enlace").info(
+    "Enlace emitido",
+    {
+      enlace: enlaceCorto(token),
+      intencion: params.intencion,
+      origenDelEnlace: params.origen,
+      formato: params.formato || "pantallas",
+      vence: venceAccion,
+      ...(params.demo ? { demo: true } : {}),
+    },
   )
 
   return {
@@ -541,7 +550,12 @@ export async function consumirEnlace(
   }
 
   await guardar(token, contexto)
-  console.log(`[PORTAL] Enlace consumido (${contexto.intencion}) para ${contexto.phone}`)
+  registroDelPortal(contexto, "consumir_enlace").info("Enlace consumido", {
+    enlace: enlaceCorto(token),
+    intencion: contexto.intencion,
+    tipo: resultado.tipo || "(sin tipo)",
+    pendiente: resultado.pendiente === true,
+  })
   return true
 }
 
