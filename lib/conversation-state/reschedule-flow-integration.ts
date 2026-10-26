@@ -444,6 +444,24 @@ export async function processRescheduleMessage(
           apellido: st.paciente.apellido,
           telefono: st.paciente.telefono,
           ...(st.obra_social_id ? { obra_social_id: st.obra_social_id } : {}),
+          // ── De qué turno viene este turno (26/10/2026) ──────────────────
+          //
+          // El flujo arrancó desde un turno cancelado y lo tiene guardado en
+          // el estado, así que se pasa explícito: es más fiable que la marca
+          // de cancelación pendiente, que `reservarTurno` consulta sólo
+          // cuando nadie le dice nada.
+          //
+          // `canceladoEl` no se manda: la cancelación ocurrió antes de este
+          // flujo y el estado no guarda cuándo. El comentario omite esa parte
+          // en vez de inventarla.
+          reagendamiento: {
+            turnoCancelado: {
+              fecha: st.turnosCancelado?.fecha,
+              hora: st.turnosCancelado?.hora,
+              profesional: st.turnosCancelado?.profesional || st.profesional_original,
+            },
+            origen: "whatsapp" as const,
+          },
         }
         console.log(`[RESCHEDULE-INTEGRATION] Reservando turno en proxy (Agenda_Id: ${turno.agenda_id})`)
         const reservaRaw = await reservarTurno(clienteId, turno.agenda_id, pacienteDatos)

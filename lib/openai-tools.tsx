@@ -22,6 +22,7 @@ import { saveConversationMessage } from "./conversations"
 import { nanoid } from "nanoid"
 import { getRedisClient } from "./redis"
 import { trackAppointmentEvent, checkAndClearPendingReschedule, trackRescheduleStarted } from "./appointment-stats"
+import { comentarioParaLaReserva } from "./turnos/comentario-de-la-reserva"
 import { getAssistantIdByFunction } from "./assistant-utils"
 import { logError } from "./logging" // Assuming logError is in './logging'
 import { incrementMetric } from "./metrics" // Assuming incrementMetric is in './metrics'
@@ -786,6 +787,20 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
       })
     }
 
+    // ── El comentario de reagendamiento (26/10/2026) ───────────────────────
+    //
+    // Este es el camino de la IA: llama `reservar_turno` sin saber si el
+    // paciente viene de cancelar. Por eso `comentarioParaLaReserva` consulta la
+    // marca de cancelación pendiente, salvo que el flujo haya pasado el dato
+    // explícito (`pacienteDatos.reagendamiento`, que usa el reagendamiento
+    // conversacional).
+    const comentarios = await comentarioParaLaReserva({
+      clienteId,
+      telefono: pacienteDatos.telefono,
+      explicito: pacienteDatos.reagendamiento,
+      comentarioDelLlamador: pacienteDatos.comentarios,
+    })
+
     const requestBody = {
       Cliente_Id: clienteId,
       Action: "set_turno",
@@ -806,7 +821,7 @@ export async function reservarTurno(clienteId: string, turnoId: string, paciente
       ...(pacienteDatos.plan_id && { Plan_Id: pacienteDatos.plan_id }),
       ...(pacienteDatos.nro_afiliado && { Nro_Afiliado: pacienteDatos.nro_afiliado }),
       ...(pacienteDatos.motivo && { Turno_Motivo: pacienteDatos.motivo }),
-      ...(pacienteDatos.comentarios && { Comentarios: pacienteDatos.comentarios }),
+      ...(comentarios && { Comentarios: comentarios }),
     }
 
     const response = await fetch(baseUrl, {

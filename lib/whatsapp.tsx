@@ -67,6 +67,7 @@ import {
   clearFlowState,
   clearAppointmentContext,
   clearAppointmentTurnos,
+  snapshotDelTurnoCancelado,
   isConfirmCancelResponse,
   isKeepAppointmentResponse,
   isAttendanceAffirmation,
@@ -1268,7 +1269,14 @@ async function handlePendingFlowResponse(
             templateSentAt: templateSentAt || undefined,
             metadata: { source: "direct_flow", proxyBody },
           })
-          await markPendingReschedule(config.cliente_id, userPhoneNumber)
+          // El snapshot del turno que se acaba de cancelar viaja con la marca
+          // (26/10/2026): es lo que después le dice al sistema de la clínica,
+          // en el comentario de `set_turno`, a qué turno reemplaza el nuevo.
+          // Se lee DESPUÉS de clearAppointmentTurnos, que es quien lo guarda.
+          await markPendingReschedule(config.cliente_id, userPhoneNumber, {
+            turnoCancelado: await snapshotDelTurnoCancelado(userPhoneNumber, config.id),
+            origen: "whatsapp",
+          })
         }
 
         // Sincronizar el contexto de la conversación: fue sembrado por el template con un
@@ -4548,8 +4556,12 @@ IMPORTANTE: Busca en el historial de la conversación la información del turno 
             metadata: { proxyResponse },
           })
           
-          // Marcar que hay una cancelación pendiente de reagendar (ventana de 12h)
-          await markPendingReschedule(config.cliente_id, userPhoneNumber)
+          // Marcar que hay una cancelación pendiente de reagendar, con el
+          // detalle del turno para el comentario de `set_turno` (26/10/2026).
+          await markPendingReschedule(config.cliente_id, userPhoneNumber, {
+            turnoCancelado: await snapshotDelTurnoCancelado(userPhoneNumber, config.id),
+            origen: "whatsapp",
+          })
 
         }
 
@@ -4624,8 +4636,12 @@ Responde de manera apropiada según la acción realizada.`
                 eventType = "confirmed"
               } else if (accionDetectada === "cancelacion") {
                 eventType = "cancelled"
-                // Marcar que hay una cancelación pendiente de reagendar (ventana de 12h)
-                await markPendingReschedule(config.cliente_id, userPhoneNumber)
+                // Marcar que hay una cancelación pendiente de reagendar, con el
+                // detalle del turno para el comentario de `set_turno`.
+                await markPendingReschedule(config.cliente_id, userPhoneNumber, {
+                  turnoCancelado: await snapshotDelTurnoCancelado(userPhoneNumber, config.id),
+                  origen: "whatsapp",
+                })
               } else {
                 eventType = "rescheduled"
               }

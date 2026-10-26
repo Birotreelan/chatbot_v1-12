@@ -1,4 +1,5 @@
 import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse, SedeResponse } from "./types"
+import { comentarioParaLaReserva, type ReagendamientoExplicito } from "../turnos/comentario-de-la-reserva"
 import { getClinicApiConfig } from "./types"
 import { getRedisClient } from "../redis"
 import { TIMEOUTS, fetchWithRetry, RETRY_PRESETS } from "../config/timeouts"
@@ -533,6 +534,13 @@ export async function reservarTurno(
     nroAfiliado?: string
     turnoMotivo?: string
     comentarios?: string
+    /**
+     * Lo que el flujo sabe del turno que este turno reemplaza (26/10/2026).
+     *
+     * Opcional: si no viene, `comentarioParaLaReserva` busca la marca de
+     * cancelación pendiente. Ver lib/turnos/comentario-de-la-reserva.ts.
+     */
+    reagendamiento?: ReagendamientoExplicito | null
   },
   useCache = false, // Reservar turno no debería cachearse
 ): Promise<ApiResponse<any>> {
@@ -560,7 +568,20 @@ export async function reservarTurno(
   if (pacienteData.planId) params.Plan_Id = pacienteData.planId
   if (pacienteData.nroAfiliado) params.Nro_Afiliado = pacienteData.nroAfiliado
   if (pacienteData.turnoMotivo) params.Turno_Motivo = pacienteData.turnoMotivo
-  if (pacienteData.comentarios) params.Comentarios = pacienteData.comentarios
+
+  // ── El comentario se resuelve acá adentro, no en el llamador (26/10/2026) ─
+  //
+  // Así cualquier reserva que pase por esta función —portal, paciente
+  // existente, paciente nuevo— sale con el comentario de reagendamiento sin
+  // que el flujo tenga que acordarse. El `comentarios` propio del llamador se
+  // conserva: se concatena, no se pisa.
+  const comentarios = await comentarioParaLaReserva({
+    clienteId,
+    telefono: pacienteData.telefono,
+    explicito: pacienteData.reagendamiento,
+    comentarioDelLlamador: pacienteData.comentarios,
+  })
+  if (comentarios) params.Comentarios = comentarios
 
   return fetchProxyApi<any>(clienteId, "set_turno", params, useCache)
 }

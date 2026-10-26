@@ -374,7 +374,35 @@ export async function POST(request: Request) {
   let reserva: any
   let falloLaLlamada = false
   try {
-    reserva = await reservarTurno(contexto.clienteId, agendaId, datosDelPaciente)
+    reserva = await reservarTurno(contexto.clienteId, agendaId, {
+      ...datosDelPaciente,
+      // ── De qué turno viene este turno (26/10/2026) ──────────────────────
+      //
+      // Acá el dato es de primera mano: el turno viejo está en el token y la
+      // cancelación la acabamos de hacer dos bloques más arriba. Se pasa
+      // explícito en vez de dejar que `reservarTurno` lo busque en la marca
+      // de cancelación pendiente, que es por (cliente, teléfono) y no sabría
+      // cuál de dos turnos se está reemplazando.
+      //
+      // Va aunque la cancelación haya fallado: si el paciente termina con dos
+      // turnos, el comentario es justamente lo que le dice a la clínica cuál
+      // sobra. En ese caso se omite la fecha de cancelación, porque no hubo.
+      ...(hayQueCancelarElAnterior
+        ? {
+            reagendamiento: {
+              turnoCancelado: {
+                fecha: contexto.turno?.fecha,
+                hora: contexto.turno?.hora,
+                profesional: contexto.turno?.profesional,
+                agendaId: contexto.turno?.agendaId,
+                sede: contexto.turno?.sede,
+              },
+              canceladoEl: seCancelóElAnterior ? new Date().toISOString() : undefined,
+              origen: "portal" as const,
+            },
+          }
+        : {}),
+    })
   } catch (error) {
     falloLaLlamada = true
     console.error("[PORTAL] Error reservando:", error)

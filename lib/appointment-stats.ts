@@ -12,8 +12,21 @@ const TEMPLATE_TRACKING_LATEST_PREFIX = "template_tracking_latest:"
 const PENDING_RESCHEDULE_PREFIX = "pending_reschedule:"
 const ACTIVE_USER_CONVERSATION_PREFIX = "active_user_conversation:"
 
-// Ventana de tiempo para considerar un reagendamiento como válido (12 horas en segundos)
-const RESCHEDULE_WINDOW_SECONDS = 12 * 60 * 60 // 12 horas
+/**
+ * Ventana para considerar que una reserva reemplaza a una cancelación.
+ *
+ * 12 h → 72 h el 26/10/2026. Doce horas dejaban afuera el caso más común de
+ * todos: cancelar a la tarde y conseguir otro turno al día siguiente. Esas
+ * reservas se contaban como "turno nuevo" en /dashboard/estadisticas —
+ * inflando los nuevos y hundiendo la tasa de reagendamiento— y ahora, además,
+ * irían al sistema de la clínica sin el comentario que dice a qué turno
+ * reemplazan.
+ *
+ * No más que eso: la marca es por (cliente, teléfono) y sin fecha de corte un
+ * paciente que canceló hace un mes y pide un turno nuevo de verdad quedaría
+ * etiquetado como reagendamiento para siempre.
+ */
+const RESCHEDULE_WINDOW_SECONDS = 72 * 60 * 60 // 72 horas
 
 // Ventana de tiempo para conversaciones user-initiated (24 horas en segundos)
 const USER_CONVERSATION_WINDOW_SECONDS = 24 * 60 * 60 // 24 horas
@@ -685,10 +698,43 @@ export async function checkAndTrackUserInitiated(clienteId: string, phoneNumber:
 }
 
 /**
- * Marca que un usuario canceló un turno y está pendiente de reagendar
- * Esta marca expira en 12 horas
+ * Lo que queda guardado cuando un paciente cancela: que canceló, y QUÉ canceló.
+ *
+ * El snapshot se agregó el 26/10/2026. Antes acá sólo había un sello de tiempo
+ * —alcanzaba para contar reagendamientos en las estadísticas— y por eso, cuando
+ * el paciente volvía a pedir turno por un camino que no sabía de la cancelación
+ * (la IA llamando `reservar_turno` por su cuenta, que es el camino más
+ * frecuente), no había forma de decirle al sistema de la clínica a qué turno
+ * reemplazaba el nuevo.
+ *
+ * Todos los campos del turno son opcionales: vienen de `Chatbot_Data` y no
+ * siempre están completos. Ver comentario-reagendamiento.ts, que arma el texto
+ * con lo que haya.
  */
-export async function markPendingReschedule(clienteId: string, phoneNumber: string): Promise<void> {
+export interface ReagendamientoPendiente {
+  cancelledAt: string
+  phoneNumber: string
+  clienteId: string
+  turnoCancelado?: {
+    fecha?: string
+    hora?: string
+    profesional?: string
+    agendaId?: string
+    sede?: string
+  }
+  /** Por dónde canceló, para que el comentario lo diga. */
+  origen?: "whatsapp" | "portal" | "chat"
+}
+
+/**
+ * Marca que un usuario canceló un turno y está pendiente de reagendar.
+ * La marca expira a las 72 horas (ver RESCHEDULE_WINDOW_SECONDS).
+ */
+export async function markPendingReschedule(
+  clienteId: string,
+  phoneNumber: string,
+  detalle?: Pick<ReagendamientoPendiente, "turnoCancelado" | "origen">,
+): Promise<void> {
   const redis = getRedisClient()
   if (!redis) {
     console.log("[APPOINTMENT_STATS] ⚠️ Redis no disponible para markPendingReschedule")
@@ -697,17 +743,49 @@ export async function markPendingReschedule(clienteId: string, phoneNumber: stri
 
   try {
     const key = `${PENDING_RESCHEDULE_PREFIX}${clienteId}_${phoneNumber}`
-    const data = {
+    const data: ReagendamientoPendiente = {
       cancelledAt: new Date().toISOString(),
       phoneNumber,
-      clienteId
+      clienteId,
+      ...(detalle?.turnoCancelado ? { turnoCancelado: detalle.turnoCancelado } : {}),
+      ...(detalle?.origen ? { origen: detalle.origen } : {}),
     }
-    
-    // Guardar por 12 horas
+
     await redis.set(key, JSON.stringify(data), { ex: RESCHEDULE_WINDOW_SECONDS })
-    console.log(`[APPOINTMENT_STATS] 📊 Marcado pending reschedule para ${phoneNumber} (expira en 12h)`)
+    console.log(
+      `[APPOINTMENT_STATS] 📊 Marcado pending reschedule para ${phoneNumber} (expira en 72h)` +
+        (data.turnoCancelado?.fecha ? ` · turno del ${data.turnoCancelado.fecha}` : " · sin detalle del turno"),
+    )
   } catch (error) {
     console.error("[APPOINTMENT_STATS] ❌ Error al marcar pending reschedule:", error)
+  }
+}
+
+/**
+ * Lee la marca SIN consumirla (26/10/2026).
+ *
+ * `checkAndClearPendingReschedule`, acá abajo, borra la marca y se llama
+ * DESPUÉS de reservar, para las estadísticas. El comentario tiene que armarse
+ * ANTES, porque viaja dentro de esa misma reserva. Si usara la función que
+ * borra, la reserva se llevaría la marca y la estadística posterior contaría el
+ * reagendamiento como turno nuevo: arreglaríamos una cosa rompiendo la otra.
+ */
+export async function leerReagendamientoPendiente(
+  clienteId: string,
+  phoneNumber: string,
+): Promise<ReagendamientoPendiente | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+
+  try {
+    const crudo = await redis.get(`${PENDING_RESCHEDULE_PREFIX}${clienteId}_${phoneNumber}`)
+    if (!crudo) return null
+    // Upstash deserializa solo lo que parece JSON, así que puede venir de las
+    // dos formas.
+    return (typeof crudo === "string" ? JSON.parse(crudo) : crudo) as ReagendamientoPendiente
+  } catch (error) {
+    console.error("[APPOINTMENT_STATS] ❌ Error al leer el reagendamiento pendiente:", error)
+    return null
   }
 }
 
@@ -725,7 +803,7 @@ export async function trackRescheduleStarted(clienteId: string, phoneNumber: str
 }
 
 /**
- * Verifica si hay una cancelación pendiente de reagendar (dentro de 12 horas)
+ * Verifica si hay una cancelación pendiente de reagendar (dentro de la ventana)
  * Si existe, la elimina y retorna true
  * Si no existe, retorna false
  */

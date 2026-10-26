@@ -9,6 +9,7 @@
  * 2. FlowState: Guardar/leer el estado del flujo pendiente (ej: awaiting_cancel_confirmation)
  */
 
+import type { TurnoCanceladoParaComentario } from "./turnos/comentario-reagendamiento"
 import { getRedisClient } from "./redis"
 import { classifyOptionWithAI } from "./conversation-state/shared/ai-option-classifier"
 
@@ -367,6 +368,39 @@ export async function clearAppointmentTurnos(
   } catch (error) {
     console.error("[APPOINTMENT-FLOW] Error en clearAppointmentTurnos:", error)
     return false
+  }
+}
+
+/**
+ * El turno que acaba de cancelarse, con la forma que espera el comentario de
+ * `set_turno` (26/10/2026).
+ *
+ * `clearAppointmentTurnos` ya dejaba el snapshot en `turno_cancelado`; lo único
+ * que faltaba era poder leerlo desde los sitios que marcan la cancelación, sin
+ * que cada uno tenga que conocer la forma interna de `ChatbotData` ni acordarse
+ * de mapear `agenda_id` a `agendaId`.
+ *
+ * Devuelve `undefined` si no hay nada: el comentario se arma igual, más corto.
+ * Ver lib/turnos/comentario-reagendamiento.ts.
+ */
+export async function snapshotDelTurnoCancelado(
+  phone: string,
+  configId: string,
+): Promise<TurnoCanceladoParaComentario | undefined> {
+  try {
+    const contexto = await getAppointmentContext(phone, configId)
+    const t = contexto?.turno_cancelado
+    if (!t) return undefined
+    return {
+      fecha: t.fecha,
+      hora: t.hora,
+      profesional: t.profesional,
+      agendaId: t.agenda_id,
+      sede: t.sede,
+    }
+  } catch (error) {
+    console.error("[APPOINTMENT-FLOW] No se pudo leer el turno cancelado:", error)
+    return undefined
   }
 }
 

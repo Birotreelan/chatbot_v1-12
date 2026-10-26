@@ -5,6 +5,7 @@ import { saveConversationMessage } from "@/lib/conversations"
 import { nanoid } from "nanoid"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { trackAppointmentEvent, getTemplateSentTime, markPendingReschedule } from "@/lib/appointment-stats"
+import { snapshotDelTurnoCancelado } from "@/lib/appointment-flow-state"
 import { sendReminderTemplate } from "@/lib/reminders/send-reminder-template"
 import { calcularRecordatorios, type RecordatoriosConfig } from "@/lib/reminders/schedule-calculator"
 import { assignSegundoRecordatorioSlot, saveReminderQueue, type QueuedReminder } from "@/lib/reminders/reminder-queue"
@@ -163,9 +164,28 @@ async function handleButtonResponse(data: any) {
         templateSentAt: templateSentAt || undefined,
       })
       
-      // Marcar que hay una cancelación pendiente de reagendar (ventana de 12h)
-      await markPendingReschedule(config.id, userPhoneNumber)
-      console.log(`[PROXYLISTENER] 📊 Marcado pending reschedule para ${userPhoneNumber}`)
+      // ── La marca de reagendamiento (26/10/2026) ──────────────────────────
+      //
+      // Dos correcciones sobre lo que había acá:
+      //
+      // 1. Iba `config.id` donde el resto del proyecto usa `config.cliente_id`.
+      //    La clave de Redis se arma con ese valor, así que la marca quedaba
+      //    bajo un nombre que no consulta nadie: ninguna de estas
+      //    cancelaciones —las del botón del recordatorio, que son las más
+      //    frecuentes— se contaba después como reagendamiento.
+      // 2. El teléfono se normaliza, por el mismo motivo: quien después lee la
+      //    marca lo hace con el número ya normalizado.
+      //
+      // Y ahora viaja además el turno cancelado, para el comentario de
+      // `set_turno`.
+      if (config.cliente_id) {
+        const telefonoNormalizado = normalizePhoneNumber(userPhoneNumber)
+        await markPendingReschedule(config.cliente_id, telefonoNormalizado, {
+          turnoCancelado: await snapshotDelTurnoCancelado(telefonoNormalizado, config.id),
+          origen: "whatsapp",
+        })
+        console.log(`[PROXYLISTENER] 📊 Marcado pending reschedule para ${telefonoNormalizado}`)
+      }
     } else if (buttonLower.includes("reprogramar") || buttonLower.includes("reagendar")) {
       responseData = {
         ...responseData,
