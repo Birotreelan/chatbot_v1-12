@@ -68,7 +68,15 @@ interface FacturacionTableProps {
    */
   /** Alias y CUIT son de Facturación. Servicio no los muestra. */
   mostrarAliasYCuit?: boolean
-  /** "Costo monotributo" en Facturación, "Costo" en Servicio. */
+  /**
+   * La columna de costo (mensajes con cargo de Meta × costo por mensaje).
+   *
+   * Sólo Servicio, desde el 27/10/2026. Facturación la mostraba como "Costo
+   * monotributo", pero es nuestro costo y no algo que se le facture al
+   * cliente: el mismo argumento por el que el margen ya era sólo de Servicio.
+   */
+  mostrarCosto?: boolean
+  /** Título de la columna de costo, si se muestra. */
   etiquetaCosto?: string
   /** Nota libre por cliente. Sólo Servicio. Ver lib/servicio-observaciones.ts. */
   mostrarObservacion?: boolean
@@ -109,7 +117,8 @@ export function FacturacionTable({
   month,
   dolarVenta,
   mostrarAliasYCuit = true,
-  etiquetaCosto = "Costo monotributo",
+  mostrarCosto = false,
+  etiquetaCosto = "Costo",
   mostrarObservacion = false,
   apiPathPrecios = "/api/facturacion/precios",
   cerrarMes = true,
@@ -403,13 +412,17 @@ export function FacturacionTable({
   const totalRecordatorios = clientes.reduce((sum, c) => sum + (c.recordatorios || 0), 0)
   const totalServicios = clientes.reduce((sum, c) => sum + (c.serviciosFacturados || 0), 0)
 
-  // ── El costo de monotributo ───────────────────────────────────────────────
+  // ── El costo ──────────────────────────────────────────────────────────────
   //
   // Corre sólo sobre los mensajes que Meta nos cobra, así que su base NO es el
   // total de la fila: los mensajes de servicio gratuitos se le facturan al
   // cliente y a nosotros no nos cuestan. Por eso esta columna no cierra con las
   // otras tres, y el encabezado lo aclara.
-  const hayCosto = clientes.some((c) => c.mensajesConCargoDeMeta !== undefined)
+  //
+  // Sólo en las pestañas que lo piden (`mostrarCosto`): Servicio sí,
+  // Facturación no. El margen de Servicio no depende de esto — lo calcula
+  // valoresDeLaFila por su cuenta.
+  const hayCosto = mostrarCosto && clientes.some((c) => c.mensajesConCargoDeMeta !== undefined)
   const totalConCargo = clientes.reduce((sum, c) => sum + (c.mensajesConCargoDeMeta || 0), 0)
   const totalCostoUSD = totalConCargo * COSTO_POR_MENSAJE_CON_CARGO_USD
 

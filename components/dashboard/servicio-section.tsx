@@ -305,9 +305,9 @@ export function ServicioSection() {
         )}
       </div>
 
-      {/* Servicio no muestra Alias ni CUIT —son de Facturación—, llama "Costo"
-          a lo que allá es "Costo monotributo", y suma una Observación por
-          cliente. Los tres son props de la misma tabla: ver la nota de
+      {/* Servicio no muestra Alias ni CUIT —son de Facturación—, y suma la
+          columna de Costo (sólo de esta pestaña desde el 27/10/2026) y una
+          Observación por cliente. Son props de la misma tabla: ver la nota de
           FacturacionTableProps sobre por qué no se copió. */}
       {/* ── Lo que Servicio hace distinto ────────────────────────────────
           · sus propios precios (`apiPathPrecios`)
@@ -321,7 +321,7 @@ export function ServicioSection() {
         month={month}
         dolarVenta={dolarVenta}
         mostrarAliasYCuit={false}
-        etiquetaCosto="Costo"
+        mostrarCosto
         mostrarObservacion
         apiPathPrecios="/api/servicio/precios"
         cerrarMes={false}
@@ -336,7 +336,7 @@ export function ServicioSection() {
         month={month}
         dolarVenta={dolarVenta}
         mostrarAliasYCuit={false}
-        etiquetaCosto="Costo"
+        mostrarCosto
         mostrarObservacion
         apiPathPrecios="/api/servicio/precios"
         cerrarMes={false}
