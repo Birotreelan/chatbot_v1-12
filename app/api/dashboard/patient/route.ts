@@ -1,8 +1,28 @@
+/**
+ * La ficha del paciente para el Monitor de Conversaciones.
+ *
+ * ── Dos arreglos, el 27/10/2026 ────────────────────────────────────────────
+ *
+ * Acá había una URL de proxy escrita a mano
+ * ("https://proxy.santiagovulliez.com/proxy_service/"). El sistema es
+ * multi-cliente y cada clínica tiene el suyo, así que el Monitor le preguntaba
+ * por los pacientes de TODAS a un solo proxy: para las demás mostraba
+ * "paciente nuevo" aunque la persona tuviera veinte turnos. Es el mismo error
+ * que se corrigió en /api/support/patient el 15/9 y que esta copia no recibió.
+ *
+ * Y pedía `get_paciente_interfaz`, una acción que no existe del lado de las
+ * clínicas.
+ *
+ * Las dos cosas se arreglaron sacando el código de acá: ahora la consulta vive
+ * en lib/paciente-del-panel.ts, que es también de donde la toma el panel de
+ * atención. Ver la cabecera de ese archivo.
+ */
+
 import { NextResponse } from "next/server"
+
 import { getWhatsAppConfig } from "@/lib/db"
 import { savePatientSnapshot } from "@/lib/conversations"
-
-const PROXY_URL = "https://proxy.santiagovulliez.com/proxy_service/"
+import { consultarPacienteDelPanel, snapshotDelPaciente } from "@/lib/paciente-del-panel"
 
 export async function GET(request: Request) {
   try {
@@ -31,112 +51,38 @@ export async function GET(request: Request) {
       })
     }
 
-    // Normalizar el numero de telefono para la busqueda
-    let telefonoNormalizado = phoneNumber.replace(/\D/g, "")
-    if (telefonoNormalizado.startsWith("549")) {
-      telefonoNormalizado = telefonoNormalizado.substring(3)
-    } else if (telefonoNormalizado.startsWith("54")) {
-      telefonoNormalizado = telefonoNormalizado.substring(2)
-    }
-
-    console.log(
-      `[DASHBOARD_PATIENT] Buscando paciente con telefono: ${telefonoNormalizado} (original: ${phoneNumber}) para cliente: ${clienteId}`,
-    )
-
-    const proxyResponse = await fetch(PROXY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        Cliente_Id: clienteId,
-        Action: "get_paciente_interfaz",
-        telefono: telefonoNormalizado,
-      }),
+    const consulta = await consultarPacienteDelPanel({
+      clienteId,
+      phoneNumber,
+      origen: "DASHBOARD_PATIENT",
     })
 
-    if (!proxyResponse.ok) {
-      console.error(`[DASHBOARD_PATIENT] Error del proxy: ${proxyResponse.status} ${proxyResponse.statusText}`)
+    // No pudimos preguntar: se dice, en vez de hacerlo pasar por paciente
+    // nuevo. "Es la primera vez que escribe" y "no pudimos consultar" llevan a
+    // decisiones distintas del agente.
+    if (consulta.estado === "sin-datos") {
       return NextResponse.json({
         success: true,
         patient: null,
-        isNewPatient: true,
+        isNewPatient: false,
+        datosNoDisponibles: true,
         phoneNumber,
-        message: "Error al consultar datos del paciente",
+        message: consulta.motivo,
       })
     }
 
-    const resultado = await proxyResponse.json()
-    console.log(`[DASHBOARD_PATIENT] Respuesta del proxy:`, JSON.stringify(resultado, null, 2))
-
-    const pacienteRaw = resultado.paciente || resultado.datos || resultado.data || resultado
-    const turnosProximos = resultado.turnos_proximos || resultado.turnosProximos || resultado.turnos || []
-    const esPrimeraVez = resultado.es_primera_vez ?? resultado.esPrimeraVez ?? null
-
-    const tieneDatasPaciente =
-      pacienteRaw &&
-      (pacienteRaw.nombre ||
-        pacienteRaw.Nombres ||
-        pacienteRaw.nombre_completo ||
-        pacienteRaw.Nombre_Completo ||
-        pacienteRaw.dni ||
-        pacienteRaw.Nrodoc ||
-        pacienteRaw.documento ||
-        pacienteRaw.id ||
-        pacienteRaw.Id)
-
-    if (!tieneDatasPaciente) {
-      console.log(`[DASHBOARD_PATIENT] Paciente no encontrado para telefono: ${telefonoNormalizado}`)
-      return NextResponse.json({
-        success: true,
-        patient: null,
-        isNewPatient: true,
-        phoneNumber,
-      })
+    if (consulta.estado === "sin-ficha") {
+      return NextResponse.json({ success: true, patient: null, isNewPatient: true, phoneNumber })
     }
 
-    const paciente = {
-      id: pacienteRaw.Id || pacienteRaw.id,
-      nombre: pacienteRaw.Nombres || pacienteRaw.nombre,
-      apellido: pacienteRaw.Apellido || pacienteRaw.apellido,
-      nombre_completo:
-        pacienteRaw.Nombre_Completo ||
-        pacienteRaw.nombre_completo ||
-        `${pacienteRaw.Nombres || pacienteRaw.nombre || ""} ${pacienteRaw.Apellido || pacienteRaw.apellido || ""}`.trim(),
-      dni: pacienteRaw.Nrodoc || pacienteRaw.dni || pacienteRaw.documento,
-      telefono: pacienteRaw.Celular || pacienteRaw.celular || pacienteRaw.telefono || phoneNumber,
-      email: pacienteRaw.Mail || pacienteRaw.mail || pacienteRaw.email,
-      fecha_nacimiento: pacienteRaw.Fecha_Nac || pacienteRaw.fecha_nacimiento,
-      obra_social: pacienteRaw.Deudor_Nombre || pacienteRaw.obra_social,
-      plan: pacienteRaw.Plan_Nombre || pacienteRaw.plan,
-      nro_afiliado: pacienteRaw.Nro_Afiliado_Ppal || pacienteRaw.nro_afiliado,
-      hc: pacienteRaw.HC || pacienteRaw.hc || null,
-      url_paciente: pacienteRaw.url_paciente || null,
-    }
-
-    // Guardar snapshot liviano para poder filtrar contactos en el panel de soporte
-    void savePatientSnapshot(configId, phoneNumber, {
-      hc: paciente.hc ? String(paciente.hc).trim() : undefined,
-      nrodoc: paciente.dni ? String(paciente.dni).trim() : undefined,
-      celular: paciente.telefono ? String(paciente.telefono).trim() : undefined,
-      apellido: paciente.apellido ? String(paciente.apellido).trim() : undefined,
-      nombre: paciente.nombre ? String(paciente.nombre).trim() : undefined,
-    })
-
-    const turnosNormalizados = turnosProximos.map((turno: any) => ({
-      id: turno.Id || turno.id,
-      fecha: turno.Fecha || turno.fecha,
-      hora: (turno.Hora || turno.hora || "").substring(0, 5),
-      profesional: turno.Profesional_Nombre || turno.profesional || turno.profesional_nombre,
-      sede: turno.Centro_Nombre || turno.sede || turno.centro_nombre,
-      motivo: turno.Motivo_Nombre || turno.motivo || turno.motivo_nombre,
-      estado: turno.Estado || turno.estado,
-      url_agenda: turno.url_agenda || null,
-    }))
+    // Snapshot liviano para poder filtrar contactos en el panel de soporte.
+    void savePatientSnapshot(configId, phoneNumber, snapshotDelPaciente(consulta.paciente))
 
     return NextResponse.json({
       success: true,
-      patient: paciente,
-      upcomingAppointments: turnosNormalizados,
-      isNewPatient: esPrimeraVez ?? false,
+      patient: consulta.paciente,
+      upcomingAppointments: consulta.turnos,
+      isNewPatient: consulta.esPrimeraVez ?? false,
       phoneNumber,
     })
   } catch (error) {

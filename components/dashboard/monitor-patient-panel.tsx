@@ -66,7 +66,7 @@ export function MonitorPatientPanel({ configId, phoneNumber }: MonitorPatientPan
   // sin turnos, email ni obra social — datos "en vivo" requieren fetchPatientData().
   const [isSnapshotOnly, setIsSnapshotOnly] = useState(false)
 
-  // Autocompletar con el snapshot cacheado (guardado por get_paciente / get_paciente_interfaz
+  // Autocompletar con el snapshot cacheado (guardado por get_paciente
   // en consultas previas) apenas se selecciona el contacto, sin llamar a la API de la clínica.
   useEffect(() => {
     let cancelled = false

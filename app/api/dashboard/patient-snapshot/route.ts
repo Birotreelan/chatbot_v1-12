@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { getPatientSnapshot } from "@/lib/conversations"
 
 // Devuelve el snapshot de paciente (HC, Nrodoc, Celular, Apellido, Nombre) ya guardado
-// en Redis por una consulta previa a get_paciente / get_paciente_interfaz. No llama a la
+// en Redis por una consulta previa a get_paciente. No llama a la
 // API de la clínica — es solo para autocompletar la UI al instante mientras carga.
 export async function GET(request: Request) {
   try {

@@ -69,8 +69,8 @@ function patientSnapshotKey(configId: string, phoneNumber: string): string {
 
 /**
  * Guarda/actualiza el snapshot de un paciente identificado para un contacto.
- * Se llama cada vez que get_paciente (bot) o get_paciente_interfaz (agente
- * humano) devuelven datos de un paciente para ese teléfono.
+ * Se llama cada vez que get_paciente devuelve una ficha, la pida el bot o un
+ * agente desde el panel.
  */
 export async function savePatientSnapshot(
   configId: string,
