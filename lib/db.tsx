@@ -105,6 +105,25 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
   const now = new Date().toISOString()
 
   const newConfig: WhatsAppConfig = {
+    // ── Primero todo lo que mandó el llamador (27/10/2026) ─────────────────
+    //
+    // Esto era una lista de 40 campos escritos a mano, y el tipo tiene 74: los
+    // otros 33 se descartaban en silencio al crear. Entre ellos
+    // `escalationPhoneNumber` ("Datos de Derivación"), `whatsappNumber`,
+    // `alias`, los switches de búsqueda, los del portal, el horario de
+    // atención y la zona horaria.
+    //
+    // Desde el dashboard no se notaba: quien crea un cliente entra enseguida a
+    // configurarlo, y `updateWhatsAppConfig` sí hace spread de lo que recibe,
+    // así que el segundo guardado lo arreglaba. El alta por /api/clients crea
+    // de una sola vez y nadie edita después — ahí los campos simplemente no
+    // estaban.
+    //
+    // Con el spread adelante, el problema no puede volver: un campo nuevo del
+    // tipo llega solo, sin que haya que acordarse de agregarlo también acá. Lo
+    // de abajo sigue igual y pisa al spread, que es lo que corresponde: son
+    // los valores por omisión y los que decide el servidor.
+    ...(config as WhatsAppConfig),
     id,
     phoneNumberId: config.phoneNumberId || "",
     wabaId: config.wabaId || "",
@@ -147,6 +166,9 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     // Nuevos campos para el botón flotante
     widgetFloatingButtonText: config.widgetFloatingButtonText || "Obtené tu turno con nuestro asistente virtual",
     widgetShowFloatingText: config.widgetShowFloatingText !== undefined ? config.widgetShowFloatingText : true,
+    // Las estadísticas arrancan en cero y no se aceptan del llamador: un alta
+    // que llegara con 5.000 mensajes procesados ensuciaría los totales del
+    // sistema desde el primer día.
     stats: {
       messagesReceived: 0,
       messagesProcessed: 0,
