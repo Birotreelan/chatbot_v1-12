@@ -68,6 +68,7 @@ import { leerEnlace, consumirEnlace, type TurnoDelPortal } from "@/lib/portal/to
 import { permiteGestionar, reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
 import { resolverPorDNI } from "@/lib/portal/identidad"
 import { reservarTurno, cancelarTurno } from "@/lib/api-tools/api-functions"
+import { deudorParticular } from "@/lib/portal/particular"
 import { saveConversationMessage } from "@/lib/conversations"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
 import { trackAppointmentEvent, checkAndClearPendingReschedule } from "@/lib/appointment-stats"
@@ -269,6 +270,33 @@ export async function POST(request: Request) {
     deudorNombre: ident?.obraSocialNombre || contexto.obraSocialNombre,
   }
 
+  // ── Turno particular (27/10/2026) ─────────────────────────────────────────
+  //
+  // El paciente eligió un profesional que no atiende su obra social y el
+  // portal le ofreció los horarios particulares. Acá se cambia la cobertura
+  // con la que se reserva.
+  //
+  // El navegador manda una MARCA, no un id: el deudor lo resuelve el servidor
+  // contra el catálogo de esta clínica. Aceptar un `Deudor_Id` del cliente
+  // sería dejar que el navegador elija con qué se factura el turno.
+  //
+  // Si esta clínica no tiene un deudor "PARTICULAR", no pasa nada: la marca se
+  // ignora y se reserva con la obra social de siempre. Una URL con
+  // `particular=1` escrita a mano no habilita nada que la clínica no tenga.
+  const pidenParticular = cuerpo?.particular === true
+  const particular = pidenParticular ? await deudorParticular(contexto.clienteId).catch(() => null) : null
+
+  if (particular) {
+    datosDelPaciente.deudorId = particular.id
+    datosDelPaciente.deudorNombre = particular.nombre
+    console.log(`[PORTAL] Reserva particular para ${contexto.phone}: deudor ${particular.nombre} (${particular.id})`)
+  } else if (pidenParticular) {
+    console.warn(
+      `[PORTAL] Se pidió reservar como particular pero ${contexto.clienteId} no tiene ese deudor; ` +
+        `se reserva con la obra social del paciente`,
+    )
+  }
+
   // ── Reservar sin obra social es un turno que alguien va a tener que
   //    corregir a mano ────────────────────────────────────────────────────
   //
@@ -387,6 +415,12 @@ export async function POST(request: Request) {
       // Va aunque la cancelación haya fallado: si el paciente termina con dos
       // turnos, el comentario es justamente lo que le dice a la clínica cuál
       // sobra. En ese caso se omite la fecha de cancelación, porque no hubo.
+      // Que el turno sea particular queda escrito en la ficha: del lado de la
+      // clínica, un turno con otro deudor que el de la ficha del paciente
+      // parece un error de carga si nadie explica por qué.
+      ...(particular
+        ? { comentarios: `Turno particular: el profesional no atiende la obra social del paciente.` }
+        : {}),
       ...(hayQueCancelarElAnterior
         ? {
             reagendamiento: {

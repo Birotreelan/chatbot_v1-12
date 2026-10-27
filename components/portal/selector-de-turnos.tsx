@@ -58,6 +58,14 @@ interface Props {
   dias: DiaConTurnos[]
   /** Se muestran en el repaso previo a confirmar. */
   paciente?: { nombre?: string; apellido?: string; dni?: string; obraSocial?: string }
+  /**
+   * El turno se reserva de forma particular (27/10/2026).
+   *
+   * No se deduce de `paciente.obraSocial`: que diga "Particular" es una
+   * cadena de texto que viene de la clínica y podría llamarse de otra forma.
+   * La página, que es la que resolvió el deudor, lo dice explícito.
+   */
+  particular?: boolean
   /** URL para volver a editar los datos personales. `null` si no hay nada que editar. */
   corregirDatosEn?: string | null
   etiquetaConfirmar?: string
@@ -169,6 +177,7 @@ export function SelectorDeTurnos({
   formato,
   dias,
   paciente,
+  particular,
   corregirDatosEn,
   etiquetaConfirmar = "Confirmar este horario",
   encabezado,
@@ -241,7 +250,11 @@ export function SelectorDeTurnos({
       const r = await fetch("/api/portal/gestionar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, ...elegido }),
+        // `particular` es una marca, no un id: el servidor resuelve cuál es el
+        // deudor Particular de esta clínica. Aceptar un `Deudor_Id` del
+        // navegador sería dejar que el cliente elija con qué cobertura se
+        // factura el turno.
+        body: JSON.stringify({ token, ...elegido, ...(particular ? { particular: true } : {}) }),
       })
       const datos = await r.json()
 
