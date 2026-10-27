@@ -66,15 +66,6 @@ export function ElegirFiltro({
      * desapareciera de la lista, pensaría que se equivocó de clínica.
      */
     deshabilitada?: boolean
-    /**
-     * Parámetros extra que esta opción agrega a la URL (27/10/2026).
-     *
-     * Lo usa el profesional que sólo atiende de forma particular: elegirlo no
-     * es lo mismo que elegir a otro, porque cambia con qué cobertura se va a
-     * reservar. Ese dato viaja en la query string como el resto de lo elegido
-     * —ver la cabecera— y no en el token: todavía no es una decisión tomada.
-     */
-    extra?: Record<string, string>
   }>
   /** Lo ya elegido en pasos anteriores, para no perderlo. */
   conservar?: Record<string, string>
@@ -82,11 +73,7 @@ export function ElegirFiltro({
   return (
     <div className="space-y-2">
       {opciones.map((opcion) => {
-        const params = new URLSearchParams({
-          ...(conservar || {}),
-          [campo]: opcion.id,
-          ...(opcion.extra || {}),
-        })
+        const params = new URLSearchParams({ ...(conservar || {}), [campo]: opcion.id })
 
         const contenido = (
           <>

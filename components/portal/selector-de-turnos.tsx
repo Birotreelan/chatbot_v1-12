@@ -59,13 +59,14 @@ interface Props {
   /** Se muestran en el repaso previo a confirmar. */
   paciente?: { nombre?: string; apellido?: string; dni?: string; obraSocial?: string }
   /**
-   * El turno se reserva de forma particular (27/10/2026).
+   * Cómo se llama el deudor "Particular" en esta clínica (27/10/2026).
    *
-   * No se deduce de `paciente.obraSocial`: que diga "Particular" es una
-   * cadena de texto que viene de la clínica y podría llamarse de otra forma.
-   * La página, que es la que resolvió el deudor, lo dice explícito.
+   * Qué horarios son particulares lo dice cada turno (`soloParticular`), que
+   * sale de fusionar las dos agendas. Esto es sólo el nombre para escribirlo
+   * en el repaso: "Obra social: Particular". Ausente = la clínica no tiene ese
+   * deudor y no hay nada que marcar.
    */
-  particular?: boolean
+  nombreParticular?: string
   /** URL para volver a editar los datos personales. `null` si no hay nada que editar. */
   corregirDatosEn?: string | null
   etiquetaConfirmar?: string
@@ -159,6 +160,8 @@ interface Elegido {
   profesional?: string
   sede?: string
   direccion?: string
+  /** El horario elegido no lo cubre la obra social del paciente. */
+  particular?: boolean
 }
 
 function aFecha(iso: string): Date {
@@ -177,7 +180,7 @@ export function SelectorDeTurnos({
   formato,
   dias,
   paciente,
-  particular,
+  nombreParticular,
   corregirDatosEn,
   etiquetaConfirmar = "Confirmar este horario",
   encabezado,
@@ -189,6 +192,18 @@ export function SelectorDeTurnos({
   const router = useRouter()
   const [diaElegido, setDiaElegido] = useState<string | null>(null)
   const horariosRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * La lista tiene horarios de los dos tipos (27/10/2026).
+   *
+   * Buscando por especialidad o "cualquier profesional", algunos horarios los
+   * cubre la obra social y otros no. Sólo en ese caso hace falta marcar uno
+   * por uno: si todos fueran particulares la pantalla lo dice una vez arriba,
+   * y si ninguno lo es no hay nada que decir.
+   */
+  const hayMezcla =
+    dias.some((d) => d.turnos.some((t) => t.soloParticular)) &&
+    dias.some((d) => d.turnos.some((t) => !t.soloParticular))
+
   const [elegido, setElegido] = useState<Elegido | null>(null)
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -254,7 +269,11 @@ export function SelectorDeTurnos({
         // deudor Particular de esta clínica. Aceptar un `Deudor_Id` del
         // navegador sería dejar que el cliente elija con qué cobertura se
         // factura el turno.
-        body: JSON.stringify({ token, ...elegido, ...(particular ? { particular: true } : {}) }),
+        body: JSON.stringify({
+          token,
+          ...elegido,
+          ...(elegido.particular ? { particular: true } : {}),
+        }),
       })
       const datos = await r.json()
 
@@ -412,12 +431,32 @@ export function SelectorDeTurnos({
           {accion === "cambiar" ? "Revisá y confirmá el cambio" : "Revisá y confirmá tu turno"}
         </TituloDePaso>
 
+        {/* ── Antes del botón, qué es lo que va a confirmar (27/10/2026) ──
+            El aviso de la pantalla anterior se lee mientras elige el horario;
+            éste se lee con el dedo sobre "Confirmar". Son dos momentos
+            distintos y el segundo es el que cuenta: después de tocar, el turno
+            está tomado. */}
+        {elegido.particular && (
+          <Aviso
+            tono="atencion"
+            titulo="Este turno es particular"
+            detalle={
+              <>
+                Tu obra social no cubre este horario: la consulta se abona de forma particular.
+                {" "}Si preferís un turno con tu cobertura, volvé y elegí uno de los horarios sin esta marca.
+              </>
+            }
+          />
+        )}
+
         <ResumenDeConfirmacion
           paciente={{
             nombre: paciente?.nombre,
             apellido: paciente?.apellido,
             dni: paciente?.dni,
-            obraSocial: paciente?.obraSocial,
+            // La cobertura con la que se va a reservar, no la de la ficha.
+            obraSocial:
+              elegido.particular && nombreParticular ? nombreParticular : paciente?.obraSocial,
           }}
           turno={{
             fechaFormateada: elegido.fechaFormateada,
@@ -676,13 +715,30 @@ export function SelectorDeTurnos({
                     profesional: turno.profesionalNombre,
                     sede: turno.sedeNombre,
                     direccion: turno.sedeId ? direccionesPorSede?.[turno.sedeId] : undefined,
+                    particular: turno.soloParticular === true,
                   })
                 }
                 // 56px de alto: lo toca con el pulgar alguien parado, y este
                 // portal lo usan pacientes mayores.
-                className="min-h-[56px] rounded-xl border bg-card px-2 py-2 text-base font-medium text-card-foreground transition-colors hover:border-primary/40 hover:bg-accent active:bg-accent lg:min-h-[48px]"
+                className={`min-h-[56px] rounded-xl border px-2 py-2 text-base font-medium transition-colors hover:bg-accent active:bg-accent lg:min-h-[48px] ${
+                  turno.soloParticular
+                    ? // Ámbar como el aviso, no gris: no es un horario de
+                      // segunda, es uno con otra condición. Gris se lee como
+                      // "no disponible" y el paciente ni lo toca.
+                      "border-warning/40 bg-warning/5 text-card-foreground hover:border-warning/60"
+                    : "bg-card text-card-foreground hover:border-primary/40"
+                }`}
               >
                 {turno.hora}
+                {/* La marca va en cada chip SÓLO cuando la lista está
+                    mezclada. Si todos fueran particulares, la pantalla ya lo
+                    dijo arriba una vez y repetirlo treinta veces es ruido.
+                    Ver `todosParticulares` en pagina-del-enlace.tsx. */}
+                {turno.soloParticular && hayMezcla && (
+                  <span className="block text-xs font-normal leading-tight text-warning">
+                    particular
+                  </span>
+                )}
                 {/* El nombre va salvo que la agenda entera sea de un solo
                     profesional, en cuyo caso ya lo dice el aviso de arriba.
                     Ver `profesionalFijo`. */}

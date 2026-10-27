@@ -42,6 +42,14 @@ export interface TurnoOption {
   sedeId?: string
   sedeNombre?: string
   duracion?: number
+  /**
+   * Este horario sólo se puede reservar de forma particular (27/10/2026).
+   *
+   * Lo pone el portal al fusionar la agenda de la obra social del paciente con
+   * la de Particular: el hueco existe, pero no bajo su cobertura. Ausente =
+   * cubierto, que es lo que pasa en todos los demás flujos.
+   */
+  soloParticular?: boolean
 }
 
 // Obra social validada

@@ -109,8 +109,6 @@ export async function PaginaDelEnlace({
     especialidadId?: string
     profesionalId?: string
     sinFiltro?: string
-    /** "1" cuando el paciente eligió un profesional que sólo atiende particular. */
-    particular?: string
   }>
 }) {
   const { token } = await params
@@ -181,8 +179,6 @@ export async function PaginaDelEnlace({
     especialidadId?: string
     profesionalId?: string
     sinFiltro: boolean
-    /** Reservar como particular, porque el profesional no atiende su obra social. */
-    particular: boolean
   } = {
     // La del query gana sobre la del token: si el paciente eligió otra sede,
     // eligió otra sede.
@@ -192,7 +188,6 @@ export async function PaginaDelEnlace({
     especialidadId: filtrosCrudos.especialidadId,
     profesionalId: filtrosCrudos.profesionalId,
     sinFiltro: filtrosCrudos.sinFiltro === "1",
-    particular: filtrosCrudos.particular === "1",
   }
 
   /**
@@ -207,10 +202,6 @@ export async function PaginaDelEnlace({
   if (filtrosCrudos.sedeId) elegido.sedeId = filtrosCrudos.sedeId
   if (filtrosCrudos.tipoBusqueda) elegido.tipoBusqueda = filtrosCrudos.tipoBusqueda
   if (filtrosCrudos.especialidadId) elegido.especialidadId = filtrosCrudos.especialidadId
-  // El modo particular se arrastra como lo demás: si no, al volver del repaso
-  // a elegir otro horario la agenda se buscaría con la obra social del
-  // paciente y los horarios que estaba mirando desaparecerían.
-  if (filtrosCrudos.particular === "1") elegido.particular = "1"
 
   /** La URL de este mismo enlace con un subconjunto de lo ya elegido. */
   const ruta = rutaDelFormato(formato)
@@ -771,8 +762,11 @@ export async function PaginaDelEnlace({
       // No aparece con su obra social, pero sí bajo Particular: se ofrece, y
       // el enlace se lleva la marca para que todo lo que sigue —la agenda, el
       // aviso, el resumen y la reserva— use esa cobertura y no la suya.
+      // Se ofrece, y la pantalla de horarios se encarga del resto: la agenda
+      // fusionada va a traer sólo huecos particulares para este profesional y
+      // los va a marcar uno por uno. No hace falta decírselo por la URL.
       if (conParticular.has(id)) {
-        return { ...o, detalle: "Sólo de forma particular", extra: { particular: "1" } }
+        return { ...o, detalle: "Sólo de forma particular" }
       }
 
       const sinTurnos = conAgenda.size > 0 || conParticular.size > 0
@@ -843,19 +837,20 @@ export async function PaginaDelEnlace({
   }
 
   // ── Elegir horario ──────────────────────────────────────────────────────
-  // ── Con qué cobertura se busca (27/10/2026) ──────────────────────────────
+  // ── Los horarios que la obra social no cubre (27/10/2026) ────────────────
   //
-  // Normalmente, con la obra social del paciente. Pero si viene del paso
-  // anterior habiendo elegido un profesional que sólo atiende de forma
-  // particular, se busca con el deudor Particular de la clínica: con su obra
-  // social esta consulta volvería vacía y la pantalla diría que no hay
-  // horarios, cuando los hay.
+  // La agenda se pide con las dos coberturas y vuelve fusionada: los huecos
+  // que sólo existen bajo Particular llegan marcados con `soloParticular`.
+  // Sirve igual para los tres flujos —un profesional, por especialidad y
+  // cualquiera—, que es lo que no se podía hacer decidiéndolo por pantalla.
   //
-  // `particularDelTurno` es null si la clínica no tiene ese deudor, y
-  // entonces `filtros.particular` no cambia nada: una URL con `particular=1`
-  // escrita a mano no habilita nada que la clínica no tenga.
-  const particularDelTurno = filtros.particular ? await deudorParticular(clienteId).catch(() => null) : null
-  const reservaParticular = Boolean(particularDelTurno)
+  // `null` si la clínica no tiene ese deudor, y entonces no se fusiona nada:
+  // esa clínica ve exactamente lo que veía antes.
+  const particularDelTurno = await deudorParticular(clienteId).catch(() => null)
+  const ofrecerParticularEnLaAgenda = correspondeOfrecerParticular(
+    identidad.obraSocialId,
+    particularDelTurno,
+  )
 
   const agendaNueva = await agendaParaTurnoNuevo({
     clienteId,
@@ -870,8 +865,22 @@ export async function PaginaDelEnlace({
     // el portal tiene su DNI y su obra social sólo acá.
     pacienteDNI: identidad.dni,
     tieneFicha: identidad.tieneFicha === true,
-    obraSocialId: reservaParticular ? particularDelTurno!.id : identidad.obraSocialId,
+    obraSocialId: identidad.obraSocialId,
+    particularId: ofrecerParticularEnLaAgenda ? particularDelTurno!.id : undefined,
   })
+
+  /**
+   * Todos los horarios que se están mostrando son particulares.
+   *
+   * Es lo que pasa cuando el paciente eligió un profesional que no atiende su
+   * obra social: la consulta con su cobertura vuelve vacía y lo único que hay
+   * es particular. Ahí conviene decirlo UNA vez arriba en vez de repetir la
+   * marca en cada uno de los treinta horarios.
+   *
+   * Se deduce de la agenda y no de la URL: el que decide es el resultado.
+   */
+  const todosParticulares =
+    agendaNueva.total > 0 && agendaNueva.dias.every((d) => d.turnos.every((t) => t.soloParticular))
 
   const conEjemplos = contexto.demo === true && agendaNueva.total === 0
   const diasNuevos = conEjemplos ? turnosDeEjemplo() : agendaNueva.dias
@@ -939,11 +948,15 @@ export async function PaginaDelEnlace({
           ya tiene que saber que ese turno se paga. Enterarse en el mostrador
           es el peor lugar posible. Se repite en el repaso previo a confirmar,
           donde dice "Obra social: Particular". */}
-      {reservaParticular && !sinHorarios && (
+      {todosParticulares && !sinHorarios && (
         <Aviso
           tono="atencion"
           titulo="Turnos particulares"
-          detalle="Este profesional no atiende tu obra social — todos los horarios disponibles se reservan de forma particular."
+          detalle={
+            filtros.profesionalId
+              ? "Este profesional no atiende tu obra social — todos los horarios disponibles se reservan de forma particular."
+              : "Tu obra social no cubre ninguno de estos horarios — se reservan de forma particular."
+          }
         />
       )}
     </>
@@ -1023,14 +1036,11 @@ export async function PaginaDelEnlace({
           token={token}
           formato={formato}
           dias={diasNuevos}
-          // En el repaso, la cobertura que se va a usar, no la de la ficha:
-          // el paciente tiene que leer "Particular" antes de confirmar.
-          paciente={
-            reservaParticular
-              ? { ...datosParaElResumen, obraSocial: particularDelTurno!.nombre }
-              : datosParaElResumen
-          }
-          particular={reservaParticular}
+          paciente={datosParaElResumen}
+          // Cómo se llama "Particular" en esta clínica. El selector lo usa en
+          // el repaso cuando el horario elegido es de los que no cubre la obra
+          // social: el paciente tiene que leerlo antes de confirmar.
+          nombreParticular={particularDelTurno?.nombre}
           corregirDatosEn={corregirDatosEn}
           etiquetaConfirmar="Confirmar mi turno"
           direccionesPorSede={direccionesNuevo}
