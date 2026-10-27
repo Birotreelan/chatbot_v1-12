@@ -88,7 +88,11 @@ import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
 import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
 import { GestionarTurno } from "@/components/portal/gestionar-turno"
 import { reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
-import { correspondeOfrecerParticular, deudorParticular } from "@/lib/portal/particular"
+import {
+  correspondeOfrecerParticular,
+  deudorParticular,
+  ofreceTurnosParticulares,
+} from "@/lib/portal/particular"
 import { registroDelPortal, datosDeLaVisita } from "@/lib/portal/registro"
 
 export async function PaginaDelEnlace({
@@ -306,6 +310,18 @@ export async function PaginaDelEnlace({
   }
 
   const clienteId = contexto.clienteId || ""
+
+  /**
+   * El deudor "Particular" de esta clínica, si corresponde ofrecerlo.
+   *
+   * Una función y no un valor: resolverlo cuesta una lectura de Redis y la
+   * mayoría de los pasos del portal —el DNI, la sede, el alta— no lo
+   * necesitan. Las dos pantallas que sí lo usan llaman a esto, así que la
+   * regla —el switch del cliente, y que el paciente no sea ya particular— se
+   * escribe una sola vez.
+   */
+  const resolverParticular = async () =>
+    ofreceTurnosParticulares(config) ? await deudorParticular(clienteId).catch(() => null) : null
 
   // ── La sede se resuelve antes de decidir el paso (24/9/2026) ─────────────
   //
@@ -716,7 +732,7 @@ export async function PaginaDelEnlace({
     // `deudorParticular` devuelve null y todo queda como estaba), ni si el
     // paciente YA es particular —decirle que su obra social no es aceptada
     // sería falso—.
-    const particular = await deudorParticular(clienteId).catch(() => null)
+    const particular = await resolverParticular()
     const ofrecerParticular = correspondeOfrecerParticular(identidad.obraSocialId, particular)
 
     const [agendaParaSaberQuienTiene, agendaParticular] =
@@ -846,7 +862,7 @@ export async function PaginaDelEnlace({
   //
   // `null` si la clínica no tiene ese deudor, y entonces no se fusiona nada:
   // esa clínica ve exactamente lo que veía antes.
-  const particularDelTurno = await deudorParticular(clienteId).catch(() => null)
+  const particularDelTurno = await resolverParticular()
   const ofrecerParticularEnLaAgenda = correspondeOfrecerParticular(
     identidad.obraSocialId,
     particularDelTurno,

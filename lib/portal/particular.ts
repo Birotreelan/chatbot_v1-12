@@ -125,6 +125,24 @@ export async function deudorParticular(clienteId: string): Promise<DeudorParticu
 }
 
 /**
+ * ¿Esta clínica ofrece turnos particulares por el portal?
+ *
+ * `undefined` es `true`: la función ya está desplegada y andando, y que
+ * aparezca el campo no tiene que apagársela a nadie. Ver `ofrecerTurnosParticulares`
+ * en lib/types.ts.
+ *
+ * Existe para que la pantalla y la reserva contesten lo mismo. Si la pantalla
+ * lo ofreciera y la reserva lo ignorara, el paciente confirmaría un turno
+ * particular y le quedaría con su obra social: un turno que la clínica no
+ * puede cobrar y que el paciente cree que sí tiene cubierto.
+ */
+export function ofreceTurnosParticulares(
+  config?: { ofrecerTurnosParticulares?: boolean } | null,
+): boolean {
+  return config?.ofrecerTurnosParticulares !== false
+}
+
+/**
  * ¿Tiene sentido ofrecerle turnos particulares a este paciente?
  *
  * No, si ya viene como particular: su obra social ES la de particular, o no

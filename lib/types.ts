@@ -44,6 +44,30 @@ export interface WhatsAppConfig {
   /** Si es false, el cliente se omite de ambos reportes de /facturacion. Default true. */
   mostrarEnFacturacion?: boolean
   /**
+   * Ofrecer turnos particulares cuando la obra social no los cubre (27/10/2026).
+   *
+   * El portal consulta la agenda con la cobertura del paciente Y con el deudor
+   * "Particular" de la clínica, y le muestra los horarios que su obra social no
+   * cubre, marcados y advertidos. Con esto en `false` esa segunda consulta no
+   * se hace: el paciente ve exactamente lo que veía antes.
+   *
+   * `undefined` se lee como `true`. Es la función ya desplegada y andando; que
+   * aparezca el campo no tiene que apagársela a nadie.
+   *
+   * ── Por qué igual existe el switch ──────────────────────────────────────
+   *
+   * Que un profesional tenga horarios bajo Particular lo decide la clínica en
+   * su propia agenda, así que en principio alcanzaba con eso. Pero hay
+   * clínicas que tienen esos huecos abiertos para el mostrador y no quieren
+   * ofrecerlos por chat —lo cobran distinto, o prefieren explicarlo por
+   * teléfono—, y eso no se puede deducir de la agenda.
+   *
+   * Se consulta por `ofreceTurnosParticulares` (lib/portal/particular.ts), no
+   * leyendo este campo a mano: la pantalla y la reserva tienen que contestar
+   * lo mismo.
+   */
+  ofrecerTurnosParticulares?: boolean
+  /**
    * Nombre de la plantilla que reabre la ventana de 24 h, si en esta cuenta
    * quedó registrada con un nombre distinto del habitual.
    *

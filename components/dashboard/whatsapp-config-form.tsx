@@ -533,6 +533,34 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </p>
               )}
 
+              {/* ── Turnos particulares (27/10/2026) ────────────────────────
+                  Prendido por omisión: `undefined` se lee como `true`, así que
+                  los clientes que ya lo tienen andando no se apagan al
+                  aparecer el campo. Por eso el `!== false` y no `=== true`,
+                  que los habría apagado a todos de una. */}
+              <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                <Switch
+                  id="ofrecerTurnosParticulares"
+                  checked={formData.ofrecerTurnosParticulares !== false}
+                  onCheckedChange={(checked) => updateFormData("ofrecerTurnosParticulares", checked)}
+                />
+                <div className="flex-1">
+                  <Label htmlFor="ofrecerTurnosParticulares" className="text-sm font-medium">
+                    Ofrecer turnos particulares
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Cuando la obra social del paciente no cubre un horario, el portal se lo muestra
+                    igual marcado como particular, le advierte que la consulta se abona y reserva
+                    con el deudor <em>Particular</em> de la clínica. Apagado, esos horarios no se
+                    ofrecen y el paciente ve sólo los que tiene cubiertos, como antes.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Qué horarios existen bajo Particular lo define la clínica en su propia agenda:
+                    esto sólo decide si se ofrecen por acá.
+                  </p>
+                </div>
+              </div>
+
               {formData.clientePortalWeb === true && (
                 <div className="space-y-2 p-2 rounded-md bg-muted/30">
                   <Label htmlFor="textoEnlacePortal" className="text-sm font-medium">

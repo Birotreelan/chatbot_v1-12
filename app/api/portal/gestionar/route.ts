@@ -68,12 +68,13 @@ import { leerEnlace, consumirEnlace, type TurnoDelPortal } from "@/lib/portal/to
 import { permiteGestionar, reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
 import { resolverPorDNI } from "@/lib/portal/identidad"
 import { reservarTurno, cancelarTurno } from "@/lib/api-tools/api-functions"
-import { deudorParticular } from "@/lib/portal/particular"
+import { deudorParticular, ofreceTurnosParticulares } from "@/lib/portal/particular"
 import { saveConversationMessage } from "@/lib/conversations"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
 import { trackAppointmentEvent, checkAndClearPendingReschedule } from "@/lib/appointment-stats"
 import { olvidarCancelacion } from "@/lib/portal/cancelacion-reciente"
 import { fechaPresentable } from "@/lib/portal/fechas"
+import { getWhatsAppConfigById } from "@/lib/db"
 import { nanoid } from "nanoid"
 
 export const runtime = "nodejs"
@@ -283,7 +284,12 @@ export async function POST(request: Request) {
   // Si esta clínica no tiene un deudor "PARTICULAR", no pasa nada: la marca se
   // ignora y se reserva con la obra social de siempre. Una URL con
   // `particular=1` escrita a mano no habilita nada que la clínica no tenga.
-  const pidenParticular = cuerpo?.particular === true
+  // El switch del cliente se chequea ACÁ también, no sólo en la pantalla
+  // (27/10/2026). Si la clínica lo apagó mientras el paciente tenía el repaso
+  // abierto, ese turno tiene que reservarse con su obra social. Y si no se
+  // chequeara, el flag del navegador alcanzaría para saltearse el switch.
+  const config = await getWhatsAppConfigById(contexto.configId).catch(() => null)
+  const pidenParticular = cuerpo?.particular === true && ofreceTurnosParticulares(config)
   const particular = pidenParticular ? await deudorParticular(contexto.clienteId).catch(() => null) : null
 
   if (particular) {
