@@ -6,6 +6,18 @@
  *
  * Todo el texto que ve el paciente sale de plantilla + datos reales (teléfono del
  * template). El LLM solo clasifica la intención; acá no se inventa nada.
+ *
+ * ── Preguntar por el motivo no es preguntar cualquier cosa (28/10/2026) ────
+ *
+ * Había UNA acción, `consulta_no_respondible`, que mezclaba "¿por qué me lo
+ * cancelaron?" con "¿cuánto vale la consulta?" —su descripción nombraba
+ * "costos" y "coberturas"— y las dos recibían el mismo texto sobre el motivo.
+ * El paciente preguntaba el precio y le contestábamos que no sabemos por qué
+ * la clínica decidió lo que decidió.
+ *
+ * Ahora son dos: la del motivo la responde este estado, que es el único que
+ * sabe que ese dato no lo tenemos; cualquier otra consulta se cede al pipeline,
+ * que tiene la información de la clínica y además recuerda el turno.
  */
 
 import {
@@ -65,9 +77,14 @@ export const clinicaPostCancelOffer: StateContract = {
         "El paciente NO quiere gestionar un turno ahora. Ej: 'no', 'no gracias', 'ahora no', 'dejalo'.",
     },
     {
-      id: 'consulta_no_respondible',
+      id: 'consulta_por_el_motivo',
       description:
-        "El paciente pregunta algo que no podemos responder con los datos que tenemos (el motivo de la cancelación, síntomas, costos, coberturas). Ej: '¿por qué me lo cancelaron?', '¿qué pasó?', 'quiero saber el motivo'.",
+        "El paciente pregunta POR QUÉ la clínica canceló el turno. Ej: '¿por qué me lo cancelaron?', '¿qué pasó?', 'quiero saber el motivo', '¿cuál fue la razón?'. SÓLO esto: una pregunta sobre otra cosa (precio, cobertura, qué llevar) NO va acá.",
+    },
+    {
+      id: 'otra_consulta',
+      description:
+        "El paciente pregunta sobre algo que no es el motivo de la cancelación: cuánto sale la consulta, si la cubre su obra social, qué tiene que llevar, dónde queda, si hay que ir en ayunas. Ej: '¿cuánto vale la consulta?', '¿tengo que llevar la derivación?'.",
     },
     {
       id: 'cambiar_intencion',
@@ -95,13 +112,23 @@ export const clinicaPostCancelOffer: StateContract = {
           message: 'Entendido. Si en algún momento querés gestionar un turno, escribime. ¡Hasta pronto!',
         }
 
-      case 'consulta_no_respondible':
+      case 'consulta_por_el_motivo':
         // Mantiene el estado (no limpiamos la oferta): responde + vuelve a ofrecer 1/2.
         return {
           type: 'send_and_return',
           message: buildUnknownReasonMessage(telefono, true),
           buttons: BUTTONS_SI_NO,
         }
+
+      case 'otra_consulta':
+        // ── No es asunto de este estado (28/10/2026) ────────────────────────
+        // Antes esto y la pregunta por el motivo eran la MISMA acción, así que
+        // "¿cuánto vale la consulta?" recibía "No tengo el detalle del motivo
+        // por parte de la clínica": la respuesta a otra pregunta. El pipeline
+        // normal sí sabe contestarla —consulta la información de la clínica y
+        // deriva por lo que se preguntó—, así que se le cede.
+        await clearClinicaCancellationOffer(ctx.phone, ctx.configId)
+        return { type: 'clear_state_and_passthrough' }
 
       case 'cambiar_intencion':
         await clearClinicaCancellationOffer(ctx.phone, ctx.configId)
@@ -136,9 +163,14 @@ export const clinicaPostConfirmFollowup: StateContract = {
 
   allowedActions: [
     {
-      id: 'consulta_no_respondible',
+      id: 'consulta_por_el_motivo',
       description:
-        'El paciente pregunta algo que no podemos responder con los datos que tenemos (el motivo, detalles que no tenemos, consultas médicas o administrativas).',
+        "El paciente pregunta POR QUÉ la clínica confirmó o decidió algo sobre su turno, o qué pasó con él. Ej: '¿por qué me lo confirmaron recién?', '¿qué pasó con mi turno?', 'quiero saber el motivo'. SÓLO esto.",
+    },
+    {
+      id: 'otra_consulta',
+      description:
+        "El paciente pregunta sobre algo que no es el estado del turno: cuánto sale la consulta, si la cubre su obra social, qué tiene que llevar, si hay que ir en ayunas, dónde queda. Ej: '¿cuánto vale la consulta?', '¿sabés cuánto es la consulta particular?'.",
     },
     {
       id: 'agradecimiento_despedida',
@@ -158,9 +190,15 @@ export const clinicaPostConfirmFollowup: StateContract = {
     const telefono = ctx.escalationPhone || (ctx.data.telefonoContacto as string | undefined)
 
     switch (actionId) {
-      case 'consulta_no_respondible':
+      case 'consulta_por_el_motivo':
         // Deriva a la clínica, sin re-oferta. Mantiene el seguimiento.
         return { type: 'send_and_return', message: buildUnknownReasonMessage(telefono, false) }
+
+      case 'otra_consulta':
+        // Ver la nota del estado de arriba: esto no es el motivo, y el
+        // pipeline sí sabe responderlo.
+        await clearClinicaCancellationOffer(ctx.phone, ctx.configId)
+        return { type: 'clear_state_and_passthrough' }
 
       case 'agradecimiento_despedida':
         await clearClinicaCancellationOffer(ctx.phone, ctx.configId)

@@ -40,6 +40,7 @@ import {
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData, isWithinTemplateWindow } from "./appointment-stats"
+import { preguntaPorElMotivo, traeOtraConsulta } from "./conversation-state/pregunta-por-el-motivo"
 import { cancelPendingReminders } from "@/lib/reminders/reminder-queue"
 import {
   getActiveSessionByPhone,
@@ -5362,10 +5363,20 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         // Teléfono para derivar: el Número de Derivación de la config; el del template es fallback.
         const clinicaPhone = telefonoParaMensajes(config) || clinicaFollowup.telefonoContacto || ''
 
-        // ¿El paciente está haciendo una pregunta / pidiendo el motivo? (no una elección 1/2)
-        const looksLikeQuestion =
-          /\b(por\s*que|porque|motivo|razon|saber|entender|explic|como fue|que paso|que sucedio)\b/.test(trimmedNorm) ||
-          /\?\s*$/.test(trimmed)
+        // ── Sólo la pregunta por el MOTIVO (28/10/2026) ─────────────────────
+        //
+        // Acá decía: la palabra "saber", "entender", "explic"… o cualquier
+        // mensaje terminado en "?". Con eso, "¿sabés cuánto vale la consulta?"
+        // recibía "No tengo el detalle del motivo por parte de la clínica" —
+        // la respuesta a una pregunta que el paciente no hizo. Reportado con
+        // dos conversaciones reales el 28/10/2026.
+        //
+        // Ahora la regla es angosta y vive en un módulo aparte, con los casos
+        // reales como prueba. Lo que no es el motivo no es asunto de este
+        // bloque: se limpia el seguimiento y el mensaje sigue por el pipeline
+        // normal, que consulta la información de la clínica, deriva por LO QUE
+        // se preguntó y encima recuerda el turno.
+        const looksLikeQuestion = preguntaPorElMotivo(trimmed)
 
         // Mensaje de derivación: reconoce que no tenemos el motivo y deriva a la clínica.
         // Reusa el mismo estilo que ya usamos en otros flujos ("comunicate ... al *telefono*").
@@ -5419,8 +5430,16 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             await clearClinicaCancellationOffer(userPhoneNumber, config.id)
             await sendDirectResponse(clinicaOfferCtx, "Entendido. Si en algún momento querés gestionar un turno, escribime. ¡Hasta pronto!", "clinica_cancellation_declined")
             return
+          } else if (traeOtraConsulta(trimmed)) {
+            // Una consulta de otro tema con la oferta 1/2 pendiente (28/10/2026).
+            // Antes caía en el "re-ofertar" de abajo y recibía el texto del
+            // motivo. Se deja pasar: el pipeline la responde, y el paciente
+            // puede volver a pedir turno cuando quiera.
+            await clearClinicaCancellationOffer(userPhoneNumber, config.id)
+            // Sin return: sigue la cascada.
           } else {
-            // No es 1/2 ni una pregunta clara: respondemos amablemente derivando + re-ofertando.
+            // No es 1/2, ni el motivo, ni una consulta: re-ofertamos sin
+            // afirmar nada.
             await sendClinicaMessage(buildUnknownReasonMessage(true), true, "clinica_cancellation_reask")
             return
           }
@@ -5532,16 +5551,52 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           if (fecha) responseMsg += ` para el *${fecha}*`
           if (hora) responseMsg += ` a las *${hora}*`
           responseMsg += '! ✅\n\nSi necesitás algo más, no dudes en escribirme.'
-          // Guardar seguimiento para manejar preguntas posteriores (ej: "¿por qué?", detalles)
-          // derivándolas a la clínica en vez de caer al pipeline genérico.
-          // Usamos el Número de Derivación de la config; el del template es solo fallback.
-          await saveClinicaCancellationOffer(userPhoneNumber, config.id, {
-            kind: 'confirmed',
-            telefonoContacto: telefonoParaMensajes(config) || telefonoContacto || '',
-          })
           void recordDiag(config.id, DIAG.CLINICA_TURNO_CONFIRMADO)
           await sendDirectResponse(clinicaInfoCtx, responseMsg, "clinica_confirmation_info")
-          return
+
+          // ── Si además preguntó algo, se le responde (28/10/2026) ──────────
+          //
+          // Este bloque respondía la confirmación y cortaba, sin mirar qué
+          // había escrito el paciente. El caso real: "Gracias, sabés cuánto
+          // vale la consulta?" recibía sólo "¡Tu turno está confirmado!", y la
+          // pregunta quedaba sin contestar hasta que la repetía.
+          //
+          // Ahora la confirmación sale igual —es lo primero que el paciente
+          // necesita leer— y la consulta sigue por la cascada, que la
+          // responde. Son dos mensajes, como hubiera hecho una persona.
+          //
+          // El seguimiento se guarda SÓLO si no hay nada más que responder:
+          // si lo guardáramos igual, el pipeline de abajo volvería a entrar en
+          // el bloque de clínica en el próximo mensaje.
+          if (traeOtraConsulta(userMessage)) {
+            createConversationLogger(userPhoneNumber, config.id, "clinica-confirmacion").info(
+              "El paciente confirmó y además preguntó otra cosa: la consulta sigue al pipeline",
+            )
+            // El contexto deja de ser "template de clínica recién llegado".
+            //
+            // Sin esto, el `tipo_mensaje` quedaría en `turno_confirmado_clinica`
+            // y el próximo mensaje del paciente volvería a entrar en este mismo
+            // bloque: recibiría la confirmación por segunda vez en vez de una
+            // respuesta. Los datos del turno se conservan —el pipeline los usa
+            // para recordarle cuándo es— y sólo cambia la marca de origen, que
+            // es lo que ya hace el reconstructor de contexto cuando el mensaje
+            // no vino de un template.
+            await saveAppointmentContext(userPhoneNumber, config.id, {
+              ...(clinicaContext as any),
+              tipo_mensaje: 'user_initiated',
+            }).catch(() => {})
+            // Sin return: sigue la cascada con el mismo mensaje.
+          } else {
+            // Guardar seguimiento para manejar preguntas posteriores (ej: "¿por
+            // qué?") derivándolas a la clínica en vez de caer al pipeline
+            // genérico. Usamos el Número de Derivación de la config; el del
+            // template es solo fallback.
+            await saveClinicaCancellationOffer(userPhoneNumber, config.id, {
+              kind: 'confirmed',
+              telefonoContacto: telefonoParaMensajes(config) || telefonoContacto || '',
+            })
+            return
+          }
         }
       }
     }
