@@ -99,8 +99,13 @@ export interface ObraSocialBloqueada {
  * Frase que explica por qué no puede sacar turno por este medio y qué hacer.
  * Sin "no está habilitada": el problema no es el paciente, es que esa cobertura
  * se gestiona por otra vía.
+ *
+ * Se exporta desde el 28/10/2026: el flujo de "turno para un familiar" la usa
+ * para contestar en el chat en vez de mandar un enlace que sólo sirve para
+ * mostrar esto mismo. Escribirla otra vez allá sería tener dos redacciones de
+ * la misma frase, y la que se arregle primero va a ser siempre la otra.
  */
-function textoObraSocialBloqueada(os: ObraSocialBloqueada): string {
+export function textoObraSocialBloqueada(os: ObraSocialBloqueada): string {
   const telefono = os.telefonoDerivacion
   if (!telefono) {
     return `Los turnos de *${os.nombre}* se gestionan por teléfono, comunicándote directamente con la clínica.`

@@ -41,6 +41,7 @@ import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
 import { trackAppointmentEvent, getTemplateSentTime, checkAndTrackUserInitiated, markPendingReschedule, getTemplateTrackingData, isWithinTemplateWindow } from "./appointment-stats"
 import { preguntaPorElMotivo, traeOtraConsulta } from "./conversation-state/pregunta-por-el-motivo"
+import { estaBloqueadaLaObraSocial } from "./portal/identidad"
 import { cancelPendingReminders } from "@/lib/reminders/reminder-queue"
 import {
   getActiveSessionByPhone,
@@ -1955,31 +1956,25 @@ async function requestFamiliarDni(
   config: any,
   ctxDirect: DirectResponseContext,
 ): Promise<boolean> {
-  // ── Con el portal activo, el DNI lo pide el portal (24/9/2026) ───────────
+  // ── El DNI del familiar se pide ACÁ, no en el portal (28/10/2026) ────────
   //
-  // Esta función es el embudo de "pedile el DNI del familiar": la llaman tres
-  // lugares del router. Poner la compuerta acá adentro —y no en cada
-  // llamador— es lo que evita que el próximo camino que se agregue se la
-  // saltee. Ya pasó dos veces con el resto de las entradas al portal.
+  // Hasta hoy, con el portal encendido esta función mandaba el enlace de una y
+  // el DNI lo pedía el portal. La idea era razonable —el familiar es otra
+  // persona y el portal sabe buscar SU ficha—, pero tenía una consecuencia que
+  // se vio en un caso real: la paciente escribió "turno para mi mamá" con el
+  // DNI y el nombre en el mismo mensaje, recibió un enlace, salió de WhatsApp,
+  // cargó el DNI y el portal le contestó "los turnos de PAMI se gestionan por
+  // teléfono". Un viaje entero para enterarse de algo que sabíamos antes de
+  // mandarlo.
   //
-  // Sin datos del paciente a propósito: el familiar es otra persona, así que
-  // el portal le va a pedir SU DNI y buscar SU ficha. Mandar la identidad de
-  // quien escribe haría que el turno quede a nombre equivocado.
-  if (usaPortal(config)) {
-    const derivado = await derivarAlPortal({
-      config,
-      phoneNumberId: ctxDirect.phoneNumberId,
-      userPhoneNumber,
-      intencion: 'familiar',
-      origen: 'conversacion',
-    })
-    if (derivado) {
-      await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
-      return true
-    }
-    // Si no se pudo derivar, sigue pidiendo el DNI por WhatsApp.
-  }
-
+  // Ahora el DNI se pregunta en el chat —como cuando el portal está apagado— y
+  // con la ficha del familiar en la mano se decide: si su obra social no saca
+  // turnos online se responde acá mismo; si puede, recién entonces va el
+  // enlace, y con sus datos ya cargados. Ver el bloque `familiar_dni_pending`.
+  //
+  // La compuerta de obra social de `derivarAlPortal` sigue excluyendo a
+  // `familiar` a propósito: la que ella conoce es la de quien escribe. La del
+  // familiar se chequea donde se la conoce, que es después de resolver el DNI.
   const ok = await updatePatientDetectionPhase(userPhoneNumber, 'awaiting_familiar_dni')
   if (!ok) return false
   const { buildFamiliarDNIRequestMessage } = await import('./conversation-state/patient-detection/patient-templates')
@@ -6609,6 +6604,31 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
           const patientResponse = await clinicAPI.paciente_dni(dniOnly)
 
           if (!patientResponse.exito || !patientResponse.datos) {
+            // ── Familiar sin ficha: acá SÍ va el enlace (28/10/2026) ────────
+            //
+            // Es el caso que el portal resuelve mejor que el chat: hay que
+            // cargar nombre, apellido, fecha de nacimiento, obra social y
+            // email, y eso en un formulario es un minuto y por WhatsApp son
+            // seis preguntas.
+            if (usaPortal(config)) {
+              const derivadoAlta = await derivarAlPortal({
+                config,
+                phoneNumberId: detectionCtx.phoneNumberId,
+                userPhoneNumber,
+                intencion: 'familiar',
+                origen: 'conversacion',
+                // El DNI va, el resto no: es lo único que sabemos del familiar
+                // y le ahorra tipearlo de nuevo.
+                paciente: { pacienteDNI: dniOnly },
+              })
+              if (derivadoAlta) {
+                await completePatientDetectionFlow(userPhoneNumber, config.id)
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
+              }
+              // Si no se pudo derivar, sigue el alta por WhatsApp.
+            }
+
             // Familiar NO encontrado → iniciar flujo de paciente nuevo con ese DNI (modo familiar)
             const newPatientResult = await initializeNewPatientFlow(dniOnly, userPhoneNumber, config.cliente_id, true, userMessage, 'whatsapp', config.permitirNuevoTurno, telefonoParaMensajes(config))
             if (newPatientResult?.handled && newPatientResult.message) {
@@ -6639,6 +6659,65 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
             const familiarCelular = (familiar.Celular || familiar.celular || familiar.Telefono || familiar.telefono || '').trim()
             const familiarObraSocialId = (familiar.Deudor_Id || familiar.deudor_id || '').toString().trim()
             const familiarObraSocialNombre = (familiar.Deudor_Nombre || familiar.deudor_nombre || '').toString().trim()
+
+            // ── Con la ficha del familiar en la mano (28/10/2026) ──────────
+            //
+            // Éste es el punto donde sabemos quién se va a atender y con qué
+            // cobertura, y es por eso el único lugar donde se puede decidir
+            // bien. Dos desenlaces antes de seguir:
+            //
+            //  · su obra social no saca turnos online → se responde ACÁ, en el
+            //    chat. Antes esto terminaba en un enlace cuyo único contenido
+            //    era ese mismo aviso, del otro lado de WhatsApp.
+            //  · puede sacar turno → va el enlace, con sus datos ya cargados,
+            //    así no escribe el DNI por segunda vez.
+            const bloqueadaFamiliar = familiarObraSocialNombre && config.cliente_id
+              ? await estaBloqueadaLaObraSocial(
+                  config.cliente_id,
+                  familiarObraSocialNombre,
+                  familiarObraSocialId || undefined,
+                ).catch(() => undefined)
+              : undefined
+
+            if (bloqueadaFamiliar === true) {
+              const { textoObraSocialBloqueada } = await import(
+                './conversation-state/patient-detection/patient-templates'
+              )
+              const aviso = textoObraSocialBloqueada({
+                nombre: familiarObraSocialNombre,
+                telefonoDerivacion: telefonoParaMensajes(config),
+              })
+              await sendDirectResponse(detectionCtx, aviso, 'familiar_obra_social_bloqueada')
+              await completePatientDetectionFlow(userPhoneNumber, config.id)
+              await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+              return
+            }
+
+            if (usaPortal(config)) {
+              const derivadoFamiliar = await derivarAlPortal({
+                config,
+                phoneNumberId: detectionCtx.phoneNumberId,
+                userPhoneNumber,
+                intencion: 'familiar',
+                origen: 'conversacion',
+                paciente: {
+                  pacienteId: familiarId || undefined,
+                  pacienteNombre: familiarName || undefined,
+                  pacienteNombres: (familiar.Nombres || familiar.nombres || '').trim() || undefined,
+                  pacienteApellido: (familiar.Apellido || familiar.apellido || '').trim() || undefined,
+                  pacienteEmail: familiarEmail || undefined,
+                  pacienteDNI: familiarDNI,
+                  obraSocialId: familiarObraSocialId || undefined,
+                  obraSocialNombre: familiarObraSocialNombre || undefined,
+                },
+              })
+              if (derivadoFamiliar) {
+                await completePatientDetectionFlow(userPhoneNumber, config.id)
+                await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+                return
+              }
+              // Si no se pudo derivar, sigue el flujo conversacional de siempre.
+            }
 
             const existingResult = await initializeExistingPatientFlow(
               userPhoneNumber,
