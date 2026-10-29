@@ -37,6 +37,7 @@
 
 import { getRedisClient } from "../redis"
 import { validarObraSocial } from "../api-tools/api-functions"
+import { muestra, type Diagnostico } from "./diagnostico"
 
 export interface DeudorParticular {
   id: string
@@ -66,7 +67,11 @@ function normalizar(texto: string): string {
  * cada paso de cada paciente de una clínica sin Particular dispararía una
  * búsqueda al proxy que ya sabemos que no va a encontrar nada.
  */
-export async function deudorParticular(clienteId: string): Promise<DeudorParticular | null> {
+export async function deudorParticular(
+  clienteId: string,
+  /** Recolector del panel de diagnóstico. Opcional. */
+  diagnostico?: Diagnostico,
+): Promise<DeudorParticular | null> {
   if (!clienteId) return null
 
   const redis = getRedisClient()
@@ -76,6 +81,11 @@ export async function deudorParticular(clienteId: string): Promise<DeudorParticu
     try {
       const guardado = await redis.get(clave)
       if (guardado !== null && guardado !== undefined) {
+        diagnostico?.anotar({
+          titulo: "deudor Particular (desde la caché)",
+          resumen: guardado === "" ? "esta clínica NO tiene un deudor Particular" : "encontrado",
+          crudo: guardado === "" ? null : guardado,
+        })
         // "" es la marca de "esta clínica no tiene Particular".
         if (guardado === "") return null
         const datos = typeof guardado === "string" ? JSON.parse(guardado) : (guardado as DeudorParticular)
@@ -92,6 +102,11 @@ export async function deudorParticular(clienteId: string): Promise<DeudorParticu
     const lista = respuesta?.exito ? respuesta?.datos?.obras_sociales : null
 
     if (Array.isArray(lista)) {
+      diagnostico?.anotar({
+        titulo: "get_obras_sociales · busqueda=\"particular\"",
+        resumen: `${lista.length} coincidencias`,
+        crudo: muestra(lista.map((os: any) => ({ id: os?.id, nombre: os?.nombre })), 10),
+      })
       const exacta = lista.find((os: any) => os?.id && normalizar(os?.nombre) === NOMBRE)
       // El nombre se guarda como lo escribe la clínica, pero sin los espacios
       // de más: va a aparecer en el repaso del paciente ("Obra social: …").

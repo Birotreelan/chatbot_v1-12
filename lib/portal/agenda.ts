@@ -28,6 +28,7 @@
 
 import { buscarProfesionales } from "../api-tools/api-functions"
 import { searchTurnosFull } from "../conversation-state/shared/turnos-handler"
+import type { Diagnostico } from "./diagnostico"
 import type { TurnoOption } from "../conversation-state/shared/types"
 
 export interface ResolucionDeProfesional {
@@ -168,6 +169,8 @@ export async function agendaParaReprogramar(params: {
   profesionalNombre?: string | null
   pacienteDNI?: string
   obraSocialId?: string
+  /** Recolector del panel de diagnóstico. Opcional. */
+  diagnostico?: Diagnostico
 }): Promise<AgendaDelPortal> {
   // Con el id no hay nada que resolver. Sólo se busca por nombre cuando el
   // recordatorio no trajo `Chatbot_Data`, que es el caso viejo.
@@ -184,6 +187,8 @@ export async function agendaParaReprogramar(params: {
       profesionalId: resolucion.profesionalId,
     },
     params.phone,
+    1,
+    params.diagnostico,
   )
 
   if (!resultado.success || !resultado.turnos?.length) {
@@ -262,6 +267,8 @@ export async function agendaParaTurnoNuevo(params: {
    * Particular quedan marcados con `soloParticular`. Ver `fusionarConParticular`.
    */
   particularId?: string
+  /** Recolector del panel de diagnóstico. Opcional; ver lib/portal/diagnostico.ts. */
+  diagnostico?: Diagnostico
 }): Promise<AgendaDelPortal> {
   // ── Las dos agendas, en paralelo (27/10/2026) ────────────────────────────
   //
@@ -312,6 +319,8 @@ export async function agendaParaTurnoNuevo(params: {
       especialidadId: params.especialidadId,
     },
     params.phone,
+    1,
+    params.diagnostico,
   )
 
   // ── Diagnóstico del filtro por especialidad (24/9/2026) ──────────────────

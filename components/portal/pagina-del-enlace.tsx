@@ -94,6 +94,9 @@ import {
   ofreceTurnosParticulares,
 } from "@/lib/portal/particular"
 import { registroDelPortal, datosDeLaVisita } from "@/lib/portal/registro"
+import { crearDiagnostico, medir, muestra } from "@/lib/portal/diagnostico"
+import { PanelDeDiagnostico } from "@/components/portal/panel-de-diagnostico"
+import { getSession } from "@/lib/auth"
 
 export async function PaginaDelEnlace({
   params,
@@ -113,6 +116,8 @@ export async function PaginaDelEnlace({
     especialidadId?: string
     profesionalId?: string
     sinFiltro?: string
+    /** Panel de diagnóstico. Ver `diagnostico` más abajo: no alcanza con pedirlo. */
+    debug?: string
   }>
 }) {
   const { token } = await params
@@ -311,6 +316,30 @@ export async function PaginaDelEnlace({
 
   const clienteId = contexto.clienteId || ""
 
+  // ── El panel de diagnóstico (28/10/2026) ─────────────────────────────────
+  //
+  // Muestra al pie lo que esta pantalla consultó y lo que le contestaron. Es
+  // la mitad que el log no tiene: ahí están los parámetros, pero la respuesta
+  // del proxy sólo se vuelca cuando vuelve vacía, y "volvió algo que no
+  // esperábamos" es la otra mitad de los casos.
+  //
+  // Va ACÁ arriba, antes de la primera consulta: si se creara más abajo, las
+  // que corren antes —las sedes, por ejemplo— no tendrían dónde anotar y el
+  // panel mostraría un recorrido con agujeros, que es peor que no tenerlo.
+  //
+  // Pedirlo no alcanza. El enlace del portal es público para quien lo tenga y
+  // esto muestra la ficha del paciente: hace falta además que el enlace sea de
+  // prueba, o una sesión de super_admin en el mismo navegador. Un paciente que
+  // le agregue `?debug=1` a su URL no ve nada.
+  //
+  // La sesión se consulta SÓLO si pidieron el panel: es una lectura más de
+  // Redis y no tiene por qué pagarla cada paciente en cada paso.
+  const pidenDiagnostico = filtrosCrudos.debug === "1"
+  const puedeDiagnosticar =
+    pidenDiagnostico &&
+    (contexto.demo === true || (await getSession().catch(() => null))?.role === "super_admin")
+  const diagnostico = puedeDiagnosticar ? crearDiagnostico() : undefined
+
   /**
    * El deudor "Particular" de esta clínica, si corresponde ofrecerlo.
    *
@@ -321,7 +350,7 @@ export async function PaginaDelEnlace({
    * escribe una sola vez.
    */
   const resolverParticular = async () =>
-    ofreceTurnosParticulares(config) ? await deudorParticular(clienteId).catch(() => null) : null
+    ofreceTurnosParticulares(config) ? await deudorParticular(clienteId, diagnostico).catch(() => null) : null
 
   // ── La sede se resuelve antes de decidir el paso (24/9/2026) ─────────────
   //
@@ -339,7 +368,12 @@ export async function PaginaDelEnlace({
   let sedesParaElegir: Array<{ id: string; nombre: string; detalle?: string }> = []
 
   if (decidirPaso(contexto.intencion, permisos, filtros, identidad, filtrosCrudos.paso) === "elegir_sede") {
-    const sedes = (await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes || []
+    const sedes =
+      (
+        await medir(diagnostico, "get_sedes", { Cliente_Id: clienteId }, () =>
+          obtenerTodasLasSedes(clienteId).catch(() => null),
+        (r) => ({ resumen: `${r?.sedes?.length ?? 0} sedes`, crudo: muestra(r?.sedes, 5) }))
+      )?.sedes || []
     sedesParaElegir = sedes
       .map((sede: any) => ({
         id: String(sede?.Id ?? ""),
@@ -373,6 +407,10 @@ export async function PaginaDelEnlace({
   const registro = registroDelPortal(contexto, paso)
   registro.info("Paso del portal", datosDeLaVisita({ token, contexto, identidad, filtros, formato }))
 
+  if (pidenDiagnostico && !puedeDiagnosticar) {
+    registro.warn("Se pidió el panel de diagnóstico sin permiso; se ignora")
+  }
+
   // El aviso de prueba va arriba de todo y en todas las pantallas. Si alguien
   // abre este enlace sin saber qué es, tiene que enterarse antes de tocar nada.
   const avisoDemo = contexto.demo ? (
@@ -397,6 +435,31 @@ export async function PaginaDelEnlace({
     >
       {avisoDemo}
       {hijos}
+      {/* Al pie y en todas las pantallas: `marco` es el envoltorio por el que
+          pasan los doce pasos, así que ponerlo acá evita tener que acordarse
+          en cada uno. Se dibuja cuando ya corrieron las consultas, así que
+          para este momento el recolector está completo. */}
+      {diagnostico && (
+        <PanelDeDiagnostico
+          anotaciones={diagnostico.anotaciones}
+          encabezado={{
+            paso,
+            intencion: contexto.intencion,
+            formato,
+            demo: contexto.demo === true,
+            filtros,
+            identidad: {
+              dni: identidad.dni ? String(identidad.dni).slice(0, 3) + "****" : "(no)",
+              tieneFicha: identidad.tieneFicha ?? "(no se resolvió)",
+              fichaConsultada: identidad.fichaConsultada ?? false,
+              obraSocialId: identidad.obraSocialId || "(no)",
+              obraSocialNombre: identidad.obraSocialNombre || "(no)",
+              obraSocialBloqueada: identidad.obraSocialBloqueada ?? "(no se resolvió)",
+            },
+            permisos,
+          }}
+        />
+      )}
     </Marco>
   )
 
@@ -517,6 +580,7 @@ export async function PaginaDelEnlace({
       profesionalNombre: contexto.turno?.profesional,
       pacienteDNI: contexto.pacienteDNI,
       obraSocialId: contexto.obraSocialId,
+      diagnostico,
     })
 
     // En un enlace de prueba, si la agenda real vino vacía se muestran horarios
@@ -668,7 +732,12 @@ export async function PaginaDelEnlace({
 
   // ── Elegir especialidad ─────────────────────────────────────────────────
   if (paso === "elegir_especialidad") {
-    const opciones = normalizarOpciones(await obtenerEspecialidades(clienteId).catch(() => null), "especialidades")
+    const opciones = normalizarOpciones(
+      await medir(diagnostico, "get_subespecialidades", { Cliente_Id: clienteId }, () =>
+        obtenerEspecialidades(clienteId).catch(() => null),
+      (r) => ({ resumen: `${(r as any)?.especialidades?.length ?? 0} especialidades`, crudo: muestra(r, 5) })),
+      "especialidades",
+    )
 
     // Sin especialidades no se frena al paciente en una pantalla vacía: se
     // salta al paso siguiente con un enlace que ya trae el `sinFiltro`.
@@ -695,7 +764,9 @@ export async function PaginaDelEnlace({
   // los horarios. El salto ahora lo hace el bloque de especialidad.
   if (paso === "elegir_profesional") {
     const listaDeProfesionales = normalizarOpciones(
-      await obtenerTodosLosProfesionales(clienteId).catch(() => null),
+      await medir(diagnostico, "get_profesionales", { Cliente_Id: clienteId }, () =>
+        obtenerTodosLosProfesionales(clienteId).catch(() => null),
+      (r) => ({ resumen: `${(r as any)?.profesionales?.length ?? (Array.isArray(r) ? r.length : 0)} profesionales`, crudo: muestra(r, 3) })),
       "profesionales",
     )
 
@@ -746,6 +817,7 @@ export async function PaginaDelEnlace({
               pacienteDNI: identidad.dni,
               tieneFicha: identidad.tieneFicha === true,
               obraSocialId: identidad.obraSocialId,
+              diagnostico,
             }).catch(() => null),
             ofrecerParticular
               ? agendaParaTurnoNuevo({
@@ -756,6 +828,7 @@ export async function PaginaDelEnlace({
                   pacienteDNI: identidad.dni,
                   tieneFicha: identidad.tieneFicha === true,
                   obraSocialId: particular!.id,
+                  diagnostico,
                 }).catch(() => null)
               : Promise.resolve(null),
           ])
@@ -883,6 +956,7 @@ export async function PaginaDelEnlace({
     tieneFicha: identidad.tieneFicha === true,
     obraSocialId: identidad.obraSocialId,
     particularId: ofrecerParticularEnLaAgenda ? particularDelTurno!.id : undefined,
+    diagnostico,
   })
 
   /**
