@@ -97,7 +97,23 @@ async function fetchProxyApi<T>(
     if (cachedData) {
       console.log(`[CACHE] ✅ Hit para ${action}`)
       const parsed = decompressFromCache<ApiResponse<T>>(cachedData)
-      if (parsed) return parsed
+      if (parsed) {
+        // Una respuesta cacheada también es una respuesta (30/10/2026).
+        //
+        // El panel decía "0 consultas" en la pantalla de sedes aunque la lista
+        // estaba ahí: `get_sedes` venía de la caché y la anotación estaba
+        // después del `fetch`. Un diagnóstico que muestra sólo las consultas
+        // que salieron a la red deja creer que no se consultó nada — y encima
+        // esconde justo el caso en que el problema puede ser una respuesta
+        // vieja guardada.
+        diagnosticoActual()?.anotar({
+          titulo: `${action} (desde la caché)`,
+          parametros: params,
+          resumen: "no salió a la red; respuesta guardada",
+          crudo: muestraDeDiagnostico((parsed as { datos?: unknown })?.datos ?? parsed),
+        })
+        return parsed
+      }
       // Entrada corrupta → continuar con fetch normal
     }
   } else if (NO_CACHE_ACTIONS.includes(action)) {
@@ -443,18 +459,38 @@ export async function buscarProfesionales(
 export async function obtenerTodosLosProfesionales(
   clienteId: string,
   useCache = true,
+  /**
+   * La sede elegida, cuando la hay (30/10/2026).
+   *
+   * Sin esto la consulta sale con `{}` y devuelve el directorio COMPLETO del
+   * cliente. En una clínica con seis sedes eso son cien profesionales, la
+   * mayoría de otra sede, y la respuesta trae `Sede_Nombre: null`, así que
+   * tampoco se puede filtrar del lado nuestro.
+   *
+   * No sabemos si todos los proxies lo soportan. Por eso, si la consulta
+   * filtrada vuelve vacía, se reintenta sin el filtro: una lista de más es
+   * molesta, una lista vacía deja al paciente sin poder elegir.
+   */
+  sedeId?: string,
 ): Promise<ApiResponse<{ id: string; nombre: string; especialidad?: string }[]>> {
-  const resultado = await fetchProxyApi<any>(clienteId, "get_profesionales", {}, useCache)
-
-  if (resultado.exito && resultado.datos) {
-    const profesionales = resultado.datos.profesionales || resultado.datos
-    return {
-      exito: true,
-      datos: Array.isArray(profesionales) ? profesionales : [],
+  const leer = async (params: Record<string, unknown>) => {
+    const resultado = await fetchProxyApi<any>(clienteId, "get_profesionales", params, useCache)
+    if (resultado.exito && resultado.datos) {
+      const profesionales = resultado.datos.profesionales || resultado.datos
+      return { exito: true as const, datos: Array.isArray(profesionales) ? profesionales : [] }
     }
+    return resultado
   }
 
-  return resultado
+  if (!sedeId) return leer({})
+
+  const conSede = await leer({ Sede_Id: sedeId })
+  if (conSede.exito && Array.isArray(conSede.datos) && conSede.datos.length > 0) return conSede
+
+  console.warn(
+    `[API] get_profesionales con Sede_Id=${sedeId} no devolvió profesionales; se reintenta sin filtro`,
+  )
+  return leer({})
 }
 
 // Función para obtener turnos disponibles o agendados

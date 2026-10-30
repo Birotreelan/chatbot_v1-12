@@ -103,7 +103,7 @@ import {
   ofreceTurnosParticulares,
 } from "@/lib/portal/particular"
 import { registroDelPortal, datosDeLaVisita } from "@/lib/portal/registro"
-import { activarDiagnostico, crearDiagnostico } from "@/lib/portal/diagnostico"
+import { activarDiagnostico, crearDiagnostico, diagnosticoActual } from "@/lib/portal/diagnostico"
 import { PanelDeDiagnostico } from "@/components/portal/panel-de-diagnostico"
 import { getSession } from "@/lib/auth"
 
@@ -813,9 +813,41 @@ export async function PaginaDelEnlace({
   // que no hay ninguna cargada no quiere elegir un profesional — quiere ver
   // los horarios. El salto ahora lo hace el bloque de especialidad.
   if (paso === "elegir_profesional") {
-    const listaDeProfesionales = normalizarOpciones(
-      await obtenerTodosLosProfesionales(clienteId).catch(() => null),
-      "profesionales",
+    // ── El directorio, filtrado por la sede elegida (30/10/2026) ─────────
+    //
+    // Antes se pedía con `{}` y volvía el padrón completo del cliente. En una
+    // clínica con seis sedes el paciente veía cien profesionales, casi todos
+    // de otra sede, en gris y con el cartel "Sin turnos disponibles por
+    // ahora" — que además es falso: su médico sí tiene turnos, en otro lado.
+    const respuestaProfesionales = await obtenerTodosLosProfesionales(
+      clienteId,
+      true,
+      filtros.sedeId,
+    ).catch(() => null)
+
+    const listaDeProfesionales = normalizarOpciones(respuestaProfesionales, "profesionales")
+
+    /**
+     * Los que la clínica marca como "sin turnos online".
+     *
+     * Viene en el mismo payload, en `Turnos_Online_Disponibles`, y lo estábamos
+     * ignorando: ALDERETE, ARAUJO y varios más llegaban con "0" y se ofrecían
+     * igual. Es la clínica diciendo que por este medio no se les saca turno;
+     * ofrecerlos es ofrecer algo que no se puede completar.
+     */
+    const sinTurnosOnline = new Set(
+      (Array.isArray((respuestaProfesionales as any)?.datos)
+        ? ((respuestaProfesionales as any).datos as any[])
+        : []
+      )
+        .filter((p) => {
+          const v = p?.Turnos_Online_Disponibles ?? p?.turnos_online_disponibles
+          // Sólo un "0"/"No" explícito excluye. Si el campo no viene, se deja
+          // pasar: un proxy que deje de mandarlo no puede vaciar la lista.
+          return String(v) === "0" || String(p?.Turnos_Online_Texto ?? "").trim().toLowerCase() === "no"
+        })
+        .map((p) => String(p?.Id ?? p?.id ?? ""))
+        .filter(Boolean),
     )
 
     // ── Quién tiene agenda de verdad (30/9/2026) ─────────────────────────
@@ -890,24 +922,63 @@ export async function PaginaDelEnlace({
     const conAgenda = profesionalesDe(agendaParaSaberQuienTiene)
     const conParticular = profesionalesDe(agendaParticular)
 
-    const opciones = listaDeProfesionales.map((o) => {
-      const id = String(o.id)
-      if (conAgenda.size > 0 && conAgenda.has(id)) return o
+    /**
+     * ¿Sabemos quién tiene agenda en esta sede?
+     *
+     * Sólo si alguna de las dos consultas trajo algo. Si las dos volvieron
+     * vacías pudo ser un problema nuestro, y ahí no se esconde a nadie: que el
+     * paciente toque y lea el mensaje de la pantalla siguiente es mucho menos
+     * malo que mostrarle una lista vacía porque no pudimos preguntar.
+     */
+    const sabemosQuienAtiende = conAgenda.size > 0 || conParticular.size > 0
 
-      // No aparece con su obra social, pero sí bajo Particular: se ofrece, y
-      // el enlace se lleva la marca para que todo lo que sigue —la agenda, el
-      // aviso, el resumen y la reserva— use esa cobertura y no la suya.
-      // Se ofrece, y la pantalla de horarios se encarga del resto: la agenda
-      // fusionada va a traer sólo huecos particulares para este profesional y
-      // los va a marcar uno por uno. No hace falta decírselo por la URL.
-      if (conParticular.has(id)) {
-        return { ...o, detalle: "Sólo de forma particular" }
+    const opciones = listaDeProfesionales.flatMap((o) => {
+      const id = String(o.id)
+
+      // La clínica dice que no da turnos online por este medio. Se muestra
+      // apagado y con el motivo verdadero: no es que no tenga horarios.
+      if (sinTurnosOnline.has(id)) {
+        return [{ ...o, deshabilitada: true, detalle: "Sus turnos se gestionan por otra vía" }]
       }
 
-      const sinTurnos = conAgenda.size > 0 || conParticular.size > 0
-      return sinTurnos
-        ? { ...o, deshabilitada: true, detalle: "Sin turnos disponibles por ahora" }
-        : o
+      if (conAgenda.has(id)) return [o]
+
+      // No aparece con su obra social, pero sí bajo Particular: se ofrece, y
+      // la pantalla de horarios se encarga del resto —la agenda fusionada
+      // trae sólo huecos particulares para él y los marca uno por uno—.
+      if (conParticular.has(id)) {
+        return [{ ...o, detalle: "Sólo de forma particular" }]
+      }
+
+      // Sin agenda en ESTA sede: se oculta. Decía "Sin turnos disponibles por
+      // ahora", que en una clínica con varias sedes es directamente falso —el
+      // profesional atiende, en otro lado— y dejaba una lista de cien
+      // nombres grises entre los que había que encontrar los cinco útiles.
+      if (sabemosQuienAtiende) return []
+
+      return [o]
+    })
+
+    // Cómo quedó la lista. Es lo que no se puede deducir de las consultas
+    // crudas: el directorio viene con cien nombres y la pantalla muestra
+    // cinco, y hay tres motivos distintos para que alguien no esté.
+    diagnosticoActual()?.anotar({
+      titulo: "lista de profesionales",
+      resumen: `${listaDeProfesionales.length} en el directorio → ${opciones.length} en pantalla`,
+      crudo: {
+        sedeElegida: filtros.sedeId || "(ninguna)",
+        conAgendaEnEstaSede: conAgenda.size,
+        soloParticularEnEstaSede: [...conParticular].filter((id) => !conAgenda.has(id)).length,
+        marcadosSinTurnosOnline: sinTurnosOnline.size,
+        ocultosPorNoAtenderEnEstaSede: sabemosQuienAtiende
+          ? listaDeProfesionales.filter(
+              (o) =>
+                !sinTurnosOnline.has(String(o.id)) &&
+                !conAgenda.has(String(o.id)) &&
+                !conParticular.has(String(o.id)),
+            ).length
+          : 0,
+      },
     })
 
     // Nadie tiene agenda: se dice acá, no después de hacerlo elegir. La
