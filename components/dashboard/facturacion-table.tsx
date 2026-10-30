@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Loader2, RefreshCw, Plus, X } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -47,6 +47,46 @@ interface FacturacionCliente {
 
 const formatoUSDMoney = new Intl.NumberFormat("es-AR", { style: "currency", currency: "USD", maximumFractionDigits: 2 })
 const formatoARS = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 })
+
+/**
+ * La fila "Total general" de esta tabla, para quien la contenga (30/10/2026).
+ *
+ * ── Para qué ───────────────────────────────────────────────────────────────
+ *
+ * Servicio muestra dos de estas tablas —con IA y sin IA— y hacía falta el
+ * total de las dos juntas. La alternativa era que la pestaña volviera a pedir
+ * los datos y los sumara por su cuenta, y entonces el gran total se calcularía
+ * con una segunda copia de la fórmula: el día que el cálculo cambie, una de
+ * las dos se actualiza y la otra no, y el gran total deja de ser la suma de lo
+ * que está en pantalla sin que nada avise.
+ *
+ * Así el gran total es, por construcción, la suma de las dos filas que se ven.
+ *
+ * Son exactamente los números de la fila de totales, ni uno más: nada que
+ * haya que volver a derivar afuera.
+ */
+export interface TotalesDeLaTabla {
+  /** Cuántos clientes entraron en estos totales. 0 es un total válido. */
+  clientes: number
+  recordatorios: number
+  mensajesDeServicio: number
+  interacciones: number
+  mensajesConCargo: number
+  costoUSD: number
+  valorUSD: number
+  valorARS: number
+  margenUSD: number
+  margenARS: number
+  /**
+   * Si esta tabla trae desglose y costo. Quien sume dos tablas necesita
+   * saberlo: sumar una que los trae con otra que no da un número que parece
+   * completo y no lo es.
+   */
+  hayDesglose: boolean
+  hayCosto: boolean
+  /** Filas que quedaron afuera del margen por no traer costo. */
+  filasSinCosto: number
+}
 
 interface FacturacionTableProps {
   title?: string
@@ -108,6 +148,21 @@ interface FacturacionTableProps {
    * mezclaría dos cosas que se miran por separado.
    */
   mostrarMargen?: boolean
+  /**
+   * Avisa los totales de esta tabla al contenedor, o `null` mientras no haya
+   * de qué: cargando, o con error.
+   *
+   * `null` y no ceros: quien sume dos tablas tiene que poder distinguir "esta
+   * tabla sumó cero" de "esta tabla todavía no cargó". Con ceros, el gran
+   * total mostraría la mitad de la verdad como si fuera el total, que es
+   * justo lo que no puede pasar con un número que se mira para facturar.
+   *
+   * Se llama en un efecto y no durante el render: es el padre el que cambia de
+   * estado, y hacerlo mientras este componente se dibuja es exactamente el
+   * error que React reporta como "Cannot update a component while rendering a
+   * different component".
+   */
+  onTotales?: (totales: TotalesDeLaTabla | null) => void
 }
 
 export function FacturacionTable({
@@ -124,6 +179,7 @@ export function FacturacionTable({
   cerrarMes = true,
   usarValoresPropios = false,
   mostrarMargen = false,
+  onTotales,
 }: FacturacionTableProps) {
   const [clientes, setClientes] = useState<FacturacionCliente[]>([])
   const [loading, setLoading] = useState(true)
@@ -387,6 +443,7 @@ export function FacturacionTable({
   // esa misma pestaña muestra al lado.
   const cierre = cerrarMes ? clientes.find((c) => c.cierre)?.cierre : undefined
   const totalGeneral = clientes.reduce((sum, c) => sum + (c.totalInteracciones || 0), 0)
+  const cantidadDeClientes = clientes.length
 
   // ── Las dos columnas del desglose ─────────────────────────────────────────
   //
@@ -467,6 +524,66 @@ export function FacturacionTable({
   const filasSinCosto = clientes.filter((c) => c.mensajesConCargoDeMeta === undefined).length
   const totalMargenUSD = clientes.reduce((sum, c) => sum + (valoresDeLaFila(c).margenUSD || 0), 0)
   const totalMargenARS = clientes.reduce((sum, c) => sum + (valoresDeLaFila(c).margenARS || 0), 0)
+
+  /**
+   * Avisar los totales al contenedor, si alguno los pidió.
+   *
+   * ── Las dos cosas que lo hacen estable ───────────────────────────────────
+   *
+   * 1. El callback se guarda en un ref y no está entre las dependencias. Si lo
+   *    estuviera, un padre que pase una función nueva en cada render —lo más
+   *    normal del mundo: `onTotales={(t) => setX(t)}`— dispararía el efecto,
+   *    el efecto cambiaría el estado del padre, el padre volvería a renderizar
+   *    con otra función, y así para siempre.
+   * 2. Las dependencias son números y booleanos, no el objeto. El objeto es
+   *    nuevo en cada render por definición, y eso sería el mismo bucle.
+   */
+  const avisar = useRef(onTotales)
+  useEffect(() => {
+    avisar.current = onTotales
+  }, [onTotales])
+
+  // Cargando o con error no hay totales: `null`, para que el contenedor no
+  // presente una suma a medias como si fuera la total. Cero clientes sí es un
+  // total —de cero—, y su tabla no aporta nada a la suma.
+  const totalesListos = !loading && !error
+  useEffect(() => {
+    if (!avisar.current) return
+    avisar.current(
+      totalesListos
+        ? {
+            clientes: cantidadDeClientes,
+            recordatorios: totalRecordatorios,
+            mensajesDeServicio: totalServicios,
+            interacciones: totalGeneral,
+            mensajesConCargo: totalConCargo,
+            costoUSD: totalCostoUSD,
+            valorUSD: totalGeneralValorUSD,
+            valorARS: totalGeneralValorARS,
+            margenUSD: totalMargenUSD,
+            margenARS: totalMargenARS,
+            hayDesglose,
+            hayCosto,
+            filasSinCosto,
+          }
+        : null,
+    )
+  }, [
+    totalesListos,
+    cantidadDeClientes,
+    totalRecordatorios,
+    totalServicios,
+    totalGeneral,
+    totalConCargo,
+    totalCostoUSD,
+    totalGeneralValorUSD,
+    totalGeneralValorARS,
+    totalMargenUSD,
+    totalMargenARS,
+    hayDesglose,
+    hayCosto,
+    filasSinCosto,
+  ])
 
   return (
     <Card>

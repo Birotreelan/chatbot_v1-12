@@ -32,7 +32,8 @@
 import { useState, useEffect, useCallback } from "react"
 import { MonthSelector, getCurrentMonthValue } from "./month-selector"
 import { esReglaAnterior, reglaDelPeriodo, REGLAS } from "@/lib/facturacion-reglas"
-import { FacturacionTable } from "./facturacion-table"
+import { FacturacionTable, type TotalesDeLaTabla } from "./facturacion-table"
+import { GranTotalServicio } from "./gran-total-servicio"
 import { Input } from "@/components/ui/input"
 import { servicioUsaValoresPropios, SERVICIO_PRECIO_PROPIO_DESDE } from "@/lib/servicio-calculo"
 
@@ -53,6 +54,22 @@ export function ServicioSection() {
    * no es todavía un dólar válido, y recalcular toda la tabla con 15 pesos en
    * cada tecla sería ruido — y dejaría números absurdos a la vista.
    */
+  /**
+   * Los totales de cada tabla, para poder sumarlos (30/10/2026).
+   *
+   * Los reporta cada `FacturacionTable` desde su propia fila de totales, así
+   * que el gran total es la suma de lo que está en pantalla y no un segundo
+   * cálculo paralelo. `null` mientras esa tabla no haya cargado: ver
+   * GranTotalServicio, que en ese caso no suma.
+   *
+   * Los dos `useCallback` son necesarios, no decoración: sin ellos la función
+   * sería nueva en cada render y la tabla volvería a avisar en cada uno.
+   */
+  const [totalesConIA, setTotalesConIA] = useState<TotalesDeLaTabla | null>(null)
+  const [totalesSinIA, setTotalesSinIA] = useState<TotalesDeLaTabla | null>(null)
+  const recibirConIA = useCallback((t: TotalesDeLaTabla | null) => setTotalesConIA(t), [])
+  const recibirSinIA = useCallback((t: TotalesDeLaTabla | null) => setTotalesSinIA(t), [])
+
   const [dolarFijado, setDolarFijado] = useState<number | null>(null)
   const [textoDolar, setTextoDolar] = useState("")
   const [guardandoDolar, setGuardandoDolar] = useState(false)
@@ -327,6 +344,7 @@ export function ServicioSection() {
         cerrarMes={false}
         usarValoresPropios={valoresPropios}
         mostrarMargen
+        onTotales={recibirConIA}
       />
 
       <FacturacionTable
@@ -342,6 +360,19 @@ export function ServicioSection() {
         cerrarMes={false}
         usarValoresPropios={valoresPropios}
         mostrarMargen
+        onTotales={recibirSinIA}
+      />
+
+      {/* ── El total de las dos tablas (30/10/2026) ───────────────────────
+          Va al final y no arriba: es la suma de los dos totales generales que
+          quedaron justo encima, y leerlo antes de ver los sumandos no diría
+          nada. Los números salen de las tablas, no de una segunda consulta:
+          ver gran-total-servicio.tsx. */}
+      <GranTotalServicio
+        partes={[
+          { etiqueta: "Clientes Wpp con IA", totales: totalesConIA },
+          { etiqueta: "Clientes Wpp sin IA", totales: totalesSinIA },
+        ]}
       />
     </div>
   )
