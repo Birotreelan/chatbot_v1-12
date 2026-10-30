@@ -12,7 +12,6 @@ import { createConversationLogger } from '../logger'
 import { obtenerTurnos } from '../../api-tools/api-functions'
 import type { TurnoOption, HandlerResult } from './types'
 import { fraseDerivacion } from '@/lib/utils/escalation-contact'
-import { muestra, type Diagnostico } from '@/lib/portal/diagnostico'
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -77,14 +76,6 @@ export async function searchTurnosFull(
   },
   phoneNumber: string,
   startNumber: number = 1,
-  /**
-   * Recolector opcional para el panel de diagnóstico del portal (28/10/2026).
-   *
-   * Acá se anota lo que el log no puede mostrar: la respuesta del proxy.
-   * Opcional y sin estado global — si nadie lo pasa, no se anota nada. Ver
-   * lib/portal/diagnostico.ts.
-   */
-  diagnostico?: Diagnostico,
 ): Promise<{
   success: boolean
   turnos?: TurnoOption[]
@@ -172,20 +163,6 @@ export async function searchTurnosFull(
         conDNI: Boolean(params.pacienteDNI),
         infoSinTurnos: infoSinTurnos ? JSON.stringify(infoSinTurnos).slice(0, 300) : '(el proxy no explicó el cero)',
       })
-      diagnostico?.anotar({
-        titulo: `get_turnos · ${params.obraSocialId ? `obra social ${params.obraSocialId}` : 'sin obra social'}`,
-        parametros: {
-          Fecha_Desde: fechaDesde,
-          Fecha_Hasta: fechaHasta,
-          Sede_Id: params.sedeId || '(no se manda)',
-          Profesional_Id: params.profesionalId || '(no se manda)',
-          Subespecialidad_Id: params.especialidadId || '(no se manda)',
-          Deudor_Id: params.obraSocialId || '(no se manda)',
-          Paciente_DNI: params.pacienteDNI ? String(params.pacienteDNI).slice(0, 3) + '****' : '(no se manda)',
-        },
-        resumen: 'CERO turnos',
-        crudo: { infoSinTurnos: infoSinTurnos || '(el proxy no explicó el cero)', respuesta: muestra(result.datos, 2) },
-      })
       return { success: false, infoSinTurnos, error: 'No se encontraron turnos disponibles en los próximos 60 días' }
     }
 
@@ -207,20 +184,6 @@ export async function searchTurnosFull(
     }))
 
     logger.info('Turnos encontrados', { total: turnos.length, fechaDesde, fechaHasta })
-    diagnostico?.anotar({
-      titulo: `get_turnos · ${params.obraSocialId ? `obra social ${params.obraSocialId}` : 'sin obra social'}`,
-      parametros: {
-        Fecha_Desde: fechaDesde,
-        Fecha_Hasta: fechaHasta,
-        Sede_Id: params.sedeId || '(no se manda)',
-        Profesional_Id: params.profesionalId || '(no se manda)',
-        Subespecialidad_Id: params.especialidadId || '(no se manda)',
-        Deudor_Id: params.obraSocialId || '(no se manda)',
-        Paciente_DNI: params.pacienteDNI ? String(params.pacienteDNI).slice(0, 3) + '****' : '(no se manda)',
-      },
-      resumen: `${turnos.length} turnos · ${new Set(turnos.map((t) => t.profesionalId)).size} profesionales`,
-      crudo: { primerTurnoCrudo: muestra(turnosRaw, 1), infoSinTurnos },
-    })
     return { success: true, turnos, infoSinTurnos }
   } catch (error) {
     logger.error('Error buscando turnos', error instanceof Error ? error : new Error(String(error)))

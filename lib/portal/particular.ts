@@ -37,7 +37,7 @@
 
 import { getRedisClient } from "../redis"
 import { validarObraSocial } from "../api-tools/api-functions"
-import { muestra, type Diagnostico } from "./diagnostico"
+import { diagnosticoActual, muestra } from "./diagnostico"
 
 export interface DeudorParticular {
   id: string
@@ -67,12 +67,13 @@ function normalizar(texto: string): string {
  * cada paso de cada paciente de una clínica sin Particular dispararía una
  * búsqueda al proxy que ya sabemos que no va a encontrar nada.
  */
-export async function deudorParticular(
-  clienteId: string,
-  /** Recolector del panel de diagnóstico. Opcional. */
-  diagnostico?: Diagnostico,
-): Promise<DeudorParticular | null> {
+export async function deudorParticular(clienteId: string): Promise<DeudorParticular | null> {
   if (!clienteId) return null
+
+  // El recolector del pedido, si el portal está en modo diagnóstico. No viene
+  // por parámetro: así esta función no cambia de forma para los seis
+  // llamadores que no saben nada de diagnósticos.
+  const diagnostico = diagnosticoActual()
 
   const redis = getRedisClient()
   const clave = `${CLAVE}${clienteId}`

@@ -64,6 +64,15 @@ import { pantallaTerminal } from "@/components/portal/pantalla-terminal"
 
 /** La cookie que ata el enlace al dispositivo que lo abrió primero. */
 const COOKIE_DISPOSITIVO = "portal_dispositivo"
+
+/**
+ * El modo diagnóstico, encendido para esta ventana (30/10/2026).
+ *
+ * Dura dos horas y se apaga sola. Es una sesión de depuración, no una
+ * preferencia: dejarla prendida un mes haría que la próxima vez que alguien
+ * abra un enlace de prueba se encuentre el panel sin saber por qué.
+ */
+const COOKIE_DIAGNOSTICO = "portal_debug"
 import { agendaParaReprogramar, agendaParaTurnoNuevo, turnosDeEjemplo } from "@/lib/portal/agenda"
 import {
   obtenerEspecialidades,
@@ -94,7 +103,7 @@ import {
   ofreceTurnosParticulares,
 } from "@/lib/portal/particular"
 import { registroDelPortal, datosDeLaVisita } from "@/lib/portal/registro"
-import { crearDiagnostico, medir, muestra } from "@/lib/portal/diagnostico"
+import { activarDiagnostico, crearDiagnostico } from "@/lib/portal/diagnostico"
 import { PanelDeDiagnostico } from "@/components/portal/panel-de-diagnostico"
 import { getSession } from "@/lib/auth"
 
@@ -345,11 +354,30 @@ export async function PaginaDelEnlace({
   //
   // La sesión se consulta SÓLO si pidieron el panel: es una lectura más de
   // Redis y no tiene por qué pagarla cada paciente en cada paso.
-  const pidenDiagnostico = filtrosCrudos.debug === "1"
+  // Se enciende con `?debug=1` y QUEDA encendido: el parámetro se guarda en
+  // una cookie y a partir de ahí no hace falta volver a escribirlo. `?debug=0`
+  // lo apaga.
+  //
+  // La cookie, y no arrastrar el parámetro por la URL: eso último ya se
+  // intentó y es frágil por diseño —hay dos mecanismos que arman URLs y una
+  // pantalla que se olvide de uno rompe la cadena—. Con la cookie, el modo
+  // depende del navegador y no de dónde estés parado.
+  const apagarDiagnostico = filtrosCrudos.debug === "0"
+  const pidenDiagnostico =
+    !apagarDiagnostico &&
+    (filtrosCrudos.debug === "1" || almacen.get(COOKIE_DIAGNOSTICO)?.value === "1")
+
+  // El permiso se revalida en CADA pantalla, no sólo al encender. La cookie la
+  // puede escribir cualquiera desde el navegador; lo que no puede falsificar
+  // es la sesión del panel ni que el enlace sea de prueba.
   const puedeDiagnosticar =
     pidenDiagnostico &&
     (contexto.demo === true || (await getSession().catch(() => null))?.role === "super_admin")
   const diagnostico = puedeDiagnosticar ? crearDiagnostico() : undefined
+
+  // Desde acá, toda consulta al sistema de la clínica queda registrada sola:
+  // `fetchProxyApi` encuentra este recolector sin que nadie se lo pase.
+  if (diagnostico) activarDiagnostico(diagnostico)
 
   /**
    * El deudor "Particular" de esta clínica, si corresponde ofrecerlo.
@@ -361,7 +389,7 @@ export async function PaginaDelEnlace({
    * escribe una sola vez.
    */
   const resolverParticular = async () =>
-    ofreceTurnosParticulares(config) ? await deudorParticular(clienteId, diagnostico).catch(() => null) : null
+    ofreceTurnosParticulares(config) ? await deudorParticular(clienteId).catch(() => null) : null
 
   // ── La sede se resuelve antes de decidir el paso (24/9/2026) ─────────────
   //
@@ -379,12 +407,7 @@ export async function PaginaDelEnlace({
   let sedesParaElegir: Array<{ id: string; nombre: string; detalle?: string }> = []
 
   if (decidirPaso(contexto.intencion, permisos, filtros, identidad, filtrosCrudos.paso) === "elegir_sede") {
-    const sedes =
-      (
-        await medir(diagnostico, "get_sedes", { Cliente_Id: clienteId }, () =>
-          obtenerTodasLasSedes(clienteId).catch(() => null),
-        (r) => ({ resumen: `${r?.sedes?.length ?? 0} sedes`, crudo: muestra(r?.sedes, 5) }))
-      )?.sedes || []
+    const sedes = (await obtenerTodasLasSedes(clienteId).catch(() => null))?.sedes || []
     sedesParaElegir = sedes
       .map((sede: any) => ({
         id: String(sede?.Id ?? ""),
@@ -440,6 +463,12 @@ export async function PaginaDelEnlace({
       marca={marca}
       cookieNueva={secretoNuevo}
       nombreCookie={COOKIE_DISPOSITIVO}
+      // Encender y apagar el modo diagnóstico. `undefined` no toca nada: sin
+      // esto, cada pantalla reescribiría la cookie y el reloj de las dos horas
+      // no arrancaría nunca.
+      diagnosticoEncendido={
+        puedeDiagnosticar && filtrosCrudos.debug === "1" ? true : apagarDiagnostico ? false : undefined
+      }
       ancho={ancho}
       token={token}
       formato={formato}
@@ -454,6 +483,7 @@ export async function PaginaDelEnlace({
         <PanelDeDiagnostico
           anotaciones={diagnostico.anotaciones}
           encabezado={{
+            modo: filtrosCrudos.debug === "1" ? "encendido por ?debug=1" : "encendido por la cookie",
             paso,
             intencion: contexto.intencion,
             formato,
@@ -598,7 +628,6 @@ export async function PaginaDelEnlace({
       profesionalNombre: contexto.turno?.profesional,
       pacienteDNI: contexto.pacienteDNI,
       obraSocialId: contexto.obraSocialId,
-      diagnostico,
     })
 
     // En un enlace de prueba, si la agenda real vino vacía se muestran horarios
@@ -758,12 +787,7 @@ export async function PaginaDelEnlace({
 
   // ── Elegir especialidad ─────────────────────────────────────────────────
   if (paso === "elegir_especialidad") {
-    const opciones = normalizarOpciones(
-      await medir(diagnostico, "get_subespecialidades", { Cliente_Id: clienteId }, () =>
-        obtenerEspecialidades(clienteId).catch(() => null),
-      (r) => ({ resumen: `${(r as any)?.especialidades?.length ?? 0} especialidades`, crudo: muestra(r, 5) })),
-      "especialidades",
-    )
+    const opciones = normalizarOpciones(await obtenerEspecialidades(clienteId).catch(() => null), "especialidades")
 
     // Sin especialidades no se frena al paciente en una pantalla vacía: se
     // salta al paso siguiente con un enlace que ya trae el `sinFiltro`.
@@ -790,9 +814,7 @@ export async function PaginaDelEnlace({
   // los horarios. El salto ahora lo hace el bloque de especialidad.
   if (paso === "elegir_profesional") {
     const listaDeProfesionales = normalizarOpciones(
-      await medir(diagnostico, "get_profesionales", { Cliente_Id: clienteId }, () =>
-        obtenerTodosLosProfesionales(clienteId).catch(() => null),
-      (r) => ({ resumen: `${(r as any)?.profesionales?.length ?? (Array.isArray(r) ? r.length : 0)} profesionales`, crudo: muestra(r, 3) })),
+      await obtenerTodosLosProfesionales(clienteId).catch(() => null),
       "profesionales",
     )
 
@@ -843,7 +865,6 @@ export async function PaginaDelEnlace({
               pacienteDNI: identidad.dni,
               tieneFicha: identidad.tieneFicha === true,
               obraSocialId: identidad.obraSocialId,
-              diagnostico,
             }).catch(() => null),
             ofrecerParticular
               ? agendaParaTurnoNuevo({
@@ -854,7 +875,6 @@ export async function PaginaDelEnlace({
                   pacienteDNI: identidad.dni,
                   tieneFicha: identidad.tieneFicha === true,
                   obraSocialId: particular!.id,
-                  diagnostico,
                 }).catch(() => null)
               : Promise.resolve(null),
           ])
@@ -982,7 +1002,6 @@ export async function PaginaDelEnlace({
     tieneFicha: identidad.tieneFicha === true,
     obraSocialId: identidad.obraSocialId,
     particularId: ofrecerParticularEnLaAgenda ? particularDelTurno!.id : undefined,
-    diagnostico,
   })
 
   /**

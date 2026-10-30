@@ -132,6 +132,7 @@ export function Marco({
   children,
   cookieNueva,
   nombreCookie,
+  diagnosticoEncendido,
   ancho = "normal",
   token,
   formato,
@@ -154,6 +155,14 @@ export function Marco({
   /** Se emite en la primera visita, para reconocer el dispositivo después. */
   cookieNueva?: string | null
   nombreCookie?: string
+  /**
+   * Encender (`true`) o apagar (`false`) el modo diagnóstico del portal.
+   *
+   * `undefined` no toca nada, que es lo normal: la cookie se escribe sólo
+   * cuando alguien pasa `?debug=1` o `?debug=0`. Si se reescribiera en cada
+   * pantalla, las dos horas de vida no se agotarían nunca.
+   */
+  diagnosticoEncendido?: boolean
   /** Para que el hito "abierto" diga con qué interfaz se abrió. */
   formato?: "pantallas" | "chat"
 }) {
@@ -171,6 +180,21 @@ export function Marco({
           página se renderiza como Server Component sin acceso a la respuesta.
           Es un secreto de reconocimiento, no una credencial: si el navegador la
           descarta, el paciente entra igual. */}
+      {/* El modo diagnóstico, para esta ventana. Dos horas: es una sesión de
+          depuración y no una preferencia. Path=/ y no /p para que valga
+          también en el formato de chat (/c). */}
+      {diagnosticoEncendido !== undefined && (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `document.cookie=${JSON.stringify(
+              diagnosticoEncendido
+                ? "portal_debug=1; Path=/; Max-Age=7200; SameSite=Lax"
+                : "portal_debug=; Path=/; Max-Age=0; SameSite=Lax",
+            )}`,
+          }}
+        />
+      )}
+
       {cookieNueva && nombreCookie && (
         <script
           dangerouslySetInnerHTML={{

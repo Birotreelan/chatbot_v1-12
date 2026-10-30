@@ -1,5 +1,6 @@
 import type { Paciente, Cita, DisponibilidadHoraria, ApiResponse, SedeResponse } from "./types"
 import { comentarioParaLaReserva, type ReagendamientoExplicito } from "../turnos/comentario-de-la-reserva"
+import { diagnosticoActual, muestra as muestraDeDiagnostico } from "../portal/diagnostico"
 import { getClinicApiConfig } from "./types"
 import { getRedisClient } from "../redis"
 import { TIMEOUTS, fetchWithRetry, RETRY_PRESETS } from "../config/timeouts"
@@ -135,6 +136,20 @@ async function fetchProxyApi<T>(
     // Las acciones que MODIFICAN datos usan un preset conservador: solo
     // reintentan si la request nunca llegó al servidor, para no arriesgar una
     // reserva o cancelación duplicada.
+    // ── Toda consulta a la clínica queda registrada (30/10/2026) ──────────
+    //
+    // Ésta es la única puerta por la que salen las consultas al sistema de la
+    // clínica, así que poner el registro acá cubre todo: las que existen y las
+    // que se agreguen. Enchufarlo en cada llamador sería volver a la lista que
+    // hay que acordarse de actualizar — el mismo error que dejó caer 33 campos
+    // al crear un cliente.
+    //
+    // `diagnosticoActual()` devuelve algo sólo cuando el portal está en modo
+    // diagnóstico. Fuera de ahí esto no cuesta nada y no guarda nada: ninguna
+    // consulta de un paciente real queda almacenada.
+    const diagnostico = diagnosticoActual()
+    const desdeDiag = Date.now()
+
     const esMutacion = MUTATION_ACTIONS.includes(action)
     const response = await fetchWithRetry(
       proxyUrl,
@@ -153,6 +168,22 @@ async function fetchProxyApi<T>(
     const responseText = await response.text()
     // Log reducido: solo estado HTTP y longitud (no loguear datos de pacientes en producción)
     console.log(`[API] 📥 ${action} → ${response.status} (${responseText.length} chars)`)
+
+    if (diagnostico) {
+      let cuerpo: unknown
+      try {
+        cuerpo = JSON.parse(responseText)
+      } catch {
+        cuerpo = responseText.slice(0, 500)
+      }
+      diagnostico.anotar({
+        titulo: action,
+        parametros: paramsParaLog,
+        ms: Date.now() - desdeDiag,
+        resumen: `HTTP ${response.status} · ${responseText.length} caracteres`,
+        crudo: muestraDeDiagnostico(cuerpo),
+      })
+    }
 
     // Intentar parsear la respuesta como JSON
     let data

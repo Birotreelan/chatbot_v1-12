@@ -31,6 +31,8 @@
  * otra cosa.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks"
+
 export interface AnotacionDeDiagnostico {
   /** "get_turnos (obra social)", "deudor particular", "ficha por DNI"… */
   titulo: string
@@ -47,6 +49,52 @@ export interface AnotacionDeDiagnostico {
 export interface Diagnostico {
   anotar(a: AnotacionDeDiagnostico): void
   anotaciones: AnotacionDeDiagnostico[]
+}
+
+/**
+ * El recolector de ESTE pedido, para que no haya que pasarlo de mano en mano.
+ *
+ * ── Por qué hizo falta ─────────────────────────────────────────────────────
+ *
+ * La primera versión pasaba el recolector como parámetro. Funciona, pero sólo
+ * anota donde alguien se acordó de enchufarlo: la agenda sí, las sedes sí, y
+ * cualquier consulta que se agregue mañana no. Y el pedido fue justamente
+ * "todas las llamadas a APIs externas".
+ *
+ * `AsyncLocalStorage` guarda el recolector para toda la cadena de llamadas de
+ * una petición, incluidas las asíncronas. Así `fetchProxyApi` —el embudo por
+ * donde pasan TODAS las consultas al sistema de la clínica— lo encuentra solo,
+ * sin recibirlo por parámetro y sin que ningún llamador tenga que saber que
+ * existe.
+ *
+ * Sigue siendo por pedido, no global: cada petición tiene su propio
+ * almacenamiento. Dos pacientes a la vez no se mezclan — que es lo que haría
+ * una variable de módulo, y lo que acá se mezclaría son fichas médicas.
+ */
+const almacen = new AsyncLocalStorage<Diagnostico>()
+
+/** Corre `fn` con este recolector activo para toda su cadena de llamadas. */
+export function conDiagnostico<T>(diagnostico: Diagnostico | undefined, fn: () => T): T {
+  return diagnostico ? almacen.run(diagnostico, fn) : fn()
+}
+
+/**
+ * Enciende el recolector para lo que reste de este pedido.
+ *
+ * `enterWith` en vez de `run(fn)` porque el componente del portal es una
+ * función larga con una docena de salidas, y envolver todo su cuerpo en un
+ * callback para esto sería reescribirla entera. La contrapartida está dicha:
+ * `enterWith` afecta al contexto actual en adelante, así que hay que llamarlo
+ * UNA vez y temprano. Se llama desde la página, apenas se decide que el modo
+ * está habilitado.
+ */
+export function activarDiagnostico(diagnostico: Diagnostico): void {
+  almacen.enterWith(diagnostico)
+}
+
+/** El recolector del pedido en curso, si el modo diagnóstico está encendido. */
+export function diagnosticoActual(): Diagnostico | undefined {
+  return almacen.getStore()
 }
 
 /** Un recolector nuevo, vacío. */
