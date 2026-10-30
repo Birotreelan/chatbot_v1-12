@@ -51,7 +51,25 @@ interface Parte {
   totales: TotalesDeLaTabla | null
 }
 
-export function GranTotalServicio({ partes }: { partes: Parte[] }) {
+export function GranTotalServicio({
+  partes,
+  costosFijosUSD,
+}: {
+  partes: Parte[]
+  /**
+   * Los costos fijos del mes, con sus impuestos: lo que la tarjeta cobró de
+   * servicios que no son Meta (Vercel, OpenAI, Upstash).
+   *
+   * Se restan del resultado GENERAL y no de ninguna fila: no se pueden
+   * atribuir a una clínica —Upstash no escala con los mensajes de una sola— y
+   * prorratearlos sería inventar una atribución que no existe.
+   *
+   * `null` o ausente = todavía no se sabe. Cero = no hay ningún resumen de
+   * tarjeta cargado para este mes, y entonces el resultado no los incluye; se
+   * dice, en vez de mostrar un resultado que parece neto y no lo es.
+   */
+  costosFijosUSD?: number | null
+}) {
   const faltan = partes.filter((p) => p.totales === null).map((p) => p.etiqueta)
 
   if (faltan.length > 0) {
@@ -79,6 +97,8 @@ export function GranTotalServicio({ partes }: { partes: Parte[] }) {
     interacciones: sumar((t) => t.interacciones),
     mensajesConCargo: sumar((t) => t.mensajesConCargo),
     costoUSD: sumar((t) => t.costoUSD),
+    costoMetaUSD: sumar((t) => t.costoMetaUSD),
+    costoImpuestosUSD: sumar((t) => t.costoImpuestosUSD),
     valorUSD: sumar((t) => t.valorUSD),
     valorARS: sumar((t) => t.valorARS),
     margenUSD: sumar((t) => t.margenUSD),
@@ -93,6 +113,10 @@ export function GranTotalServicio({ partes }: { partes: Parte[] }) {
   const desgloseParcial = hayDesglose && listas.some(({ t }) => !t.hayDesglose)
   const hayCosto = listas.some(({ t }) => t.hayCosto)
   const costoParcial = hayCosto && listas.some(({ t }) => !t.hayCosto)
+  // El desglose del costo lo decide el período, que es el mismo para las dos
+  // tablas. Se exige que las dos lo tengan igual: si no, se muestra el costo
+  // junto, que es el único número comparable entre ellas.
+  const costoDesglosado = hayCosto && listas.every(({ t }) => t.costoDesglosado)
 
   const numero = (n: number) => n.toLocaleString("es-AR")
 
@@ -106,7 +130,12 @@ export function GranTotalServicio({ partes }: { partes: Parte[] }) {
       )}
       <TableCell className="text-right">{numero(t.interacciones)}</TableCell>
       {hayCosto && (
-        <TableCell className="text-right">{formatoUSDMoney.format(t.costoUSD)}</TableCell>
+        <TableCell className="text-right">
+          {formatoUSDMoney.format(costoDesglosado ? t.costoMetaUSD : t.costoUSD)}
+        </TableCell>
+      )}
+      {costoDesglosado && (
+        <TableCell className="text-right">{formatoUSDMoney.format(t.costoImpuestosUSD)}</TableCell>
       )}
       <TableCell className="text-right">{formatoUSDMoney.format(t.valorUSD)}</TableCell>
       <TableCell className="text-right">{formatoARS.format(t.valorARS)}</TableCell>
@@ -151,7 +180,12 @@ export function GranTotalServicio({ partes }: { partes: Parte[] }) {
               <TableHead className="text-right">Total de Interacciones</TableHead>
               {hayCosto && (
                 <TableHead className="text-right font-normal text-muted-foreground">
-                  Costo
+                  {costoDesglosado ? "Costo Meta" : "Costo"}
+                </TableHead>
+              )}
+              {costoDesglosado && (
+                <TableHead className="text-right font-normal text-muted-foreground">
+                  Impuestos
                 </TableHead>
               )}
               <TableHead className="text-right">Valor Total Dólares</TableHead>
@@ -182,12 +216,20 @@ export function GranTotalServicio({ partes }: { partes: Parte[] }) {
               <TableCell className="text-right">{numero(total.interacciones)}</TableCell>
               {hayCosto && (
                 <TableCell className="text-right">
-                  {formatoUSDMoney.format(total.costoUSD)}
+                  {formatoUSDMoney.format(costoDesglosado ? total.costoMetaUSD : total.costoUSD)}
                   {total.mensajesConCargo !== total.interacciones && (
                     <span className="block text-[10px] font-normal text-muted-foreground">
                       {numero(total.mensajesConCargo)} con cargo
                     </span>
                   )}
+                </TableCell>
+              )}
+              {costoDesglosado && (
+                <TableCell className="text-right">
+                  {formatoUSDMoney.format(total.costoImpuestosUSD)}
+                  <span className="block text-[10px] font-normal text-muted-foreground">
+                    costo total {formatoUSDMoney.format(total.costoUSD)}
+                  </span>
                 </TableCell>
               )}
               <TableCell className="text-right">{formatoUSDMoney.format(total.valorUSD)}</TableCell>
@@ -215,6 +257,53 @@ export function GranTotalServicio({ partes }: { partes: Parte[] }) {
             </TableRow>
           </TableBody>
         </Table>
+
+        {/* ── El resultado después de los costos fijos ───────────────────
+            Los mensajes son el costo variable; Vercel, OpenAI y Upstash son
+            fijos y no están en ninguna columna de la tabla, porque no se
+            pueden atribuir a un cliente. Sin esta línea, el "Resultado" de
+            arriba se lee como el resultado del mes y le falta esta parte.
+
+            El dólar es el mismo con el que se valorizó el mes —sale de dividir
+            el total en pesos por el total en dólares— y no la cotización de
+            hoy: si no, el resultado en pesos no coincidiría con la fila de
+            arriba. */}
+        {hayCosto && costosFijosUSD !== null && costosFijosUSD !== undefined && (
+          <div className="mt-3 rounded border bg-muted/30 px-3 py-2 text-xs">
+            {costosFijosUSD > 0 ? (
+              <>
+                <p>
+                  <span className="font-medium">Resultado después de costos fijos:</span>{" "}
+                  <span
+                    className={
+                      total.margenUSD - costosFijosUSD < 0 ? "font-semibold text-destructive" : "font-semibold"
+                    }
+                  >
+                    {formatoUSDMoney.format(total.margenUSD - costosFijosUSD)}
+                  </span>
+                  {total.valorUSD > 0 && (
+                    <>
+                      {" · "}
+                      {formatoARS.format(
+                        (total.margenUSD - costosFijosUSD) * (total.valorARS / total.valorUSD),
+                      )}
+                    </>
+                  )}
+                </p>
+                <p className="mt-0.5 text-muted-foreground">
+                  {formatoUSDMoney.format(total.margenUSD)} de resultado menos{" "}
+                  {formatoUSDMoney.format(costosFijosUSD)} de servicios que no son Meta (Vercel,
+                  OpenAI, Upstash, con sus sellos), tomados del resumen de tarjeta de este mes.
+                </p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                El resultado de arriba no incluye costos fijos: todavía no hay un resumen de tarjeta
+                cargado para este mes. Se carga abajo, en la conciliación.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* El costo no corre sobre el total: los mensajes de servicio gratuitos
             se facturan y a nosotros no nos cuestan. Es la misma aclaración que

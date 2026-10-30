@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { monthValueToRange } from "./month-selector"
 import { OBSERVACION_MAX } from "@/lib/servicio-observacion-texto"
-import { COSTO_POR_MENSAJE_CON_CARGO_USD, reglaPorId } from "@/lib/facturacion-reglas"
+import { reglaPorId } from "@/lib/facturacion-reglas"
+import { costoPorMensaje } from "@/lib/servicio-costos"
 
 interface FacturacionCliente {
   clienteId: string
@@ -73,6 +74,10 @@ export interface TotalesDeLaTabla {
   interacciones: number
   mensajesConCargo: number
   costoUSD: number
+  /** Las dos partes del costo, cuando el período las tiene discriminadas. */
+  costoMetaUSD: number
+  costoImpuestosUSD: number
+  costoDesglosado: boolean
   valorUSD: number
   valorARS: number
   margenUSD: number
@@ -401,6 +406,21 @@ export function FacturacionTable({
    * `usarValoresPropios`, se ignora ese precio —no las unidades— y se usa el
    * de esta pestaña.
    */
+  /**
+   * De qué está hecho el costo en ESTE período (30/10/2026).
+   *
+   * Antes era la constante `COSTO_POR_MENSAJE_CON_CARGO_USD` escrita en cuatro
+   * lugares de este archivo. Ahora sale de lib/servicio-costos.ts, que lo
+   * devuelve partido en el cargo de Meta y sus impuestos — y fechado, así que un
+   * mes anterior a octubre de 2026 sigue dando el mismo 0,0318 de siempre, sin
+   * desglose.
+   *
+   * `costo.desglosado` es lo que decide si la tabla muestra una columna de costo
+   * o dos. Para los meses sin desglose no se parte: no sabemos cuánto de ese
+   * número era impuesto, y repartirlo sería inventarlo.
+   */
+  const costo = costoPorMensaje(month)
+
   const valoresDeLaFila = (c: FacturacionCliente) => {
     const congelado = Boolean(c.cierre) && !usarValoresPropios
     const precio = congelado ? (c.cierre!.precioUnitarioUsd ?? 0) : (precios[c.clienteIdBase] ?? 0)
@@ -413,9 +433,7 @@ export function FacturacionTable({
     // que pasa es que no sabemos cuánto costó — el mismo criterio que la
     // columna de costo, que ahí muestra un guión.
     const costoUSD =
-      c.mensajesConCargoDeMeta !== undefined
-        ? c.mensajesConCargoDeMeta * COSTO_POR_MENSAJE_CON_CARGO_USD
-        : null
+      c.mensajesConCargoDeMeta !== undefined ? c.mensajesConCargoDeMeta * costo.totalUSD : null
     const margenUSD = costoUSD === null ? null : ingresoUSD - costoUSD
 
     return {
@@ -425,6 +443,14 @@ export function FacturacionTable({
       ingresoUSD,
       ingresoARS: cotizacion ? ingresoUSD * cotizacion : null,
       costoUSD,
+      // Las dos partes del costo. `null` por lo mismo que `costoUSD`: no se
+      // sabe cuántos mensajes con cargo tuvo esa fila.
+      costoMetaUSD:
+        c.mensajesConCargoDeMeta !== undefined ? c.mensajesConCargoDeMeta * costo.metaUSD : null,
+      costoImpuestosUSD:
+        c.mensajesConCargoDeMeta !== undefined
+          ? c.mensajesConCargoDeMeta * costo.impuestosUSD
+          : null,
       margenUSD,
       margenARS: margenUSD !== null && cotizacion ? margenUSD * cotizacion : null,
     }
@@ -481,7 +507,9 @@ export function FacturacionTable({
   // valoresDeLaFila por su cuenta.
   const hayCosto = mostrarCosto && clientes.some((c) => c.mensajesConCargoDeMeta !== undefined)
   const totalConCargo = clientes.reduce((sum, c) => sum + (c.mensajesConCargoDeMeta || 0), 0)
-  const totalCostoUSD = totalConCargo * COSTO_POR_MENSAJE_CON_CARGO_USD
+  const totalCostoUSD = totalConCargo * costo.totalUSD
+  const totalCostoMetaUSD = totalConCargo * costo.metaUSD
+  const totalCostoImpuestosUSD = totalConCargo * costo.impuestosUSD
 
   async function reabrir() {
     if (
@@ -558,6 +586,9 @@ export function FacturacionTable({
             interacciones: totalGeneral,
             mensajesConCargo: totalConCargo,
             costoUSD: totalCostoUSD,
+            costoMetaUSD: totalCostoMetaUSD,
+            costoImpuestosUSD: totalCostoImpuestosUSD,
+            costoDesglosado: costo.desglosado,
             valorUSD: totalGeneralValorUSD,
             valorARS: totalGeneralValorARS,
             margenUSD: totalMargenUSD,
@@ -576,6 +607,9 @@ export function FacturacionTable({
     totalGeneral,
     totalConCargo,
     totalCostoUSD,
+    totalCostoMetaUSD,
+    totalCostoImpuestosUSD,
+    costo.desglosado,
     totalGeneralValorUSD,
     totalGeneralValorARS,
     totalMargenUSD,
@@ -672,18 +706,36 @@ export function FacturacionTable({
                 )}
                 <TableHead className="text-right">{etiquetaCantidad}</TableHead>
                 {hayCosto && (
-                  <TableHead className="text-right font-normal text-muted-foreground">
-                    {etiquetaCosto}
+                  <>
                     {/* Se dice sobre qué corre. Al lado de tres columnas que
-                        suman entre sí, una cuarta con otra base se lee como un
-                        error de la tabla si no está explicado. */}
-                    <span className="block text-[10px] font-normal">
-                      US$ {COSTO_POR_MENSAJE_CON_CARGO_USD} ×{" "}
-                      {totalConCargo === totalGeneral
-                        ? etiquetaCantidad.toLowerCase()
-                        : "mensajes con cargo de Meta"}
-                    </span>
-                  </TableHead>
+                        suman entre sí, una con otra base se lee como un error
+                        de la tabla si no está explicado.
+
+                        Desde octubre de 2026 son dos columnas: lo que cobra
+                        Meta y lo que agrega la tarjeta en impuestos. Son dos
+                        números que se miran distinto —uno se negocia con Meta,
+                        el otro no se negocia con nadie— y sumados no se puede
+                        saber cuál creció. */}
+                    <TableHead className="text-right font-normal text-muted-foreground">
+                      {costo.desglosado ? "Costo Meta" : etiquetaCosto}
+                      <span className="block text-[10px] font-normal">
+                        US$ {costo.metaUSD} ×{" "}
+                        {totalConCargo === totalGeneral
+                          ? etiquetaCantidad.toLowerCase()
+                          : "mensajes con cargo de Meta"}
+                      </span>
+                    </TableHead>
+                    {costo.desglosado && (
+                      <TableHead className="text-right font-normal text-muted-foreground">
+                        Impuestos
+                        <span className="block text-[10px] font-normal">
+                          {costo.partes
+                            .map((p) => `${p.nombre} ${(p.alicuota * 100).toFixed(1).replace(".", ",")} %`)
+                            .join(" + ")}
+                        </span>
+                      </TableHead>
+                    )}
+                  </>
                 )}
                 <TableHead className="text-right">Valor por unidad (USD)</TableHead>
                 <TableHead className="text-right">Valor Total Dólares</TableHead>
@@ -806,11 +858,12 @@ export function FacturacionTable({
                       {totalInteracciones.toLocaleString("es-AR")}
                     </TableCell>
                     {hayCosto && (
+                      <>
                       <TableCell className="text-right text-muted-foreground">
                         {cliente.mensajesConCargoDeMeta !== undefined ? (
                           <>
                             {formatoUSDMoney.format(
-                              cliente.mensajesConCargoDeMeta * COSTO_POR_MENSAJE_CON_CARGO_USD,
+                              cliente.mensajesConCargoDeMeta * costo.metaUSD,
                             )}
                             {/* La cantidad va a la vista y no sólo el monto: sin
                                 ella, el único modo de saber sobre cuántos
@@ -831,6 +884,16 @@ export function FacturacionTable({
                           "—"
                         )}
                       </TableCell>
+                      {costo.desglosado && (
+                        <TableCell className="text-right text-muted-foreground">
+                          {cliente.mensajesConCargoDeMeta !== undefined
+                            ? formatoUSDMoney.format(
+                                cliente.mensajesConCargoDeMeta * costo.impuestosUSD,
+                              )
+                            : "—"}
+                        </TableCell>
+                      )}
+                      </>
                     )}
                     <TableCell className="text-right">
                       {/* En un mes cerrado el precio no se edita: el total ya
@@ -911,14 +974,27 @@ export function FacturacionTable({
                 )}
                 <TableCell className="text-right">{totalGeneral.toLocaleString("es-AR")}</TableCell>
                 {hayCosto && (
-                  <TableCell className="text-right">
-                    {formatoUSDMoney.format(totalCostoUSD)}
-                    {totalConCargo !== totalGeneral && (
-                      <span className="block text-[10px] font-normal text-muted-foreground">
-                        {totalConCargo.toLocaleString("es-AR")} con cargo
-                      </span>
+                  <>
+                    <TableCell className="text-right">
+                      {formatoUSDMoney.format(costo.desglosado ? totalCostoMetaUSD : totalCostoUSD)}
+                      {totalConCargo !== totalGeneral && (
+                        <span className="block text-[10px] font-normal text-muted-foreground">
+                          {totalConCargo.toLocaleString("es-AR")} con cargo
+                        </span>
+                      )}
+                    </TableCell>
+                    {costo.desglosado && (
+                      <TableCell className="text-right">
+                        {formatoUSDMoney.format(totalCostoImpuestosUSD)}
+                        {/* La suma de las dos columnas, dicha. Es el número que
+                            se resta del resultado, y si no está escrito hay que
+                            sumarlo de cabeza para entender esa resta. */}
+                        <span className="block text-[10px] font-normal text-muted-foreground">
+                          costo total {formatoUSDMoney.format(totalCostoUSD)}
+                        </span>
+                      </TableCell>
                     )}
-                  </TableCell>
+                  </>
                 )}
                 <TableCell />
                 <TableCell className="text-right">{formatoUSDMoney.format(totalGeneralValorUSD)}</TableCell>

@@ -210,6 +210,45 @@ export async function leerCierre(clienteId: string, periodo: string): Promise<Ci
 }
 
 /**
+ * Los mensajes con cargo de Meta de todo un mes, sumando los cierres guardados.
+ *
+ * Sirve para la conciliación con el resumen de la tarjeta, que necesita el
+ * total de CADA mes anterior —el saldo es acumulado— y no sólo del que se está
+ * mirando.
+ *
+ * ── Por qué sale de los cierres y no se recalcula ──────────────────────────
+ *
+ * Porque el cierre es el único lugar donde ese número quedó congelado. Volver a
+ * consultar el proxy por un mes viejo daría lo que el proxy diga HOY, que puede
+ * no ser lo que se facturó — es el problema que el cierre existe para resolver.
+ *
+ * ── `null` no es cero ──────────────────────────────────────────────────────
+ *
+ * Un mes sin cierres devuelve `null`: no es que haya habido cero mensajes, es
+ * que nadie abrió Facturación ese mes y el dato no se guardó. Tratarlo como
+ * cero metería un agujero silencioso en la cuenta corriente, que es exactamente
+ * lo que esa cuenta no puede tener.
+ */
+export async function mensajesConCargoDelPeriodo(periodo: string): Promise<number | null> {
+  const clientes = await clientesCerrados(periodo)
+  if (clientes.length === 0) return null
+
+  const cierres = await Promise.all(clientes.map((c) => leerCierre(c, periodo)))
+
+  let total = 0
+  let alguno = false
+  for (const cierre of cierres) {
+    if (!cierre || cierre.mensajesConCargoDeMeta === undefined) continue
+    total += cierre.mensajesConCargoDeMeta
+    alguno = true
+  }
+
+  // Cierres que existen pero son de antes de que se guardara este campo: el mes
+  // está cerrado y el dato no está. Tampoco es cero.
+  return alguno ? total : null
+}
+
+/**
  * Guarda el cierre, sin pisar uno existente.
  *
  * El `if` no es defensivo por las dudas: dos pestañas abiertas sobre el mismo

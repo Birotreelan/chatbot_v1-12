@@ -34,6 +34,7 @@ import { MonthSelector, getCurrentMonthValue } from "./month-selector"
 import { esReglaAnterior, reglaDelPeriodo, REGLAS } from "@/lib/facturacion-reglas"
 import { FacturacionTable, type TotalesDeLaTabla } from "./facturacion-table"
 import { GranTotalServicio } from "./gran-total-servicio"
+import { ConciliacionTarjeta } from "./conciliacion-tarjeta"
 import { Input } from "@/components/ui/input"
 import { servicioUsaValoresPropios, SERVICIO_PRECIO_PROPIO_DESDE } from "@/lib/servicio-calculo"
 
@@ -69,6 +70,28 @@ export function ServicioSection() {
   const [totalesSinIA, setTotalesSinIA] = useState<TotalesDeLaTabla | null>(null)
   const recibirConIA = useCallback((t: TotalesDeLaTabla | null) => setTotalesConIA(t), [])
   const recibirSinIA = useCallback((t: TotalesDeLaTabla | null) => setTotalesSinIA(t), [])
+
+  /**
+   * Los mensajes con cargo de las dos tablas juntas, o `null` si falta alguna.
+   *
+   * Es el mismo número de la fila "Total general de todo", y es lo que la
+   * conciliación compara contra el resumen de la tarjeta.
+   */
+  const mensajesConCargoDelMes =
+    totalesConIA && totalesSinIA
+      ? totalesConIA.mensajesConCargo + totalesSinIA.mensajesConCargo
+      : null
+
+  /**
+   * Los costos fijos del mes, que los avisa la conciliación.
+   *
+   * Van hacia arriba —al gran total— porque es donde se mira el resultado. Que
+   * el dato nazca abajo y se muestre arriba es incómodo, pero la alternativa
+   * era mostrar un "Resultado" en el gran total al que le falta una parte, y
+   * más abajo la parte que falta, sin que se encuentren nunca.
+   */
+  const [costosFijosUSD, setCostosFijosUSD] = useState<number | null>(null)
+  const recibirCostosFijos = useCallback((usd: number | null) => setCostosFijosUSD(usd), [])
 
   const [dolarFijado, setDolarFijado] = useState<number | null>(null)
   const [textoDolar, setTextoDolar] = useState("")
@@ -373,6 +396,19 @@ export function ServicioSection() {
           { etiqueta: "Clientes Wpp con IA", totales: totalesConIA },
           { etiqueta: "Clientes Wpp sin IA", totales: totalesSinIA },
         ]}
+        costosFijosUSD={costosFijosUSD}
+      />
+
+      {/* ── La tarjeta (30/10/2026) ───────────────────────────────────────
+          Recibe los mensajes con cargo que acaba de mostrar el gran total:
+          conciliar contra otro número que el que está en pantalla sería tener
+          dos respuestas a la misma pregunta en la misma vista. `null` mientras
+          alguna tabla no cargó, y ahí la conciliación lo dice en vez de
+          calcular con la mitad. */}
+      <ConciliacionTarjeta
+        month={month}
+        mensajesConCargo={mensajesConCargoDelMes}
+        onCostosFijos={recibirCostosFijos}
       />
     </div>
   )
