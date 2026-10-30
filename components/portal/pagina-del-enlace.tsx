@@ -211,6 +211,9 @@ export async function PaginaDelEnlace({
   if (filtrosCrudos.sedeId) elegido.sedeId = filtrosCrudos.sedeId
   if (filtrosCrudos.tipoBusqueda) elegido.tipoBusqueda = filtrosCrudos.tipoBusqueda
   if (filtrosCrudos.especialidadId) elegido.especialidadId = filtrosCrudos.especialidadId
+  // Se arrastra como un filtro más: `elegido` es lo que cada opción de la
+  // lista se lleva al paso siguiente. Ver `urlCon`.
+  if (filtrosCrudos.debug === "1") elegido.debug = "1"
 
   /** La URL de este mismo enlace con un subconjunto de lo ya elegido. */
   const ruta = rutaDelFormato(formato)
@@ -219,7 +222,15 @@ export async function PaginaDelEnlace({
   const volverArriba = (href: string | null | undefined) =>
     href ? <Volver href={href} /> : null
   const urlCon = (campos: Record<string, string>) => {
+    // El modo diagnóstico se pega a TODA URL que arme la página (30/10/2026).
+    //
+    // Antes había que volver a escribir `?debug=1` en cada paso: alcanzaba
+    // para ver la primera pantalla y se perdía al tocar cualquier opción, que
+    // es justo cuando uno quiere seguir mirando. `urlCon` es por donde pasan
+    // el "Volver" y los saltos a un paso concreto, así que acá cubre a todos
+    // de una vez; lo que arman los componentes va por `elegido`, más abajo.
     const params = new URLSearchParams(campos)
+    if (filtrosCrudos.debug === "1") params.set("debug", "1")
     const query = params.toString()
     return query ? `/${ruta}/${token}?${query}` : `/${ruta}/${token}`
   }
@@ -487,7 +498,13 @@ export async function PaginaDelEnlace({
             "Continuar" del formulario, que con el DNI sin cambios simplemente
             sigue. */}
         <EncabezadoDelPaso formato={formato} paso="pedir_dni" paraFamiliar={paraFamiliar} />
-        <PedirDNI ruta={ruta} token={token} paraFamiliar={paraFamiliar} valorInicial={contexto.identidad?.dni} />
+        <PedirDNI
+          ruta={ruta}
+          token={token}
+          paraFamiliar={paraFamiliar}
+          valorInicial={contexto.identidad?.dni}
+          debug={filtrosCrudos.debug === "1"}
+        />
       </>,
     )
   }
@@ -507,6 +524,7 @@ export async function PaginaDelEnlace({
           dni={identidad.dni}
           paraFamiliar={paraFamiliar}
           valoresIniciales={contexto.identidad}
+          debug={filtrosCrudos.debug === "1"}
         />
       </>,
     )
@@ -721,10 +739,18 @@ export async function PaginaDelEnlace({
             parecieran la primera. */}
         <EncabezadoDelPaso formato={formato} paso="elegir_tipo_busqueda" />
         <ElegirFiltro
+          // `ruta` faltaba (30/10/2026). Sin esto, con el formato de chat las
+          // tres opciones de esta pantalla llevaban a `/p/` —el componente cae
+          // a "p" por omisión— y el paciente salía del chat sin tocar nada
+          // raro. Es la misma omisión que ya se había corregido en las otras
+          // listas.
+          ruta={ruta}
           token={token}
           campo="tipoBusqueda"
           opciones={opciones}
-          conservar={filtrosCrudos.sedeId ? { sedeId: filtrosCrudos.sedeId } : undefined}
+          // `elegido` y no sólo la sede: trae lo mismo, más el `?debug=1`
+          // cuando está puesto. Ver `urlCon`.
+          conservar={elegido}
         />
       </>,
     )

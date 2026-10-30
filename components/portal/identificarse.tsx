@@ -63,7 +63,17 @@ export function PedirDNI({
   paraFamiliar,
   valorInicial,
   ruta = "p",
+  debug,
 }: {
+  /**
+   * Volver con el panel de diagnóstico puesto (30/10/2026).
+   *
+   * El `replace` de acá abajo limpia la query a propósito, y eso se llevaba
+   * puesto el `?debug=1`: justo después de identificarse —que es donde se
+   * resuelve la obra social, o sea lo que uno vino a mirar— el panel
+   * desaparecía.
+   */
+  debug?: boolean
   /** "p" o "c": a dónde volver después de guardar. Ver ElegirFiltro. */
   ruta?: string
   token: string
@@ -104,7 +114,7 @@ export function PedirDNI({
         // `refresh` vuelve a pedir la página al servidor sin parpadeo. Van los
         // dos: si la URL ya estaba limpia, `replace` no hace nada y sin el
         // `refresh` la pantalla se quedaría igual.
-        router.replace(`/${ruta}/${token}`)
+        router.replace(`/${ruta}/${token}${debug ? "?debug=1" : ""}`)
         router.refresh()
         return
       }
@@ -158,7 +168,10 @@ export function DarseDeAlta({
   paraFamiliar,
   valoresIniciales,
   ruta = "p",
+  debug,
 }: {
+  /** Ver PedirDNI: el `replace` limpia la query y se llevaba el `?debug=1`. */
+  debug?: boolean
   /** "p" o "c": a dónde volver después de guardar. Ver ElegirFiltro. */
   ruta?: string
   token: string
@@ -254,7 +267,7 @@ export function DarseDeAlta({
       const data = await r.json()
       if (data.ok) {
         // Ver el comentario en PedirDNI: navegación del lado del cliente.
-        router.replace(`/${ruta}/${token}`)
+        router.replace(`/${ruta}/${token}${debug ? "?debug=1" : ""}`)
         router.refresh()
         return
       }
