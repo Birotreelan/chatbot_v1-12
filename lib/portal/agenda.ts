@@ -388,14 +388,48 @@ function fusionarConParticular(
   base: AgendaDelPortal,
   conParticular: AgendaDelPortal | null,
 ): AgendaDelPortal {
-  if (!conParticular) return base
+  if (!conParticular) {
+    diagnosticoActual()?.anotar({
+      titulo: "comparación con la agenda particular",
+      resumen: "no se pudo consultar la agenda particular; queda sólo la de la obra social",
+    })
+    return base
+  }
 
   const cubiertos = new Set(base.dias.flatMap((d) => d.turnos.map((t) => String(t.id))))
+  const deParticular = conParticular.dias.flatMap((d) => d.turnos)
 
-  const soloParticulares = conParticular.dias
-    .flatMap((d) => d.turnos)
+  const soloParticulares = deParticular
     .filter((t) => !cubiertos.has(String(t.id)))
     .map((t) => ({ ...t, soloParticular: true }))
+
+  // ── El veredicto se anota SIEMPRE (30/10/2026) ──────────────────────────
+  //
+  // Esta anotación estaba después del corte de abajo, así que cuando no había
+  // nada para agregar no aparecía ninguna línea: el panel mostraba las dos
+  // consultas y ningún resultado de cruzarlas. Y es justo el caso que genera
+  // la duda —"corrió y no me ofreció nada, ¿por qué?"—.
+  //
+  // Un diagnóstico que sólo habla cuando encontró algo deja al que mira
+  // creyendo que no corrió. Es el mismo error que el cartel que no distingue
+  // "no hay turnos" de "no pudimos preguntar".
+  diagnosticoActual()?.anotar({
+    titulo: "comparación con la agenda particular",
+    resumen:
+      soloParticulares.length === 0
+        ? `nada para ofrecer: los ${deParticular.length} horarios particulares ya están cubiertos por la obra social`
+        : `${soloParticulares.length} horarios se ofrecen como particulares`,
+    crudo: {
+      conLaObraSocialDelPaciente: cubiertos.size,
+      conElDeudorParticular: deParticular.length,
+      soloBajoParticular: soloParticulares.length,
+      // Los ids ayudan a ver de un vistazo si las dos consultas trajeron lo
+      // mismo —que es lo que pasa cuando el proxy ignora el `Deudor_Id`— o
+      // conjuntos realmente distintos.
+      idsDeLaObraSocial: [...cubiertos].slice(0, 8),
+      idsDeParticular: deParticular.map((t) => String(t.id)).slice(0, 8),
+    },
+  })
 
   if (soloParticulares.length === 0) return base
 
@@ -404,13 +438,6 @@ function fusionarConParticular(
   console.log(
     `[PORTAL] Agenda fusionada: ${cubiertos.size} con cobertura + ${soloParticulares.length} sólo particulares`,
   )
-  // Esto no se puede leer de las consultas crudas: es el resultado de cruzar
-  // las dos, que es justo lo que hay que entender cuando un profesional
-  // aparece o no aparece en la lista.
-  diagnosticoActual()?.anotar({
-    titulo: "fusión de las dos agendas",
-    resumen: `${cubiertos.size} horarios con cobertura + ${soloParticulares.length} sólo particulares`,
-  })
 
   return {
     ...base,

@@ -169,7 +169,28 @@ export function correspondeOfrecerParticular(
   obraSocialDelPaciente: string | undefined,
   particular: DeudorParticular | null,
 ): boolean {
-  if (!particular) return false
-  if (!obraSocialDelPaciente) return false
-  return String(obraSocialDelPaciente) !== particular.id
+  // El motivo queda anotado también cuando la respuesta es NO (30/10/2026).
+  //
+  // Si esto devuelve false, la segunda consulta no se hace y el panel no
+  // muestra nada al respecto: quien mira ve una sola consulta y no sabe si la
+  // función no corrió o si decidió que no correspondía. Son dos cosas muy
+  // distintas y hasta hoy se veían igual.
+  const anotar = (resumen: string) =>
+    diagnosticoActual()?.anotar({ titulo: "¿se ofrecen turnos particulares?", resumen })
+
+  if (!particular) {
+    anotar("no: esta clínica no tiene un deudor Particular, o el switch está apagado")
+    return false
+  }
+  if (!obraSocialDelPaciente) {
+    anotar("no: el paciente no tiene obra social cargada, así que ya ve todos sus horarios")
+    return false
+  }
+  if (String(obraSocialDelPaciente) === particular.id) {
+    anotar("no: la obra social del paciente ES Particular")
+    return false
+  }
+
+  anotar(`sí: se va a consultar también con el deudor Particular (${particular.id})`)
+  return true
 }
