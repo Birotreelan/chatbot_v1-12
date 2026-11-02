@@ -22,6 +22,7 @@ import { exigirSuperAdmin, esDenegado } from "@/lib/conversations-auth"
 import { analizarResumen, totalesDelResumen, type LineaDelResumen } from "@/lib/tarjeta-resumen"
 import {
   borrarResumen,
+  guardarPDFDelResumen,
   guardarResumen,
   listarResumenes,
   periodoDelCierre,
@@ -122,6 +123,8 @@ export async function POST(request: Request) {
     let analisis: Awaited<ReturnType<typeof leerResumenDelPDF>> | ReturnType<typeof analizarResumen>
     let body: any = null
     let leidoConIA = false
+    let bytesDelPDF: Buffer | null = null
+    let nombreDelPDF = ""
 
     if (tipo.includes("multipart/form-data")) {
       const form = await request.formData()
@@ -143,10 +146,12 @@ export async function POST(request: Request) {
         categorias: form.get("categorias") ? JSON.parse(String(form.get("categorias"))) : {},
       }
       try {
-        analisis = await leerResumenDelPDF(
-          Buffer.from(await archivo.arrayBuffer()),
-          archivo.name || "resumen.pdf",
-        )
+        // Los bytes quedan a mano: si el resumen se guarda, el PDF se archiva
+        // junto con él. Leerlo de nuevo no se puede —un FormData se consume—
+        // y pedirle el archivo dos veces a la persona sería absurdo.
+        bytesDelPDF = Buffer.from(await archivo.arrayBuffer())
+        nombreDelPDF = archivo.name || "resumen.pdf"
+        analisis = await leerResumenDelPDF(bytesDelPDF, nombreDelPDF)
         leidoConIA = true
       } catch (err) {
         console.error("[SERVICIO_TARJETA] No se pudo leer el PDF:", err)
@@ -232,6 +237,34 @@ export async function POST(request: Request) {
       impuestos: analisis.impuestos,
       cargadoEl: new Date().toISOString(),
       nota: typeof body?.nota === "string" ? body.nota.trim().slice(0, 300) : undefined,
+    }
+
+    /**
+     * El comprobante se archiva con el resumen.
+     *
+     * Es lo que hace auditable la conciliación: tres meses después, "¿de dónde
+     * salió este US$ 1.691,98?" se contesta abriendo el papel en vez de
+     * reconstruyendo la cuenta. Si el archivo no entra —más de 4 MB— el resumen
+     * se guarda igual y se dice que el PDF no quedó: perder el comprobante es
+     * malo, perder la carga entera por eso es peor.
+     */
+    if (bytesDelPDF) {
+      try {
+        const guardado = await guardarPDFDelResumen(analisis.cierre, bytesDelPDF)
+        if (guardado) {
+          resumen.pdf = {
+            nombre: nombreDelPDF,
+            bytes: bytesDelPDF.length,
+            guardadoEl: new Date().toISOString(),
+          }
+        } else {
+          console.warn(
+            `[SERVICIO_TARJETA] El PDF de ${analisis.cierre} pesa ${bytesDelPDF.length} bytes y no se archivó`,
+          )
+        }
+      } catch (err) {
+        console.error("[SERVICIO_TARJETA] No se pudo archivar el PDF:", err)
+      }
     }
 
     await guardarResumen(resumen)

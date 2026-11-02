@@ -29,6 +29,23 @@ import type { ImpuestoDelResumen, LineaDelResumen } from "./tarjeta-resumen"
 const PREFIJO = "servicio:tarjeta:resumen:"
 const INDICE = "servicio:tarjeta:cierres"
 
+/**
+ * El PDF, en una clave SEPARATE del resumen (2/11/2026).
+ *
+ * Separada a propósito: `listarResumenes` lee todos los resúmenes para armar la
+ * cuenta corriente, y si el archivo viviera en la misma clave cada carga de la
+ * pantalla se traería todos los PDF en base64 para no mostrar ninguno. Acá se
+ * lee sólo cuando alguien lo pide.
+ */
+const PREFIJO_PDF = "servicio:tarjeta:pdf:"
+
+/**
+ * Hasta cuánto se guarda. Estos resúmenes son de 250 a 350 KB; 4 MB es margen
+ * de sobra y a la vez un techo: en base64 un archivo ocupa un 33 % más, y
+ * Redis no es un depósito de archivos.
+ */
+export const MAXIMO_PDF_GUARDADO_BYTES = 4 * 1024 * 1024
+
 export interface ResumenGuardado {
   /** La fecha de cierre, ISO. Es la identidad del resumen. */
   cierre: string
@@ -56,6 +73,45 @@ export interface ResumenGuardado {
   impuestos: ImpuestoDelResumen[]
   cargadoEl: string
   nota?: string
+  /**
+   * El comprobante guardado, si entró. Son los datos para mostrarlo y
+   * ofrecerlo; el contenido vive en su propia clave.
+   *
+   * Que esté es lo que convierte la conciliación en algo auditable: tres meses
+   * después, "¿de dónde salió este US$ 1.691,98?" se contesta abriendo el
+   * papel, no reconstruyendo la cuenta.
+   */
+  pdf?: {
+    nombre: string
+    bytes: number
+    guardadoEl: string
+  }
+}
+
+/** Guarda el PDF del resumen. Devuelve `false` si era demasiado grande. */
+export async function guardarPDFDelResumen(cierre: string, pdf: Buffer): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis) throw new Error("Redis no está disponible")
+  if (pdf.length === 0 || pdf.length > MAXIMO_PDF_GUARDADO_BYTES) return false
+
+  // Sin TTL: es el respaldo de un registro contable y no vence.
+  await redis.set(`${PREFIJO_PDF}${cierre}`, pdf.toString("base64"))
+  return true
+}
+
+/** El PDF guardado de ese cierre, o `null`. */
+export async function leerPDFDelResumen(cierre: string): Promise<Buffer | null> {
+  const redis = getRedisClient()
+  if (!redis) return null
+
+  try {
+    const crudo = await redis.get(`${PREFIJO_PDF}${cierre}`)
+    if (!crudo || typeof crudo !== "string") return null
+    return Buffer.from(crudo, "base64")
+  } catch (error) {
+    console.error(`[SERVICIO_TARJETA] No se pudo leer el PDF de ${cierre}:`, error)
+    return null
+  }
 }
 
 /** "2026-10-01" → "2026-10" */
@@ -76,6 +132,9 @@ export async function borrarResumen(cierre: string): Promise<void> {
   if (!redis) throw new Error("Redis no está disponible")
 
   await redis.del(`${PREFIJO}${cierre}`)
+  // El archivo se va con el resumen: dejarlo sería ocupar lugar con un
+  // comprobante que ya no está referenciado por nada.
+  await redis.del(`${PREFIJO_PDF}${cierre}`)
   await redis.srem(INDICE, cierre)
 }
 

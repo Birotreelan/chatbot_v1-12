@@ -26,7 +26,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Loader2, Trash2 } from "lucide-react"
+import { FileText, Loader2, Trash2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -106,6 +106,7 @@ interface ResumenGuardado {
   percepcionAcreditadaARS: number
   lineas: LineaDelResumen[]
   cargadoEl: string
+  pdf?: { nombre: string; bytes: number; guardadoEl: string }
 }
 
 interface FilaDeConciliacion {
@@ -263,7 +264,14 @@ export function ConciliacionTarjeta({
         return
       }
       if (guardar) {
-        setMensaje(`Resumen del ${fechaLegible(data.guardado?.cierre)} guardado.`)
+        setMensaje(
+          `Resumen del ${fechaLegible(data.guardado?.cierre)} guardado` +
+            (archivo
+              ? data.guardado?.pdf
+                ? ", con el PDF archivado."
+                : ". El PDF no se archivó: pesa más de 4 MB."
+              : "."),
+        )
         setTexto("")
         setArchivo(null)
         setAnalisis(null)
@@ -778,6 +786,24 @@ export function ConciliacionTarjeta({
                       <span className="block text-[10px] text-muted-foreground">
                         desde {fechaLegible(r.cierreAnterior)} · {r.lineas.length} líneas
                       </span>
+                      {/* El comprobante, si quedó guardado (2/11/2026).
+                          Es lo que hace auditable la conciliación: tres meses
+                          después, "¿de dónde salió este número?" se contesta
+                          abriendo el papel y no reconstruyendo la cuenta.
+                          Se abre en otra pestaña porque uno mira una línea y
+                          vuelve; perder la pantalla sería perder el contexto. */}
+                      {r.pdf && (
+                        <a
+                          href={`/api/servicio/tarjeta/pdf?cierre=${encodeURIComponent(r.cierre)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-0.5 flex items-center gap-1 text-[10px] text-primary hover:underline"
+                          title={`${r.pdf.nombre} · ${(r.pdf.bytes / 1024).toFixed(0)} KB`}
+                        >
+                          <FileText className="h-3 w-3" />
+                          Ver el PDF
+                        </a>
+                      )}
                     </TableCell>
                     <TableCell className="py-1 text-xs">{mesLegible(r.periodoImputado)}</TableCell>
                     <TableCell className="py-1 text-right text-xs">
