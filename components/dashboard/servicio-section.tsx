@@ -36,6 +36,9 @@ import { FacturacionTable, type TotalesDeLaTabla } from "./facturacion-table"
 import { GranTotalServicio } from "./gran-total-servicio"
 import { ConciliacionTarjeta } from "./conciliacion-tarjeta"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { Download, Loader2 } from "lucide-react"
+import { costoPorMensaje } from "@/lib/servicio-costos"
 import { servicioUsaValoresPropios, SERVICIO_PRECIO_PROPIO_DESDE } from "@/lib/servicio-calculo"
 
 const formatoUSD = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -92,6 +95,74 @@ export function ServicioSection() {
    */
   const [costosFijosUSD, setCostosFijosUSD] = useState<number | null>(null)
   const recibirCostosFijos = useCallback((usd: number | null) => setCostosFijosUSD(usd), [])
+
+  /**
+   * Exportar el detalle para la empresa que nos contrata (2/11/2026).
+   *
+   * ── Las filas se mandan, no se recalculan ────────────────────────────────
+   *
+   * Salen de lo que las dos tablas acaban de reportar, que es lo que está en
+   * pantalla. El servidor sólo arma el archivo. Si recalculara, habría dos
+   * respuestas a la misma pregunta y el día que difieran nos enteraríamos por
+   * la empresa.
+   *
+   * ── Qué NO va ────────────────────────────────────────────────────────────
+   *
+   * La Observación, el resultado (ingresos − costos) y todo lo de la tarjeta.
+   * La lista de campos está escrita en lib/servicio-exportacion.ts, así que
+   * una columna nueva en la tabla no se manda sola.
+   */
+  const [exportando, setExportando] = useState(false)
+
+  const exportar = async () => {
+    if (!totalesConIA || !totalesSinIA) return
+    setExportando(true)
+    try {
+      const costo = costoPorMensaje(month)
+      const r = await fetch("/api/servicio/exportar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mes: month,
+          dolarVenta,
+          costoMetaUnitarioUSD: costo.metaUSD,
+          detalleDeImpuestos: costo.desglosado
+            ? costo.partes
+                .map(
+                  (p) =>
+                    `${p.nombre} ${(p.alicuota * 100).toFixed(1).replace(".", ",")} %`,
+                )
+                .join(" + ")
+            : "sin discriminar",
+          grupos: [
+            { titulo: "Clientes Wpp con IA", filas: totalesConIA.filasExportables },
+            { titulo: "Clientes Wpp sin IA", filas: totalesSinIA.filasExportables },
+          ],
+        }),
+      })
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}))
+        throw new Error(data.error || "No se pudo generar el Excel")
+      }
+
+      // Descarga por Blob y no por una URL con los datos: el archivo viene en
+      // la respuesta del POST, que es el único lugar donde existe.
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `servicio-${month}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Error exportando el detalle de servicio:", err)
+      alert(err instanceof Error ? err.message : "No se pudo generar el Excel")
+    } finally {
+      setExportando(false)
+    }
+  }
 
   const [dolarFijado, setDolarFijado] = useState<number | null>(null)
   const [textoDolar, setTextoDolar] = useState("")
@@ -219,6 +290,27 @@ export function ServicioSection() {
       <div className="flex items-center gap-3">
         <MonthSelector value={month} onChange={setMonth} />
         {esMesEnCurso && <span className="text-sm font-semibold text-red-600">Consumo en curso</span>}
+        {/* La exportación para la empresa. Deshabilitada hasta que las dos
+            tablas hayan cargado: un archivo con una sola tabla se manda igual
+            y nadie se entera de que faltaba la otra. */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={exportar}
+          disabled={exportando || !totalesConIA || !totalesSinIA}
+          title={
+            !totalesConIA || !totalesSinIA
+              ? "Esperando que carguen las dos tablas"
+              : "Detalle por clínica de las dos tablas, sin los datos de contabilidad interna"
+          }
+        >
+          {exportando ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="mr-2 h-4 w-4" />
+          )}
+          Exportar a Excel
+        </Button>
         {/* En Servicio el dólar se edita: es uno de los dos valores propios de
             la pestaña. Vacío = usar el del día. Antes del corte de octubre el
             campo no aparece, porque esos meses muestran lo de Facturación y

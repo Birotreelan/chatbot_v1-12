@@ -10,6 +10,7 @@ import { monthValueToRange } from "./month-selector"
 import { OBSERVACION_MAX } from "@/lib/servicio-observacion-texto"
 import { reglaPorId } from "@/lib/facturacion-reglas"
 import { costoPorMensaje } from "@/lib/servicio-costos"
+import type { FilaExportable } from "@/lib/servicio-exportacion"
 
 interface FacturacionCliente {
   clienteId: string
@@ -93,6 +94,18 @@ export interface TotalesDeLaTabla {
   hayCosto: boolean
   /** Filas que quedaron afuera del margen por no traer costo. */
   filasSinCosto: number
+  /**
+   * Las filas con los campos que se le mandan a la empresa (2/11/2026).
+   *
+   * Van acá —con los totales— y no por un callback propio para que el Excel
+   * salga de los MISMOS números que la pantalla: si se reportaran aparte,
+   * podrían quedar de un render distinto que los totales y el archivo diría
+   * algo que nadie vio.
+   *
+   * Qué campos son lo decide lib/servicio-exportacion.ts, no esta tabla: la
+   * tabla muestra más de lo que se manda.
+   */
+  filasExportables: FilaExportable[]
 }
 
 interface FacturacionTableProps {
@@ -660,6 +673,32 @@ export function FacturacionTable({
    * aclara.
    */
   const filasSinCosto = clientes.filter((c) => c.mensajesConCargoDeMeta === undefined).length
+
+  /**
+   * Las filas para el Excel, armadas de lo mismo que dibuja cada renglón.
+   *
+   * `valoresDeLaFila` es la única fuente del precio y la cotización de una
+   * fila, así que el archivo no puede diferir de la pantalla ni en un mes
+   * cerrado ni con los valores propios de Servicio.
+   */
+  const filasExportables: FilaExportable[] = clientes.map((c) => {
+    const { precio, ingresoUSD, ingresoARS } = valoresDeLaFila(c)
+    return {
+      cliente: c.nombreCliente,
+      recordatorios: c.recordatorios ?? null,
+      mensajesDeServicio: c.serviciosFacturados ?? null,
+      interacciones: c.totalInteracciones || 0,
+      costoMetaUSD:
+        c.mensajesConCargoDeMeta !== undefined ? c.mensajesConCargoDeMeta * costo.metaUSD : null,
+      impuestosUSD:
+        c.mensajesConCargoDeMeta !== undefined
+          ? c.mensajesConCargoDeMeta * costo.impuestosUSD
+          : null,
+      valorUnitarioUSD: precio,
+      valorTotalUSD: ingresoUSD,
+      valorTotalARS: ingresoARS,
+    }
+  })
   const totalMargenUSD = clientes.reduce((sum, c) => sum + (valoresDeLaFila(c).margenUSD || 0), 0)
   const totalMargenARS = clientes.reduce((sum, c) => sum + (valoresDeLaFila(c).margenARS || 0), 0)
 
@@ -707,6 +746,7 @@ export function FacturacionTable({
             hayDesglose,
             hayCosto,
             filasSinCosto,
+            filasExportables,
           }
         : null,
     )
