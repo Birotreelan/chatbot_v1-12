@@ -174,6 +174,18 @@ export function ConciliacionTarjeta({
 
   const [abierto, setAbierto] = useState(false)
   const [texto, setTexto] = useState("")
+  /**
+   * El PDF, que es el camino recomendado (2/11/2026).
+   *
+   * Pegar el texto fallaba y no era culpa del parser: al copiar un PDF el
+   * visor entrega las columnas una abajo de la otra —primero todas las fechas,
+   * después todas las descripciones— y las filas dejan de existir. Pedirle a
+   * alguien un texto que su visor no le da no es una instrucción, es un
+   * laberinto. Subiendo el PDF lo lee un modelo, y el resultado pasa por las
+   * mismas verificaciones que el texto pegado.
+   */
+  const [archivo, setArchivo] = useState<File | null>(null)
+  const [leidoConIA, setLeidoConIA] = useState(false)
   const [analisis, setAnalisis] = useState<Analisis | null>(null)
   const [totales, setTotales] = useState<TotalesDelResumen | null>(null)
   const [categorias, setCategorias] = useState<Record<string, "meta" | "otro">>({})
@@ -215,17 +227,32 @@ export function ConciliacionTarjeta({
     setTrabajando(true)
     setMensaje(null)
     try {
-      const r = await fetch("/api/servicio/tarjeta", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          texto,
-          categorias,
-          guardar,
-          periodoImputado: guardar ? imputarA || undefined : undefined,
-        }),
-      })
+      // Con archivo va como form —el PDF no entra en un JSON— y sin archivo
+      // como JSON, igual que antes. El endpoint acepta las dos formas y las
+      // dos terminan en el mismo análisis verificado.
+      const pedido: RequestInit = archivo
+        ? (() => {
+            const form = new FormData()
+            form.append("archivo", archivo)
+            form.append("guardar", guardar ? "1" : "0")
+            form.append("categorias", JSON.stringify(categorias))
+            if (guardar && imputarA) form.append("periodoImputado", imputarA)
+            return { method: "POST", body: form }
+          })()
+        : {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              texto,
+              categorias,
+              guardar,
+              periodoImputado: guardar ? imputarA || undefined : undefined,
+            }),
+          }
+
+      const r = await fetch("/api/servicio/tarjeta", pedido)
       const data = await r.json()
+      setLeidoConIA(Boolean(data.leidoConIA))
       if (data.analisis) setAnalisis(data.analisis)
       if (data.totales) setTotales(data.totales)
       if (!r.ok) {
@@ -235,6 +262,7 @@ export function ConciliacionTarjeta({
       if (guardar) {
         setMensaje(`Resumen del ${fechaLegible(data.guardado?.cierre)} guardado.`)
         setTexto("")
+        setArchivo(null)
         setAnalisis(null)
         setTotales(null)
         setCategorias({})
@@ -319,23 +347,54 @@ export function ConciliacionTarjeta({
         {/* ── Cargar un resumen ──────────────────────────────────────────── */}
         {abierto && (
           <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-            <p className="text-sm font-medium">Pegá el texto del resumen</p>
+            <p className="text-sm font-medium">Subí el PDF del resumen</p>
             <p className="text-xs text-muted-foreground">
-              Abrí el PDF, seleccioná todo y pegalo acá. Hace falta que vengan la fila de CIERRE
-              ACTUAL, la sección de consumos con su TOTAL CONSUMOS y las líneas de impuestos: de ahí
-              salen el período, el tipo de cambio y las verificaciones.
+              El PDF tal como lo manda el banco. Lo lee un modelo y después se verifica con las
+              cuentas del propio resumen: la suma de las líneas tiene que dar el TOTAL CONSUMOS
+              declarado y el tipo de cambio tiene que salir igual por dos bases distintas. Si algo
+              no cierra, no se guarda y te dice qué fue.
             </p>
-            <Textarea
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              rows={6}
-              placeholder="CIERRE ACTUAL  VENCIMIENTO ACTUAL …"
-              className="font-mono text-xs"
+            <Input
+              type="file"
+              accept="application/pdf,.pdf"
+              className="h-9 text-xs"
+              onChange={(e) => {
+                setArchivo(e.target.files?.[0] ?? null)
+                setAnalisis(null)
+                setTotales(null)
+                setMensaje(null)
+              }}
             />
+
+            {/* El texto pegado sigue estando, plegado: sirve cuando el texto
+                viene alineado (por ejemplo de `pdftotext -layout`) y no gasta
+                una llamada al modelo. No es lo primero porque es lo que no
+                funcionaba. */}
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground">
+                O pegar el texto, si lo tenés alineado
+              </summary>
+              <Textarea
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+                rows={6}
+                placeholder="CIERRE ACTUAL  VENCIMIENTO ACTUAL …"
+                className="mt-2 font-mono text-xs"
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Al copiar desde un visor de PDF las columnas se desalinean y las filas se pierden:
+                si pasa eso, usá el PDF de arriba.
+              </p>
+            </details>
+
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => analizar(false)} disabled={trabajando || !texto.trim()}>
+              <Button
+                size="sm"
+                onClick={() => analizar(false)}
+                disabled={trabajando || (!archivo && !texto.trim())}
+              >
                 {trabajando && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
-                Analizar
+                {archivo ? "Leer el PDF" : "Analizar"}
               </Button>
               {analisis && (
                 <>
@@ -364,6 +423,12 @@ export function ConciliacionTarjeta({
             </div>
 
             {mensaje && <p className="text-xs font-medium">{mensaje}</p>}
+            {analisis && leidoConIA && (
+              <p className="text-[11px] text-muted-foreground">
+                Leído del PDF con IA y verificado con las cuentas del resumen. Revisá las líneas
+                antes de guardar.
+              </p>
+            )}
 
             {/* ── Lo que entendió ─────────────────────────────────────────── */}
             {analisis && totales && (

@@ -28,6 +28,7 @@ import {
   type ResumenGuardado,
 } from "@/lib/servicio-tarjeta"
 import { conciliar, type MesComputado } from "@/lib/servicio-conciliacion"
+import { leerResumenDelPDF, MAXIMO_PDF_BYTES } from "@/lib/tarjeta-resumen-ia"
 import { COSTO_DESGLOSADO_DESDE } from "@/lib/servicio-costos"
 import { mensajesConCargoDelPeriodo } from "@/lib/facturacion-cierre"
 
@@ -104,16 +105,72 @@ export async function POST(request: Request) {
     const acceso = await exigirSuperAdmin(request)
     if (esDenegado(acceso)) return acceso.respuesta
 
-    const body = await request.json().catch(() => null)
-    const texto = typeof body?.texto === "string" ? body.texto : ""
-    if (texto.trim().length < 50) {
-      return NextResponse.json(
-        { error: "Pegá el texto del resumen: lo que llegó es demasiado corto." },
-        { status: 400 },
-      )
-    }
+    /**
+     * Dos formas de cargar el mismo resumen (2/11/2026).
+     *
+     * · PDF (multipart): lo lee un modelo. Es el camino recomendado, porque al
+     *   copiar un PDF el visor entrega las columnas una abajo de la otra y las
+     *   filas dejan de existir — ninguna regla puede reconstruirlas.
+     * · texto pegado (JSON): el parser determinístico, que sirve cuando el
+     *   texto viene alineado.
+     *
+     * Las dos desembocan en el MISMO `ResumenAnalizado`, con las mismas
+     * verificaciones. Lo que decide si un resumen se guarda no depende de cómo
+     * se extrajo. Ver lib/tarjeta-resumen-ia.ts.
+     */
+    const tipo = request.headers.get("content-type") || ""
+    let analisis: Awaited<ReturnType<typeof leerResumenDelPDF>> | ReturnType<typeof analizarResumen>
+    let body: any = null
+    let leidoConIA = false
 
-    const analisis = analizarResumen(texto)
+    if (tipo.includes("multipart/form-data")) {
+      const form = await request.formData()
+      const archivo = form.get("archivo")
+      if (!(archivo instanceof File)) {
+        return NextResponse.json({ error: "Falta el archivo PDF." }, { status: 400 })
+      }
+      if (archivo.size > MAXIMO_PDF_BYTES) {
+        return NextResponse.json(
+          { error: `El PDF pesa ${(archivo.size / 1024 / 1024).toFixed(1)} MB y el máximo es 10 MB.` },
+          { status: 400 },
+        )
+      }
+      // El resto de los campos viajan como texto en el mismo form.
+      body = {
+        guardar: form.get("guardar") === "1" || form.get("guardar") === "true",
+        periodoImputado: form.get("periodoImputado") || undefined,
+        nota: form.get("nota") || undefined,
+        categorias: form.get("categorias") ? JSON.parse(String(form.get("categorias"))) : {},
+      }
+      try {
+        analisis = await leerResumenDelPDF(
+          Buffer.from(await archivo.arrayBuffer()),
+          archivo.name || "resumen.pdf",
+        )
+        leidoConIA = true
+      } catch (err) {
+        console.error("[SERVICIO_TARJETA] No se pudo leer el PDF:", err)
+        return NextResponse.json(
+          {
+            error:
+              err instanceof Error
+                ? `No se pudo leer el PDF: ${err.message}`
+                : "No se pudo leer el PDF.",
+          },
+          { status: 422 },
+        )
+      }
+    } else {
+      body = await request.json().catch(() => null)
+      const texto = typeof body?.texto === "string" ? body.texto : ""
+      if (texto.trim().length < 50) {
+        return NextResponse.json(
+          { error: "Subí el PDF o pegá el texto del resumen: lo que llegó es demasiado corto." },
+          { status: 400 },
+        )
+      }
+      analisis = analizarResumen(texto)
+    }
 
     /**
      * Las correcciones de categoría que hizo la persona.
@@ -137,7 +194,7 @@ export async function POST(request: Request) {
     const totales = totalesDelResumen(conCorrecciones)
 
     if (!body?.guardar) {
-      return NextResponse.json({ exito: true, analisis: conCorrecciones, totales })
+      return NextResponse.json({ exito: true, analisis: conCorrecciones, totales, leidoConIA })
     }
 
     if (analisis.problemas.length > 0) {
@@ -182,7 +239,13 @@ export async function POST(request: Request) {
         `Meta US$ ${resumen.cargosDeMetaUSD.toFixed(2)}, fijos US$ ${resumen.cargosFijosUSD.toFixed(2)}`,
     )
 
-    return NextResponse.json({ exito: true, guardado: resumen, analisis: conCorrecciones, totales })
+    return NextResponse.json({
+      exito: true,
+      guardado: resumen,
+      analisis: conCorrecciones,
+      totales,
+      leidoConIA,
+    })
   } catch (error) {
     console.error("[SERVICIO_TARJETA] Error analizando o guardando:", error)
     return NextResponse.json({ error: "Error al procesar el resumen" }, { status: 500 })

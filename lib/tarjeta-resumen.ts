@@ -341,6 +341,59 @@ export function analizarResumen(textoCrudo: string): ResumenAnalizado {
     })
   }
 
+  // La verificación es común a las dos formas de cargar un resumen —texto
+  // pegado y PDF leído con IA— así que vive aparte. Ver `verificarResumen`.
+  return verificarResumen({
+    cierre,
+    cierreAnterior,
+    vencimiento,
+    lineas,
+    impuestos,
+    totalDeclaradoUSD,
+    totalDeclaradoARS,
+    consumosARS: sumaARSDeConsumos,
+  })
+}
+
+/**
+ * Lo que hace falta para verificar un resumen, venga de donde venga.
+ *
+ * El texto pegado y el PDF leído con IA llegan a esto mismo: las cuentas que
+ * deciden si un resumen se puede guardar no dependen de cómo se extrajo.
+ */
+export interface DatosDelResumen {
+  cierre: string | null
+  cierreAnterior: string | null
+  vencimiento: string | null
+  lineas: LineaDelResumen[]
+  impuestos: ImpuestoDelResumen[]
+  totalDeclaradoUSD: number | null
+  totalDeclaradoARS: number | null
+  /** Consumos en pesos que se pudieron leer, para cruzar contra su total. */
+  consumosARS?: number
+}
+
+/**
+ * Las tres verificaciones, sobre datos ya extraídos (2/11/2026).
+ *
+ * ── Por qué está separado del parser ─────────────────────────────────────────
+ *
+ * Porque desde hoy hay dos formas de extraer un resumen: el texto pegado y el
+ * PDF leído con un modelo. La segunda no es determinística, así que es MÁS
+ * importante que pase exactamente los mismos controles que la primera, no
+ * menos. Si la verificación viviera adentro del parser de texto, el camino con
+ * IA entraría sin controlar y un número inventado llegaría a la cuenta
+ * corriente.
+ *
+ * Las cuentas no dependen de cómo se extrajo nada: son el resumen contra sí
+ * mismo. Ver la nota de arriba del archivo.
+ */
+export function verificarResumen(datos: DatosDelResumen): ResumenAnalizado {
+  const { cierre, cierreAnterior, vencimiento, lineas, impuestos } = datos
+  const { totalDeclaradoUSD, totalDeclaradoARS } = datos
+  const sumaARSDeConsumos = datos.consumosARS ?? 0
+  const problemas: string[] = []
+  const verificaciones: Verificacion[] = []
   // ── Las sumas que importan ───────────────────────────────────────────────
   const metaUSD = lineas.filter((l) => l.categoria === "meta").reduce((s, l) => s + l.importeUSD, 0)
   const otrosUSD = lineas.filter((l) => l.categoria === "otro").reduce((s, l) => s + l.importeUSD, 0)

@@ -95,6 +95,22 @@ export const MODELO_REDACCION = modeloDe('MODELO_REDACCION', 'gpt-4o-mini')
 export const MODELO_ASISTENTE = modeloDe('MODELO_ASISTENTE', 'gpt-4.1')
 
 /**
+ * LECTURA DE DOCUMENTOS. Saca la estructura de un PDF —hoy, el resumen de la
+ * tarjeta de crédito— que no se puede leer con una expresión regular porque al
+ * copiarlo se pierde la alineación de las columnas.
+ *
+ * RIESGO BAJO, y es la única capa del sistema donde se puede afirmar eso con
+ * fundamento: lo que devuelve se verifica con aritmética contra el propio
+ * documento (la suma de las líneas tiene que dar el total declarado, y el tipo
+ * de cambio tiene que salir igual por dos bases independientes). Un número
+ * inventado no pasa esos controles, y sin pasarlos no se guarda. Ver
+ * lib/tarjeta-resumen.ts.
+ *
+ * Tiene que ser un modelo que lea PDFs, no sólo texto.
+ */
+export const MODELO_DOCUMENTOS = modeloDe('MODELO_DOCUMENTOS', 'gpt-4.1')
+
+/**
  * TRANSCRIPCIÓN de los audios que mandan los pacientes.
  */
 export const MODELO_TRANSCRIPCION = modeloDe('MODELO_TRANSCRIPCION', 'whisper-1')
