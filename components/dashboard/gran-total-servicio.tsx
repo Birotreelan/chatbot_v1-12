@@ -99,6 +99,7 @@ export function GranTotalServicio({
     costoUSD: sumar((t) => t.costoUSD),
     costoMetaUSD: sumar((t) => t.costoMetaUSD),
     costoImpuestosUSD: sumar((t) => t.costoImpuestosUSD),
+    costoImpuestosARS: sumar((t) => t.costoImpuestosARS),
     valorUSD: sumar((t) => t.valorUSD),
     valorARS: sumar((t) => t.valorARS),
     margenUSD: sumar((t) => t.margenUSD),
@@ -135,7 +136,15 @@ export function GranTotalServicio({
         </TableCell>
       )}
       {costoDesglosado && (
-        <TableCell className="text-right">{formatoUSDMoney.format(t.costoImpuestosUSD)}</TableCell>
+        <TableCell className="text-right">
+          {formatoUSDMoney.format(t.costoImpuestosUSD)}
+          {/* En pesos: el IVA RG 4240 y los sellos se pagan en pesos. */}
+          {t.costoImpuestosARS > 0 && (
+            <span className="block text-[10px] font-normal text-muted-foreground">
+              {formatoARS.format(t.costoImpuestosARS)}
+            </span>
+          )}
+        </TableCell>
       )}
       <TableCell className="text-right">{formatoUSDMoney.format(t.valorUSD)}</TableCell>
       <TableCell className="text-right">{formatoARS.format(t.valorARS)}</TableCell>
@@ -186,6 +195,9 @@ export function GranTotalServicio({
               {costoDesglosado && (
                 <TableHead className="text-right font-normal text-muted-foreground">
                   Impuestos
+                  <span className="block text-[10px] font-normal">
+                    se pagan en pesos
+                  </span>
                 </TableHead>
               )}
               <TableHead className="text-right">Valor Total Dólares</TableHead>
@@ -227,6 +239,12 @@ export function GranTotalServicio({
               {costoDesglosado && (
                 <TableCell className="text-right">
                   {formatoUSDMoney.format(total.costoImpuestosUSD)}
+                  {/* Lo que hay que pagar en pesos, que es como se paga. */}
+                  {total.costoImpuestosARS > 0 && (
+                    <span className="block text-[10px] font-normal">
+                      {formatoARS.format(total.costoImpuestosARS)}
+                    </span>
+                  )}
                   <span className="block text-[10px] font-normal text-muted-foreground">
                     costo total {formatoUSDMoney.format(total.costoUSD)}
                   </span>

@@ -77,6 +77,8 @@ export interface TotalesDeLaTabla {
   /** Las dos partes del costo, cuando el período las tiene discriminadas. */
   costoMetaUSD: number
   costoImpuestosUSD: number
+  /** Los mismos impuestos en pesos: es la moneda en la que se pagan. */
+  costoImpuestosARS: number
   costoDesglosado: boolean
   valorUSD: number
   valorARS: number
@@ -535,6 +537,22 @@ export function FacturacionTable({
         c.mensajesConCargoDeMeta !== undefined
           ? c.mensajesConCargoDeMeta * costo.impuestosUSD
           : null,
+      /**
+       * Los impuestos en PESOS (2/11/2026).
+       *
+       * Van a la vista porque el IVA RG 4240 y los sellos se pagan en pesos,
+       * siempre: el número en dólares es una conversión nuestra, el que
+       * efectivamente sale de la cuenta es éste. Verlo sólo en dólares obliga a
+       * multiplicar de cabeza para saber de cuánta plata se está hablando.
+       *
+       * Con la MISMA cotización que usa el resto de la fila —no con una propia—
+       * para que la columna de pesos del ingreso y ésta sean comparables. En un
+       * mes cerrado es el dólar del cierre; en el mes en curso, el del día.
+       */
+      costoImpuestosARS:
+        c.mensajesConCargoDeMeta !== undefined && cotizacion
+          ? c.mensajesConCargoDeMeta * costo.impuestosUSD * cotizacion
+          : null,
       margenUSD,
       margenARS: margenUSD !== null && cotizacion ? margenUSD * cotizacion : null,
     }
@@ -594,6 +612,14 @@ export function FacturacionTable({
   const totalCostoUSD = totalConCargo * costo.totalUSD
   const totalCostoMetaUSD = totalConCargo * costo.metaUSD
   const totalCostoImpuestosUSD = totalConCargo * costo.impuestosUSD
+  // Fila por fila y no el total por una cotización única: en un mes cerrado
+  // cada fila puede traer la suya, y multiplicar el total en dólares por el
+  // dólar de hoy daría un número que no coincide con la suma de los renglones.
+  // Es el mismo criterio que `totalGeneralValorARS`.
+  const totalCostoImpuestosARS = clientes.reduce(
+    (sum, c) => sum + (valoresDeLaFila(c).costoImpuestosARS || 0),
+    0,
+  )
 
   async function reabrir() {
     if (
@@ -672,6 +698,7 @@ export function FacturacionTable({
             costoUSD: totalCostoUSD,
             costoMetaUSD: totalCostoMetaUSD,
             costoImpuestosUSD: totalCostoImpuestosUSD,
+            costoImpuestosARS: totalCostoImpuestosARS,
             costoDesglosado: costo.desglosado,
             valorUSD: totalGeneralValorUSD,
             valorARS: totalGeneralValorARS,
@@ -693,6 +720,7 @@ export function FacturacionTable({
     totalCostoUSD,
     totalCostoMetaUSD,
     totalCostoImpuestosUSD,
+    totalCostoImpuestosARS,
     costo.desglosado,
     totalGeneralValorUSD,
     totalGeneralValorARS,
@@ -975,11 +1003,25 @@ export function FacturacionTable({
                       </TableCell>
                       {costo.desglosado && (
                         <TableCell className="text-right text-muted-foreground">
-                          {cliente.mensajesConCargoDeMeta !== undefined
-                            ? formatoUSDMoney.format(
+                          {cliente.mensajesConCargoDeMeta !== undefined ? (
+                            <>
+                              {formatoUSDMoney.format(
                                 cliente.mensajesConCargoDeMeta * costo.impuestosUSD,
-                              )
-                            : "—"}
+                              )}
+                              {/* En pesos, que es como se pagan. */}
+                              {cotizacion && (
+                                <span className="block text-[10px]">
+                                  {formatoARS.format(
+                                    cliente.mensajesConCargoDeMeta *
+                                      costo.impuestosUSD *
+                                      cotizacion,
+                                  )}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            "—"
+                          )}
                         </TableCell>
                       )}
                       </>
@@ -1104,6 +1146,13 @@ export function FacturacionTable({
                     {costo.desglosado && (
                       <TableCell className="text-right">
                         {formatoUSDMoney.format(totalCostoImpuestosUSD)}
+                        {/* En pesos: es la moneda en la que se paga este
+                            impuesto, y es la cifra que hay que tener. */}
+                        {totalCostoImpuestosARS > 0 && (
+                          <span className="block text-[10px] font-normal">
+                            {formatoARS.format(totalCostoImpuestosARS)}
+                          </span>
+                        )}
                         {/* La suma de las dos columnas, dicha. Es el número que
                             se resta del resultado, y si no está escrito hay que
                             sumarlo de cabeza para entender esa resta. */}
