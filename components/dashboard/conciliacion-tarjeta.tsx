@@ -463,6 +463,18 @@ export function ConciliacionTarjeta({
                   <div>
                     <span className="block text-muted-foreground">Costos fijos</span>
                     <span className="font-semibold">{formatoUSD.format(totales.cargosFijosUSD)}</span>
+                    {/* La cuenta, escrita (2/11/2026).
+                        Sin esto, "Cargos de Meta US$ 1.691,98" al lado de un
+                        resumen que dice 1.704,51 se lee como un error de
+                        lectura. Son dos costos distintos —los de Meta son por
+                        mensaje y se concilian; Upstash y Vercel son
+                        infraestructura y se restan del resultado general— y la
+                        suma es la que el resumen declara. */}
+                    <span className="block text-[10px] text-muted-foreground">
+                      {formatoUSD.format(totales.cargosDeMetaUSD)} +{" "}
+                      {formatoUSD.format(totales.cargosFijosUSD)} ={" "}
+                      {formatoUSD.format(totales.consumoTotalUSD)}, el TOTAL CONSUMOS del resumen
+                    </span>
                   </div>
                   <div>
                     {/* En pesos primero: es la moneda en la que se pagan. */}
