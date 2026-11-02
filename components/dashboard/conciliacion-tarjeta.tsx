@@ -615,8 +615,13 @@ export function ConciliacionTarjeta({
                   <TableHead>Mes</TableHead>
                   <TableHead className="text-right">Mensajes con cargo</TableHead>
                   <TableHead className="text-right">Computado (Meta)</TableHead>
-                  <TableHead className="text-right">Cobró la tarjeta</TableHead>
+                  {/* "Cobró la tarjeta" a secas era ambiguo (2/11/2026): se
+                      leía como todo el resumen y era sólo la parte de Meta.
+                      Ahora se nombra qué es cada columna y se agrega el total,
+                      que es la suma de las dos. */}
+                  <TableHead className="text-right">Cobró por Meta</TableHead>
                   <TableHead className="text-right">Costos fijos</TableHead>
+                  <TableHead className="text-right">Total cobrado</TableHead>
                   <TableHead className="text-right">Saldo acumulado</TableHead>
                 </TableRow>
               </TableHeader>
@@ -654,6 +659,13 @@ export function ConciliacionTarjeta({
                     <TableCell className="text-right text-muted-foreground">
                       {f.cargosFijosUSD === 0 ? "—" : formatoUSD.format(f.cargosFijosUSD)}
                     </TableCell>
+                    {/* Todos los dólares del resumen: es el TOTAL CONSUMOS que
+                        dice el papel, y así se puede cotejar de un vistazo. */}
+                    <TableCell className="text-right">
+                      {f.imputadoUSD === 0 && f.cargosFijosUSD === 0
+                        ? "—"
+                        : formatoUSD.format(f.imputadoUSD + f.cargosFijosUSD)}
+                    </TableCell>
                     <TableCell
                       className={`text-right font-medium ${
                         f.saldoUSD !== null && f.saldoUSD < 0 ? "text-destructive" : ""
@@ -672,7 +684,17 @@ export function ConciliacionTarjeta({
                   <TableCell className="text-right">
                     {formatoUSD.format(conciliacion.imputadoAcumuladoUSD)}
                   </TableCell>
-                  <TableCell />
+                  <TableCell className="text-right">
+                    {formatoUSD.format(
+                      conciliacion.filas.reduce((s, f) => s + f.cargosFijosUSD, 0),
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {formatoUSD.format(
+                      conciliacion.imputadoAcumuladoUSD +
+                        conciliacion.filas.reduce((s, f) => s + f.cargosFijosUSD, 0),
+                    )}
+                  </TableCell>
                   <TableCell
                     className={`text-right ${
                       conciliacion.saldoUSD !== null && conciliacion.saldoUSD < 0
@@ -686,6 +708,13 @@ export function ConciliacionTarjeta({
               </TableBody>
             </Table>
 
+            <p className="text-xs text-muted-foreground">
+              El saldo se calcula sobre la columna de Meta, no sobre el total: los costos fijos no
+              salen de los mensajes que computamos, así que incluirlos en la resta correría el
+              saldo todos los meses por un consumo que no tiene con qué compararse. "Total
+              cobrado" es la suma de las dos columnas anteriores, que es el TOTAL CONSUMOS que
+              declara el resumen.
+            </p>
             <p className="text-xs text-muted-foreground">
               Saldo positivo = mensajes ya computados que la tarjeta todavía no cobró, normalmente
               porque el período del resumen cerró antes que el mes. Negativo = el resumen abarcó
