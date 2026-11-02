@@ -116,6 +116,7 @@ interface FilaDeConciliacion {
   imputadoUSD: number
   resumenes: string[]
   cargosFijosUSD: number
+  impuestosARS: number
   saldoUSD: number | null
 }
 
@@ -630,6 +631,10 @@ export function ConciliacionTarjeta({
                   <TableHead className="text-right">Cobró por Meta</TableHead>
                   <TableHead className="text-right">Costos fijos</TableHead>
                   <TableHead className="text-right">Total cobrado</TableHead>
+                  {/* En pesos y no en dólares: es la moneda en la que se pagan.
+                      No incluye la percepción RG 5617 del 30 %, que la tarjeta
+                      debita y devuelve en el resumen siguiente. */}
+                  <TableHead className="text-right">Impuestos a pagar</TableHead>
                   <TableHead className="text-right">Saldo acumulado</TableHead>
                 </TableRow>
               </TableHeader>
@@ -674,6 +679,9 @@ export function ConciliacionTarjeta({
                         ? "—"
                         : formatoUSD.format(f.imputadoUSD + f.cargosFijosUSD)}
                     </TableCell>
+                    <TableCell className="text-right">
+                      {f.impuestosARS === 0 ? "—" : formatoARS.format(f.impuestosARS)}
+                    </TableCell>
                     <TableCell
                       className={`text-right font-medium ${
                         f.saldoUSD !== null && f.saldoUSD < 0 ? "text-destructive" : ""
@@ -702,6 +710,9 @@ export function ConciliacionTarjeta({
                       conciliacion.imputadoAcumuladoUSD +
                         conciliacion.filas.reduce((s, f) => s + f.cargosFijosUSD, 0),
                     )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {formatoARS.format(conciliacion.filas.reduce((s, f) => s + f.impuestosARS, 0))}
                   </TableCell>
                   <TableCell
                     className={`text-right ${
@@ -773,7 +784,7 @@ export function ConciliacionTarjeta({
                   <TableHead className="h-8">Imputado a</TableHead>
                   <TableHead className="h-8 text-right">Meta</TableHead>
                   <TableHead className="h-8 text-right">Fijos</TableHead>
-                  <TableHead className="h-8 text-right">Impuestos</TableHead>
+                  <TableHead className="h-8 text-right">Impuestos a pagar</TableHead>
                   <TableHead className="h-8 text-right">Dólar</TableHead>
                   <TableHead className="h-8" />
                 </TableRow>
@@ -813,7 +824,13 @@ export function ConciliacionTarjeta({
                       {formatoUSD.format(r.cargosFijosUSD)}
                     </TableCell>
                     <TableCell className="py-1 text-right text-xs">
-                      {formatoUSD.format(r.impuestosUSD)}
+                      {/* En pesos, que es como se pagan, y sin la percepción
+                          RG 5617: nunca entró en este número — el resumen la
+                          marca como no computable al cargarse. */}
+                      {formatoARS.format(r.impuestosARS)}
+                      <span className="block text-[10px] text-muted-foreground">
+                        equivale a {formatoUSD.format(r.impuestosUSD)}
+                      </span>
                     </TableCell>
                     <TableCell className="py-1 text-right text-xs">
                       {r.tipoDeCambio ? formatoARS.format(r.tipoDeCambio) : "—"}

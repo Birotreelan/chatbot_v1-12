@@ -54,6 +54,20 @@ export interface FilaDeConciliacion {
   /** Costo fijo del mes: lo que no es Meta, con sus impuestos. */
   cargosFijosUSD: number
   /**
+   * Los impuestos del mes en PESOS, que es la moneda en la que se pagan
+   * (2/11/2026).
+   *
+   * Son los que efectivamente hay que pagar: IVA RG 4240 + sellos. La
+   * percepción RG 5617 del 30 % NO está acá, y no porque se reste después sino
+   * porque nunca entró — el resumen la marca `computa: false` al cargarse, ya
+   * que la tarjeta la debita y la acredita entera en el período siguiente.
+   * Ver lib/tarjeta-resumen.ts.
+   *
+   * Sale de los resúmenes imputados a este mes, al dólar de cada resumen: es
+   * el importe que figura en el comprobante, no una conversión nuestra.
+   */
+  impuestosARS: number
+  /**
    * Saldo acumulado al final del mes: saldo anterior + computado − imputado.
    *
    * Positivo = computamos mensajes que la tarjeta todavía no cobró. Negativo =
@@ -111,6 +125,7 @@ export function conciliar(
     const delMes = resumenes.filter((r) => r.periodoImputado === mes.periodo)
     const imputadoUSD = delMes.reduce((s, r) => s + (r.cargosDeMetaUSD || 0), 0)
     const cargosFijosUSD = delMes.reduce((s, r) => s + (r.cargosFijosUSD || 0), 0)
+    const impuestosARS = delMes.reduce((s, r) => s + (r.impuestosARS || 0), 0)
 
     // El cargo neto de Meta de ESE período: si la composición cambia, cada mes
     // usa la suya. Multiplicar todo por el valor de hoy reescribiría el pasado.
@@ -136,6 +151,7 @@ export function conciliar(
       imputadoUSD,
       resumenes: delMes.map((r) => r.cierre),
       cargosFijosUSD,
+      impuestosARS,
       saldoUSD: saldo,
     })
   }
