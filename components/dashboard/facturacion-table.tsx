@@ -168,6 +168,14 @@ interface FacturacionTableProps {
    * different component".
    */
   onTotales?: (totales: TotalesDeLaTabla | null) => void
+  /**
+   * Cambiarlo hace que la tabla vuelva a pedir el mes.
+   *
+   * Lo usa el contenedor cuando corrige el dólar de un mes cerrado: el cierre
+   * que la tabla tiene en memoria quedó viejo, y sin esto las filas seguirían
+   * multiplicando por la cotización anterior.
+   */
+  recargar?: number
 }
 
 export function FacturacionTable({
@@ -185,6 +193,7 @@ export function FacturacionTable({
   usarValoresPropios = false,
   mostrarMargen = false,
   onTotales,
+  recargar = 0,
 }: FacturacionTableProps) {
   const [clientes, setClientes] = useState<FacturacionCliente[]>([])
   const [loading, setLoading] = useState(true)
@@ -251,7 +260,7 @@ export function FacturacionTable({
       setLoading(false)
       setRefreshing(false)
     }
-  }, [month, apiPath, apiPathPrecios, cerrarMes, mostrarAliasYCuit, mostrarObservacion])
+  }, [month, apiPath, apiPathPrecios, cerrarMes, mostrarAliasYCuit, mostrarObservacion, recargar])
 
   useEffect(() => {
     setLoading(true)
@@ -279,6 +288,81 @@ export function FacturacionTable({
       })
     } catch (err) {
       console.error("Error guardando precio:", err)
+    } finally {
+      setGuardando((prev) => ({ ...prev, [clienteIdBase]: false }))
+    }
+  }
+
+  /**
+   * Corregir el precio de un mes YA CERRADO (2/11/2026).
+   *
+   * ── Qué estaba mal ───────────────────────────────────────────────────────
+   *
+   * Un mes cerrado mostraba el precio como texto, formateado como moneda. Dos
+   * problemas: no se podía corregir sin reabrir el mes entero —que lo
+   * recalcula con el dólar de hoy y mueve todo lo demás—, y el formato redondea
+   * a dos decimales, así que un precio de US$ 0,075 se leía "US$ 0,08". El
+   * número que se facturó no era el número que se veía.
+   *
+   * ── Por qué escribe en el cierre y no en el precio del cliente ───────────
+   *
+   * Porque el precio del cliente (`facturacion:precio:`) es el VIGENTE, el que
+   * se usa para el mes en curso. Si corregir septiembre lo cambiara, se
+   * corregiría septiembre y se rompería noviembre de paso. El precio de un mes
+   * cerrado vive en ese cierre, y ahí se corrige.
+   *
+   * Va por `clienteIdBase` y no por `clienteId`: el cierre se guarda por
+   * cliente real, y un cliente multi-sede tiene una fila por sede con el mismo
+   * cierre detrás. Ver app/api/facturacion/interacciones/route.ts.
+   */
+  const [precioCierreTexto, setPrecioCierreTexto] = useState<Record<string, string>>({})
+
+  const guardarPrecioDelCierre = async (clienteIdBase: string) => {
+    const texto = precioCierreTexto[clienteIdBase]
+    // Sin texto no se tocó nada. Sin esto, cualquier blur mandaría un PATCH.
+    if (texto === undefined) return
+
+    const valor = texto.trim() === "" ? null : Number(texto)
+    if (valor !== null && (!Number.isFinite(valor) || valor < 0)) {
+      // Entrada inválida: se vuelve a lo guardado en vez de mandar basura.
+      setPrecioCierreTexto((prev) => {
+        const limpio = { ...prev }
+        delete limpio[clienteIdBase]
+        return limpio
+      })
+      return
+    }
+
+    setGuardando((prev) => ({ ...prev, [clienteIdBase]: true }))
+    try {
+      const r = await fetch("/api/facturacion/cierre", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mes: month, clienteId: clienteIdBase, precioUnitarioUsd: valor }),
+      })
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}))
+        throw new Error(data.error || "No se pudo corregir el precio")
+      }
+
+      // El cierre que ya está en pantalla se actualiza acá mismo, sin volver a
+      // pedir el mes: así la fila y los totales se recalculan en el acto. Si en
+      // cambio se esperara un refresh, el precio nuevo quedaría guardado y el
+      // total seguiría mostrando el viejo.
+      setClientes((prev) =>
+        prev.map((c) =>
+          c.clienteIdBase === clienteIdBase && c.cierre
+            ? { ...c, cierre: { ...c.cierre, precioUnitarioUsd: valor } }
+            : c,
+        ),
+      )
+      setPrecioCierreTexto((prev) => {
+        const limpio = { ...prev }
+        delete limpio[clienteIdBase]
+        return limpio
+      })
+    } catch (err) {
+      console.error("Error corrigiendo el precio del cierre:", err)
     } finally {
       setGuardando((prev) => ({ ...prev, [clienteIdBase]: false }))
     }
@@ -643,7 +727,12 @@ export function FacturacionTable({
                     ternario acá: con el próximo cambio, este archivo no se
                     toca. Ver lib/facturacion-reglas.ts. */}
                 {reglaPorId(cierre.regla) ? ` · ${reglaPorId(cierre.regla)!.nombre}` : ""}
-                . Estos valores ya no cambian.
+                {/* Antes decía "estos valores ya no cambian", y desde el
+                    2/11/2026 es falso: el precio y el dólar se pueden corregir
+                    sin reabrir el mes. Lo que no cambia solo son las unidades,
+                    que es lo que el cierre existe para congelar. */}
+                . Las unidades quedaron congeladas; el precio y el dólar se
+                pueden corregir.
               </>
             ) : (
               <>{etiquetaCantidad} por clínica en el período seleccionado</>
@@ -900,19 +989,48 @@ export function FacturacionTable({
                           no depende de él. Un campo editable que no cambia
                           nada es peor que uno bloqueado —se toca, no pasa
                           nada, y uno cree que el sistema falla—. */}
-                      {congelado && cliente.cierre ? (
+                      {congelado && cliente.cierre && !cerrarMes ? (
+                        /* Servicio NO administra los cierres de Facturación
+                           —es el mismo criterio que `cerrarMes`: desde una
+                           pestaña que no factura no se puede cambiar lo que se
+                           le cobró a un cliente—. Así que acá el precio se
+                           muestra, y sin formato de moneda: `formatoUSDMoney`
+                           redondea a dos decimales y un precio de US$ 0,075 se
+                           leía "US$ 0,08". */
                         <span
                           className="block text-right text-muted-foreground"
                           title={`Precio con el que se facturó ${cliente.cierre.periodo}`}
                         >
                           {cliente.cierre.precioUnitarioUsd !== null
-                            ? formatoUSDMoney.format(cliente.cierre.precioUnitarioUsd)
+                            ? `US$ ${cliente.cierre.precioUnitarioUsd}`
                             : "—"}
                         </span>
+                      ) : congelado && cliente.cierre ? (
+                        <Input
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          className="w-28 ml-auto text-right"
+                          title={`Precio con el que se facturó ${cliente.cierre.periodo}. Editarlo corrige el cierre de ese mes.`}
+                          value={
+                            precioCierreTexto[cliente.clienteIdBase] ??
+                            (cliente.cierre.precioUnitarioUsd !== null
+                              ? String(cliente.cierre.precioUnitarioUsd)
+                              : "")
+                          }
+                          onChange={(e) =>
+                            setPrecioCierreTexto((prev) => ({
+                              ...prev,
+                              [cliente.clienteIdBase]: e.target.value,
+                            }))
+                          }
+                          onBlur={() => guardarPrecioDelCierre(cliente.clienteIdBase)}
+                          disabled={guardando[cliente.clienteIdBase]}
+                        />
                       ) : (
                         <Input
                           type="number"
-                          step="0.01"
+                          step="0.001"
                           min="0"
                           className="w-28 ml-auto text-right"
                           value={precios[cliente.clienteIdBase] ?? ""}

@@ -25,7 +25,14 @@
 import { type NextRequest, NextResponse } from "next/server"
 
 import { requireBillingAgentForApi } from "@/lib/auth"
-import { clientesCerrados, cotizacionFueraDePeriodo, leerCierre, reabrirMes } from "@/lib/facturacion-cierre"
+import {
+  clientesCerrados,
+  corregirDolarDelMes,
+  corregirPrecioDelCierre,
+  cotizacionFueraDePeriodo,
+  leerCierre,
+  reabrirMes,
+} from "@/lib/facturacion-cierre"
 
 export const runtime = "nodejs"
 
@@ -71,6 +78,76 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({ exito: true, mes, cerrado: false })
+}
+
+/**
+ * Corregir un mes cerrado sin reabrirlo (2/11/2026).
+ *
+ *   PATCH /api/facturacion/cierre
+ *   { mes, clienteId, precioUnitarioUsd }  → el precio de ese cliente
+ *   { mes, dolarVenta }                    → el dólar de todo el mes
+ *
+ * Reabrir recalcula el mes con los datos y el dólar de HOY: para arreglar un
+ * precio mal cargado había que aceptar que se moviera todo lo demás. Esto
+ * corrige sólo lo que se pide y deja el resto congelado.
+ *
+ * Las unidades no se pueden tocar: son el consumo medido. Ver la nota en
+ * lib/facturacion-cierre.ts.
+ */
+export async function PATCH(request: NextRequest) {
+  const { session, error } = await requireBillingAgentForApi()
+  if (!session) return NextResponse.json({ error: error || "No autorizado" }, { status: 401 })
+
+  const body = await request.json().catch(() => null)
+  const mes = body?.mes
+  if (typeof mes !== "string" || !/^\d{4}-\d{2}$/.test(mes)) {
+    return NextResponse.json({ error: 'Falta "mes" en formato YYYY-MM' }, { status: 400 })
+  }
+
+  // ── El dólar del mes ─────────────────────────────────────────────────────
+  if (body?.dolarVenta !== undefined) {
+    const valor = body.dolarVenta === null || body.dolarVenta === "" ? null : Number(body.dolarVenta)
+    if (valor !== null && (!Number.isFinite(valor) || valor <= 0)) {
+      return NextResponse.json({ error: "dolarVenta debe ser un número > 0, o null" }, { status: 400 })
+    }
+    const corregidos = await corregirDolarDelMes(mes, valor)
+    if (corregidos === 0) {
+      return NextResponse.json({ error: `No hay cierres guardados para ${mes}` }, { status: 404 })
+    }
+    console.log(`[FACTURACION_CIERRE] ${mes}: dólar a ${valor} por ${session.username}`)
+    return NextResponse.json({ exito: true, mes, dolarVenta: valor, clientes: corregidos })
+  }
+
+  // ── El precio de un cliente ──────────────────────────────────────────────
+  const clienteId = body?.clienteId
+  if (typeof clienteId !== "string" || !clienteId) {
+    return NextResponse.json(
+      { error: "Hay que mandar dolarVenta, o clienteId con precioUnitarioUsd" },
+      { status: 400 },
+    )
+  }
+
+  const crudo = body?.precioUnitarioUsd
+  const precio = crudo === null || crudo === "" || crudo === undefined ? null : Number(crudo)
+  if (precio !== null && (!Number.isFinite(precio) || precio < 0)) {
+    return NextResponse.json(
+      { error: "precioUnitarioUsd debe ser un número >= 0, o null" },
+      { status: 400 },
+    )
+  }
+
+  const listo = await corregirPrecioDelCierre(clienteId, mes, precio)
+  if (!listo) {
+    return NextResponse.json(
+      { error: `${clienteId} no tiene un cierre guardado para ${mes}` },
+      { status: 404 },
+    )
+  }
+
+  console.log(
+    `[FACTURACION_CIERRE] ${clienteId} ${mes}: precio a ${precio} por ${session.username}`,
+  )
+  return NextResponse.json({ exito: true, mes, clienteId, precioUnitarioUsd: precio })
 }
 
 export async function DELETE(request: NextRequest) {

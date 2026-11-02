@@ -249,6 +249,80 @@ export async function mensajesConCargoDelPeriodo(periodo: string): Promise<numbe
 }
 
 /**
+ * Corregir un cierre ya guardado (2/11/2026).
+ *
+ * ── Por qué hace falta, si el cierre existe para no cambiar ────────────────
+ *
+ * Son dos cosas distintas. El cierre congela el mes para que NO se mueva solo
+ * —por el dólar de hoy, por un precio nuevo, por un cambio de cálculo—, y eso
+ * sigue igual. Esto es para cuando el número congelado está mal: se cargó un
+ * precio equivocado, o el dólar que quedó no es el que correspondía.
+ *
+ * Hasta ahora la única salida era reabrir el mes entero, que lo recalcula con
+ * los datos y el dólar de HOY: para corregir el precio de un cliente había que
+ * aceptar que se moviera todo lo demás.
+ *
+ * ── Qué se puede corregir y qué no ─────────────────────────────────────────
+ *
+ * El precio por unidad y el dólar. Las UNIDADES no: ésas son el consumo
+ * medido, y si están mal lo que hay que hacer es reabrir el mes para volver a
+ * medirlas. Un panel que dejara editar a mano cuántos mensajes se enviaron
+ * dejaría de ser un registro de lo que pasó.
+ *
+ * Se escribe en el cierre y no en una capa de correcciones aparte para que
+ * siga habiendo UN solo lugar donde está el número del mes. Dos lugares
+ * significa que la tabla y el encabezado pueden decir cosas distintas, que es
+ * el error que ya arrastró este archivo con el dólar.
+ */
+export async function corregirPrecioDelCierre(
+  clienteId: string,
+  periodo: string,
+  precioUnitarioUsd: number | null,
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis || !clienteId || !periodo) return false
+
+  const cierre = await leerCierre(clienteId, periodo)
+  if (!cierre) return false
+
+  const actualizado: CierreDeMes = { ...cierre, precioUnitarioUsd }
+  await redis.set(clave(clienteId, periodo), JSON.stringify(actualizado))
+  console.log(
+    `[FACTURACION_CIERRE] ${clienteId} ${periodo}: precio corregido de ` +
+      `${cierre.precioUnitarioUsd} a ${precioUnitarioUsd}`,
+  )
+  return true
+}
+
+/**
+ * Corrige el dólar de TODOS los cierres del mes.
+ *
+ * Es por mes y no por cliente por el mismo motivo que reabrir es por mes: el
+ * cierre de un mes es una foto, y dejar unas filas con un dólar y otras con
+ * otro haría que el total general no sea comparable con nada.
+ */
+export async function corregirDolarDelMes(
+  periodo: string,
+  dolarVenta: number | null,
+): Promise<number> {
+  const redis = getRedisClient()
+  if (!redis || !periodo) return 0
+
+  const clientes = await clientesCerrados(periodo)
+  let corregidos = 0
+
+  for (const clienteId of clientes) {
+    const cierre = await leerCierre(clienteId, periodo)
+    if (!cierre) continue
+    await redis.set(clave(clienteId, periodo), JSON.stringify({ ...cierre, dolarVenta }))
+    corregidos += 1
+  }
+
+  console.log(`[FACTURACION_CIERRE] ${periodo}: dólar corregido a ${dolarVenta} en ${corregidos} cierres`)
+  return corregidos
+}
+
+/**
  * Guarda el cierre, sin pisar uno existente.
  *
  * El `if` no es defensivo por las dudas: dos pestañas abiertas sobre el mismo

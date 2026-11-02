@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { MonthSelector, getCurrentMonthValue } from "./month-selector"
 import { esReglaAnterior, reglaDelPeriodo, REGLAS } from "@/lib/facturacion-reglas"
 import { FacturacionTable } from "./facturacion-table"
+import { Input } from "@/components/ui/input"
 
 const formatoUSD = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -61,8 +62,100 @@ export function FacturacionSection() {
     loadCierre()
   }, [loadCierre])
 
+  /**
+   * El dólar del mes, editable (2/11/2026).
+   *
+   * ── Dónde vive, según el mes ─────────────────────────────────────────────
+   *
+   * Mes CERRADO: en el cierre. Editarlo corrige el cierre de todos los
+   * clientes de ese mes —es por mes y no por cliente, por lo mismo que reabrir:
+   * el cierre es una foto, y unas filas con un dólar y otras con otro harían
+   * que el total general no se pueda comparar con nada—.
+   *
+   * Mes ABIERTO: en `facturacion:dolar:<mes>`, y si nadie lo fijó, el del día.
+   *
+   * Son dos lugares porque el número de un mes cerrado ya tiene su lugar, y
+   * agregarle una capa de override encima daría dos respuestas a "¿con qué
+   * dólar se facturó septiembre?". Para el que edita es un solo campo.
+   */
+  const [dolarFijado, setDolarFijado] = useState<number | null>(null)
+  const [textoDolar, setTextoDolar] = useState("")
+  const [guardandoDolar, setGuardandoDolar] = useState(false)
+  // Sube cada vez que se corrige el dólar de un mes cerrado: la tabla lo recibe
+  // como `recargar` y vuelve a pedir el mes, así las filas usan el valor nuevo.
+  const [version, setVersion] = useState(0)
+
+  const loadDolarDelMes = useCallback(async () => {
+    setDolarFijado(null)
+    setTextoDolar("")
+    try {
+      const r = await fetch(`/api/facturacion/dolar-mes?mes=${encodeURIComponent(month)}`)
+      if (!r.ok) return
+      const data = await r.json()
+      const fijado = typeof data.fijado === "number" ? data.fijado : null
+      setDolarFijado(fijado)
+      setTextoDolar(fijado !== null ? String(fijado) : "")
+    } catch {
+      // Sin esto se usa el dólar del día, que es lo mismo que cuando nadie
+      // fijó nada. No hay nada que avisar.
+    }
+  }, [month])
+
+  useEffect(() => {
+    loadDolarDelMes()
+  }, [loadDolarDelMes])
+
   // El que se usa para calcular y para mostrar: en un mes cerrado, el suyo.
-  const dolarVenta = mesCerrado ? dolarCongelado : dolarVivo
+  const dolarVenta = mesCerrado ? dolarCongelado : (dolarFijado ?? dolarVivo)
+
+  // El texto del campo: en un mes cerrado arranca del cierre, no del fijado.
+  const textoVisible = mesCerrado
+    ? (textoDolar !== "" ? textoDolar : dolarCongelado !== null ? String(dolarCongelado) : "")
+    : textoDolar
+
+  const guardarDolar = async () => {
+    const crudo = textoVisible.trim()
+    const valor = crudo === "" ? null : Number(crudo)
+    if (valor !== null && (!Number.isFinite(valor) || valor <= 0)) {
+      setTextoDolar(dolarFijado !== null ? String(dolarFijado) : "")
+      return
+    }
+    // Sin cambios no se manda nada: si no, cualquier clic afuera del campo
+    // reescribiría el cierre de todos los clientes del mes.
+    if (mesCerrado && valor === dolarCongelado) return
+    if (!mesCerrado && valor === dolarFijado) return
+
+    setGuardandoDolar(true)
+    try {
+      if (mesCerrado) {
+        const r = await fetch("/api/facturacion/cierre", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mes: month, dolarVenta: valor }),
+        })
+        if (!r.ok) throw new Error("No se pudo corregir el dólar del cierre")
+        setDolarCongelado(valor)
+        setTextoDolar(valor !== null ? String(valor) : "")
+        // La tabla tiene el cierre viejo en memoria: hay que que lo vuelva a pedir.
+        setVersion((v) => v + 1)
+      } else {
+        const r = await fetch("/api/facturacion/dolar-mes", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mes: month, valor }),
+        })
+        if (!r.ok) throw new Error("No se pudo fijar el dólar del mes")
+        const data = await r.json()
+        const fijado = typeof data.fijado === "number" ? data.fijado : null
+        setDolarFijado(fijado)
+        setTextoDolar(fijado !== null ? String(fijado) : "")
+      }
+    } catch (err) {
+      console.error("Error guardando el dólar de Facturación:", err)
+    } finally {
+      setGuardandoDolar(false)
+    }
+  }
 
   const esMesEnCurso = month === getCurrentMonthValue()
 
@@ -81,17 +174,42 @@ export function FacturacionSection() {
           <span className="text-sm text-muted-foreground">
             {mesCerrado ? "Dólar del cierre" : "Dolar Venta"}
           </span>
-          <span className="text-sm font-semibold">
-            {dolarVenta ? `$${formatoUSD.format(dolarVenta)}` : "—"}
+          {/* Editable (2/11/2026). Antes era texto, y la única forma de
+              arreglar una cotización mal congelada era reabrir el mes entero
+              —que lo recalcula con los datos de hoy—. En un mes abierto, vacío
+              = usar el del día. */}
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder={dolarVivo ? formatoUSD.format(dolarVivo) : "—"}
+            className="h-8 w-28 text-right"
+            value={textoVisible}
+            onChange={(e) => setTextoDolar(e.target.value)}
+            onBlur={guardarDolar}
+            disabled={guardandoDolar}
+            title={
+              mesCerrado
+                ? "El dólar con el que quedó cerrado el mes. Al cambiarlo se corrigen los cierres de todos los clientes de este mes."
+                : "Vacío = se usa el dólar del día."
+            }
+          />
+          <span
+            className={`rounded px-1.5 py-0.5 text-xs ${
+              mesCerrado || dolarFijado !== null
+                ? "bg-primary/10 text-primary"
+                : "bg-muted text-muted-foreground"
+            }`}
+            title={
+              mesCerrado
+                ? "La cotización de este mes quedó fija al cerrarse. El dólar de hoy no lo afecta."
+                : dolarFijado !== null
+                  ? "Este mes usa el valor fijado acá. Borralo para volver al dólar del día."
+                  : "Nadie lo fijó: se usa el dólar del día."
+            }
+          >
+            {mesCerrado ? "del cierre" : dolarFijado !== null ? "fijado" : "del día"}
           </span>
-          {mesCerrado && (
-            <span
-              className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary"
-              title="La cotización de este mes quedó fija al cerrarse. El dólar de hoy no lo afecta."
-            >
-              fijo
-            </span>
-          )}
         </div>
       </div>
 
@@ -156,7 +274,7 @@ export function FacturacionSection() {
         )}
       </div>
 
-      <FacturacionTable month={month} dolarVenta={dolarVenta} />
+      <FacturacionTable month={month} dolarVenta={dolarVenta} recargar={version} />
 
       <FacturacionTable
         title="Facturación de clientes Wpp sin IA"
@@ -164,6 +282,7 @@ export function FacturacionSection() {
         cantidadLabel="Mensajes pagados"
         month={month}
         dolarVenta={dolarVenta}
+        recargar={version}
       />
     </div>
   )
