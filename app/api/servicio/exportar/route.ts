@@ -56,8 +56,6 @@ export async function POST(request: Request) {
           recordatorios: numeroONull(f?.recordatorios),
           mensajesDeServicio: numeroONull(f?.mensajesDeServicio),
           interacciones: numero(f?.interacciones),
-          costoMetaUSD: numeroONull(f?.costoMetaUSD),
-          impuestosUSD: numeroONull(f?.impuestosUSD),
           valorUnitarioUSD: numero(f?.valorUnitarioUSD),
           valorTotalUSD: numero(f?.valorTotalUSD),
           valorTotalARS: numeroONull(f?.valorTotalARS),
@@ -76,8 +74,6 @@ export async function POST(request: Request) {
     const archivo = construirPlanillaDeServicio({
       mes,
       dolarVenta: numeroONull(body?.dolarVenta),
-      detalleDeImpuestos: String(body?.detalleDeImpuestos ?? "IVA + sellos").slice(0, 200),
-      costoMetaUnitarioUSD: numero(body?.costoMetaUnitarioUSD),
       grupos: conFilas,
     })
 

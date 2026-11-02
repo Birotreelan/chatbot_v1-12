@@ -11,8 +11,14 @@
  * el punto del archivo. Quedan afuera
  *
  *   · la Observación de cada cliente, que son notas nuestras;
+ *   · el Costo Meta y sus Impuestos: es lo que nos cuesta a nosotros prestar
+ *     el servicio, no algo que se le facture a nadie. Mostrárselo al que lo
+ *     paga sería mostrarle nuestro margen renglón por renglón;
  *   · "Ingresos − costos" en dólares y en pesos, que es nuestro resultado;
  *   · la conciliación con la tarjeta, los costos fijos y todo el resumen.
+ *
+ * Lo que queda es exactamente lo que se factura: cuántos mensajes se enviaron,
+ * a cuánto la unidad y cuánto da.
  *
  * Por eso la exportación tiene su propio módulo y no es "la tabla pasada a
  * Excel": la tabla muestra más de lo que se manda, y si el archivo saliera de
@@ -38,9 +44,6 @@ export interface FilaExportable {
   recordatorios: number | null
   mensajesDeServicio: number | null
   interacciones: number
-  /** `null` cuando no se sabe cuántos mensajes tuvieron cargo de Meta. */
-  costoMetaUSD: number | null
-  impuestosUSD: number | null
   valorUnitarioUSD: number
   valorTotalUSD: number
   /** `null` si no había cotización. */
@@ -56,9 +59,6 @@ export interface PedidoDeExportacion {
   /** "2026-10" */
   mes: string
   dolarVenta: number | null
-  /** La alícuota de cada impuesto, para escribirla en el encabezado. */
-  detalleDeImpuestos: string
-  costoMetaUnitarioUSD: number
   grupos: GrupoExportable[]
 }
 
@@ -75,28 +75,21 @@ export function mesLegible(periodo: string): string {
 /**
  * Los títulos de las columnas.
  *
- * Dicen la fórmula donde la hay —"Costo Meta (US$ 0,026 × mensajes con cargo
- * de Meta)"— porque el archivo viaja solo: quien lo abre no tiene la pantalla
- * al lado para entender de dónde sale una columna, y un número sin su fórmula
- * genera un mail de ida y vuelta.
+ * Son una constante y no algo que se derive de la tabla: agregar una columna
+ * al archivo que se manda afuera tiene que ser una línea que alguien escribe
+ * acá, no una consecuencia de haber tocado la pantalla.
  */
-function encabezados(pedido: PedidoDeExportacion): string[] {
-  const costo = pedido.costoMetaUnitarioUSD
-    .toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 6 })
-  return [
-    "Cliente",
-    "Recordatorios enviados",
-    "Mensajes de servicio",
-    "Total de Interacciones",
-    `Costo Meta (US$ ${costo} × mensajes con cargo de Meta)`,
-    `Impuestos (${pedido.detalleDeImpuestos})`,
-    "Valor por unidad (USD)",
-    "Valor Total Dólares",
-    "Valor Total Pesos",
-  ]
-}
+const ENCABEZADOS = [
+  "Cliente",
+  "Recordatorios enviados",
+  "Mensajes de servicio",
+  "Total de Interacciones",
+  "Valor por unidad (USD)",
+  "Valor Total Dólares",
+  "Valor Total Pesos",
+]
 
-const ANCHOS = [34, 14, 14, 14, 22, 22, 14, 16, 18]
+const ANCHOS = [34, 14, 14, 14, 16, 16, 18]
 
 /** El nombre del archivo: "servicio-2026-10.xlsx". */
 export function nombreDelArchivo(mes: string): string {
@@ -132,13 +125,11 @@ export function construirPlanillaDeServicio(pedido: PedidoDeExportacion): Buffer
 
   for (const grupo of pedido.grupos) {
     filas.push([{ v: grupo.titulo, f: "textoFuerte" }])
-    filas.push(encabezados(pedido).map((v) => ({ v, f: "encabezado" as const })))
+    filas.push(ENCABEZADOS.map((v) => ({ v, f: "encabezado" as const })))
 
     let gInteracciones = 0
     let gRecordatorios = 0
     let gServicio = 0
-    let gCostoMeta = 0
-    let gImpuestos = 0
     let gUSD = 0
     let gARS = 0
 
@@ -148,8 +139,6 @@ export function construirPlanillaDeServicio(pedido: PedidoDeExportacion): Buffer
         { v: f.recordatorios, f: "entero" },
         { v: f.mensajesDeServicio, f: "entero" },
         { v: f.interacciones, f: "entero" },
-        { v: f.costoMetaUSD, f: "usd" },
-        { v: f.impuestosUSD, f: "usd" },
         { v: f.valorUnitarioUSD, f: "usdPrecio" },
         { v: f.valorTotalUSD, f: "usd" },
         { v: f.valorTotalARS, f: "ars" },
@@ -157,8 +146,6 @@ export function construirPlanillaDeServicio(pedido: PedidoDeExportacion): Buffer
       gInteracciones += f.interacciones
       gRecordatorios += f.recordatorios ?? 0
       gServicio += f.mensajesDeServicio ?? 0
-      gCostoMeta += f.costoMetaUSD ?? 0
-      gImpuestos += f.impuestosUSD ?? 0
       gUSD += f.valorTotalUSD
       if (f.valorTotalARS !== null) {
         gARS += f.valorTotalARS
@@ -173,8 +160,6 @@ export function construirPlanillaDeServicio(pedido: PedidoDeExportacion): Buffer
       { v: gRecordatorios, f: "enteroFuerte" },
       { v: gServicio, f: "enteroFuerte" },
       { v: gInteracciones, f: "enteroFuerte" },
-      { v: gCostoMeta, f: "usdFuerte" },
-      { v: gImpuestos, f: "usdFuerte" },
       { v: null, f: "texto" },
       { v: gUSD, f: "usdFuerte" },
       { v: gARS, f: "arsFuerte" },
@@ -196,8 +181,6 @@ export function construirPlanillaDeServicio(pedido: PedidoDeExportacion): Buffer
       { v: null },
       { v: null },
       { v: totalInteracciones, f: "enteroFuerte" },
-      { v: null },
-      { v: null },
       { v: null },
       { v: totalUSD, f: "usdFuerte" },
       { v: hayARS ? totalARS : null, f: "arsFuerte" },

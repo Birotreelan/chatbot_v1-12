@@ -38,7 +38,6 @@ import { ConciliacionTarjeta } from "./conciliacion-tarjeta"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Download, Loader2 } from "lucide-react"
-import { costoPorMensaje } from "@/lib/servicio-costos"
 import { servicioUsaValoresPropios, SERVICIO_PRECIO_PROPIO_DESDE } from "@/lib/servicio-calculo"
 
 const formatoUSD = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -108,7 +107,9 @@ export function ServicioSection() {
    *
    * ── Qué NO va ────────────────────────────────────────────────────────────
    *
-   * La Observación, el resultado (ingresos − costos) y todo lo de la tarjeta.
+   * La Observación, el Costo Meta y sus Impuestos —que es lo que nos cuesta a
+   * nosotros, no algo que se le facture—, el resultado (ingresos − costos) y
+   * todo lo de la tarjeta.
    * La lista de campos está escrita en lib/servicio-exportacion.ts, así que
    * una columna nueva en la tabla no se manda sola.
    */
@@ -118,22 +119,12 @@ export function ServicioSection() {
     if (!totalesConIA || !totalesSinIA) return
     setExportando(true)
     try {
-      const costo = costoPorMensaje(month)
       const r = await fetch("/api/servicio/exportar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mes: month,
           dolarVenta,
-          costoMetaUnitarioUSD: costo.metaUSD,
-          detalleDeImpuestos: costo.desglosado
-            ? costo.partes
-                .map(
-                  (p) =>
-                    `${p.nombre} ${(p.alicuota * 100).toFixed(1).replace(".", ",")} %`,
-                )
-                .join(" + ")
-            : "sin discriminar",
           grupos: [
             { titulo: "Clientes Wpp con IA", filas: totalesConIA.filasExportables },
             { titulo: "Clientes Wpp sin IA", filas: totalesSinIA.filasExportables },

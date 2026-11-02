@@ -688,12 +688,6 @@ export function FacturacionTable({
       recordatorios: c.recordatorios ?? null,
       mensajesDeServicio: c.serviciosFacturados ?? null,
       interacciones: c.totalInteracciones || 0,
-      costoMetaUSD:
-        c.mensajesConCargoDeMeta !== undefined ? c.mensajesConCargoDeMeta * costo.metaUSD : null,
-      impuestosUSD:
-        c.mensajesConCargoDeMeta !== undefined
-          ? c.mensajesConCargoDeMeta * costo.impuestosUSD
-          : null,
       valorUnitarioUSD: precio,
       valorTotalUSD: ingresoUSD,
       valorTotalARS: ingresoARS,
