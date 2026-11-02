@@ -86,8 +86,10 @@ interface TotalesDelResumen {
   consumoTotalUSD: number
   impuestosARS: number
   impuestosUSD: number
-  excluidoARS: number
-  totalUSD: number
+  percepcionDebitadaARS: number
+  percepcionAcreditadaARS: number
+  totalEnDolaresUSD: number
+  totalEnPesosARS: number
 }
 
 interface ResumenGuardado {
@@ -100,7 +102,8 @@ interface ResumenGuardado {
   cargosFijosUSD: number
   impuestosARS: number
   impuestosUSD: number
-  excluidoARS: number
+  percepcionDebitadaARS: number
+  percepcionAcreditadaARS: number
   lineas: LineaDelResumen[]
   cargadoEl: string
 }
@@ -462,15 +465,26 @@ export function ConciliacionTarjeta({
                     <span className="font-semibold">{formatoUSD.format(totales.cargosFijosUSD)}</span>
                   </div>
                   <div>
+                    {/* En pesos primero: es la moneda en la que se pagan. */}
                     <span className="block text-muted-foreground">Impuestos</span>
-                    <span className="font-semibold">{formatoUSD.format(totales.impuestosUSD)}</span>
+                    <span className="font-semibold">{formatoARS.format(totales.impuestosARS)}</span>
                     <span className="block text-[10px] text-muted-foreground">
-                      {formatoARS.format(totales.impuestosARS)}
+                      equivale a {formatoUSD.format(totales.impuestosUSD)}
                     </span>
                   </div>
                   <div>
-                    <span className="block text-muted-foreground">Total del resumen</span>
-                    <span className="font-semibold">{formatoUSD.format(totales.totalUSD)}</span>
+                    {/* Los consumos son en dólares y los impuestos en pesos, así
+                        que el resumen NO declara un total en una sola moneda.
+                        Antes se mostraba uno en dólares y era un número nuestro,
+                        imposible de encontrar en el comprobante. Ahora se dicen
+                        los dos equivalentes, cada uno como lo que es. */}
+                    <span className="block text-muted-foreground">Consumos + impuestos</span>
+                    <span className="font-semibold">
+                      {formatoARS.format(totales.totalEnPesosARS)}
+                    </span>
+                    <span className="block text-[10px] text-muted-foreground">
+                      equivale a {formatoUSD.format(totales.totalEnDolaresUSD)}
+                    </span>
                   </div>
                 </div>
 
@@ -494,11 +508,23 @@ export function ConciliacionTarjeta({
                   </div>
                 )}
 
-                {totales.excluidoARS !== 0 && (
+                {(totales.percepcionDebitadaARS !== 0 || totales.percepcionAcreditadaARS !== 0) && (
                   <p className="rounded border bg-background p-2 text-[11px] text-muted-foreground">
-                    Se encontró la percepción RG 5617 por {formatoARS.format(totales.excluidoARS)} y
-                    NO se computa: la tarjeta la debita y la acredita entera en el resumen
-                    siguiente. Se menciona para que no parezca que se perdió una línea.
+                    Percepción RG 5617, que NO se computa:{" "}
+                    {totales.percepcionDebitadaARS !== 0 && (
+                      <>
+                        este resumen debita {formatoARS.format(totales.percepcionDebitadaARS)}
+                        {totales.percepcionAcreditadaARS !== 0 ? " y " : ""}
+                      </>
+                    )}
+                    {totales.percepcionAcreditadaARS !== 0 && (
+                      <>
+                        acredita {formatoARS.format(Math.abs(totales.percepcionAcreditadaARS))} del
+                        resumen anterior
+                      </>
+                    )}
+                    . Va y vuelve, así que no es costo. Se menciona para que no parezca que se
+                    perdió una línea.
                   </p>
                 )}
 

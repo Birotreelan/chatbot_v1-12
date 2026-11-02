@@ -537,11 +537,29 @@ export interface TotalesDelResumen {
   consumoTotalUSD: number
   impuestosARS: number
   impuestosUSD: number
-  /** Lo excluido a propósito: la percepción que la tarjeta devuelve. */
-  excluidoARS: number
+  /**
+   * Lo excluido a propósito, en dos partes y no en una (2/11/2026).
+   *
+   * El resumen trae la percepción de ESTE período como débito y la del
+   * ANTERIOR como crédito. Sumarlas daba un solo número —en noviembre,
+   * −$467.824,53— que no está en ningún lado del papel y que encima sale
+   * negativo: se lee como un error de lectura cuando en realidad son dos
+   * movimientos de dos períodos distintos.
+   */
+  percepcionDebitadaARS: number
+  percepcionAcreditadaARS: number
   tipoDeCambio: number | null
-  /** Cargos + impuestos computados, en dólares. */
-  totalUSD: number
+  /**
+   * Los impuestos salen en pesos y los cargos en dólares, así que NO hay un
+   * "total del resumen" en una sola moneda que esté en el papel. Antes se
+   * mostraba uno en dólares (consumos + impuestos convertidos) y era un número
+   * inventado por nosotros: imposible de encontrar en el comprobante, que es
+   * la peor propiedad que puede tener una cifra en una conciliación.
+   *
+   * Se publican los dos equivalentes, cada uno dicho como lo que es.
+   */
+  totalEnDolaresUSD: number
+  totalEnPesosARS: number
 }
 
 export function totalesDelResumen(r: {
@@ -556,7 +574,13 @@ export function totalesDelResumen(r: {
     .filter((l) => l.categoria === "otro")
     .reduce((s, l) => s + l.importeUSD, 0)
   const impuestosARS = r.impuestos.filter((i) => i.computa).reduce((s, i) => s + i.importeARS, 0)
-  const excluidoARS = r.impuestos.filter((i) => !i.computa).reduce((s, i) => s + i.importeARS, 0)
+  const noComputan = r.impuestos.filter((i) => !i.computa)
+  const percepcionDebitadaARS = noComputan
+    .filter((i) => i.importeARS > 0)
+    .reduce((s, i) => s + i.importeARS, 0)
+  const percepcionAcreditadaARS = noComputan
+    .filter((i) => i.importeARS < 0)
+    .reduce((s, i) => s + i.importeARS, 0)
   const impuestosUSD = r.tipoDeCambio ? impuestosARS / r.tipoDeCambio : 0
 
   return {
@@ -565,8 +589,12 @@ export function totalesDelResumen(r: {
     consumoTotalUSD: cargosDeMetaUSD + cargosFijosUSD,
     impuestosARS,
     impuestosUSD,
-    excluidoARS,
+    percepcionDebitadaARS,
+    percepcionAcreditadaARS,
     tipoDeCambio: r.tipoDeCambio,
-    totalUSD: cargosDeMetaUSD + cargosFijosUSD + impuestosUSD,
+    totalEnDolaresUSD: cargosDeMetaUSD + cargosFijosUSD + impuestosUSD,
+    totalEnPesosARS: r.tipoDeCambio
+      ? (cargosDeMetaUSD + cargosFijosUSD) * r.tipoDeCambio + impuestosARS
+      : 0,
   }
 }

@@ -44,8 +44,13 @@ export interface ResumenGuardado {
   cargosFijosUSD: number
   impuestosARS: number
   impuestosUSD: number
-  /** La percepción que la tarjeta devuelve. Se guarda sólo para poder mostrarla. */
-  excluidoARS: number
+  /**
+   * La percepción RG 5617, en sus dos movimientos y no sumados: el débito de
+   * este período y el crédito del anterior. No se computan en ningún total;
+   * se guardan para poder mostrar el resumen completo.
+   */
+  percepcionDebitadaARS: number
+  percepcionAcreditadaARS: number
   /** El detalle, para poder auditar un número meses después. */
   lineas: LineaDelResumen[]
   impuestos: ImpuestoDelResumen[]
