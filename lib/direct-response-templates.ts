@@ -417,6 +417,34 @@ export function buildCancellationSuccessMessage(
    * que escriba es mandarlo por el camino largo.
    */
   ofertaConBoton: boolean = false,
+  /**
+   * Los datos de derivación, para decirle CÓMO reagendar cuando acá no puede
+   * (3/11/2026).
+   *
+   * ── El caso ──────────────────────────────────────────────────────────────
+   *
+   * Un cliente con "Permitir reagendar turno cancelado" apagado contestaba sólo
+   * "la cancelación fue procesada correctamente" y se despedía. Correcto y
+   * completamente inútil: el paciente que quiere otra fecha queda sin saber qué
+   * hacer, y lo más probable es que escriba de nuevo acá —donde no se puede— o
+   * que simplemente no vuelva.
+   *
+   * Pasarlo por parámetro y no leer la config acá es lo mismo que hace el resto
+   * del archivo: estas funciones redactan, no deciden. Quién recibe el bloque
+   * lo resuelve el llamador, que es el único que sabe POR QUÉ no se ofrece
+   * reagendar.
+   *
+   * ── Sólo cuando el motivo es el switch del cliente ───────────────────────
+   *
+   * `includeRescheduleOffer` es false por dos motivos distintos: el turno
+   * puntual no admite reagendarse, o el cliente tiene el switch apagado. El
+   * bloque va SÓLO en el segundo. En el primero la clínica sí reagenda por este
+   * medio, y mandar a la gente a otro canal por un turno que era la excepción
+   * sería desviar consultas que el bot puede atender.
+   *
+   * `undefined` deja el mensaje exactamente como estaba.
+   */
+  contactoParaReagendar?: string,
 ): string {
   const nombre = formatPatientName(chatbotData)
   const turno = chatbotData.turnos[turnoIndex]
@@ -454,8 +482,29 @@ Gracias por comunicarte con nosotros. ¡Que tengas un buen día!`
     : ``
 
   // Reagendamiento no disponible (turno no lo admite o el cliente lo tiene
-  // desactivado): cancelación simple, sin texto adicional ni menú.
+  // desactivado): cancelación simple, sin menú.
   if (!includeRescheduleOffer) {
+    if (contactoParaReagendar) {
+      /**
+       * La despedida va igual, aunque `ofertaConBoton` sea false.
+       *
+       * `despedida` se omite en la variante del menú numerado porque ahí el
+       * mensaje termina en una pregunta y el bot espera el 1 o el 2. Acá no
+       * hay nada que contestar: el mensaje se cierra, y cerrarlo en un número
+       * de teléfono lo deja sonando a que falta algo.
+       */
+      return (
+        message +
+        `
+
+Si deseas solicitar un nuevo turno, puedes comunicarte con nuestro equipo de atención a través del siguiente Whatsapp. Allí podrán asesorarte y ayudarte a coordinar una nueva fecha y horario.
+
+Reagendamiento de turnos:
+${contactoParaReagendar}
+
+Gracias por comunicarte con nosotros. ¡Que tengas un buen día!`
+      )
+    }
     return message + despedida
   }
 

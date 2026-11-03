@@ -1434,12 +1434,32 @@ Si el paciente pregunta por sacar/obtener otro turno, ayudalo a iniciar una NUEV
         // porque allá el reagendamiento es conversacional y hace falta una
         // forma explícita de salir.
         const ofertaConBoton = usaPortal(config)
+
+        /**
+         * Cuando el cliente no permite reagendar, se le dice dónde SÍ puede
+         * (3/11/2026).
+         *
+         * La condición es el switch del cliente y no `admiteReagendamiento`, que
+         * además mezcla el `admite_reagendamiento` del turno puntual. Son dos
+         * motivos distintos para no ofrecer reagendar y sólo uno significa "por
+         * este medio no se reagenda nunca": ver la nota del parámetro en
+         * buildCancellationSuccessMessage.
+         *
+         * Pasa por `telefonoParaMensajes`, así que un cliente con el switch de
+         * derivación apagado no muestra el teléfono y el mensaje queda como
+         * estaba. Es el mismo criterio que los otros cuarenta mensajes que lo
+         * mencionan.
+         */
+        const contactoParaReagendar =
+          config.permitirReagendamiento === false ? telefonoParaMensajes(config) : undefined
+
         const successMsg = buildCancellationSuccessMessage(
           chatbotData,
           flowState.turnoIndex || 0,
           admiteReagendamiento,
           false,
           ofertaConBoton,
+          contactoParaReagendar,
         )
 
         // ── El enlace va EN este mensaje, no en el siguiente (29/9/2026) ────
