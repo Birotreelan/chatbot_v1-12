@@ -11,6 +11,7 @@ import { saveConversationMessage, isConversationPaused, type ConversationMessage
 import { registrarMensajeEntrante, normalizarMomento } from "./ventana-atencion"
 import { estaBloqueado } from "./contactos-bloqueados"
 import { PAYLOAD_BOTON_REAPERTURA, registrarRespuesta } from "./reapertura"
+import { atenderRespuestaDeEncuesta } from "./encuestas/atender-encuesta"
 import {
   leerMediaDelWebhook,
   describirArchivoRecibido,
@@ -3554,6 +3555,87 @@ export async function handleMessage(value: any) {
     cancelPendingReminders(config.id, userPhoneNumber).catch((error) => {
       console.warn("[WHATSAPP] Error cancelando recordatorios pendientes (no crítico):", error)
     })
+
+    // ============================================================================
+    // ENCUESTA POSTOPERATORIA (3/11/2026)
+    // ============================================================================
+    //
+    // Va ANTES de todas las compuertas de abajo, y después de la transcripción
+    // de audio. Las dos cosas importan:
+    //
+    // · Antes, porque los payloads ENCUESTA_CONFORME / ENCUESTA_DISCONFORME no
+    //   matchean con ninguno de los detectores de más abajo —que ruteán por
+    //   `includes("cancelar")` / `includes("confirmar")`— y hasta hoy caían al
+    //   asistente de texto libre. Un paciente que tocaba "Molestia o
+    //   disconformidad" recibía una respuesta improvisada sobre turnos.
+    //
+    // · Después del audio, porque una molestia postoperatoria contada en una
+    //   nota de voz tiene que derivar igual que una escrita. Acá `userMessage`
+    //   ya es el texto transcripto.
+    //
+    // Sólo hace algo si hay una encuesta abierta para este paciente (siete
+    // días) o si tocó uno de los dos botones. Fuera de eso devuelve
+    // "no_era_encuesta" y el mensaje sigue su camino normal: ver la nota de
+    // lib/encuestas/encuesta-postoperatoria.ts sobre por qué la ventana existe.
+    {
+      const resultadoEncuesta = await atenderRespuestaDeEncuesta({
+        payload: message.type === "button" ? message.button?.payload : undefined,
+        texto: message.type === "text" ? userMessage : undefined,
+        entorno: {
+          configId: config.id,
+          clienteId: config.cliente_id || "",
+          telefono: userPhoneNumber,
+          responder: async (texto, etiqueta) => {
+            await sendDirectResponse(
+              {
+                phoneNumberId: value.metadata.phone_number_id,
+                accessToken: config.accessToken,
+                userPhoneNumber,
+                configId: config.id,
+                clienteId: config.cliente_id,
+              },
+              texto,
+              etiqueta,
+            )
+          },
+          atencionHumanaHabilitada: async () => (await getEffectiveFeatureFlags(config.id)).humanSupport,
+          enHorario: async () =>
+            isWithinHumanSupportHours(
+              await getHumanSupportSchedule(config.id),
+              config.timezone || "America/Argentina/Buenos_Aires",
+            ),
+          abrirSesion: async ({ motivo, resumen }) => {
+            // El hilo, con el mismo patrón que las otras derivaciones: si no se
+            // puede resolver, vacío. Una sesión sin hilo se atiende igual; una
+            // derivación que no se abre por eso, no.
+            const { threadId } = await getThreadForUser(userPhoneNumber, config.id).catch(() => ({
+              threadId: "",
+            }))
+            await createSupportSession({
+              phoneNumber: userPhoneNumber,
+              configId: config.id,
+              tenantId: config.cliente_id || "unknown",
+              threadId: threadId || "",
+              assistantId: config.whatsappAssistantId || "",
+              displayName: config.displayName || config.id,
+              reason: motivo,
+              // Alta: es un paciente operado refiriendo un síntoma. Es la
+              // única cola del panel donde esperar tiene un costo clínico.
+              priority: "high",
+              summary: resumen,
+            })
+          },
+          // `ultimaSalida`: si la clínica no atiende por el panel, el teléfono
+          // es el único camino que le queda al paciente. Ver telefonoParaMensajes.
+          telefonoDeDerivacion: telefonoParaMensajes(config, { ultimaSalida: true }),
+        },
+      })
+
+      if (resultadoEncuesta !== "no_era_encuesta") {
+        console.info(`[ENCUESTA] ${userPhoneNumber}: atendida (${resultadoEncuesta})`)
+        return
+      }
+    }
 
     // ============================================================================
     // INTERCEPTOR GLOBAL DE BOTONES DE MENÚ PRINCIPAL

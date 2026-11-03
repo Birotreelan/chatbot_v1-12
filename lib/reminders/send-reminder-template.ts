@@ -18,6 +18,7 @@ import { nanoid } from "nanoid"
 import { trackTemplateSent } from "../appointment-stats"
 import { extractAndFormatDate } from "../utils/date-utils"
 import { saveAppointmentContext } from "../appointment-flow-state"
+import { abrirEncuesta, esEncuestaPostoperatoria } from "../encuestas/encuesta-postoperatoria"
 import { extraerDatosDelTurno, type DatosDelTurno } from "./datos-del-turno"
 import { agregarBotonesAlEnvio } from "../flows/recordatorio-con-botones"
 
@@ -247,6 +248,44 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
   // No hay contexto" → bot responde "No pudimos procesar tu confirmación...".
   // Se saca este guardado del bloque de OpenAI para que corra SIEMPRE,
   // sin depender de que esa notificación tenga éxito.
+  /**
+   * ── La encuesta postoperatoria no es un turno (3/11/2026) ────────────────
+   *
+   * Su `Chatbot_Data` no tiene `turnos` ni `cantidad_turnos`, que en
+   * `ChatbotData` son obligatorios y que medio proyecto lee sin preguntar.
+   * Guardarlo como contexto de turno —que es lo que esta función hace con todo
+   * lo que le llega— pisaría el contexto real del paciente con un objeto sin
+   * turnos, y lo que se rompería no es la encuesta: es el próximo botón de
+   * recordatorio que toque, que contestaría "no pudimos procesar tu
+   * confirmación".
+   *
+   * Así que la encuesta se guarda en su propia clave y se sale por otro lado.
+   * Ver lib/encuestas/encuesta-postoperatoria.ts.
+   */
+  if (esEncuestaPostoperatoria(chatbotDataParsed) && config && cleanPhoneNumber) {
+    const wamid =
+      whatsappResponse?.messages?.[0]?.id ||
+      whatsappResponse?.message_id ||
+      whatsappResponse?.wamid ||
+      undefined
+
+    await abrirEncuesta(config.id, cleanPhoneNumber, {
+      clienteId: config.cliente_id || "",
+      // Puede venir `null`: la clínica no lo cargó, o no se pudo leer en ese
+      // momento. Se resuelve cuando el paciente contesta, no ahora.
+      linkEncuesta:
+        typeof chatbotDataParsed.link_encuesta === "string" && chatbotDataParsed.link_encuesta.trim()
+          ? chatbotDataParsed.link_encuesta.trim()
+          : null,
+      wamid,
+      enviadaEl: new Date().toISOString(),
+      paciente: chatbotDataParsed.paciente,
+      cirugia: chatbotDataParsed.cirugia,
+    })
+
+    return whatsappResponse
+  }
+
   if (chatbotDataParsed && config && cleanPhoneNumber) {
     try {
       const firstTurno = Array.isArray(chatbotDataParsed.turnos) && chatbotDataParsed.turnos[0]
