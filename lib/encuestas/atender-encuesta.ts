@@ -45,6 +45,7 @@ import {
   cerrarEncuesta,
   contarRepregunta,
   leerEncuestaAbierta,
+  BOTON_DE_LA_ENCUESTA,
   mensajeConLink,
   mensajeDerivacionAlTelefono,
   mensajeDerivacionPorMolestia,
@@ -63,6 +64,22 @@ export interface EntornoDeEncuesta {
   telefono: string
   /** Manda un mensaje al paciente. */
   responder: (texto: string, etiqueta: string) => Promise<void>
+  /**
+   * Manda un mensaje con un botón que abre una URL (CTA URL de WhatsApp).
+   *
+   * Separado de `responder` porque son dos tipos de mensaje distintos para
+   * Meta y porque el CTA tiene restricciones propias: un solo botón, no se
+   * combina con respuestas rápidas y 20 caracteres de etiqueta.
+   *
+   * Si falla, el llamador tira: acá se cae al mensaje sin botón, que es mejor
+   * que no contestarle nada a un paciente que dijo que está bien.
+   */
+  responderConBoton: (params: {
+    texto: string
+    url: string
+    textoDelBoton: string
+    etiqueta: string
+  }) => Promise<void>
   /** `true` si la clínica atiende por el panel de Iris. */
   atencionHumanaHabilitada: () => Promise<boolean>
   /** `true` si estamos dentro del horario de atención de la clínica. */
@@ -168,8 +185,23 @@ async function responderConforme(
 ): Promise<ResultadoDeEncuesta> {
   const link = await resolverLink(entorno, encuesta)
   if (link) {
-    await entorno.responder(mensajeConLink(encuesta, link), "encuesta-link")
-    return "link_enviado"
+    try {
+      await entorno.responderConBoton({
+        texto: mensajeConLink(encuesta),
+        url: link,
+        textoDelBoton: BOTON_DE_LA_ENCUESTA,
+        etiqueta: "encuesta-link",
+      })
+      return "link_enviado"
+    } catch (error) {
+      // El CTA puede fallar por cosas del lado de Meta —la ventana, un
+      // formato de URL que rechaza— y el paciente ya contestó que está bien.
+      // Se cae al texto con el enlace adentro: es peor que el botón, y mucho
+      // mejor que no responderle.
+      console.error("[ENCUESTA] Falló el botón de la encuesta, se manda el enlace en el texto:", error)
+      await entorno.responder(`${mensajeConLink(encuesta)}\n\n${link}`, "encuesta-link-sin-boton")
+      return "link_enviado"
+    }
   }
   await entorno.responder(mensajeSinLink(encuesta), "encuesta-sin-link")
   return "sin_link"

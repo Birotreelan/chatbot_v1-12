@@ -12,6 +12,7 @@ import { registrarMensajeEntrante, normalizarMomento } from "./ventana-atencion"
 import { estaBloqueado } from "./contactos-bloqueados"
 import { PAYLOAD_BOTON_REAPERTURA, registrarRespuesta } from "./reapertura"
 import { atenderRespuestaDeEncuesta } from "./encuestas/atender-encuesta"
+import { construirMensajeConEnlace, enviarMensajeConEnlace } from "./portal/mensaje-enlace"
 import {
   leerMediaDelWebhook,
   describirArchivoRecibido,
@@ -3596,6 +3597,33 @@ export async function handleMessage(value: any) {
               },
               texto,
               etiqueta,
+            )
+          },
+          // El botón que abre la encuesta: un CTA URL, el mismo mecanismo que
+          // el enlace del portal. Se guarda en el historial con la URL adentro
+          // porque si no, un agente abre la conversación y ve que el bot dejó
+          // de responder — y además es el dato para reproducir lo que ve el
+          // paciente si algo falla.
+          responderConBoton: async ({ texto, url, textoDelBoton }) => {
+            await enviarMensajeConEnlace(
+              value.metadata.phone_number_id,
+              config.accessToken,
+              construirMensajeConEnlace({
+                to: userPhoneNumber,
+                cuerpo: texto,
+                url,
+                textoDelBoton,
+              }),
+            )
+            await saveConversationMessage({
+              id: nanoid(),
+              role: "assistant",
+              content: `${texto}\n\n[Encuesta enviada: ${url}]`,
+              timestamp: new Date().toISOString(),
+              phoneNumber: userPhoneNumber,
+              configId: config.id,
+            }).catch((error) =>
+              console.error("[ENCUESTA] No se pudo guardar el mensaje en el historial:", error),
             )
           },
           atencionHumanaHabilitada: async () => (await getEffectiveFeatureFlags(config.id)).humanSupport,

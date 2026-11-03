@@ -178,12 +178,31 @@ function gracias(encuesta: EncuestaAbierta): string {
   return nombre ? `¡Gracias, ${nombre}!` : "¡Gracias!"
 }
 
-export function mensajeConLink(encuesta: EncuestaAbierta, link: string): string {
+/**
+ * La etiqueta del botón que lleva a la encuesta.
+ *
+ * Máximo 20 caracteres: es el límite de `display_text` de un CTA URL. "Dejar
+ * opinión" tiene 14, y el texto del mensaje lo nombra, así que si alguien lo
+ * cambia por algo más largo llegaría cortado en los dos lugares. Hay un assert
+ * que verifica el largo.
+ */
+export const BOTON_DE_LA_ENCUESTA = "Dejar opinión"
+
+/**
+ * El cuerpo del mensaje que acompaña al botón (3/11/2026).
+ *
+ * La URL NO va en el texto: va en el botón. Un enlace crudo en el cuerpo
+ * compite con el botón —el paciente ve dos formas de hacer lo mismo— y encima
+ * las URLs de encuesta son largas y ocupan tres renglones.
+ *
+ * Por eso esta función ya no recibe el link: lo estampa el botón. Si recibiera
+ * las dos cosas, nada impediría que el texto mostrara una URL y el botón
+ * llevara a otra.
+ */
+export function mensajeConLink(encuesta: EncuestaAbierta): string {
   return `${gracias(encuesta)} Nos alegra mucho saber que estás bien.
 
-Si querés, podés dejarnos tu opinión sobre la atención que recibiste en esta breve encuesta:
-
-${link}
+Podés dejarnos tu opinión sobre la atención que recibiste utilizando el botón.
 
 Nos ayuda a seguir mejorando. ¡Que tengas un buen día!`
 }
