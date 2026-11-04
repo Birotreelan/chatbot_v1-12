@@ -1,19 +1,23 @@
 import { validateSSOToken, buildSsoUserId, renovarTokenSSO } from "@/lib/sso"
-import { contarAvisosDelAgente, type ConteoDeAvisos } from "@/lib/human-support"
-import { getRedisClient } from "@/lib/redis"
-
-// Cache TTL para los conteos SSE (segundos).
-// Las reconexiones SSE son frecuentes (cada cierre/apertura de pestaña); con este cache
-// no se re-lee Redis si los conteos ya se calcularon recientemente.
-// IMPORTANTE (fix 27/8/2026): debe ser MAYOR al intervalo de envío (30s, ver
-// setInterval más abajo). Antes era 20s < 30s, así que la entrada siempre expiraba
-// antes del siguiente tick y la caché nunca se usaba dentro de una misma conexión
-// — cada tick recomputaba getPendingSessions/getAgentActiveSessions desde cero.
-const SSE_COUNTS_CACHE_TTL = 35
-const SSE_COUNTS_CACHE_PREFIX = "sse_counts:"
+import { conteoParaElWidget } from "@/lib/notificaciones-conteo"
 
 /**
  * API de Server-Sent Events para notificaciones en tiempo real
+ *
+ * ── Reemplazado por /api/notifications/conteo (4/11/2026) ─────────────────
+ *
+ * El widget ya no se conecta acá: pide los conteos cada 30 segundos al
+ * endpoint JSON. El motivo es de costo y está explicado en esa ruta — este
+ * stream vive 240 s por conexión y el cliente reconecta, así que mantenía una
+ * instancia de función viva todo el horario de atención de cada clínica, y en
+ * Fluid compute la memoria se factura por tiempo de vida de la instancia.
+ *
+ * Se deja en pie a propósito: el loader del widget está embebido en el sistema
+ * de las clínicas y puede quedar cacheado del lado de ellos. Una recepción con
+ * la página vieja abierta sigue recibiendo notificaciones hasta que recargue,
+ * y son las pantallas desde las que se atiende a los pacientes.
+ *
+ * Se puede borrar cuando los logs no muestren más conexiones acá.
  * Autenticación via token SSO en query param (no usa cookies)
  * 
  * GET /api/notifications/stream?sso_token=xxx
@@ -75,33 +79,10 @@ export async function GET(request: Request) {
         }
 
         try {
-          const redis = getRedisClient()
-          // Cache por tenant + usuario: active_count es por-agente, así que compartir la
-          // clave solo por tenantId serviría el active_count del PRIMER usuario que conecte
-          // a los demás usuarios del mismo tenant durante la ventana de cache (20s).
-          const cacheKey = `${SSE_COUNTS_CACHE_PREFIX}${tenantId}:${userId}`
-
-          let conteo: ConteoDeAvisos
-
-          // Intentar servir desde cache Redis (evita re-leer sesiones en reconexiones frecuentes)
-          const cached = redis ? await redis.get(cacheKey).catch(() => null) : null
-          if (cached) {
-            const counts = typeof cached === "string" ? JSON.parse(cached) : (cached as Partial<ConteoDeAvisos>)
-            const pending_count = counts.pending_count ?? 0
-            const active_count = counts.active_count ?? 0
-            // `esperando_count` puede faltar en una entrada cacheada por la
-            // versión anterior (20/10/2026). Recalcular el total desde los dos
-            // campos, en vez de leer `counts.total`, evita servir durante 35
-            // segundos un total con el criterio viejo después de un deploy.
-            const esperando_count = counts.esperando_count ?? 0
-            conteo = { pending_count, active_count, esperando_count, total: pending_count + esperando_count }
-          } else {
-            // Cache miss → leer sesiones y guardar resultado
-            conteo = await contarAvisosDelAgente(tenantId, userId)
-            if (redis) {
-              redis.setex(cacheKey, SSE_COUNTS_CACHE_TTL, JSON.stringify(conteo)).catch(() => {})
-            }
-          }
+          // La caché y el criterio del total viven en lib/notificaciones-conteo.ts,
+          // compartidos con el endpoint JSON: dos copias significaban que los dos
+          // badges podían contar distinto durante una ventana de caché.
+          const conteo = await conteoParaElWidget(tenantId, userId)
 
           const data = {
             pending_count: conteo.pending_count,

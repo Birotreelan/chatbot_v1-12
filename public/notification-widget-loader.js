@@ -90,7 +90,6 @@
     esperandoCount: 0,
     total: 0,
     connected: false,
-    eventSource: null,
     lastUpdate: null,
     // Fallos de conexión seguidos; se reinicia en cada onopen (17/9/2026).
     reintentos: 0,
@@ -512,134 +511,165 @@
     }
   }
 
-  // Variable para polling
-  var pollingInterval = null;
+  // ── Consultas periódicas en lugar de SSE (4/11/2026) ─────────────────────
+  //
+  // Hasta hoy esto abría un EventSource contra /api/notifications/stream, un
+  // SSE que vive 240 s y que el cliente reconectaba solo. Mientras una
+  // recepción tuviera su sistema abierto, eso mantenía una instancia de
+  // función VIVA de forma continua — y en Fluid compute la memoria se factura
+  // por tiempo de vida de la instancia, no por CPU usada.
+  //
+  // El número de octubre: 731,9 GB-hora, que con el instance de 2 GB son 366
+  // horas de instancia viva, o 12 horas por día. Eso no era tráfico de
+  // pacientes: era el horario de atención de las clínicas.
+  //
+  // Y el SSE no daba tiempo real: el servidor empujaba en un setInterval de
+  // 30 segundos. O sea que se pagaban 366 horas de memoria para entregar la
+  // misma latencia que una consulta cada 30 segundos, que mantiene la
+  // instancia viva unos 100 ms por vez.
+  //
+  // Mismo dato, misma frescura, tres órdenes de magnitud menos de memoria.
+  var INTERVALO_MS = 30000;
+  var consultaIntervalId = null;
+  var consultaEnCurso = false;
 
-  // ── Reconexión con backoff (17/9/2026) ───────────────────────────────────
+  // ── Backoff al fallar (heredado de la reconexión del SSE, 17/9/2026) ─────
   //
-  // Antes esto era un setTimeout fijo de 5 s que reconectaba SIEMPRE, con el
-  // mismo token. Cuando el token vencía —a las 24 h, con la pestaña abierta—
-  // el widget quedaba golpeando el servidor cada 5 segundos indefinidamente:
-  // 4.400 requests por hora, todas con 401, y el usuario sin notificaciones
-  // sin enterarse.
+  // El motivo original sigue valiendo: cuando el token vence —a las 24 h, con
+  // la pestaña abierta— el servidor contesta 401, y eso no se arregla
+  // reintentando. Antes el widget quedaba golpeando cada 5 s: 4.400 requests
+  // por hora, todas con 401, y el usuario sin notificaciones sin enterarse.
   //
-  // Ahora hay tres cambios:
-  //  · backoff creciente con tope, en vez de 5 s fijos;
-  //  · un límite de intentos: si no se recupera, se corta y se avisa, porque
-  //    un 401 no se arregla reintentando;
-  //  · un solo timer vivo a la vez — antes, si onerror disparaba dos veces
-  //    seguidas, los setTimeout se apilaban y el ritmo se multiplicaba.
-  //
-  // onerror de EventSource no expone el status HTTP, así que no podemos
-  // distinguir un 401 de un corte de red. Por eso el criterio es el número de
-  // fallos seguidos: un corte real se recupera en pocos intentos.
-  var ESPERAS_RECONEXION_MS = [5000, 10000, 20000, 40000, 60000];
-  var MAX_REINTENTOS = 8;
-  var reconexionTimeoutId = null;
+  // Acá la consulta ya es periódica, así que el backoff no es para espaciar
+  // reintentos sino para CORTAR: a los 8 fallos seguidos se deja de consultar
+  // y se marca desconectado. Un corte de red real se recupera en pocos
+  // intentos; un 401 no se recupera nunca.
+  var MAX_FALLOS = 8;
 
-  function programarReconexion() {
-    if (reconexionTimeoutId) {
-      clearTimeout(reconexionTimeoutId);
-      reconexionTimeoutId = null;
+  function detenerConsultas() {
+    if (consultaIntervalId) {
+      clearInterval(consultaIntervalId);
+      consultaIntervalId = null;
     }
-
-    state.reintentos = (state.reintentos || 0) + 1;
-
-    if (state.reintentos > MAX_REINTENTOS) {
-      console.warn(
-        "[NOTIFICATION-WIDGET] Sin conexión tras " + MAX_REINTENTOS +
-        " intentos. La sesión probablemente venció: recargá la página."
-      );
-      state.sesionVencida = true;
-      updateUI();
-      return;
-    }
-
-    var espera = ESPERAS_RECONEXION_MS[Math.min(state.reintentos - 1, ESPERAS_RECONEXION_MS.length - 1)];
-    console.log("[NOTIFICATION-WIDGET] Reintento " + state.reintentos + "/" + MAX_REINTENTOS + " en " + (espera / 1000) + "s");
-
-    reconexionTimeoutId = setTimeout(function() {
-      reconexionTimeoutId = null;
-      connectSSE();
-    }, espera);
   }
 
-  // Conectar al stream SSE
-  function connectSSE() {
-    if (state.eventSource) {
-      state.eventSource.close();
+  function aplicarConteo(data) {
+    var oldTotal = state.total;
+
+    state.pendingCount = data.pending_count || 0;
+    state.activeCount = data.active_count || 0;
+    state.esperandoCount = data.esperando_count || 0;
+    state.total = data.total || 0;
+    state.lastUpdate = data.timestamp;
+    state.connected = true;
+    state.reintentos = 0;
+    state.sesionVencida = false;
+
+    // Renovación deslizante del token (17/9/2026).
+    //
+    // El servidor devuelve un token fresco en cada consulta. Mientras la
+    // pestaña esté abierta la sesión no vence, aunque el sistema de la clínica
+    // nunca renueve el token original con el que se cargó el widget. Si esto
+    // faltara, el widget andaría perfecto hasta las 24 h y después quedaría
+    // pidiendo contra un 401.
+    if (data.sso_token) {
+      config.ssoToken = data.sso_token;
     }
 
-    var streamUrl = config.baseUrl + "/api/notifications/stream?sso_token=" + encodeURIComponent(config.ssoToken);
-    console.log("[NOTIFICATION-WIDGET] Conectando a SSE: " + streamUrl);
+    if (state.total > oldTotal) {
+      triggerNewNotificationAnimation();
+    }
 
-    try {
-      state.eventSource = new EventSource(streamUrl);
+    updateUI();
+  }
 
-      state.eventSource.onopen = function() {
-        console.log("[NOTIFICATION-WIDGET] SSE conectado");
-        state.connected = true;
-        // Conexión buena: se reinicia el backoff de reconexión.
-        state.reintentos = 0;
-        updateUI();
-      };
+  function consultar() {
+    // Una sola consulta en vuelo: si el servidor tarda más que el intervalo,
+    // apilar pedidos sólo empeora las cosas —y mantiene viva la instancia que
+    // justamente estamos tratando de no mantener viva—.
+    if (consultaEnCurso) return;
+    consultaEnCurso = true;
 
-      // Renovación deslizante del token (17/9/2026).
-      //
-      // El servidor manda un token fresco en cada conexión, y esta conexión se
-      // renueva sola cada 4 minutos. Mientras la pestaña esté abierta, la
-      // sesión no vence — aunque el sistema de la clínica nunca renueve el
-      // token original con el que se cargó el widget.
-      state.eventSource.addEventListener("token_renovado", function(event) {
+    var url = config.baseUrl + "/api/notifications/conteo?sso_token=" + encodeURIComponent(config.ssoToken);
+
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", url, true);
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState !== 4) return;
+      consultaEnCurso = false;
+
+      if (xhr.status === 200) {
         try {
-          var data = JSON.parse(event.data);
-          if (data && data.sso_token) {
-            config.ssoToken = data.sso_token;
-            console.log("[NOTIFICATION-WIDGET] Token renovado");
-          }
+          aplicarConteo(JSON.parse(xhr.responseText));
+          return;
         } catch (error) {
-          console.error("[NOTIFICATION-WIDGET] Error procesando el token renovado:", error);
+          console.error("[NOTIFICATION-WIDGET] Error parseando la respuesta:", error);
         }
-      });
+      }
 
-      state.eventSource.onmessage = function(event) {
-        try {
-          var data = JSON.parse(event.data);
-          console.log("[NOTIFICATION-WIDGET] Datos recibidos:", data);
-
-          var oldTotal = state.total;
-
-          state.pendingCount = data.pending_count || 0;
-          state.activeCount = data.active_count || 0;
-          state.esperandoCount = data.esperando_count || 0;
-          state.total = data.total || 0;
-          state.lastUpdate = data.timestamp;
-
-          // Si aumentaron las notificaciones, triggear animacion
-          if (state.total > oldTotal) {
-            triggerNewNotificationAnimation();
-          }
-
-          updateUI();
-        } catch (error) {
-          console.error("[NOTIFICATION-WIDGET] Error parseando datos SSE:", error);
-        }
-      };
-
-      state.eventSource.onerror = function(error) {
-        console.error("[NOTIFICATION-WIDGET] Error SSE:", error);
-        state.connected = false;
-        updateUI();
-        programarReconexion();
-      };
-    } catch (error) {
-      console.error("[NOTIFICATION-WIDGET] Error creando EventSource:", error);
+      state.reintentos = (state.reintentos || 0) + 1;
       state.connected = false;
       updateUI();
 
-      // Fallback a polling si SSE no funciona
-      console.log("[NOTIFICATION-WIDGET] Usando fallback de polling");
-      startPolling();
+      if (xhr.status === 401) {
+        console.error("[NOTIFICATION-WIDGET] Token rechazado (401): se dejan de consultar las notificaciones");
+        // El tooltip pasa a decir "recargá la página", que es lo único que
+        // arregla un token vencido. Ver updateUI.
+        state.sesionVencida = true;
+        detenerConsultas();
+        updateUI();
+        return;
+      }
+
+      if (state.reintentos > MAX_FALLOS) {
+        console.error("[NOTIFICATION-WIDGET] Sin conexión tras " + MAX_FALLOS + " intentos: se deja de consultar");
+        state.sesionVencida = true;
+        detenerConsultas();
+        updateUI();
+      }
+    };
+    xhr.onerror = function() {
+      consultaEnCurso = false;
+      state.reintentos = (state.reintentos || 0) + 1;
+      state.connected = false;
+      updateUI();
+      if (state.reintentos > MAX_FALLOS) {
+        console.error("[NOTIFICATION-WIDGET] Sin conexión tras " + MAX_FALLOS + " intentos: se deja de consultar");
+        state.sesionVencida = true;
+        detenerConsultas();
+        updateUI();
+      }
+    };
+    xhr.send();
+  }
+
+  function arrancarConsultas() {
+    detenerConsultas();
+    state.reintentos = 0;
+    // Si lo que había era un corte de red, volver a la pestaña tiene que
+    // reintentar. Si era un token vencido, el 401 la marca de nuevo en la
+    // primera consulta — no se pierde el aviso, sólo se vuelve a chequear.
+    state.sesionVencida = false;
+    consultar();
+    consultaIntervalId = setInterval(consultar, INTERVALO_MS);
+    console.log("[NOTIFICATION-WIDGET] Consultando notificaciones cada " + (INTERVALO_MS / 1000) + "s");
+  }
+
+  // ── Mientras la pestaña no se ve, no se consulta ─────────────────────────
+  //
+  // Es la mitad del ahorro, no un detalle. Una computadora de recepción que
+  // queda prendida con el sistema abierto facturaba la noche entera y el fin
+  // de semana. Nadie está mirando el badge: no hay nada que actualizar.
+  //
+  // Al volver se consulta en el acto, así que el badge está al día antes de
+  // que el ojo llegue a él — con un intervalo fijo habría hasta 30 segundos
+  // mostrando el conteo de ayer.
+  function alCambiarLaVisibilidad() {
+    if (document.visibilityState === "hidden") {
+      console.log("[NOTIFICATION-WIDGET] Pestaña oculta: se pausan las consultas");
+      detenerConsultas();
+    } else {
+      arrancarConsultas();
     }
   }
 
@@ -654,60 +684,6 @@
     }
   }
 
-  // Fallback: Polling si SSE no funciona
-  function startPolling() {
-    if (pollingInterval) return;
-
-    console.log("[NOTIFICATION-WIDGET] Iniciando polling cada 15 segundos");
-
-    function poll() {
-      var statusUrl = config.baseUrl + "/api/notifications/status?sso_token=" + encodeURIComponent(config.ssoToken);
-      
-      var xhr = new XMLHttpRequest();
-      xhr.open("GET", statusUrl, true);
-      xhr.onreadystatechange = function() {
-        if (xhr.readyState === 4) {
-          if (xhr.status === 200) {
-            try {
-              var data = JSON.parse(xhr.responseText);
-              if (data.success) {
-                var oldTotal = state.total;
-
-                state.pendingCount = data.pending_count || 0;
-                state.activeCount = data.active_count || 0;
-                state.esperandoCount = data.esperando_count || 0;
-                state.total = data.total || 0;
-                state.connected = true;
-                state.lastUpdate = data.timestamp;
-
-                if (state.total > oldTotal) {
-                  triggerNewNotificationAnimation();
-                }
-
-                updateUI();
-              }
-            } catch (e) {
-              console.error("[NOTIFICATION-WIDGET] Error parseando respuesta polling:", e);
-            }
-          } else {
-            state.connected = false;
-            updateUI();
-          }
-        }
-      };
-      xhr.onerror = function() {
-        console.error("[NOTIFICATION-WIDGET] Error en polling");
-        state.connected = false;
-        updateUI();
-      };
-      xhr.send();
-    }
-
-    // Poll inmediatamente y luego cada 15 segundos
-    poll();
-    pollingInterval = setInterval(poll, 15000);
-  }
-
   // Inicializar widget
   function init() {
     console.log("[NOTIFICATION-WIDGET] Inicializando...");
@@ -719,8 +695,14 @@
     // Crear widget
     createWidget();
 
-    // Conectar a SSE (o fallback a polling)
-    connectSSE();
+    // Consultar las notificaciones periódicamente, y sólo con la pestaña a la
+    // vista. Ver la nota de `arrancarConsultas`.
+    document.addEventListener("visibilitychange", alCambiarLaVisibilidad);
+    if (document.visibilityState === "hidden") {
+      console.log("[NOTIFICATION-WIDGET] La pestaña arranca oculta: se consulta cuando se vea");
+    } else {
+      arrancarConsultas();
+    }
 
     console.log("[NOTIFICATION-WIDGET] Widget inicializado correctamente");
   }
@@ -738,18 +720,11 @@
       };
     },
     refresh: function() {
-      if (state.eventSource) {
-        state.eventSource.close();
-      }
-      connectSSE();
+      arrancarConsultas();
     },
     destroy: function() {
-      if (state.eventSource) {
-        state.eventSource.close();
-      }
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
+      detenerConsultas();
+      document.removeEventListener("visibilitychange", alCambiarLaVisibilidad);
       var container = document.getElementById("notification-widget-container");
       if (container) {
         container.parentNode.removeChild(container);
