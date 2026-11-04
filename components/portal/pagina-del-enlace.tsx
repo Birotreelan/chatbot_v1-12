@@ -570,8 +570,35 @@ export async function PaginaDelEnlace({
     const nombreOS = identidad.obraSocialNombre
     const telefonosDeDerivacion = lineasDeContactoParaWeb(telefonoParaMensajes(config))
 
+    /**
+     * De acá SÍ se puede volver (4/11/2026).
+     *
+     * ── Qué estaba mal ──────────────────────────────────────────────────
+     *
+     * Era la única pantalla sin salida. Y es justo la que más la necesita:
+     * se llega por la obra social que figura en la ficha, y hay dos motivos
+     * muy comunes para que ésa no sea la que corresponde — el paciente se
+     * equivocó un dígito del DNI, o está sacando el turno desde el teléfono
+     * de un familiar y el DNI que cargó es el del otro. En los dos casos el
+     * portal le decía "llamá por teléfono" y le cerraba la puerta.
+     *
+     * ── Por qué no usa `volverQuitando` ─────────────────────────────────
+     *
+     * Porque ése empieza sacando filtros, y esta pantalla se decide ANTES de
+     * los filtros: sacar uno devolvería a `decidirPaso` al mismo lugar y el
+     * "Volver" parecería no hacer nada. Acá se va derecho al paso de
+     * identidad, que es el único que puede cambiar el resultado.
+     *
+     * Funciona porque `decidirPaso` chequea el paso forzado ANTES de la obra
+     * social bloqueada: ver `PASOS_REVISITABLES`. Sin ese orden, volver
+     * rebotaría de nuevo a esta pantalla.
+     */
+    const volverACorregirLaIdentidad =
+      identidad.tieneFicha === false ? urlCon({ paso: "registrar" }) : urlCon({ paso: "pedir_dni" })
+
     return marco(
       <>
+        {volverArriba(volverACorregirLaIdentidad)}
         <Aviso
           tono="atencion"
           titulo={
@@ -599,6 +626,16 @@ export async function PaginaDelEnlace({
             )
           }
         />
+
+        {/* Para qué sirve el "Volver" de arriba.
+            Sin esto es un enlace que nadie toca: el paciente lee que su obra
+            social no saca turnos online y no se le ocurre que el dato pueda
+            estar mal. Los dos casos que nombra son los que de verdad pasan. */}
+        <p className="text-[13px] text-muted-foreground">
+          {identidad.tieneFicha === false
+            ? "Si elegiste mal tu obra social, podés volver y corregirla."
+            : "Si no es tu obra social, o estás sacando el turno para otra persona, podés volver y cargar otro DNI."}
+        </p>
       </>,
     )
   }
