@@ -865,6 +865,15 @@ export async function PaginaDelEnlace({
     const listaDeProfesionales = normalizarOpciones(respuestaProfesionales, "profesionales")
 
     /**
+     * ¿La lista que volvió es de ESTA sede, o el padrón completo del cliente?
+     *
+     * Lo dice `obtenerTodosLosProfesionales`, que reintenta sin filtro cuando
+     * el proxy devuelve cero con `Sede_Id`. Es la diferencia entre "figura en
+     * la lista, entonces atiende acá" y "figura en la lista, que no dice nada".
+     */
+    const listaFiltradaPorSede = (respuestaProfesionales as any)?.filtradaPorSede === true
+
+    /**
      * Los que la clínica marca como "sin turnos online".
      *
      * Viene en el mismo payload, en `Turnos_Online_Disponibles`, y lo estábamos
@@ -969,15 +978,39 @@ export async function PaginaDelEnlace({
      */
     const sabemosQuienAtiende = conAgenda.size > 0 || conParticular.size > 0
 
+    /**
+     * El orden de estas reglas es el arreglo (4/11/2026).
+     *
+     * ── Qué estaba mal ───────────────────────────────────────────────────
+     *
+     * `sinTurnosOnline` se evaluaba PRIMERO. O sea que un profesional de otra
+     * sede que además estuviera marcado como "sin turnos online" se mostraba
+     * apagado en vez de ocultarse: la regla que lo rescataba corría antes que
+     * la que lo escondía.
+     *
+     * Y como el filtro por sede del proxy no está funcionando —ver la
+     * anotación de `get_profesionales` en el panel de diagnóstico—, la lista
+     * que llega es el padrón completo del cliente. Resultado real: cuarenta
+     * nombres apagados diciendo "sus turnos se gestionan por otra vía", casi
+     * todos de otra sede, y cinco con enlace perdidos entre ellos.
+     *
+     * ── El orden correcto ────────────────────────────────────────────────
+     *
+     * Primero la evidencia POSITIVA de que atiende en esta sede: aparecer en
+     * la agenda de la sede es el único dato duro que tenemos, porque esa
+     * consulta sí filtra por sede.
+     *
+     * Después el "no da turnos online", que es un cómo-mostrarlo y no un
+     * si-mostrarlo: sólo aplica a alguien de quien ya sabemos que es de esta
+     * sede. Si la lista no vino filtrada, no lo sabemos, y mostrarlo es
+     * llenarle la pantalla al paciente con gente de otra sucursal.
+     *
+     * Y al final el oculto por no tener agenda acá.
+     */
     const opciones = listaDeProfesionales.flatMap((o) => {
       const id = String(o.id)
 
-      // La clínica dice que no da turnos online por este medio. Se muestra
-      // apagado y con el motivo verdadero: no es que no tenga horarios.
-      if (sinTurnosOnline.has(id)) {
-        return [{ ...o, deshabilitada: true, detalle: "Sus turnos se gestionan por otra vía" }]
-      }
-
+      // Tiene agenda en esta sede con la obra social del paciente.
       if (conAgenda.has(id)) return [o]
 
       // No aparece con su obra social, pero sí bajo Particular: se ofrece, y
@@ -985,6 +1018,16 @@ export async function PaginaDelEnlace({
       // trae sólo huecos particulares para él y los marca uno por uno—.
       if (conParticular.has(id)) {
         return [{ ...o, detalle: "Sólo de forma particular" }]
+      }
+
+      // La clínica dice que no da turnos online por este medio. Se muestra
+      // apagado y con el motivo verdadero —no es que no tenga horarios—, pero
+      // SÓLO si la lista está filtrada por sede: si es el padrón completo, que
+      // figure no dice nada sobre dónde atiende.
+      if (sinTurnosOnline.has(id)) {
+        return listaFiltradaPorSede
+          ? [{ ...o, deshabilitada: true, detalle: "Sus turnos se gestionan por otra vía" }]
+          : []
       }
 
       // Sin agenda en ESTA sede: se oculta. Decía "Sin turnos disponibles por
@@ -1006,6 +1049,7 @@ export async function PaginaDelEnlace({
         sedeElegida: filtros.sedeId || "(ninguna)",
         conAgendaEnEstaSede: conAgenda.size,
         soloParticularEnEstaSede: [...conParticular].filter((id) => !conAgenda.has(id)).length,
+        listaFiltradaPorSede,
         marcadosSinTurnosOnline: sinTurnosOnline.size,
         ocultosPorNoAtenderEnEstaSede: sabemosQuienAtiende
           ? listaDeProfesionales.filter(

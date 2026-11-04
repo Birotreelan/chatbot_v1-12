@@ -472,7 +472,27 @@ export async function obtenerTodosLosProfesionales(
    * molesta, una lista vacía deja al paciente sin poder elegir.
    */
   sedeId?: string,
-): Promise<ApiResponse<{ id: string; nombre: string; especialidad?: string }[]>> {
+): Promise<
+  ApiResponse<{ id: string; nombre: string; especialidad?: string }[]> & {
+    /**
+     * Si la lista que volvió está filtrada por la sede pedida (4/11/2026).
+     *
+     * ── Por qué hace falta decirlo ──────────────────────────────────────────
+     *
+     * Porque quien la usa toma decisiones distintas según la respuesta. Si la
+     * lista es de la sede, un profesional que figura ahí ATIENDE ahí, y tiene
+     * sentido mostrarlo apagado con el motivo. Si es el padrón completo del
+     * cliente, figurar no significa nada: puede atender en cualquier otra de
+     * las seis sedes.
+     *
+     * Antes esto se perdía —el reintento sin filtro sólo dejaba un
+     * `console.warn`— y la pantalla no tenía forma de saber con qué estaba
+     * trabajando. El resultado fue una lista de cien nombres apagados que
+     * decían "sus turnos se gestionan por otra vía", casi todos de otra sede.
+     */
+    filtradaPorSede: boolean
+  }
+> {
   const leer = async (params: Record<string, unknown>) => {
     const resultado = await fetchProxyApi<any>(clienteId, "get_profesionales", params, useCache)
     if (resultado.exito && resultado.datos) {
@@ -482,15 +502,41 @@ export async function obtenerTodosLosProfesionales(
     return resultado
   }
 
-  if (!sedeId) return leer({})
+  if (!sedeId) return { ...(await leer({})), filtradaPorSede: false }
 
   const conSede = await leer({ Sede_Id: sedeId })
-  if (conSede.exito && Array.isArray(conSede.datos) && conSede.datos.length > 0) return conSede
+  if (conSede.exito && Array.isArray(conSede.datos) && conSede.datos.length > 0) {
+    diagnosticoActual()?.anotar({
+      titulo: "get_profesionales · filtrado por sede",
+      resumen: `${conSede.datos.length} profesionales con Sede_Id=${sedeId}`,
+    })
+    return { ...conSede, filtradaPorSede: true }
+  }
 
+  /**
+   * El proxy no filtró por sede: se pide el padrón completo.
+   *
+   * Pasa si ese `get_profesionales` no soporta `Sede_Id` —`get_turnos` sí lo
+   * soporta, pero son dos endpoints distintos del lado de la clínica— o si la
+   * sede realmente no tiene profesionales cargados. Desde acá no se puede
+   * distinguir, y en los dos casos una lista vacía sería peor: el paciente se
+   * queda sin poder elegir.
+   *
+   * Pero el llamador tiene que ENTERARSE, y por eso queda en el diagnóstico y
+   * no sólo en el log: lo que muestre la pantalla depende de esto.
+   */
   console.warn(
     `[API] get_profesionales con Sede_Id=${sedeId} no devolvió profesionales; se reintenta sin filtro`,
   )
-  return leer({})
+  diagnosticoActual()?.anotar({
+    titulo: "get_profesionales · el filtro por sede NO funcionó",
+    resumen:
+      `con Sede_Id=${sedeId} volvieron 0 profesionales, así que se pide el padrón completo. ` +
+      `La lista NO está filtrada por sede: la pantalla sólo puede mostrar a los que ` +
+      `aparecen en la agenda de esta sede.`,
+    crudo: { exito: conSede.exito, cantidad: Array.isArray(conSede.datos) ? conSede.datos.length : null },
+  })
+  return { ...(await leer({})), filtradaPorSede: false }
 }
 
 // Función para obtener turnos disponibles o agendados
