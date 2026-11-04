@@ -30,6 +30,7 @@ import { buscarProfesionales } from "../api-tools/api-functions"
 import { searchTurnosFull } from "../conversation-state/shared/turnos-handler"
 import { diagnosticoActual } from "./diagnostico"
 import type { TurnoOption } from "../conversation-state/shared/types"
+import { filtrarPorSubespecialidad } from "./subespecialidad"
 
 export interface ResolucionDeProfesional {
   profesionalId?: string
@@ -315,30 +316,6 @@ export async function agendaParaTurnoNuevo(params: {
     params.phone,
   )
 
-  // ── Diagnóstico del filtro por especialidad (24/9/2026) ──────────────────
-  //
-  // Reportado: elegir una especialidad no cambia los horarios. Verificado en
-  // producción: las tres especialidades y "sin filtro" devuelven exactamente
-  // los mismos días.
-  //
-  // El parámetro se manda —`searchTurnosFull` lo pasa como `Subespecialidad_Id`
-  // y el bot hace exactamente lo mismo—, así que o el proxy de este cliente lo
-  // ignora, o el id que mandamos no es el que espera. Desde el código no se
-  // puede distinguir una cosa de la otra.
-  //
-  // Esto lo deja registrado: cuántos turnos volvieron y qué especialidades
-  // declaran. Si todos traen la misma especialidad, el filtro funcionó. Si
-  // traen varias, el proxy lo ignoró. Si no traen ninguna, no hay con qué
-  // filtrar del lado nuestro tampoco, y hay que arreglarlo en el origen.
-  if (params.especialidadId && resultado.turnos?.length) {
-    const declaradas = [...new Set(resultado.turnos.map((t) => t.especialidad).filter(Boolean))]
-    console.log(
-      `[PORTAL] Filtro por especialidad "${params.especialidadId}": ` +
-        `${resultado.turnos.length} turnos | especialidades que declaran: ` +
-        `${declaradas.length ? declaradas.join(" / ") : "(ninguna — los turnos no traen el campo)"}`,
-    )
-  }
-
   if (!resultado.success || !resultado.turnos?.length) {
     return {
       dias: [],
@@ -349,9 +326,52 @@ export async function agendaParaTurnoNuevo(params: {
     }
   }
 
+  /**
+   * ── El filtro por subespecialidad se aplica ACÁ (4/11/2026) ──────────────
+   *
+   * El caso quedó abierto el 24/9: elegir una especialidad no cambiaba los
+   * horarios, y desde el código no se podía saber si el proxy ignoraba el
+   * parámetro o si el id era el equivocado. El panel de diagnóstico lo
+   * resolvió: con `Subespecialidad_Id: 17` mandado como número, Salud Ocular
+   * devolvió 310 turnos declarando "Cirujano" Y "Oftalmologia", y una
+   * respuesta de 105.621 caracteres contra los 105.283 de la misma consulta
+   * sin el parámetro. El proxy lo acepta, no se queja, y lo ignora.
+   *
+   * Así que se filtra del lado nuestro, por la subespecialidad que declara
+   * cada profesional en `get_profesionales`. El parámetro se sigue mandando:
+   * el día que el proxy lo respete, el filtro de acá no descarta nada y no hay
+   * nada que desactivar.
+   *
+   * Lo que este filtro NO hace es esconder un turno que no pudo clasificar.
+   * Ver lib/portal/subespecialidad.ts.
+   */
+  const turnosCrudos: TurnoOption[] = resultado.turnos
+  const turnos = await filtrarPorSubespecialidad(
+    params.clienteId,
+    params.especialidadId,
+    turnosCrudos,
+  ).catch((error) => {
+    // Si la consulta del directorio falla, se devuelven todos: el paciente no
+    // puede quedarse sin horarios porque no pudimos leer una lista auxiliar.
+    console.error("[PORTAL] No se pudo filtrar por subespecialidad:", error)
+    return turnosCrudos
+  })
+
+  if (turnos.length === 0) {
+    // Había turnos y el filtro los descartó todos: la subespecialidad no tiene
+    // disponibilidad en esta sede. Es un "no hay turnos" legítimo, y la
+    // pantalla lo dice como tal.
+    return {
+      dias: [],
+      total: 0,
+      filtradoPorProfesional: !!params.profesionalId,
+      infoSinTurnos: resultado.infoSinTurnos,
+    }
+  }
+
   return {
-    dias: agruparPorDia(resultado.turnos),
-    total: resultado.turnos.length,
+    dias: agruparPorDia(turnos),
+    total: turnos.length,
     filtradoPorProfesional: !!params.profesionalId,
     infoSinTurnos: resultado.infoSinTurnos,
   }
