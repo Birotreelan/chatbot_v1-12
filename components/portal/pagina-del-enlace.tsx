@@ -958,107 +958,201 @@ export async function PaginaDelEnlace({
           ])
         : [null, null]
 
-    const profesionalesDe = (agenda: { dias?: { turnos: { profesionalId?: string }[] }[] } | null) =>
-      new Set(
-        (agenda?.dias || [])
-          .flatMap((d) => d.turnos.map((t) => String(t.profesionalId || "")))
-          .filter(Boolean),
+    /**
+     * Quién tiene agenda en esta sede, CON su nombre (4/11/2026).
+     *
+     * ── Por qué la agenda y no el directorio ─────────────────────────────
+     *
+     * Porque el directorio y la agenda de la misma sede no coinciden, y está
+     * medido: en Callao, `get_profesionales` con `Sede_Id` devolvió 50
+     * profesionales y `get_turnos` con el MISMO `Sede_Id` devolvió turnos de
+     * 15, de los cuales sólo 4 figuraban en esos 50. Once profesionales que
+     * atienden ahí no estaban en la lista de la sede.
+     *
+     * O sea que el directorio no sirve para decidir quién atiende en esta
+     * sede: ni incluye a todos los que atienden, ni excluye a los que no.
+     *
+     * La agenda sí: cada turno trae `Sede_Id`, `Profesional_Id` y
+     * `Profesional_Nombre`, y esa consulta filtra por sede correctamente —se
+     * ve en el panel de diagnóstico, todos los turnos vuelven con
+     * `Sede_Nombre: "SALUD OCULAR CALLAO"`—. Es la misma consulta que ya se
+     * hacía para saber quién tenía huecos, así que no cuesta nada más: lo que
+     * se hace ahora es además quedarse con el nombre.
+     */
+    const profesionalesDe = (
+      agenda: {
+        dias?: { turnos: { profesionalId?: string; profesionalNombre?: string; especialidad?: string }[] }[]
+      } | null,
+    ) => {
+      const mapa = new Map<string, { nombre: string; especialidad?: string }>()
+      for (const dia of agenda?.dias || []) {
+        for (const t of dia.turnos) {
+          const id = String(t.profesionalId || "")
+          if (!id || mapa.has(id)) continue
+          mapa.set(id, { nombre: String(t.profesionalNombre || "").trim(), especialidad: t.especialidad })
+        }
+      }
+      return mapa
+    }
+
+    const agendaDeLaObraSocial = profesionalesDe(agendaParaSaberQuienTiene)
+    const agendaDeParticular = profesionalesDe(agendaParticular)
+    const conAgenda = new Set(agendaDeLaObraSocial.keys())
+    const conParticular = new Set(agendaDeParticular.keys())
+
+
+    /**
+     * La lista se arma desde la AGENDA, no desde el directorio (4/11/2026).
+     *
+     * ── Lo que se midió ──────────────────────────────────────────────────
+     *
+     * En Callao: 50 profesionales en `get_profesionales?Sede_Id=…`, 15 con
+     * turnos en `get_turnos?Sede_Id=…` (el mismo id de sede), y sólo 4 en
+     * común. El directorio omitía a once que atienden ahí e incluía a treinta
+     * y uno que no.
+     *
+     * Con el armado anterior —recorrer el directorio y marcar— eso daba 35
+     * nombres en pantalla de los cuales 31 estaban apagados diciendo "sus
+     * turnos se gestionan por otra vía", y los once que sí tenían horarios no
+     * aparecían. El paciente no podía elegir a su médico aunque tuviera turno
+     * libre.
+     *
+     * Ahora la fuente es la agenda: quien tiene un hueco en esta sede se
+     * ofrece, con el nombre que viene en el turno. El directorio pasa a ser lo
+     * que es —una lista de nombres y especialidades— y se usa sólo para
+     * mejorar el nombre y para los dos casos de abajo.
+     */
+    const porNombre = (a: { nombre: string }, b: { nombre: string }) =>
+      a.nombre.localeCompare(b.nombre, "es")
+
+    /** El directorio, indexado, para completar nombre y especialidad. */
+    const delDirectorio = new Map(listaDeProfesionales.map((o) => [String(o.id), o]))
+
+    /**
+     * ¿El directorio es de ESTA sede?
+     *
+     * No se le cree porque haya devuelto algo: se verifica contra la agenda.
+     * Si omite a alguien que demostrablemente atiende acá —tiene un turno con
+     * este `Sede_Id`— entonces no es la lista de esta sede, y no se puede usar
+     * para afirmar nada sobre quién atiende dónde.
+     *
+     * Es la única forma de distinguir "el proxy filtró" de "el proxy aceptó el
+     * parámetro y lo ignoró", que es lo que estaba pasando: la llamada volvía
+     * 200 con 50 profesionales y parecía haber funcionado.
+     */
+    const conHuecosEnLaSede = new Set([...conAgenda, ...conParticular])
+    const faltanEnElDirectorio = [...conHuecosEnLaSede].filter((id) => !delDirectorio.has(id))
+    const directorioEsDeLaSede =
+      listaFiltradaPorSede && conHuecosEnLaSede.size > 0 && faltanEnElDirectorio.length === 0
+
+    const opciones: Array<{ id: string; nombre: string; detalle?: string; deshabilitada?: boolean }> = []
+
+    // ── 1 · los que tienen agenda en esta sede ───────────────────────────
+    const conAgendaOrdenados = [...agendaDeLaObraSocial.entries()]
+      .map(([id, datos]) => ({
+        id,
+        // El nombre del directorio gana cuando está: es el que la clínica usa
+        // en su propio sistema. El de la agenda es el respaldo, y es el que
+        // rescata a los once que el directorio no trae.
+        nombre: delDirectorio.get(id)?.nombre || datos.nombre || id,
+      }))
+      .filter((o) => o.nombre && o.nombre !== o.id)
+      .sort(porNombre)
+    opciones.push(...conAgendaOrdenados)
+
+    // ── 2 · los que sólo tienen huecos de forma particular ───────────────
+    const soloParticularOrdenados = [...agendaDeParticular.entries()]
+      .filter(([id]) => !conAgenda.has(id))
+      .map(([id, datos]) => ({
+        id,
+        nombre: delDirectorio.get(id)?.nombre || datos.nombre || id,
+        detalle: "Sólo de forma particular",
+      }))
+      .filter((o) => o.nombre && o.nombre !== o.id)
+      .sort(porNombre)
+    opciones.push(...soloParticularOrdenados)
+
+    /**
+     * ── 3 · los que la clínica no da por este medio ───────────────────────
+     *
+     * `Turnos_Online_Disponibles: "0"` es la clínica diciendo que a ése no se
+     * le saca turno por acá. Mostrarlo apagado con el motivo es útil —el
+     * paciente que busca a su médico ve que existe y por qué no puede— y es lo
+     * que se decidió en octubre.
+     *
+     * Pero sólo tiene sentido si sabemos que es de esta sede. Con el
+     * directorio desalineado de la agenda, mostrarlos es llenar la pantalla
+     * con treinta y un nombres de otras sucursales entre los que hay que
+     * encontrar los que sirven. Mientras el proxy no filtre de verdad, no se
+     * muestran.
+     */
+    if (directorioEsDeLaSede) {
+      const apagados = listaDeProfesionales
+        .filter((o) => sinTurnosOnline.has(String(o.id)) && !conHuecosEnLaSede.has(String(o.id)))
+        .map((o) => ({ ...o, deshabilitada: true, detalle: "Sus turnos se gestionan por otra vía" }))
+        .sort(porNombre)
+      opciones.push(...apagados)
+    }
+
+    /**
+     * ── 4 · y si no sabemos nada, se ofrece todo ──────────────────────────
+     *
+     * Las dos consultas de agenda volvieron vacías. Pudo ser que la sede no
+     * tenga turnos, o un problema nuestro, y desde acá no se distingue.
+     * Ocultar a todos dejaría al paciente con una lista vacía por algo que
+     * quizás es nuestra culpa; que toque y lea el mensaje de la pantalla
+     * siguiente es mucho menos malo.
+     */
+    if (conHuecosEnLaSede.size === 0) {
+      opciones.length = 0
+      opciones.push(
+        ...listaDeProfesionales
+          .map((o) =>
+            sinTurnosOnline.has(String(o.id))
+              ? { ...o, deshabilitada: true, detalle: "Sus turnos se gestionan por otra vía" }
+              : o,
+          )
+          .sort(porNombre),
       )
-
-    const conAgenda = profesionalesDe(agendaParaSaberQuienTiene)
-    const conParticular = profesionalesDe(agendaParticular)
+    }
 
     /**
-     * ¿Sabemos quién tiene agenda en esta sede?
+     * Cómo quedó la lista, y de dónde salió cada nombre.
      *
-     * Sólo si alguna de las dos consultas trajo algo. Si las dos volvieron
-     * vacías pudo ser un problema nuestro, y ahí no se esconde a nadie: que el
-     * paciente toque y lea el mensaje de la pantalla siguiente es mucho menos
-     * malo que mostrarle una lista vacía porque no pudimos preguntar.
+     * Lo que importa de esta anotación es `elDirectorioCoincideConLaAgenda`:
+     * es la que destapó el problema de Callao —50 en el directorio, 15 con
+     * turnos, 4 en común— y es el número que hay que mirar si la pantalla
+     * vuelve a mostrar gente de otra sede. Sin él, la llamada a
+     * `get_profesionales` parecía haber funcionado: 200, 50 resultados.
      */
-    const sabemosQuienAtiende = conAgenda.size > 0 || conParticular.size > 0
-
-    /**
-     * El orden de estas reglas es el arreglo (4/11/2026).
-     *
-     * ── Qué estaba mal ───────────────────────────────────────────────────
-     *
-     * `sinTurnosOnline` se evaluaba PRIMERO. O sea que un profesional de otra
-     * sede que además estuviera marcado como "sin turnos online" se mostraba
-     * apagado en vez de ocultarse: la regla que lo rescataba corría antes que
-     * la que lo escondía.
-     *
-     * Y como el filtro por sede del proxy no está funcionando —ver la
-     * anotación de `get_profesionales` en el panel de diagnóstico—, la lista
-     * que llega es el padrón completo del cliente. Resultado real: cuarenta
-     * nombres apagados diciendo "sus turnos se gestionan por otra vía", casi
-     * todos de otra sede, y cinco con enlace perdidos entre ellos.
-     *
-     * ── El orden correcto ────────────────────────────────────────────────
-     *
-     * Primero la evidencia POSITIVA de que atiende en esta sede: aparecer en
-     * la agenda de la sede es el único dato duro que tenemos, porque esa
-     * consulta sí filtra por sede.
-     *
-     * Después el "no da turnos online", que es un cómo-mostrarlo y no un
-     * si-mostrarlo: sólo aplica a alguien de quien ya sabemos que es de esta
-     * sede. Si la lista no vino filtrada, no lo sabemos, y mostrarlo es
-     * llenarle la pantalla al paciente con gente de otra sucursal.
-     *
-     * Y al final el oculto por no tener agenda acá.
-     */
-    const opciones = listaDeProfesionales.flatMap((o) => {
-      const id = String(o.id)
-
-      // Tiene agenda en esta sede con la obra social del paciente.
-      if (conAgenda.has(id)) return [o]
-
-      // No aparece con su obra social, pero sí bajo Particular: se ofrece, y
-      // la pantalla de horarios se encarga del resto —la agenda fusionada
-      // trae sólo huecos particulares para él y los marca uno por uno—.
-      if (conParticular.has(id)) {
-        return [{ ...o, detalle: "Sólo de forma particular" }]
-      }
-
-      // La clínica dice que no da turnos online por este medio. Se muestra
-      // apagado y con el motivo verdadero —no es que no tenga horarios—, pero
-      // SÓLO si la lista está filtrada por sede: si es el padrón completo, que
-      // figure no dice nada sobre dónde atiende.
-      if (sinTurnosOnline.has(id)) {
-        return listaFiltradaPorSede
-          ? [{ ...o, deshabilitada: true, detalle: "Sus turnos se gestionan por otra vía" }]
-          : []
-      }
-
-      // Sin agenda en ESTA sede: se oculta. Decía "Sin turnos disponibles por
-      // ahora", que en una clínica con varias sedes es directamente falso —el
-      // profesional atiende, en otro lado— y dejaba una lista de cien
-      // nombres grises entre los que había que encontrar los cinco útiles.
-      if (sabemosQuienAtiende) return []
-
-      return [o]
-    })
-
-    // Cómo quedó la lista. Es lo que no se puede deducir de las consultas
-    // crudas: el directorio viene con cien nombres y la pantalla muestra
-    // cinco, y hay tres motivos distintos para que alguien no esté.
     diagnosticoActual()?.anotar({
       titulo: "lista de profesionales",
-      resumen: `${listaDeProfesionales.length} en el directorio → ${opciones.length} en pantalla`,
+      resumen:
+        `${opciones.length} en pantalla ` +
+        `(${conAgenda.size} con agenda, ${soloParticularOrdenados.length} sólo particular` +
+        (directorioEsDeLaSede ? `, ${opciones.length - conAgenda.size - soloParticularOrdenados.length} apagados` : "") +
+        `) · el directorio traía ${listaDeProfesionales.length}`,
       crudo: {
         sedeElegida: filtros.sedeId || "(ninguna)",
+        deDondeSaleLaLista:
+          conHuecosEnLaSede.size > 0
+            ? "de la agenda de esta sede"
+            : "del directorio completo (las dos agendas volvieron vacías)",
+        enElDirectorio: listaDeProfesionales.length,
         conAgendaEnEstaSede: conAgenda.size,
-        soloParticularEnEstaSede: [...conParticular].filter((id) => !conAgenda.has(id)).length,
-        listaFiltradaPorSede,
+        soloParticularEnEstaSede: soloParticularOrdenados.length,
         marcadosSinTurnosOnline: sinTurnosOnline.size,
-        ocultosPorNoAtenderEnEstaSede: sabemosQuienAtiende
-          ? listaDeProfesionales.filter(
-              (o) =>
-                !sinTurnosOnline.has(String(o.id)) &&
-                !conAgenda.has(String(o.id)) &&
-                !conParticular.has(String(o.id)),
-            ).length
-          : 0,
+        // El cruce que decide todo. Si faltan, el directorio NO es de esta
+        // sede, por más que la llamada haya traído resultados.
+        elDirectorioCoincideConLaAgenda: directorioEsDeLaSede,
+        conHuecosQueElDirectorioNoTrae: faltanEnElDirectorio.length,
+        ejemplosQueFaltaban: faltanEnElDirectorio.slice(0, 5).map((id) => ({
+          id,
+          nombre: agendaDeLaObraSocial.get(id)?.nombre || agendaDeParticular.get(id)?.nombre || "(sin nombre)",
+        })),
+        apagadosMostrados: directorioEsDeLaSede
+          ? opciones.filter((o) => o.deshabilitada).length
+          : `0 (${sinTurnosOnline.size} ocultos: el directorio no está filtrado por sede)`,
       },
     })
 
