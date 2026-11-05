@@ -52,7 +52,32 @@ export async function GET(request: Request) {
     const supportSession = await getSupportSession(sessionId)
 
     if (!supportSession) {
-      return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
+      /**
+       * Estaba en la lista y acá no está (5/11/2026).
+       *
+       * Puede pasar, y conviene que quede anotado: el objeto de la sesión se
+       * escribe sin TTL, pero `closeSession` le pone 7 días, y el índice de
+       * activas del agente —`human_support:agent:<id>:active`— es un SET que
+       * no vence nunca. Una sesión que pasó por un cierre puede morirse
+       * dejando la entrada del índice colgada. Es la misma asimetría que ya
+       * está documentada en `getActiveSessionByPhone`.
+       *
+       * Con el id en el log se puede ir a mirar la clave; el texto le dice al
+       * agente qué pasó en vez de "error al cargar".
+       */
+      console.warn(
+        `[SUPPORT_ACTIONS] La sesión ${sessionId} no existe en Redis pero se abrió desde la lista: ` +
+          `índice colgado o sesión vencida`,
+      )
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Esta conversación ya no está disponible. Si el paciente vuelve a escribir se abre una nueva.",
+          sesionInexistente: true,
+        },
+        { status: 404 },
+      )
     }
 
     // Verificar permisos
@@ -130,7 +155,14 @@ export async function GET(request: Request) {
       },
     })
   } catch (error: any) {
-    console.error("[API SUPPORT ACTIONS GET] Error:", error)
+    // Con el sessionId y el stack: sin el id, un error en los logs de Vercel
+    // no se puede atar a la conversación que lo produjo, que es lo primero que
+    // hace falta para reproducirlo.
+    console.error(
+      `[API SUPPORT ACTIONS GET] Error cargando la sesión ` +
+        `${new URL(request.url).searchParams.get("sessionId")}:`,
+      error?.stack || error,
+    )
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }

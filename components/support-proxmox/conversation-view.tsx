@@ -78,7 +78,27 @@ export function ConversationView({ sessionId }: ConversationViewProps) {
           ...getAuthHeaders(),
         },
       })
-      if (!response.ok) throw new Error("Error al cargar sesión")
+      if (!response.ok) {
+        /**
+         * El motivo del servidor, no un texto genérico (5/11/2026).
+         *
+         * Esta línea decía `throw new Error("Error al cargar sesión")` y tiraba
+         * la respuesta a la basura. Para el agente —y para quien tiene que
+         * arreglarlo— "sesión no encontrada" (404), "no autenticado" (401) y
+         * una excepción del servidor (500) son tres problemas distintos con
+         * tres soluciones distintas, y los tres se veían iguales.
+         *
+         * `handleSendMessage`, treinta líneas más abajo, ya lo hacía bien: lee
+         * `errorData.error`. Acá faltaba.
+         */
+        const datos = await response.json().catch(() => null)
+        const motivo =
+          datos?.error ||
+          (response.status === 404
+            ? "La conversación ya no está disponible"
+            : `Error ${response.status} al cargar la conversación`)
+        throw new Error(motivo)
+      }
       const data = await response.json()
 
       if (typeof data.lastActivity === "number") {
