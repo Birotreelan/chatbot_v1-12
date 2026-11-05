@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     let activeSessions: any[] = []
     if (session.role === "support_agent") {
       // Obtener las sesiones activas asignadas a ESTE usuario específico
-      activeSessions = await getAgentActiveSessions(session.userId)
+      activeSessions = await getAgentActiveSessions(session.userId, session.tenantId)
       console.log("[API Sessions] Sesiones activas del agente (userId:", session.userId, "):", activeSessions.length)
     }
 

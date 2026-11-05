@@ -317,9 +317,151 @@ export async function getPendingSessions(tenantId: string | null = null): Promis
   return sessions
 }
 
+/**
+ * ¿Esta sesión es de esta clínica? (5/11/2026)
+ *
+ * ── El bug que esto arregla ───────────────────────────────────────────────
+ *
+ * El panel mostraba conversaciones de varios días y al abrirlas devolvía 403
+ * "No autorizado". La comparación era `supportSession.tenantId !== tenant del
+ * usuario`, y `supportSession.tenantId` es una COPIA del `cliente_id` de la
+ * config, escrita el día que se creó la sesión y nunca más actualizada. Si el
+ * `cliente_id` de la config cambió después —o si cuando se creó la sesión
+ * todavía no estaba y quedó el `"unknown"` del fallback— la copia queda
+ * apuntando a un tenant que ya no existe. La sesión sigue en el índice de
+ * activas del agente, así que se ve; pero no se puede abrir.
+ *
+ * ── La regla ──────────────────────────────────────────────────────────────
+ *
+ * La verdad es la config, no la copia. Primero se compara la copia porque es
+ * gratis y acierta siempre salvo en este caso; si no coincide, se resuelve el
+ * `cliente_id` vivo de `configId` y se compara contra ése. Si el vivo coincide,
+ * la copia estaba vieja: se repara, así la próxima consulta no paga el viaje y
+ * —más importante— la sesión vuelve a aparecer en el índice de pendientes, que
+ * filtra por el mismo campo.
+ *
+ * Denegar sigue siendo posible: una sesión de otra clínica tiene que seguir
+ * siendo invisible. Pero cuando se deniega queda en el log con los tres valores,
+ * que es lo que faltaba para diagnosticar esto.
+ */
+function normalizarTenant(valor: unknown): string {
+  if (valor === null || valor === undefined) return ""
+  return String(valor).trim()
+}
+
+export interface ResultadoDeAutorizacion {
+  autorizado: boolean
+  /** Para el log y para el mensaje del panel. */
+  motivo: "coincide" | "coincide_por_config" | "sin_tenant" | "otra_clinica" | "sin_config"
+}
+
+export async function sesionDelMismoTenant(
+  tenantDelUsuario: string | null | undefined,
+  supportSession: Pick<HumanSupportSession, "id" | "tenantId" | "configId">,
+): Promise<ResultadoDeAutorizacion> {
+  const usuario = normalizarTenant(tenantDelUsuario)
+  if (!usuario) return { autorizado: false, motivo: "sin_tenant" }
+
+  const guardado = normalizarTenant(supportSession.tenantId)
+  if (guardado && guardado === usuario) return { autorizado: true, motivo: "coincide" }
+
+  let vivo = ""
+  try {
+    const config = await getWhatsAppConfigById(supportSession.configId)
+    vivo = normalizarTenant(config?.cliente_id)
+  } catch (error) {
+    console.error(
+      `[HUMAN_SUPPORT] No se pudo resolver la config ${supportSession.configId} para autorizar:`,
+      error,
+    )
+    // Sin poder consultar no se inventa un permiso.
+    return { autorizado: false, motivo: "sin_config" }
+  }
+
+  if (!vivo) {
+    console.warn(
+      `[HUMAN_SUPPORT] 🚫 ${supportSession.id}: la config ${supportSession.configId} no tiene cliente_id ` +
+        `(guardado «${guardado}», usuario «${usuario}»)`,
+    )
+    return { autorizado: false, motivo: "sin_config" }
+  }
+
+  if (vivo !== usuario) {
+    console.warn(
+      `[HUMAN_SUPPORT] 🚫 ${supportSession.id} es de otra clínica: guardado «${guardado}», ` +
+        `config ${supportSession.configId} → «${vivo}», usuario «${usuario}»`,
+    )
+    return { autorizado: false, motivo: "otra_clinica" }
+  }
+
+  // La copia estaba vieja. Se repara en el momento: es el mismo criterio con
+  // el que los dos índices se autocorrigen cuando encuentran un fantasma.
+  await repararTenantDeLaSesion(supportSession.id, vivo, guardado)
+  return { autorizado: true, motivo: "coincide_por_config" }
+}
+
+/**
+ * Lo que lee el agente cuando se le niega una sesión.
+ *
+ * "No autorizado" era lo que decía antes, y no distingue entre "esto es de
+ * otra clínica" —correcto, no hay nada que hacer— y "tu usuario entró sin
+ * clínica" o "la config de esta conversación ya no existe", que son problemas
+ * de configuración que alguien puede arreglar. Decirlo evita el reclamo que
+ * empieza con "me dice no autorizado".
+ */
+export function textoDeDenegacion(motivo: ResultadoDeAutorizacion["motivo"]): string {
+  switch (motivo) {
+    case "sin_tenant":
+      return "Tu usuario no tiene una clínica asignada. Volvé a entrar desde el panel de tu clínica."
+    case "sin_config":
+      return "La configuración de WhatsApp de esta conversación ya no está disponible. Avisale al equipo de Treelan."
+    case "otra_clinica":
+      return "Esta conversación es de otra clínica."
+    default:
+      return "No autorizado"
+  }
+}
+
+async function repararTenantDeLaSesion(
+  sessionId: string,
+  tenantVivo: string,
+  tenantGuardado: string,
+): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  try {
+    const clave = `${SUPPORT_SESSION_PREFIX}${sessionId}`
+    const crudo = await redis.get(clave)
+    if (!crudo) return
+    const session = (typeof crudo === "string" ? JSON.parse(crudo) : crudo) as HumanSupportSession
+    if (!session?.id) return
+    session.tenantId = tenantVivo
+    await redis.set(clave, JSON.stringify(session))
+    console.log(
+      `[HUMAN_SUPPORT] 🔧 ${sessionId}: tenantId corregido de «${tenantGuardado}» a «${tenantVivo}» ` +
+        `(la config manda)`,
+    )
+  } catch (error) {
+    // Best-effort: la autorización ya se resolvió bien sin esto. Lo único que
+    // se pierde es que la próxima consulta vuelva a resolver la config.
+    console.warn(`[HUMAN_SUPPORT] No se pudo corregir el tenantId de ${sessionId}:`, error)
+  }
+}
+
 // Obtener sesiones activas de un agente
 // OPTIMIZACIÓN: pipeline para agrupar los GETs de sesión
-export async function getAgentActiveSessions(agentId: string): Promise<HumanSupportSession[]> {
+/**
+ * Las activas del agente.
+ *
+ * `tenantId` es opcional por compatibilidad, pero conviene pasarlo siempre:
+ * sin él esta lista no filtra por clínica y `getPendingSessions` sí, así que la
+ * misma pregunta quedaba contestada de dos formas. Era parte del bug del 403:
+ * el panel mostraba una conversación que el detalle después se negaba a abrir.
+ */
+export async function getAgentActiveSessions(
+  agentId: string,
+  tenantId: string | null = null,
+): Promise<HumanSupportSession[]> {
   const redis = getRedisClient()
   if (!redis) return []
 
@@ -375,6 +517,19 @@ export async function getAgentActiveSessions(agentId: string): Promise<HumanSupp
     }
 
     if (session.status === "in_progress") {
+      // De otra clínica: no se muestra, y no se saca del índice —es de otro
+      // agente de otro tenant, no un fantasma—. Queda en el log porque llegar
+      // acá significa que algo escribió el índice equivocado.
+      if (tenantId !== null) {
+        const permiso = await sesionDelMismoTenant(tenantId, session)
+        if (!permiso.autorizado) {
+          console.warn(
+            `[HUMAN_SUPPORT] ${session.id} está en el índice de ${agentId} pero no es de «${tenantId}» ` +
+              `(${permiso.motivo}): no se muestra`,
+          )
+          continue
+        }
+      }
       sessions.push(session)
       continue
     }
@@ -437,7 +592,7 @@ export async function contarAvisosDelAgente(
 ): Promise<ConteoDeAvisos> {
   const [pendientes, activas] = await Promise.all([
     getPendingSessions(tenantId),
-    getAgentActiveSessions(agentId),
+    getAgentActiveSessions(agentId, tenantId),
   ])
 
   const esperando = activas.filter((s) => Boolean(s.esperaRespuestaDesde)).length

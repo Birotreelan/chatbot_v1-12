@@ -10,6 +10,8 @@ import {
   createSupportSession,
   getActiveSessionByPhone,
   getSupportSessionActivity,
+  sesionDelMismoTenant,
+  textoDeDenegacion,
 } from "@/lib/human-support"
 import { getConversationMessages, getAllConversationMessages, saveConversationMessage, getConversationLastActivity } from "@/lib/conversations"
 import { getWhatsAppConfigById, getThreadForUser } from "@/lib/db"
@@ -81,8 +83,18 @@ export async function GET(request: Request) {
     }
 
     // Verificar permisos
-    if (session.role === "support_agent" && supportSession.tenantId !== session.tenantId) {
-      return NextResponse.json({ success: false, error: "No autorizado" }, { status: 403 })
+    //
+    // La comparación vive en `sesionDelMismoTenant`: el `tenantId` guardado en
+    // la sesión es una copia del `cliente_id` de la config y puede haber
+    // quedado vieja. Ver la nota larga en lib/human-support.ts.
+    if (session.role === "support_agent") {
+      const permiso = await sesionDelMismoTenant(session.tenantId, supportSession)
+      if (!permiso.autorizado) {
+        return NextResponse.json(
+          { success: false, error: textoDeDenegacion(permiso.motivo) },
+          { status: 403 },
+        )
+      }
     }
 
     // OPTIMIZACIÓN BANDWIDTH (2026-07-06): short-circuit "unchanged" para polling.
@@ -323,9 +335,13 @@ async function handleAssign(sessionId: string, session: SessionData) {
     console.log("[v0] [ASSIGN] Estado de sesión:", supportSession.status)
     console.log("[v0] [ASSIGN] TenantId sesión:", supportSession.tenantId, "vs usuario:", session.tenantId)
 
-    if (supportSession.tenantId !== session.tenantId) {
-      console.log("[v0] [ASSIGN] ERROR: Tenant no coincide")
-      return NextResponse.json({ success: false, error: "No autorizado para esta sesión" }, { status: 403 })
+    const permisoAsignar = await sesionDelMismoTenant(session.tenantId, supportSession)
+    if (!permisoAsignar.autorizado) {
+      console.log("[v0] [ASSIGN] ERROR: Tenant no coincide:", permisoAsignar.motivo)
+      return NextResponse.json(
+        { success: false, error: textoDeDenegacion(permisoAsignar.motivo) },
+        { status: 403 },
+      )
     }
 
     if (supportSession.status !== "pending") {

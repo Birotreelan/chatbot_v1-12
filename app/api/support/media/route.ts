@@ -25,7 +25,10 @@
 
 import { NextResponse } from "next/server"
 import { getSessionFromRequest } from "@/lib/auth"
-import { getSupportSession, saveSupportMessage } from "@/lib/human-support"
+import { getSupportSession, saveSupportMessage,
+  sesionDelMismoTenant,
+  textoDeDenegacion,
+} from "@/lib/human-support"
 import { saveConversationMessage } from "@/lib/conversations"
 import { getWhatsAppConfigById } from "@/lib/db"
 import { estadoVentana } from "@/lib/ventana-atencion"
@@ -73,8 +76,12 @@ export async function POST(request: Request) {
     if (!supportSession) {
       return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
     }
-    if (supportSession.tenantId !== userSession.tenantId) {
-      return NextResponse.json({ success: false, error: "No autorizado para esta sesión" }, { status: 403 })
+    const permiso = await sesionDelMismoTenant(userSession.tenantId, supportSession)
+    if (!permiso.autorizado) {
+      return NextResponse.json(
+        { success: false, error: textoDeDenegacion(permiso.motivo) },
+        { status: 403 },
+      )
     }
     if (supportSession.assignedTo !== userSession.userId) {
       return NextResponse.json({ success: false, error: "No estás asignado a esta sesión" }, { status: 403 })
@@ -233,8 +240,12 @@ export async function GET(request: Request) {
     if (!supportSession) {
       return NextResponse.json({ success: false, error: "Sesión no encontrada" }, { status: 404 })
     }
-    if (supportSession.tenantId !== userSession.tenantId) {
-      return NextResponse.json({ success: false, error: "No autorizado para esta sesión" }, { status: 403 })
+    const permiso = await sesionDelMismoTenant(userSession.tenantId, supportSession)
+    if (!permiso.autorizado) {
+      return NextResponse.json(
+        { success: false, error: textoDeDenegacion(permiso.motivo) },
+        { status: 403 },
+      )
     }
 
     // Sin mediaId, la ruta informa el estado de la ventana de 24 h.

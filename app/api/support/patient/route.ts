@@ -21,7 +21,10 @@
 import { NextResponse } from "next/server"
 
 import { requireSupportAgentFromRequest } from "@/lib/auth"
-import { getSupportSession } from "@/lib/human-support"
+import { getSupportSession,
+  sesionDelMismoTenant,
+  textoDeDenegacion,
+} from "@/lib/human-support"
 import { savePatientSnapshot } from "@/lib/conversations"
 import { consultarPacienteDelPanel, snapshotDelPaciente } from "@/lib/paciente-del-panel"
 
@@ -47,8 +50,18 @@ export async function GET(request: Request) {
     }
 
     // Verificar que el agente tiene permiso para ver esta sesion
-    if (session.tenantId && session.tenantId !== supportSession.tenantId) {
-      return NextResponse.json({ success: false, error: "Sin permiso para esta sesion" }, { status: 403 })
+    //
+    // El `if (session.tenantId && …)` original dejaba pasar al usuario sin
+    // tenant —el super admin— y eso se conserva: `sesionDelMismoTenant` sólo
+    // se consulta cuando el usuario tiene uno.
+    if (session.tenantId) {
+      const permiso = await sesionDelMismoTenant(session.tenantId, supportSession)
+      if (!permiso.autorizado) {
+        return NextResponse.json(
+          { success: false, error: textoDeDenegacion(permiso.motivo) },
+          { status: 403 },
+        )
+      }
     }
 
     const phoneNumber = supportSession.phoneNumber
