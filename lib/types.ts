@@ -68,6 +68,51 @@ export interface WhatsAppConfig {
    */
   ofrecerTurnosParticulares?: boolean
   /**
+   * La atención humana pasa por un chat web en vez de por WhatsApp
+   * (5/11/2026).
+   *
+   * ── Qué cambia ───────────────────────────────────────────────────────────
+   *
+   * Nada del lado de la clínica: el agente sigue viendo la misma lista, toma
+   * la conversación igual y escribe en el mismo cuadro. Lo que cambia es por
+   * dónde sale su mensaje: en vez de ir a WhatsApp va a un chat alojado acá, y
+   * al paciente se le avisa por WhatsApp con un botón que lo abre.
+   *
+   * ── Por qué ──────────────────────────────────────────────────────────────
+   *
+   * Sólo se pagan los mensajes que SALEN, y cada uno cuesta US$ 0,0318. Una
+   * consulta atendida por una persona son diez o quince mensajes del agente;
+   * por el chat son una o dos notificaciones. El resto es gratis.
+   *
+   * ── Apagado por default ──────────────────────────────────────────────────
+   *
+   * A diferencia de los otros switches de este archivo, éste arranca en
+   * `false` y no en `true`. Cambia cómo se atiende a un paciente, no una
+   * opción de una pantalla: prenderlo para todos de golpe porque apareció el
+   * campo sería decidir por las clínicas que no lo pidieron.
+   *
+   * Se consulta por `atencionPorChatWeb` (lib/atencion/switch.ts), no leyendo
+   * este campo a mano, por lo mismo que `ofreceTurnosParticulares`: hay dos
+   * lugares que tienen que contestar lo mismo —por dónde sale el mensaje del
+   * agente y qué recibe el paciente— y si se desincronizan, el agente escribe
+   * a un lado y el paciente mira el otro.
+   */
+  atencionPorChatWeb?: boolean
+  /**
+   * Nombre de la plantilla que avisa de una respuesta fuera de las 24 h.
+   *
+   * Vacío mientras no esté dada de alta en Meta, y eso es significativo: sin
+   * ella, fuera de la ventana NO se avisa. Mandarla a ciegas haría que el
+   * agente vea "no se pudo avisar" sin poder distinguir una plantilla
+   * inexistente de un problema de red.
+   *
+   * El alta y el texto están en lib/atencion/plantilla.ts. Es por cliente y no
+   * una constante porque cada WABA la registra por su cuenta y un alta
+   * rechazada obliga a reintentar con otro nombre — lo mismo que ya pasó con
+   * `plantillaReapertura`.
+   */
+  plantillaAvisoDeAtencion?: string
+  /**
    * Nombre de la plantilla que reabre la ventana de 24 h, si en esta cuenta
    * quedó registrada con un nombre distinto del habitual.
    *

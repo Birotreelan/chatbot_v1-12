@@ -14,6 +14,9 @@ import {
 import { getConversationMessages, getAllConversationMessages, saveConversationMessage, getConversationLastActivity } from "@/lib/conversations"
 import { getWhatsAppConfigById, getThreadForUser } from "@/lib/db"
 import { sendWhatsAppMessage, sendWhatsAppTemplate } from "@/lib/whatsapp-api"
+import { atencionPorChatWeb } from "@/lib/atencion/switch"
+import { agregarMensaje } from "@/lib/atencion/conversacion"
+import { avisarSiCorresponde } from "@/lib/atencion/aviso"
 import { setConversationPaused } from "@/lib/conversations"
 import {
   loQueVeElPaciente,
@@ -635,6 +638,85 @@ async function handleMessage(sessionId: string, session: SessionData, message: s
       hasAccessToken: !!config.accessToken,
       destinationPhone: supportSession.phoneNumber,
     })
+
+    /**
+     * ── El chat web, cuando la clínica lo tiene prendido (5/11/2026) ──────
+     *
+     * El mensaje del agente no sale por WhatsApp: se guarda en la conversación
+     * durable y al paciente se le avisa con un botón que la abre. De acá para
+     * abajo no cambia nada —el mensaje se guarda en el hilo de soporte y en el
+     * historial igual que siempre— así que el panel no se toca: misma lista,
+     * misma burbuja, mismo cuadro de texto.
+     *
+     * Por qué: sólo se pagan los mensajes que salen, y una consulta atendida
+     * por una persona son diez o quince. Por el chat son uno o dos avisos. La
+     * regla de cuándo se avisa está en lib/atencion/aviso.ts, y es la que
+     * decide si esto ahorra plata.
+     *
+     * El `return` adentro del `if` es a propósito: lo que sigue es el camino
+     * de WhatsApp completo, con su manejo de la pausa de envíos y del error de
+     * ventana cerrada, y nada de eso aplica acá.
+     */
+    if (atencionPorChatWeb(config)) {
+      const clienteId = config.cliente_id || supportSession.tenantId || ""
+      const idDelMensaje = nanoid()
+      const ahoraIso = new Date().toISOString()
+
+      await agregarMensaje(clienteId, supportSession.phoneNumber, {
+        id: idDelMensaje,
+        rol: "agente",
+        texto: message.trim(),
+        enviadoEl: ahoraIso,
+        // Para que el paciente vea quién le contesta. Una clínica con varias
+        // personas atendiendo y mensajes sin firma se lee como un sistema.
+        agenteNombre: session.displayName || undefined,
+        via: "chat",
+        sessionId,
+      })
+
+      const aviso = await avisarSiCorresponde({
+        config,
+        clienteId,
+        telefono: supportSession.phoneNumber,
+        // La sesión no guarda el nombre del paciente, y el aviso lo usa sólo
+        // para el saludo: `textoDelAviso` contempla no tenerlo y arranca la
+        // frase en minúscula. Nombrarlo mal sería peor que no nombrarlo.
+      })
+
+      const supportMessage: HumanSupportMessage = {
+        id: idDelMensaje,
+        sessionId,
+        role: "agent",
+        content: message.trim(),
+        timestamp: ahoraIso,
+        agentId: session.userId,
+      }
+      await saveSupportMessage(supportMessage)
+      await saveConversationMessage({
+        id: supportMessage.id,
+        role: "assistant",
+        content: message.trim(),
+        timestamp: ahoraIso,
+        phoneNumber: supportSession.phoneNumber,
+        configId: supportSession.configId,
+        messageType: "agent",
+      })
+
+      console.log(
+        `[ATENCION] Mensaje del agente al chat de ${supportSession.phoneNumber}; ` +
+          `aviso: ${aviso.enviado ? "enviado" : `no (${aviso.motivo})`}`,
+      )
+
+      return NextResponse.json({
+        success: true,
+        message: "Mensaje enviado al chat",
+        // Para que el panel pueda decir algo si algún día se quiere mostrar.
+        // Hoy no lo usa: el pedido fue que del lado de la clínica no cambie nada.
+        porChatWeb: true,
+        avisoEnviado: aviso.enviado,
+        motivoDelAviso: aviso.motivo,
+      })
+    }
 
     console.log("[v0] [MESSAGE] Enviando mensaje a WhatsApp...")
     try {

@@ -561,6 +561,61 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </div>
               </div>
 
+              {/* ── Atención humana por chat web (5/11/2026) ──────────────
+                  `=== true` y no `!== false`, al revés que los de arriba:
+                  éste cambia cómo se atiende a un paciente, no una opción de
+                  una pantalla. Que aparezca el campo no tiene que
+                  prendérselo a ninguna clínica que no lo pidió. */}
+              <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                <Switch
+                  id="atencionPorChatWeb"
+                  checked={formData.atencionPorChatWeb === true}
+                  onCheckedChange={(checked) => updateFormData("atencionPorChatWeb", checked)}
+                />
+                <div className="flex-1">
+                  <Label htmlFor="atencionPorChatWeb" className="text-sm font-medium">
+                    Atención humana por chat web
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Las respuestas del agente salen por un chat alojado acá en lugar de por
+                    WhatsApp, y al paciente se le avisa con un botón que lo abre. Puede escribir,
+                    adjuntar archivos y mandar audios igual que en WhatsApp, y la conversación
+                    queda guardada: si vuelve dentro de dos meses, la ve completa.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Para el agente no cambia nada: misma lista, misma pantalla, mismo cuadro de
+                    texto. Lo que cambia es el costo — hoy cada mensaje que sale cuesta, y por el
+                    chat se paga sólo el aviso.
+                  </p>
+
+                  {/* El nombre de la plantilla, sólo cuando el switch está
+                      prendido. Vacío es significativo y por eso el texto lo
+                      dice: fuera de las 24 h no se avisa, en vez de intentar
+                      una plantilla que no existe y dejar al agente con un
+                      error que no distingue de un problema de red. */}
+                  {formData.atencionPorChatWeb === true && (
+                    <div className="mt-2 space-y-1">
+                      <Label htmlFor="plantillaAvisoDeAtencion" className="text-xs font-medium">
+                        Plantilla para avisar fuera de las 24 h
+                      </Label>
+                      <Input
+                        id="plantillaAvisoDeAtencion"
+                        value={formData.plantillaAvisoDeAtencion || ""}
+                        onChange={(e) => updateFormData("plantillaAvisoDeAtencion", e.target.value)}
+                        placeholder="respuesta_de_atencion"
+                        className="h-8 font-mono text-xs"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Pasadas las 24 h del último mensaje del paciente, WhatsApp sólo acepta
+                        plantillas aprobadas. Cargá acá el nombre con el que quedó registrada en
+                        Meta. Mientras esté vacío, fuera de ese plazo no se le avisa y el agente ve
+                        el estado de la ventana como hasta ahora.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {formData.clientePortalWeb === true && (
                 <div className="space-y-2 p-2 rounded-md bg-muted/30">
                   <Label htmlFor="textoEnlacePortal" className="text-sm font-medium">

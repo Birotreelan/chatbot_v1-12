@@ -26,6 +26,7 @@ import {
   LIMITE_DESCARGA_PANEL,
 } from "@/lib/whatsapp-media"
 import type { MediaAdjunta } from "@/lib/types"
+import { esMediaDelChat, leerMediaDelChat } from "@/lib/atencion/media"
 
 /** Cuántos mensajes del historial se miran para validar que un media_id sea de esta conversación. */
 const MENSAJES_A_REVISAR = 100
@@ -76,6 +77,44 @@ export async function servirMediaDeLaConversacion(params: {
       { success: false, error: "El archivo no pertenece a esta conversación" },
       { status: 403 },
     )
+  }
+
+  /**
+   * ── Los adjuntos del chat de atención (5/11/2026) ───────────────────────
+   *
+   * Un archivo que el paciente subió en el chat web no está en WhatsApp: está
+   * en nuestro almacenamiento, porque tiene que seguir ahí en dos meses. Se
+   * reconoce por el prefijo del id — ver lib/atencion/media.ts.
+   *
+   * Va DESPUÉS del control de pertenencia de arriba, que vale igual para los
+   * dos orígenes: el mensaje del chat se guarda en el historial de la
+   * conversación con su adjunto, así que `buscarMediaEnLaConversacion` lo
+   * encuentra y un agente de otra clínica sigue sin poder pedirlo.
+   *
+   * Y va acá, en la función COMPARTIDA, no en una de las dos rutas: así el
+   * panel de atención y el Monitor del dashboard lo muestran los dos sin
+   * cambiar una línea, que es lo que hace cierto el "del lado de la clínica
+   * queda exactamente igual".
+   */
+  if (esMediaDelChat(mediaId)) {
+    const nuestro = await leerMediaDelChat(mediaId)
+    if (!nuestro) {
+      return NextResponse.json(
+        { success: false, error: "El archivo no está disponible.", caducado: true },
+        { status: 404 },
+      )
+    }
+    return new NextResponse(new Uint8Array(nuestro.contenido), {
+      headers: {
+        "Content-Type": nuestro.media.mimeType,
+        "Content-Length": String(nuestro.contenido.length),
+        "Content-Disposition": cabeceraContentDisposition(
+          nuestro.media.nombreArchivo,
+          forzarDescarga ? "attachment" : "inline",
+        ),
+        "Cache-Control": "private, max-age=3600",
+      },
+    })
   }
 
   const config = await getWhatsAppConfigById(configId)

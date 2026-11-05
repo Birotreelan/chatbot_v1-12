@@ -12,6 +12,8 @@ import { registrarMensajeEntrante, normalizarMomento } from "./ventana-atencion"
 import { estaBloqueado } from "./contactos-bloqueados"
 import { PAYLOAD_BOTON_REAPERTURA, registrarRespuesta } from "./reapertura"
 import { atenderRespuestaDeEncuesta } from "./encuestas/atender-encuesta"
+import { atencionPorChatWeb } from "./atencion/switch"
+import { agregarMensaje } from "./atencion/conversacion"
 import { construirMensajeConEnlace, enviarMensajeConEnlace } from "./portal/mensaje-enlace"
 import {
   leerMediaDelWebhook,
@@ -4166,6 +4168,23 @@ export async function handleMessage(value: any) {
       // justo en el caso que más importa: la sesión que todavía nadie tomó.
       await saveSupportMessage(mensajeDeSoporte)
 
+      // El archivo también entra a la conversación del chat. El adjunto se
+      // guarda con el `mediaId` de WhatsApp tal cual: la ruta de media del
+      // chat sabe resolver los dos orígenes. Lo que SÍ cambia es la duración —
+      // WhatsApp conserva siete días lo que manda un paciente— y eso lo dice
+      // el propio `disponibleHasta` del adjunto.
+      if (atencionPorChatWeb(config)) {
+        await agregarMensaje(config.cliente_id || "", userPhoneNumber, {
+          id: mensajeId,
+          rol: "paciente",
+          texto: userMessage,
+          enviadoEl: ahora,
+          via: "whatsapp",
+          media: mediaEntrante,
+          sessionId: registro.session.id,
+        })
+      }
+
       // Solo se le avisa al paciente cuando la derivación es nueva. Si ya estaba
       // en atención, mandarle "te derivo" por cada foto sería ruido — y un
       // mensaje facturable por foto.
@@ -4242,6 +4261,21 @@ export async function handleMessage(value: any) {
           timestamp: new Date().toISOString(),
         })
 
+        // También a la conversación del chat, por lo mismo que en la rama de
+        // abajo: lo que el paciente escribió tiene que estar donde él lo va a
+        // buscar. Y acá más todavía, porque esta rama es la de la espera: es
+        // el mensaje que va a querer releer mientras nadie le contesta.
+        if (atencionPorChatWeb(config)) {
+          await agregarMensaje(config.cliente_id || "", userPhoneNumber, {
+            id: patientMessageId,
+            rol: "paciente",
+            texto: userMessage,
+            enviadoEl: new Date().toISOString(),
+            via: "whatsapp",
+            sessionId: activeSession.id,
+          })
+        }
+
         // Opcional: enviar mensaje de confirmación
         const confirmMessage = "Tu mensaje ha sido recibido. Un agente te responderá pronto."
         await sendWhatsAppMessage(value.metadata.phone_number_id, config.accessToken, userPhoneNumber, confirmMessage)
@@ -4262,6 +4296,31 @@ export async function handleMessage(value: any) {
 
         await saveSupportMessage(supportMessage)
         await updateWhatsAppStats(config.id, { messagesReceived: 1 })
+
+        /**
+         * ── Y a la conversación del chat web (5/11/2026) ─────────────────
+         *
+         * El paciente puede seguir escribiendo por WhatsApp aunque la clínica
+         * atienda por el chat: es su teléfono y nadie le prohíbe nada. Su
+         * mensaje tiene que quedar en la MISMA conversación, o abre el chat,
+         * no ve lo que acaba de escribir y cree que no llegó.
+         *
+         * No se le contesta nada acá. Cuando el agente responda, el aviso de
+         * siempre le va a llegar con el enlace —ver lib/atencion/aviso.ts— y
+         * ése es el mensaje que lo trae al chat. Mandarle además un "te
+         * respondemos allá" sería un mensaje facturable para decir algo que el
+         * aviso ya dice.
+         */
+        if (atencionPorChatWeb(config)) {
+          await agregarMensaje(config.cliente_id || "", userPhoneNumber, {
+            id: patientMessageId,
+            rol: "paciente",
+            texto: userMessage,
+            enviadoEl: supportMessage.timestamp,
+            via: "whatsapp",
+            sessionId: activeSession.id,
+          })
+        }
 
         // El mensaje se envia al agente a través de WebSocket o polling en la UI
         // No necesitamos enviar respuesta automática aquí
