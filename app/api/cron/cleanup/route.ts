@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { cerrarSesionesInactivas } from "@/lib/human-support"
 import { Redis } from "@upstash/redis"
 import { incrementMetric, logError } from "@/lib/monitoring"
 
@@ -268,7 +269,29 @@ export async function GET(req: Request) {
       }
     }
 
+    /**
+     * 8. Cerrar las sesiones de atención abiertas y sin actividad (5/11/2026)
+     *
+     * Hasta hoy el cron borraba las conversaciones a los 7 días y no tocaba
+     * las sesiones de atención, que se guardan SIN vencimiento. El resultado
+     * era una sesión de diez días en "Mis Activas" que al abrirse no tenía un
+     * solo mensaje —se le habían evaporado por debajo— y, peor, con la
+     * conversación con el bot pausada todo ese tiempo: ni humano ni bot.
+     *
+     * Va con el MISMO plazo que la retención de conversaciones, y no con uno
+     * propio, porque es la misma decisión: una sesión no puede sobrevivir a su
+     * contenido. Si mañana se sube `CLEANUP_CONVERSATION_DAYS`, esto lo sigue
+     * solo.
+     *
+     * Cierra, no borra: `closeSession` reanuda el bot, saca la sesión de los
+     * dos índices y libera el teléfono. Ver `cerrarSesionesInactivas`.
+     */
+    const sesiones = await cerrarSesionesInactivas(conversationDays)
+
     console.log(`[CLEANUP] Conversaciones eliminadas: ${conversationsDeleted} (${conversationMessagesDeleted} mensajes)`)
+    console.log(
+      `[CLEANUP] Sesiones de atención cerradas por inactividad: ${sesiones.cerradas} de ${sesiones.revisadas} abiertas`,
+    )
     console.log(`[CLEANUP] Contactos eliminados: ${contactsDeleted}`)
     console.log(`[CLEANUP] Flags pausados huerfanos eliminados: ${pausedFlagsDeleted}`)
 
@@ -282,9 +305,12 @@ export async function GET(req: Request) {
     await incrementMetric("cleanup_conversation_messages_deleted", conversationMessagesDeleted)
     await incrementMetric("cleanup_contacts_deleted", contactsDeleted)
     await incrementMetric("cleanup_paused_flags_deleted", pausedFlagsDeleted)
+    await incrementMetric("cleanup_sesiones_cerradas", sesiones.cerradas)
 
     return NextResponse.json({
       success: true,
+      sesionesDeAtencionCerradas: sesiones.cerradas,
+      sesionesDeAtencionRevisadas: sesiones.revisadas,
       threadsDeleted,
       threadsConverted,
       metricsCleanedUp,

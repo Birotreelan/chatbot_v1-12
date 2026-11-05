@@ -336,16 +336,61 @@ export async function getAgentActiveSessions(agentId: string): Promise<HumanSupp
   const results = await pipeline.exec()
 
   const sessions: HumanSupportSession[] = []
-  for (const raw of results) {
-    if (!raw) continue
-    try {
-      const session = (typeof raw === "string" ? JSON.parse(raw) : raw) as HumanSupportSession
-      if (session && session.status === "in_progress") {
-        sessions.push(session)
-      }
-    } catch {
-      // skip malformed session
+  const aLimpiar: string[] = []
+
+  /**
+   * Se recorre por ÍNDICE, no por valor (5/11/2026).
+   *
+   * Antes era `for (const raw of results)` con un `continue` cuando venía
+   * vacío: la sesión desaparecida se saltaba, pero su id quedaba en el SET
+   * para siempre — y este SET, a diferencia del sorted set de pendientes, no
+   * vence nunca. `getPendingSessions` ya se autocorregía desde el 23/9; acá
+   * faltaba.
+   *
+   * La consecuencia era visible: la tarjeta aparecía en "Mis Activas" con su
+   * teléfono y su motivo —porque el objeto todavía estaba cuando se armó la
+   * lista— y al abrirla el detalle devolvía 404. O peor: desaparecía de la
+   * lista pero el conteo del widget seguía contándola.
+   */
+  for (let i = 0; i < sessionIds.length; i++) {
+    const sessionId = String(sessionIds[i])
+    const raw = results[i]
+
+    if (!raw) {
+      aLimpiar.push(sessionId)
+      continue
     }
+
+    let session: HumanSupportSession | null = null
+    try {
+      session = (typeof raw === "string" ? JSON.parse(raw) : raw) as HumanSupportSession
+    } catch {
+      aLimpiar.push(sessionId)
+      continue
+    }
+
+    if (!session) {
+      aLimpiar.push(sessionId)
+      continue
+    }
+
+    if (session.status === "in_progress") {
+      sessions.push(session)
+      continue
+    }
+
+    // Ya no la está atendiendo: resuelta, o devuelta a pendientes. El estado
+    // manda y el índice se corrige, igual que en `getPendingSessions`.
+    aLimpiar.push(sessionId)
+  }
+
+  if (aLimpiar.length > 0) {
+    await redis.srem(agentSessionsKey, ...aLimpiar).catch((error) => {
+      console.warn("[HUMAN_SUPPORT] No se pudo limpiar el índice de activas:", error)
+    })
+    console.log(
+      `[HUMAN_SUPPORT] ${aLimpiar.length} entradas colgadas sacadas del índice de ${agentId}`,
+    )
   }
 
   return sessions
@@ -675,6 +720,119 @@ export async function getSupportMessages(sessionId: string): Promise<HumanSuppor
 export async function hasActiveSession(configId: string, phoneNumber: string): Promise<boolean> {
   const session = await getActiveSessionByPhone(configId, phoneNumber)
   return session !== null && (session.status === "pending" || session.status === "in_progress")
+}
+
+/**
+ * Cierra las sesiones que quedaron abiertas y sin actividad (5/11/2026).
+ *
+ * ── Por qué existe ─────────────────────────────────────────────────────────
+ *
+ * La sesión se guarda SIN vencimiento, pero todo lo que cuelga de ella dura
+ * siete días:
+ *
+ *   human_support:messages:<id>   7 días   (saveSupportMessage)
+ *   conversation:<cfg>:<tel>      7 días   (CONVERSATION_TTL + el cron)
+ *   human_support:activity:<id>   7 días
+ *   la ventana de 24 h           48 horas
+ *
+ * O sea que una conversación de diez días seguía figurando en "Mis Activas" y
+ * al abrirla no tenía ni un mensaje: el contenido se le había evaporado por
+ * debajo. Nicolás lo reportó el 5/11 con dos conversaciones de diez días.
+ *
+ * Y había algo peor que la lista sucia: mientras la sesión está abierta, la
+ * conversación con el bot está PAUSADA. Un paciente con una sesión que nadie
+ * cerró llevaba diez días sin bot y sin humano — le escribía a la clínica y no
+ * le contestaba nadie.
+ *
+ * ── Cierra, no borra ───────────────────────────────────────────────────────
+ *
+ * Se usa `closeSession`, que hace las cinco cosas que hay que hacer: la saca
+ * del índice de pendientes y del de activas del agente, borra el mapeo del
+ * teléfono, le pone el TTL de sesiones resueltas y —la que importa— REANUDA la
+ * conversación con el bot. Borrar la clave a mano dejaría al paciente pausado
+ * para siempre.
+ *
+ * ── Sin avisarle al paciente ───────────────────────────────────────────────
+ *
+ * Decidido con Nicolás. A los siete días de silencio la ventana de 24 h está
+ * cerrada hace rato, así que avisar costaría una plantilla por conversación
+ * para decirle algo a alguien que no escribe hace una semana. Si vuelve a
+ * escribir se le abre una sesión nueva, que es lo que corresponde.
+ *
+ * ── Cómo se mide la inactividad ────────────────────────────────────────────
+ *
+ * Por la ausencia de la clave de actividad, que ya vence sola a los 7 días en
+ * cada mensaje. No hace falta escribir ningún dato nuevo: que no esté ES la
+ * señal. Se cruza con la fecha de creación porque una sesión recién creada
+ * todavía no tiene esa clave —`createSupportSession` no la escribe— y sin ese
+ * cruce se cerraría al minuto de nacer.
+ */
+export async function cerrarSesionesInactivas(
+  dias: number = 7,
+): Promise<{ revisadas: number; cerradas: number }> {
+  const redis = getRedisClient()
+  if (!redis) return { revisadas: 0, cerradas: 0 }
+
+  const corte = Date.now() - dias * 24 * 60 * 60 * 1000
+  const claves = await scanSupportSessionKeys(redis)
+
+  let revisadas = 0
+  let cerradas = 0
+
+  for (const clave of claves) {
+    try {
+      const crudo = await redis.get(clave)
+      if (!crudo) continue
+
+      const session = (typeof crudo === "string" ? JSON.parse(crudo) : crudo) as HumanSupportSession
+      if (!session?.id) continue
+      if (session.status !== "pending" && session.status !== "in_progress") continue
+
+      revisadas += 1
+
+      // Si la clave de actividad existe, hubo un mensaje en los últimos 7
+      // días: está viva aunque sea vieja.
+      //
+      // Esa clave vence a los 7 días (`SESSION_ACTIVITY_TTL`), que es el mismo
+      // plazo que conservan los mensajes. Si algún día `dias` fuera menor, el
+      // plazo efectivo seguiría siendo 7 para las sesiones que tuvieron
+      // mensajes: cierra más tarde, nunca antes, que es el lado seguro.
+      const actividad = await getSupportSessionActivity(session.id)
+      if (actividad) continue
+
+      // Sin actividad: se mira cuándo empezó. `requestedAt` es el momento en
+      // que se pidió la atención. La más reciente de las dos fechas, porque
+      // una sesión pedida hace diez días y tomada ayer está viva aunque nadie
+      // haya escrito todavía.
+      const creada = new Date(session.requestedAt || 0).getTime()
+      const asignada = session.assignedAt ? new Date(session.assignedAt).getTime() : 0
+      const ultimoRastro = Math.max(Number.isNaN(creada) ? 0 : creada, Number.isNaN(asignada) ? 0 : asignada)
+
+      // Sin ninguna fecha utilizable no se cierra: preferir dejarla abierta
+      // antes que cerrar algo que no se pudo fechar.
+      if (ultimoRastro === 0 || ultimoRastro > corte) continue
+
+      const cerro = await closeSession(
+        session.id,
+        `Cerrada automáticamente: ${dias} días sin actividad. Los mensajes de una conversación se conservan ese mismo plazo.`,
+      )
+      if (cerro) {
+        cerradas += 1
+        console.log(
+          `[HUMAN_SUPPORT] 🧹 ${session.id} (${session.phoneNumber}) cerrada por ${dias} días sin actividad`,
+        )
+      }
+    } catch (error) {
+      // Una sesión ilegible no puede frenar la limpieza de las demás.
+      console.warn(`[HUMAN_SUPPORT] No se pudo revisar ${clave}:`, error)
+    }
+  }
+
+  if (cerradas > 0) {
+    console.log(`[HUMAN_SUPPORT] 🧹 ${cerradas} de ${revisadas} sesiones abiertas cerradas por inactividad`)
+  }
+
+  return { revisadas, cerradas }
 }
 
 // ─── Cierre masivo de sesiones (toggle del flag maestro "humanSupport") ────
