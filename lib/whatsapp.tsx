@@ -423,6 +423,25 @@ async function sendDirectResponse(
     // Es una lectura más por respuesta sólo para los clientes del portal.
     const configRepeticion = configSilencio ?? (await getWhatsAppConfigById(ctx.configId).catch(() => null))
 
+    /**
+     * Lo que se compara es lo que se recuerda (12/11/2026).
+     *
+     * Antes se comparaba el mensaje crudo —acá— y se recordaba el mensaje YA
+     * presentado, treinta líneas más abajo. Como la presentación como asistente
+     * de IA se antepone una sola vez por día, las dos puntas no eran el mismo
+     * texto y la primera repetición siempre pasaba:
+     *
+     *   #1  "Soy el asistente… · ¿En qué te ayudo?"  → recordado CON prefijo
+     *   #2  "¿En qué te ayudo?"                      → distinto → SALE
+     *   #3  "¿En qué te ayudo?"                      → ahora sí, se calla
+     *
+     * O sea que del caso reportado —cuatro saludos idénticos— se seguían
+     * pagando dos. Se recuerda el texto crudo, que es contra el que se compara.
+     * Las etiquetas del cliente que se aplican más abajo no cambian nada:
+     * son constantes por cliente, así que afectan a los dos lados igual.
+     */
+    const textoParaRecordar = message
+
     if (
       usaSilencio(configRepeticion) &&
       (await esIdenticoALoUltimo(ctx.configId, ctx.userPhoneNumber, message))
@@ -499,9 +518,10 @@ async function sendDirectResponse(
       await anotarQueSeDijo(ctx.configId, ctx.userPhoneNumber, etiqueta)
     }
 
-    // El texto tal como salió —ya con la presentación y las etiquetas del
-    // cliente aplicadas—, que es con lo que hay que comparar el próximo.
-    await recordarUltimaRespuesta(ctx.configId, ctx.userPhoneNumber, message)
+    // El texto crudo, el mismo que se comparó arriba. Ver `textoParaRecordar`:
+    // recordar el que salió —con la presentación del día ya puesta— es lo que
+    // dejaba pasar la primera repetición.
+    await recordarUltimaRespuesta(ctx.configId, ctx.userPhoneNumber, textoParaRecordar)
 
     // Recordar los botones y el texto del paso actual (para re-mostrarlos en una
     // consulta intercalada o un "no te entendí"). No lo hacemos para la propia
