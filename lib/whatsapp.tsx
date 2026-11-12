@@ -2,7 +2,7 @@ import { getWhatsAppConfigByPhoneId, getWhatsAppConfigById, updateWhatsAppStats,
 import { sendWhatsAppMessage, sendWhatsAppInteractive, sendWhatsAppList } from "@/lib/whatsapp-api"
 import { downloadWhatsAppMedia, transcribeAudio } from "@/lib/audio-transcription"
 import { saveConversationAudio } from "@/lib/conversation-audio"
-import { llevaDatosDeContacto, fraseDerivacion, esContactoMultilinea, contactoDerivacionEnLinea, telefonoParaMensajes } from "@/lib/utils/escalation-contact"
+import { fraseDerivacion, esContactoMultilinea, contactoDerivacionEnLinea, telefonoParaMensajes } from "@/lib/utils/escalation-contact"
 import { getArgentinaDateTime, formatDateWithDayOfWeek } from "@/lib/utils/date-utils"
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
@@ -24,11 +24,7 @@ import {
 import { usaPortal, derivarAlPortal, datosDesdeElContexto } from "./portal/derivar-al-portal"
 import {
   usaSilencio,
-  yaSeDijo,
-  anotarQueSeDijo,
   registrarSilencio,
-  esIdenticoALoUltimo,
-  recordarUltimaRespuesta,
 } from "./conversation-state/silencio"
 import { cancelacionReciente, mensajeYaCancelado } from "./portal/cancelacion-reciente"
 import { PLANTILLA_SIN_TURNO } from "./portal/mensaje-enlace"
@@ -333,129 +329,32 @@ async function sendDirectResponse(
   message: string,
   phase = "direct",
   buttons?: Array<{ id: string; title: string }>,
-  opciones?: {
-    /**
-     * Este mensaje se manda una sola vez cada 24 h (29/9/2026).
-     *
-     * El valor es una ETIQUETA de qué se está diciendo —"derivacion",
-     * "cancelacion_no_permitida"— y no el texto: si mañana se reescribe la
-     * frase, el paciente no tiene que volver a recibirla por ser otras
-     * palabras.
-     *
-     * Se marca a mano, en las pocas ramas donde repetir no agrega nada. NO se
-     * deduce del texto: "no entendí, elegí una opción" seguido del mismo menú
-     * también es una repetición, y ésa hay que mandarla.
-     *
-     * Ver lib/conversation-state/silencio.ts.
-     */
-    unaVezPorVentana?: string
-  },
 ): Promise<boolean> {
   const logger = createConversationLogger(ctx.userPhoneNumber, ctx.configId, phase)
   try {
-    // ── ¿Ya se lo dijimos hoy? ────────────────────────────────────────────
-    //
-    // Va arriba de todo, antes de la presentación y del armado: si no se va a
-    // enviar, no tiene sentido prepararlo. Y va en el embudo y no en cada rama
-    // por el mismo motivo que la presentación —ver presentacion-inicial—: una
-    // rama que se olvida de callar no se nota hasta que alguien mira la
-    // factura.
-    //
-    // ── Los datos de contacto se mandan una sola vez (2/10/2026) ──────────
-    //
-    // Reportado: a un paciente de PAMI SO le dimos los seis teléfonos de las
-    // sedes en el saludo y, cuando volvió a escribir, se los dimos enteros de
-    // nuevo. El segundo envío no le agrega nada —los tiene dos mensajes más
-    // arriba— y se paga igual que cualquier otro.
-    //
-    // La etiqueta se deduce del texto en vez de marcarse en cada rama. Es la
-    // excepción a la regla de arriba, y tiene su motivo: el bloque sale hoy de
-    // cinco lugares distintos y la sexta rama que se agregue mañana se
-    // olvidaría de etiquetarla. Acá no hay nada que recordar.
-    //
-    // La diferencia con "no repitas el mismo texto" —la regla que silencio.ts
-    // deliberadamente NO implementa— es que esto no mira si el texto se
-    // repite: mira si lleva una información puntual que el paciente ya tiene.
-    // Un menú repetido hay que mandarlo; una lista de teléfonos, no.
-    let etiqueta = opciones?.unaVezPorVentana
-
-    // Sin una tira de siete dígitos no hay teléfono posible, y entonces no
-    // hace falta leer la configuración. Importa: esto corre en cada respuesta,
-    // y la mayoría —menús, confirmaciones, "no te entendí"— no lleva ningún
-    // número. Mismo criterio que el bloque de etiquetas de más abajo.
-    const podriaLlevarContacto = !etiqueta && /\d[\d\s().-]{6,}/.test(message)
-
-    const configSilencio =
-      etiqueta || podriaLlevarContacto
-        ? await getWhatsAppConfigById(ctx.configId).catch(() => null)
-        : null
-
-    if (podriaLlevarContacto && llevaDatosDeContacto(message, configSilencio?.escalationPhoneNumber)) {
-      etiqueta = "datos_de_contacto"
-    }
-
-    if (etiqueta) {
-      if (
-        usaSilencio(configSilencio) &&
-        (await yaSeDijo(ctx.configId, ctx.userPhoneNumber, etiqueta))
-      ) {
-        registrarSilencio({
-          configId: ctx.configId,
-          phoneNumber: ctx.userPhoneNumber,
-          motivo: "ya_se_dijo",
-          texto: message,
-          detalle: etiqueta,
-        })
-        return true
-      }
-    }
-
-    // ── El mismo texto dos veces seguidas (2/10/2026) ─────────────────────
-    //
-    // Reportado: un paciente escribió cuatro veces y recibió cuatro veces el
-    // mismo saludo, palabra por palabra, en un minuto.
-    //
-    // Se compara contra lo ÚLTIMO enviado y no contra todo lo del día: el
-    // caso legítimo —"no entendí tu respuesta" seguido del mismo menú— no es
-    // idéntico al menú solo, así que sale. Ver `esIdenticoALoUltimo`.
-    //
-    // La config ya está leída arriba cuando hizo falta; si no, se lee ahora.
-    // Es una lectura más por respuesta sólo para los clientes del portal.
-    const configRepeticion = configSilencio ?? (await getWhatsAppConfigById(ctx.configId).catch(() => null))
-
     /**
-     * Lo que se compara es lo que se recuerda (12/11/2026).
+     * ── Lo que se quitó de acá (12/11/2026) ───────────────────────────────
      *
-     * Antes se comparaba el mensaje crudo —acá— y se recordaba el mensaje YA
-     * presentado, treinta líneas más abajo. Como la presentación como asistente
-     * de IA se antepone una sola vez por día, las dos puntas no eran el mismo
-     * texto y la primera repetición siempre pasaba:
+     * En este punto vivían dos reglas de silencio que ya no están:
      *
-     *   #1  "Soy el asistente… · ¿En qué te ayudo?"  → recordado CON prefijo
-     *   #2  "¿En qué te ayudo?"                      → distinto → SALE
-     *   #3  "¿En qué te ayudo?"                      → ahora sí, se calla
+     *  · "una vez por ventana": un mensaje con una etiqueta —derivación,
+     *    cancelación no permitida— no se repetía por 24 h. La rama la marcaba
+     *    con `opciones.unaVezPorVentana`, y el bloque de datos de contacto se
+     *    etiquetaba solo, mirando si el texto traía teléfonos.
+     *  · "idéntica a la anterior": no salía un texto igual al último enviado.
      *
-     * O sea que del caso reportado —cuatro saludos idénticos— se seguían
-     * pagando dos. Se recuerda el texto crudo, que es contra el que se compara.
-     * Las etiquetas del cliente que se aplican más abajo no cambian nada:
-     * son constantes por cliente, así que afectan a los dos lados igual.
+     * Las dos ahorraban mensajes y las dos tenían el mismo costo: el paciente
+     * que vuelve a preguntar algo que ya le contestamos recibía silencio, y
+     * desde afuera el silencio no se distingue de un número que no funciona.
+     * Se decidió pagar el mensaje repetido.
+     *
+     * Lo que SÍ queda es callar ante un cierre conversacional —"gracias",
+     * "chau"—, que no es una repetición: es un mensaje que no hace falta ni la
+     * primera vez. Ver lib/conversation-state/silencio.ts.
+     *
+     * Si alguna vez se quieren de vuelta, están en el historial de git:
+     * buscar `esIdenticoALoUltimo` antes de esta fecha.
      */
-    const textoParaRecordar = message
-
-    if (
-      usaSilencio(configRepeticion) &&
-      (await esIdenticoALoUltimo(ctx.configId, ctx.userPhoneNumber, message))
-    ) {
-      registrarSilencio({
-        configId: ctx.configId,
-        phoneNumber: ctx.userPhoneNumber,
-        motivo: "respuesta_identica",
-        texto: message,
-        detalle: "idéntica a la anterior — revisar por qué el flujo no avanzó",
-      })
-      return true
-    }
-
     // Presentación como asistente de IA en la primera respuesta del día
     // (17/9/2026). Se decide acá, en el embudo, y no en cada rama: estaba
     // resuelta a mano en 13 lugares y cada capa nueva se olvidaba —el executor,
@@ -510,18 +409,6 @@ async function sendDirectResponse(
     appendToHistory(ctx.userPhoneNumber, { role: 'bot', text: message, timestamp: Date.now() }).catch(() => {})
 
     await updateWhatsAppStats(ctx.configId, { messagesProcessed: 1 })
-
-    // Recién ahora, con el mensaje ya enviado. Anotarlo antes y que el envío
-    // fallara dejaría al paciente sin la respuesta y sin poder recibirla por
-    // 24 h.
-    if (etiqueta) {
-      await anotarQueSeDijo(ctx.configId, ctx.userPhoneNumber, etiqueta)
-    }
-
-    // El texto crudo, el mismo que se comparó arriba. Ver `textoParaRecordar`:
-    // recordar el que salió —con la presentación del día ya puesta— es lo que
-    // dejaba pasar la primera repetición.
-    await recordarUltimaRespuesta(ctx.configId, ctx.userPhoneNumber, textoParaRecordar)
 
     // Recordar los botones y el texto del paso actual (para re-mostrarlos en una
     // consulta intercalada o un "no te entendí"). No lo hacemos para la propia
@@ -2259,10 +2146,6 @@ async function startCancelDoubleConfirm(
       `Actualmente no es posible cancelar turnos por este medio.\n\n` +
         fraseDerivacion('Para cancelar tu turno, por favor contactanos', telefonoParaMensajes(config)),
       "cancelacion-no-permitida",
-      undefined,
-      // El paciente ya sabe que por acá no se puede: repetírselo cada vez que
-      // insiste no le agrega nada y se paga cada vez.
-      { unaVezPorVentana: "cancelacion_no_permitida" },
     )
     await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
     return true
@@ -7214,8 +7097,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 `Actualmente no es posible cancelar turnos por este medio.\n\n` +
                   fraseDerivacion('Para cancelar tu turno, por favor contactanos', telefonoParaMensajes(config)),
                 "cancelacion-no-permitida",
-                undefined,
-                { unaVezPorVentana: "cancelacion_no_permitida" },
               )
             } else if (detectionResult.action === 'confirm_appointment' || detectionResult.action === 'cancel_appointment' || detectionResult.action === 'cancel_and_book_new_appointment') {
               // Sprint 9a: Manejar confirmación/cancelación directamente con los turnos del paciente detectado
@@ -8220,8 +8101,6 @@ export async function processIndividualMessage(
           `Actualmente no es posible reagendar turnos por este medio.\n\n` +
             fraseDerivacion('Para reagendar tu turno, por favor contactanos', telefonoParaMensajes(config)),
           "reagendamiento-no-permitido",
-          undefined,
-          { unaVezPorVentana: "reagendamiento_no_permitido" },
         )
         await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
         return

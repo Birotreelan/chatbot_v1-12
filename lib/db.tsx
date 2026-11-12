@@ -842,11 +842,15 @@ export async function clearAllConversationStates(
     // respuesta, no sólo el estado del flujo. Si no, el reinicio es parcial
     // de un modo que nadie puede adivinar.
     //
-    // Los prefijos son de lib/conversation-state/silencio.ts y
-    // presentacion-inicial.ts; se escriben acá a mano porque importarlos
-    // desde db.tsx armaría un ciclo. Si allá cambian, esto queda viejo —por
-    // eso los nombres figuran en el comentario, para que se encuentren.
-    `silencio:ultima:${configId}:${normalizedPhone}`,
+    // De las dos claves que había acá quedó una: `silencio:ultima:` y las
+    // etiquetas de "ya se lo dijimos hoy" se dejaron de escribir el
+    // 12/11/2026, cuando se quitaron esas dos reglas. Las que quedaron
+    // escritas vencen solas (24 h y 1 h).
+    //
+    // El prefijo es de lib/conversation-state/presentacion-inicial.ts; se
+    // escribe acá a mano porque importarlo desde db.tsx armaría un ciclo. Si
+    // allá cambia, esto queda viejo —por eso el nombre figura en el
+    // comentario, para que se encuentre.
     `presentacion_enviada:${configId}:${normalizedPhone}`,
 
     // El historial que leen el extractor de entidades y el generador de
@@ -855,20 +859,6 @@ export async function clearAllConversationStates(
     `conv_history_v2:${normalizedPhone}`,
   ]
   
-  // ── Las etiquetas de "ya se lo dijimos hoy" ─────────────────────────────
-  //
-  // Van por scan porque la etiqueta es parte de la clave y la lista crece:
-  // hoy son `datos_de_contacto`, `cancelacion_no_permitida` y
-  // `reagendamiento_no_permitido`, y la próxima que se agregue quedaría sin
-  // limpiar si acá hubiera una lista escrita a mano. Un reset es una
-  // operación rara, así que el scan no cuesta nada.
-  try {
-    const etiquetas = await scanRedisKeys(redisClient, `silencio:${configId}:${normalizedPhone}:*`)
-    keysToDelete.push(...etiquetas)
-  } catch (error) {
-    errors.push(`Error buscando etiquetas de silencio: ${(error as Error).message}`)
-  }
-
   // Limpiar cada key
   for (const key of keysToDelete) {
     try {

@@ -12,7 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
-import { usaSilencio, yaSeDijo, registrarSilencio } from "./silencio"
+import { usaSilencio, registrarSilencio } from "./silencio"
 
 describe("a quién le aplica", () => {
   it("sólo a los clientes del portal", () => {
@@ -26,14 +26,6 @@ describe("a quién le aplica", () => {
     for (const config of [null, undefined, {}, { clientePortalWeb: false }]) {
       expect(usaSilencio(config), JSON.stringify(config)).toBe(false)
     }
-  })
-})
-
-describe("sin Redis no se calla", () => {
-  it("yaSeDijo devuelve false cuando no hay dónde leer el estado", async () => {
-    // El error inofensivo es un mensaje de más. Callar por no poder leer el
-    // estado sería callar por accidente, que es justo lo que no queremos.
-    expect(await yaSeDijo("cfg", "5491100000000", "derivacion")).toBe(false)
   })
 })
 
@@ -67,7 +59,7 @@ describe("el registro de lo que se calló", () => {
     registrarSilencio({
       configId: "cfg",
       phoneNumber: "549110",
-      motivo: "ya_se_dijo",
+      motivo: "cierre_conversacional",
       texto: "x".repeat(500),
     })
     expect(String(log.mock.calls[0]?.[0] || "").length).toBeLessThan(300)
@@ -75,7 +67,7 @@ describe("el registro de lo que se calló", () => {
 
   it("aguanta un silencio sin texto", () => {
     expect(() =>
-      registrarSilencio({ configId: "cfg", phoneNumber: "549110", motivo: "ya_se_dijo" }),
+      registrarSilencio({ configId: "cfg", phoneNumber: "549110", motivo: "cierre_conversacional" }),
     ).not.toThrow()
   })
 })
