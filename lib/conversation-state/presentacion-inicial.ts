@@ -29,6 +29,7 @@
 import { getRedisClient } from "../redis"
 import { getPatientSnapshot } from "../conversations"
 import { getWhatsAppConfigById } from "../db"
+import { getAppointmentContext } from "../appointment-flow-state"
 
 const PRESENTACION_PREFIX = "presentacion_enviada:"
 
@@ -53,6 +54,51 @@ function primerNombre(nombreCompleto?: string | null): string {
   const primero = (nombreCompleto || "").trim().split(/\s+/)[0] || ""
   if (!primero) return ""
   return primero.charAt(0).toUpperCase() + primero.slice(1).toLowerCase()
+}
+
+/**
+ * ¿Con qué nombre saludamos? (13/11/2026)
+ *
+ * ── El caso ───────────────────────────────────────────────────────────────
+ *
+ * Un mismo mensaje nombró a dos pacientes distintos:
+ *
+ *   ¡Hola, Testdos! Soy Iris, tu asistente virtual…
+ *   Testuno, tu confirmación de asistencia fue recibida correctamente.
+ *
+ * El cuerpo estaba bien —era el turno de Testuno, el del botón que se tocó—.
+ * El que estaba mal era el saludo: el nombre sale del snapshot del paciente,
+ * que está guardado POR TELÉFONO, así que tiene al último que se identificó.
+ * Con dos pacientes en un teléfono, el snapshot es una respuesta vieja a una
+ * pregunta que cambió.
+ *
+ * ── La regla: ante la duda, sin nombre ────────────────────────────────────
+ *
+ * Si el snapshot y el turno del que estamos hablando apuntan a documentos
+ * distintos, no sabemos quién está escribiendo, y entonces no se usa ninguno
+ * de los dos: sale "*¡Hola!* Soy Iris…", que es la variante que ya existía
+ * para cuando no se conoce al paciente.
+ *
+ * Nombrar mal a alguien en una conversación sobre su salud es peor que no
+ * nombrarlo. Y acá hay un agravante: el cuerpo del mensaje sí nombra al
+ * paciente correcto, así que un saludo equivocado no queda como un detalle
+ * —queda como dos personas en un mismo mensaje, y el paciente no puede saber
+ * cuál de las dos cosas creer—.
+ */
+export function nombreParaSaludar(opciones: {
+  /** Del snapshot por teléfono: el último paciente identificado. */
+  nombreDelSnapshot?: string | null
+  dniDelSnapshot?: string | null
+  /** Del turno del que trata esta respuesta. */
+  dniDelTurno?: string | null
+}): string | null {
+  const digitos = (v?: string | null) => String(v ?? "").replace(/[^0-9]/g, "")
+  const delSnapshot = digitos(opciones.dniDelSnapshot)
+  const delTurno = digitos(opciones.dniDelTurno)
+
+  if (delSnapshot && delTurno && delSnapshot !== delTurno) return null
+
+  return opciones.nombreDelSnapshot || null
 }
 
 /**
@@ -153,13 +199,21 @@ export async function presentarSiCorresponde(
       return mensaje
     }
 
-    const [snapshot, config] = await Promise.all([
+    const [snapshot, config, contextoDelTurno] = await Promise.all([
       getPatientSnapshot(configId, phoneNumber).catch(() => null),
       getWhatsAppConfigById(configId).catch(() => null),
+      // El turno del que trata esta respuesta. En el camino de los botones ya
+      // quedó guardado el del mensaje que el paciente tocó, así que acá se
+      // puede saber si el snapshot del teléfono habla de otra persona.
+      getAppointmentContext(phoneNumber, configId).catch(() => null),
     ])
 
     const conPresentacion = anteponerPresentacion(mensaje, {
-      nombre: snapshot?.nombre,
+      nombre: nombreParaSaludar({
+        nombreDelSnapshot: snapshot?.nombre,
+        dniDelSnapshot: snapshot?.nrodoc,
+        dniDelTurno: contextoDelTurno?.paciente?.dni,
+      }),
       clinica: config?.displayName,
     })
 
