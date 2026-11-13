@@ -1,4 +1,5 @@
 import { getRedisClient } from '@/lib/redis'
+import { turnosDelPaciente } from "./turnos-del-paciente"
 import { createConversationLogger } from '../logger'
 import { ClinicAPI } from '../../clinic-api'
 import { savePatientSnapshot } from '../../conversations'
@@ -325,7 +326,14 @@ export async function startPatientDetectionFlow(
     // Los turnos vienen directamente en turnos_proximos del get_paciente response.
     // get_turnos_paciente no existe en el proxy, y get_turnos devuelve slots disponibles
     // (no turnos reservados del paciente), por lo que no se usa como fallback.
-    let turnos: any[] = turnosFromResponse
+    // Sólo los de este paciente: con `pacientes_multiples`, `turnos_proximos`
+    // viene al nivel raíz y es la unión de los turnos de todos los pacientes
+    // del teléfono. Ver ./turnos-del-paciente.ts.
+    let turnos: any[] = turnosDelPaciente(
+      turnosFromResponse,
+      { patientId, patientDNI, hc: patient.HC || patient.hc },
+      'detección por teléfono',
+    )
 
     // Filtrar turnos cancelados (Estado es string: "Cancelado", "No confirmado", "Confirmado")
     turnos = turnos.filter(
@@ -468,7 +476,16 @@ export async function identifyPatientByDNI(
     const obraSocialId = (paciente.Deudor_Id || paciente.deudor_id || '').toString().trim()
     const obraSocialNombre = (paciente.Deudor_Nombre || paciente.deudor_nombre || '').toString().trim()
 
-    const turnos = (turnosDeRespuesta || []).filter(
+    // Sólo los de este paciente — ver ./turnos-del-paciente.ts. El DNI vino en
+    // el propio mensaje, así que se eligió bien al paciente entre los del
+    // teléfono; lo que faltaba era filtrar su lista de turnos.
+    const turnosPropios = turnosDelPaciente(
+      turnosDeRespuesta,
+      { patientId, patientDNI, hc: paciente.HC || paciente.hc },
+      'DNI en el primer mensaje',
+    )
+
+    const turnos = turnosPropios.filter(
       (t: any) => t.estado !== 'cancelado' && t.status !== 'cancelado',
     )
 
@@ -755,11 +772,24 @@ export async function processDNIForDisambiguation(
       nombre: foundPatientFirstName || undefined,
     })
 
-    // Usar turnos de la respuesta de get_paciente si existen
-    let turnos: any[] = turnosFromResponse
-
+    // Sólo los de este paciente (13/11/2026).
+    //
+    // Éste es el camino del caso reportado: el teléfono tenía dos pacientes, el
+    // bot pidió el DNI, el paciente lo dio, se lo saludó por su nombre —bien— y
+    // acto seguido se le listaron los dos turnos. `turnos_proximos` viene al
+    // nivel raíz y es la unión de todos. Ver ./turnos-del-paciente.ts.
+    //
     // Nota: get_turnos_paciente no existe en el proxy — los turnos siempre vienen
     // en turnos_proximos del get_paciente. Si no hay turnos aquí, el paciente no tiene turnos.
+    let turnos: any[] = turnosDelPaciente(
+      turnosFromResponse,
+      {
+        patientId: foundPatientId,
+        patientDNI: validatedPatientDNI,
+        hc: validatedPatient.HC || validatedPatient.hc,
+      },
+      'DNI para desambiguar',
+    )
 
     // Filtrar turnos cancelados
     turnos = turnos.filter(
