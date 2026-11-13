@@ -66,39 +66,49 @@ function primerNombre(nombreCompleto?: string | null): string {
  *   ¡Hola, Testdos! Soy Iris, tu asistente virtual…
  *   Testuno, tu confirmación de asistencia fue recibida correctamente.
  *
- * El cuerpo estaba bien —era el turno de Testuno, el del botón que se tocó—.
- * El que estaba mal era el saludo: el nombre sale del snapshot del paciente,
- * que está guardado POR TELÉFONO, así que tiene al último que se identificó.
- * Con dos pacientes en un teléfono, el snapshot es una respuesta vieja a una
- * pregunta que cambió.
+ * El turno de las 18:00 es de Testuno, y el cuerpo lo decía bien: es el turno
+ * del botón que el paciente tocó. El que estaba mal era el saludo, porque el
+ * nombre salía del snapshot del paciente —guardado POR TELÉFONO, con el
+ * último que se identificó—. Con dos pacientes en un teléfono, el snapshot es
+ * una respuesta vieja a una pregunta que cambió.
  *
- * ── La regla: ante la duda, sin nombre ────────────────────────────────────
+ * ── La regla: manda el turno del que trata la respuesta ───────────────────
  *
- * Si el snapshot y el turno del que estamos hablando apuntan a documentos
- * distintos, no sabemos quién está escribiendo, y entonces no se usa ninguno
- * de los dos: sale "*¡Hola!* Soy Iris…", que es la variante que ya existía
- * para cuando no se conoce al paciente.
+ * Si el turno que se está gestionando dice de quién es, ése es el nombre. El
+ * snapshot queda como respaldo para cuando no hay turno en juego —una
+ * consulta general, un saludo suelto—.
  *
- * Nombrar mal a alguien en una conversación sobre su salud es peor que no
- * nombrarlo. Y acá hay un agravante: el cuerpo del mensaje sí nombra al
- * paciente correcto, así que un saludo equivocado no queda como un detalle
- * —queda como dos personas en un mismo mensaje, y el paciente no puede saber
- * cuál de las dos cosas creer—.
+ * Es la misma idea que arregló la confirmación: el recordatorio trae al
+ * paciente, y preguntarle al teléfono quién es sólo agrega una oportunidad de
+ * equivocarse. Y el saludo tiene que coincidir con el cuerpo: dos nombres en
+ * un mismo mensaje no son un detalle de redacción, son dos personas, y el
+ * paciente no puede saber cuál de las dos cosas creer.
+ *
+ * Si no hay ningún nombre confiable, sale "*¡Hola!* Soy Iris…", la variante
+ * que ya existía para cuando no se conoce al paciente. Mejor sin nombre que
+ * con el de otro.
  */
 export function nombreParaSaludar(opciones: {
+  /** Del turno del que trata esta respuesta. Tiene prioridad. */
+  nombreDelTurno?: string | null
+  dniDelTurno?: string | null
   /** Del snapshot por teléfono: el último paciente identificado. */
   nombreDelSnapshot?: string | null
   dniDelSnapshot?: string | null
-  /** Del turno del que trata esta respuesta. */
-  dniDelTurno?: string | null
 }): string | null {
   const digitos = (v?: string | null) => String(v ?? "").replace(/[^0-9]/g, "")
-  const delSnapshot = digitos(opciones.dniDelSnapshot)
   const delTurno = digitos(opciones.dniDelTurno)
+  const delSnapshot = digitos(opciones.dniDelSnapshot)
 
-  if (delSnapshot && delTurno && delSnapshot !== delTurno) return null
+  const nombreDelTurno = (opciones.nombreDelTurno || "").trim()
+  if (nombreDelTurno) return nombreDelTurno
 
-  return opciones.nombreDelSnapshot || null
+  // El turno no trae nombre pero sí documento, y es otro paciente que el del
+  // snapshot: el snapshot no sirve para esta respuesta y no hay con qué
+  // reemplazarlo.
+  if (delTurno && delSnapshot && delTurno !== delSnapshot) return null
+
+  return (opciones.nombreDelSnapshot || "").trim() || null
 }
 
 /**
@@ -210,9 +220,10 @@ export async function presentarSiCorresponde(
 
     const conPresentacion = anteponerPresentacion(mensaje, {
       nombre: nombreParaSaludar({
+        nombreDelTurno: contextoDelTurno?.paciente?.nombres,
+        dniDelTurno: contextoDelTurno?.paciente?.dni,
         nombreDelSnapshot: snapshot?.nombre,
         dniDelSnapshot: snapshot?.nrodoc,
-        dniDelTurno: contextoDelTurno?.paciente?.dni,
       }),
       clinica: config?.displayName,
     })
