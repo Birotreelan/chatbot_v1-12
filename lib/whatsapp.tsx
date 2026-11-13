@@ -739,7 +739,16 @@ async function confirmarTurnoEnProxy(
   userPhoneNumber: string
 ): Promise<ResultadoConfirmacion> {
   const turno = chatbotData.turnos?.[turnoIndex]
-  const dni = chatbotData.paciente?.dni
+  /**
+   * Con trim (13/11/2026).
+   *
+   * Los campos de la agenda vienen rellenados con espacios —en el mismo
+   * payload se ve `"obra_social_nombre": "OSDE          "`— y el DNI llegó
+   * como `" 20755823"`. Un documento con un espacio adelante no coincide con
+   * nada del otro lado, y el error que vuelve es indistinguible del de un
+   * turno que no existe.
+   */
+  const dni = String(chatbotData.paciente?.dni || "").trim()
   const fecha = turno?.fecha
 
   if (!config?.proxy || !fecha || !dni) {
@@ -5862,7 +5871,8 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 Action: "confirmar_turno",
                 fecha: turnoAConfirmar?.fecha,
                 paciente_datos: {
-                  dni: appointmentCtx.paciente?.dni,
+                  // Con trim, por lo mismo que en confirmarTurnoEnProxy.
+                  dni: String(appointmentCtx.paciente?.dni || "").trim(),
                 },
               }
               console.info("[PROXY] Enviando confirmacion de turno", {

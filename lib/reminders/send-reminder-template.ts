@@ -220,6 +220,25 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
   if (Chatbot_Data) {
     try {
       chatbotDataParsed = typeof Chatbot_Data === "string" ? JSON.parse(Chatbot_Data) : Chatbot_Data
+
+      /**
+       * El DNI, sin los espacios de la agenda (13/11/2026).
+       *
+       * Los campos vienen rellenados —en el mismo payload se ve
+       * `"obra_social_nombre": "OSDE                    "`— y el DNI llegó
+       * como `" 20755823"`. Se limpia acá, en el borde, y no en cada lugar
+       * que lo usa: de este objeto salen el contexto del turno, el
+       * recordatorio guardado por mensaje y el payload de confirmación, y los
+       * tres tienen que ver el mismo documento.
+       */
+      const dniCrudo = chatbotDataParsed?.paciente?.dni
+      if (dniCrudo !== undefined && dniCrudo !== null) {
+        const limpio = String(dniCrudo).trim()
+        if (limpio !== String(dniCrudo)) {
+          console.log(`[REMINDERS] DNI normalizado: «${dniCrudo}» → «${limpio}»`)
+        }
+        chatbotDataParsed.paciente.dni = limpio
+      }
     } catch (e) {
       console.error("[REMINDERS] ❌ Error al parsear Chatbot_Data:", e)
     }
