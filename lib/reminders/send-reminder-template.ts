@@ -18,6 +18,7 @@ import { nanoid } from "nanoid"
 import { trackTemplateSent } from "../appointment-stats"
 import { extractAndFormatDate } from "../utils/date-utils"
 import { saveAppointmentContext } from "../appointment-flow-state"
+import { guardarRecordatorioDelMensaje, wamidDelEnvio } from "../recordatorio-del-mensaje"
 import { abrirEncuesta, esEncuestaPostoperatoria } from "../encuestas/encuesta-postoperatoria"
 import { extraerDatosDelTurno, type DatosDelTurno } from "./datos-del-turno"
 import { agregarBotonesAlEnvio } from "../flows/recordatorio-con-botones"
@@ -301,6 +302,22 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
       console.log("[REMINDERS] ✅ Contexto de turno guardado en Redis para respuestas directas", {
         appointment_id: chatbotDataParsed.appointment_id,
         tieneProxyUrl: !!chatbotDataParsed.proxyUrl,
+      })
+
+      /**
+       * Y además, atado al mensaje que se acaba de mandar (13/11/2026).
+       *
+       * El contexto de arriba es uno por teléfono y lo sobrescribe el próximo
+       * recordatorio —o una búsqueda por teléfono en `pacientes`, que con un
+       * teléfono familiar devuelve a otra persona—. Éste no: es el turno de
+       * ESTE mensaje, y es el que se confirma cuando el paciente toca su
+       * botón. Ver lib/recordatorio-del-mensaje.ts.
+       */
+      await guardarRecordatorioDelMensaje({
+        configId: config.id,
+        telefono: cleanPhoneNumber,
+        wamid: wamidDelEnvio(whatsappResponse),
+        chatbotData: chatbotDataParsed,
       })
     } catch (e) {
       console.error("[REMINDERS] ⚠️ Error guardando contexto en Redis (continuando):", e)

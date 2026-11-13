@@ -13,6 +13,10 @@ import { estaBloqueado } from "./contactos-bloqueados"
 import { PAYLOAD_BOTON_REAPERTURA, registrarRespuesta } from "./reapertura"
 import { atenderRespuestaDeEncuesta } from "./encuestas/atender-encuesta"
 import { atencionPorChatWeb } from "./atencion/switch"
+import {
+  leerRecordatorioDelMensaje,
+  wamidDelMensajeRespondido,
+} from "./recordatorio-del-mensaje"
 import { agregarMensaje } from "./atencion/conversacion"
 import { construirMensajeConEnlace, enviarMensajeConEnlace } from "./portal/mensaje-enlace"
 import {
@@ -323,6 +327,58 @@ const RESCHEDULE_OFFER_BUTTONS = [
  * explícita de salir.
  */
 const RESCHEDULE_OFFER_BOTON_UNICO = [{ id: "1", title: "Reagendar turno" }]
+
+/**
+ * El turno del mensaje que el paciente tocó (13/11/2026).
+ *
+ * Primero el recordatorio atado a ESE mensaje; si no está, el contexto del
+ * teléfono, que es el comportamiento anterior.
+ *
+ * Por qué importa el orden: el contexto del teléfono es uno solo y lo
+ * sobrescribe el próximo recordatorio, o una búsqueda del paciente por
+ * teléfono en `pacientes` —que con un teléfono de familia devuelve a otra
+ * persona, y con un paciente que nunca se atendió devuelve al familiar que sí
+ * está—. Confirmando desde ahí, la madre que saca turno para sus dos hijos
+ * confirma siempre el último, o el de quien no es.
+ *
+ * Cuando acierta por `wamid`, el contexto del teléfono se actualiza con ese
+ * mismo turno: lo que sigue del flujo —el menú, el marcado de confirmado, el
+ * doble paso de cancelación— lo lee de ahí, y tienen que estar hablando del
+ * mismo turno que se acaba de confirmar.
+ *
+ * Ver lib/recordatorio-del-mensaje.ts.
+ */
+async function turnoDelMensajeTocado(
+  message: any,
+  userPhoneNumber: string,
+  config: any,
+): Promise<ChatbotData | null> {
+  const wamid = wamidDelMensajeRespondido(message)
+
+  const delMensaje = await leerRecordatorioDelMensaje({
+    configId: config.id,
+    telefono: userPhoneNumber,
+    wamid,
+  })
+
+  if (delMensaje) {
+    console.log(
+      `[RECORDATORIO] Botón de ${wamid}: se opera sobre su propio turno ` +
+        `(dni ${delMensaje.paciente?.dni || "—"}, ${delMensaje.turnos?.[0]?.fecha || "sin fecha"} ` +
+        `${delMensaje.turnos?.[0]?.hora || ""})`,
+    )
+    await saveAppointmentContext(userPhoneNumber, config.id, delMensaje).catch(() => {})
+    return delMensaje
+  }
+
+  const delTelefono = await getAppointmentContext(userPhoneNumber, config.id)
+  console.log(
+    `[RECORDATORIO] Botón sin recordatorio propio (wamid: ${wamid || "no vino"}): ` +
+      `se usa el contexto del teléfono` +
+      `${delTelefono ? ` (dni ${delTelefono.paciente?.dni || "—"})` : " — que está vacío"}`,
+  )
+  return delTelefono
+}
 
 async function sendDirectResponse(
   ctx: DirectResponseContext,
@@ -1952,6 +2008,43 @@ async function rebuildAppointmentContextFromBackend(
     const paciente: any = Array.isArray(datos) ? datos[0] : datos
     if (!paciente) return null
 
+    /**
+     * ── Un resultado único no quiere decir que sea el paciente (13/11/2026) ──
+     *
+     * La guarda de arriba cubre el caso en que el backend AVISA que hay varios
+     * pacientes con ese teléfono. El caso que faltaba es el contrario y es más
+     * común: devuelve uno solo, con cara de respuesta correcta, y no es la
+     * persona de la que estábamos hablando.
+     *
+     * Pasa porque esta búsqueda es por teléfono contra la tabla `pacientes`, y:
+     *
+     *  · un teléfono es de una familia —una madre saca turno para sus dos
+     *    hijos, alguien saca uno para un conocido—;
+     *  · los recordatorios salen de `agenda`, y un paciente que nunca se
+     *    atendió todavía no está en `pacientes`. Entonces la búsqueda
+     *    encuentra al familiar que sí está, y lo adopta.
+     *
+     * Así se confirmó el turno de Rosana (DNI 16715916) con el DNI 20755823.
+     *
+     * Si ya sabemos de qué paciente venimos hablando y el que vino es otro, no
+     * se pisa lo que sabemos: se devuelve `null`, que los llamadores ya
+     * manejan diciendo "no encontramos tu turno, comunicate con nosotros". Es
+     * peor operar sobre el turno de otra persona —sobre todo cancelándolo—
+     * que admitir que no lo pudimos identificar.
+     */
+    const dniEncontrado = String(paciente.Nrodoc || paciente.dni || "").trim()
+    const contextoPrevio = await getAppointmentContext(userPhoneNumber, config.id)
+    const dniConocido = String(contextoPrevio?.paciente?.dni || "").trim()
+
+    if (dniConocido && dniEncontrado && dniConocido !== dniEncontrado) {
+      console.warn(
+        `[CANCEL-FALLBACK] El paciente que devuelve el backend para ${userPhoneNumber} ` +
+          `(DNI ${dniEncontrado}) no es el que veníamos atendiendo (DNI ${dniConocido}): ` +
+          `teléfono compartido o paciente que todavía no está en «pacientes». No se reconstruye.`,
+      )
+      return null
+    }
+
     const turnosRaw: any[] = (resp as any).turnosProximos || []
     const turnosActivos = turnosRaw.filter((t: any) => {
       const estado = String(t.Estado ?? t.estado ?? '').trim().toLowerCase()
@@ -1984,7 +2077,7 @@ async function rebuildAppointmentContextFromBackend(
           paciente: {
             nombres: (paciente.Nombres || paciente.nombres || paciente.nombre || 'Paciente').trim(),
             apellido: (paciente.Apellido || paciente.apellido || '').trim(),
-            dni: (paciente.Nrodoc || paciente.dni || '').toString(),
+            dni: dniEncontrado,
             telefono: userPhoneNumber,
           },
           turnos: [],
@@ -2010,7 +2103,9 @@ async function rebuildAppointmentContextFromBackend(
       paciente: {
         nombres: (paciente.Nombres || paciente.nombres || paciente.nombre || 'Paciente').trim(),
         apellido: (paciente.Apellido || paciente.apellido || '').trim(),
-        dni: (paciente.Nrodoc || paciente.dni || '').toString(),
+        // Ya viene sin los espacios con que la API rellena los campos. Un DNI
+        // como " 20755823" no coincide con nada del otro lado.
+        dni: dniEncontrado,
         telefono: userPhoneNumber,
         obra_social_id: (paciente.Deudor_Id || paciente.deudor_id || '').toString() || undefined,
         obra_social_nombre: (paciente.Deudor_Nombre || paciente.deudor_nombre || '').toString() || undefined,
@@ -4376,8 +4471,8 @@ export async function handleMessage(value: any) {
 
       // Si es cancelación, intentar respuesta directa primero
       if (isCancellationButton) {
-        // Intentar respuesta directa con datos del contexto guardado
-        const chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+        // El turno del mensaje tocado, no el último del teléfono.
+        const chatbotData = await turnoDelMensajeTocado(message, userPhoneNumber, config)
         
         if (chatbotData) {
           
@@ -4442,7 +4537,7 @@ IMPORTANTE: El turno NO ha sido cancelado todavía. Busca en el historial de la 
           clienteId: config.cliente_id,
         }
 
-        const chatbotDataConfirmBtn = await getAppointmentContext(userPhoneNumber, config.id)
+        const chatbotDataConfirmBtn = await turnoDelMensajeTocado(message, userPhoneNumber, config)
         // Motivo del fallo, para poder distinguir más abajo "el turno ya no está
         // agendado" de una falla técnica. Si no hubo contexto guardado ni siquiera
         // se llamó al proxy, así que queda como falla técnica.
