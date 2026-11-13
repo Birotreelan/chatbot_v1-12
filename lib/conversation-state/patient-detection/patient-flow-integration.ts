@@ -1,4 +1,5 @@
 import { createConversationLogger } from '../logger'
+import { pacientesDelTelefono, pacienteMencionado, recordarQuienEscribe } from "../../recordatorio-del-mensaje"
 import { getEffectiveFeatureFlags } from '../feature-flags'
 import {
   startPatientDetectionFlow,
@@ -856,7 +857,45 @@ export async function handleDNIForMultiplePatients(
     }
   }
 
-  const extraccion = extractDNI(dniMessage)
+  /**
+   * El nombre también vale como respuesta (13/11/2026).
+   *
+   * El paciente escribió "soy testuno" y recibió "Perdón, no entendí tu
+   * mensaje" dos veces. Lo había dicho con todas las letras, y nosotros sabemos
+   * los nombres: son los de los recordatorios que le mandamos a ese teléfono.
+   *
+   * Sólo si el nombre identifica a UNO. Con dos hermanos del mismo apellido,
+   * "soy Gonzalez" no alcanza y se sigue pidiendo el documento.
+   */
+  const extraccionPrevia = extractDNI(dniMessage)
+  if (!extraccionPrevia.valid) {
+    const delTelefono = await pacientesDelTelefono(configId, phoneNumber)
+    const porNombre = pacienteMencionado(dniMessage, delTelefono)
+    if (porNombre?.dni) {
+      logger.info('Paciente identificado por su nombre en vez del DNI', {})
+      const porNombreResuelto = await processDNIForDisambiguation(
+        phoneNumber,
+        porNombre.dni,
+        configId,
+        clienteId,
+      )
+      if (porNombreResuelto.found) {
+        await recordarQuienEscribe(configId, phoneNumber, porNombre.dni)
+        return {
+          handled: true,
+          message: porNombreResuelto.message,
+          patientInfo: {
+            isNewPatient: false,
+            patientId: porNombreResuelto.patientId,
+            patientName: porNombreResuelto.patientName,
+            turnos: porNombreResuelto.turnos,
+          },
+        }
+      }
+    }
+  }
+
+  const extraccion = extraccionPrevia
 
   if (!extraccion.valid) {
     logger.warn('Invalid DNI format', { reason: extraccion.reason })
@@ -881,6 +920,12 @@ export async function handleDNIForMultiplePatients(
     configId,
     clienteId
   )
+
+  // Queda anotado para no volver a preguntarle en cada mensaje. Se invalida
+  // solo cuando llega un recordatorio nuevo — ver `quienEstaEscribiendo`.
+  if (result.found) {
+    await recordarQuienEscribe(configId, phoneNumber, dniMatch)
+  }
 
   // No pudimos consultar al backend (14/9/2026): no se lo trata como paciente
   // inexistente ni se lo manda al alta — puede estar perfectamente registrado y

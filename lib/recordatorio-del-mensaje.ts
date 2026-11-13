@@ -166,3 +166,215 @@ export function wamidDelMensajeRespondido(message: any): string | undefined {
   const id = message?.context?.id
   return typeof id === "string" && id.trim() ? id.trim() : undefined
 }
+
+/**
+ * ── Quiénes recibieron recordatorios en este teléfono (13/11/2026) ────────
+ *
+ * El caso: después de confirmar los dos turnos, el paciente escribió "puedo
+ * tomar otro turno?" y el bot arrancó la gestión con Testdos —el último
+ * recordatorio— sin preguntar de quién se trataba. Un mensaje de texto libre
+ * no viene atado a ningún recordatorio, así que el `wamid` no ayuda: hay que
+ * preguntar.
+ *
+ * Para preguntar hay que saber que hace falta preguntar, y esto es lo que lo
+ * sabe: los pacientes a los que se le mandó un recordatorio a ese teléfono.
+ * Si son dos o más, no se asume ninguno.
+ *
+ * Por qué de acá y no consultando al backend: es gratis —ya estamos
+ * escribiendo el recordatorio— y no agrega una llamada a la API en el camino
+ * caliente de cada mensaje. No pretende ser la lista completa de pacientes del
+ * teléfono: para eso está el aviso `pacientes_multiples` de `get_paciente`,
+ * que sigue funcionando como antes. Esto cubre el caso que se puede saber sin
+ * preguntarle a nadie.
+ */
+const PREFIJO_PACIENTES = "recordatorio:pacientes:"
+
+export interface PacienteConRecordatorio {
+  dni: string
+  nombres?: string
+  apellido?: string
+}
+
+interface RegistroDelTelefono {
+  pacientes: Record<string, PacienteConRecordatorio>
+  /** Cuándo llegó el último recordatorio. Invalida la identificación anterior. */
+  ultimoRecordatorioEl?: string
+  /** A quién identificamos, y cuándo. Ver `quienEstaEscribiendo`. */
+  identificadoDni?: string
+  identificadoEl?: string
+}
+
+function clavePacientes(configId: string, telefono: string): string {
+  return `${PREFIJO_PACIENTES}${configId}:${telefono}`
+}
+
+async function leerRegistro(configId: string, telefono: string): Promise<RegistroDelTelefono> {
+  const vacio: RegistroDelTelefono = { pacientes: {} }
+  if (!configId || !telefono) return vacio
+  const redis = getRedisClient()
+  if (!redis) return vacio
+
+  try {
+    const crudo = await redis.get(clavePacientes(configId, telefono))
+    if (!crudo) return vacio
+    const leido = typeof crudo === "string" ? JSON.parse(crudo) : crudo
+    // Compatibilidad con el formato anterior, que era el mapa pelado.
+    if (leido && !leido.pacientes) return { pacientes: leido as Record<string, PacienteConRecordatorio> }
+    return { pacientes: {}, ...leido }
+  } catch (error) {
+    console.warn("[RECORDATORIO] No se pudo leer el registro del teléfono:", error)
+    return vacio
+  }
+}
+
+async function escribirRegistro(
+  configId: string,
+  telefono: string,
+  registro: RegistroDelTelefono,
+): Promise<void> {
+  const redis = getRedisClient()
+  if (!redis) return
+  try {
+    await redis.set(clavePacientes(configId, telefono), JSON.stringify(registro), { ex: VIDA_SEGUNDOS })
+  } catch (error) {
+    console.warn("[RECORDATORIO] No se pudo escribir el registro del teléfono:", error)
+  }
+}
+
+/** Anota al paciente de un recordatorio. Indexado por documento: es la identidad que siempre está. */
+export async function anotarPacienteDelTelefono(params: {
+  configId: string
+  telefono: string
+  paciente?: { dni?: string; nombres?: string; apellido?: string }
+}): Promise<void> {
+  const dni = String(params.paciente?.dni || "").trim()
+  if (!dni || !params.configId || !params.telefono) return
+
+  const registro = await leerRegistro(params.configId, params.telefono)
+  registro.pacientes[dni] = {
+    dni,
+    nombres: params.paciente?.nombres,
+    apellido: params.paciente?.apellido,
+  }
+  registro.ultimoRecordatorioEl = new Date().toISOString()
+
+  await escribirRegistro(params.configId, params.telefono, registro)
+
+  const cuantos = Object.keys(registro.pacientes).length
+  if (cuantos > 1) {
+    console.log(
+      `[RECORDATORIO] El teléfono ${params.telefono} tiene ${cuantos} pacientes con recordatorio: ` +
+        `una gestión por texto libre va a pedir el DNI`,
+    )
+  }
+}
+
+/**
+ * ¿Sabemos quién está escribiendo? (13/11/2026)
+ *
+ * Devuelve el paciente sólo si se identificó DESPUÉS del último recordatorio.
+ * La fecha importa: en la prueba, el paciente se había identificado como
+ * Testdos veinte minutos antes, llegaron dos recordatorios nuevos —uno de cada
+ * paciente— y la identificación vieja hizo que la gestión siguiera con
+ * Testdos. Un recordatorio nuevo vuelve la pregunta a cero.
+ *
+ * Con un solo paciente en el teléfono no hay nada que preguntar y esto no se
+ * consulta.
+ */
+export async function quienEstaEscribiendo(
+  configId: string,
+  telefono: string,
+): Promise<PacienteConRecordatorio | null> {
+  const registro = await leerRegistro(configId, telefono)
+  const { identificadoDni, identificadoEl, ultimoRecordatorioEl } = registro
+
+  if (!identificadoDni || !identificadoEl) return null
+  if (ultimoRecordatorioEl && ultimoRecordatorioEl > identificadoEl) return null
+
+  return registro.pacientes[identificadoDni] || { dni: identificadoDni }
+}
+
+/** Anota a quién identificamos, para no volver a preguntarle en cada mensaje. */
+export async function recordarQuienEscribe(
+  configId: string,
+  telefono: string,
+  dni: string,
+): Promise<void> {
+  const limpio = String(dni || "").trim()
+  if (!limpio) return
+  const registro = await leerRegistro(configId, telefono)
+  registro.identificadoDni = limpio
+  registro.identificadoEl = new Date().toISOString()
+  await escribirRegistro(configId, telefono, registro)
+}
+
+/** Los pacientes con recordatorio en ese teléfono. Vacío si no se sabe. */
+export async function pacientesDelTelefono(
+  configId: string,
+  telefono: string,
+): Promise<PacienteConRecordatorio[]> {
+  const registro = await leerRegistro(configId, telefono)
+  return Object.values(registro.pacientes)
+}
+
+/**
+ * ¿A qué paciente se refiere este texto?
+ *
+ * Acepta el documento —"14123321", "14.123.321"— y el nombre, con o sin el
+ * "soy" adelante. El nombre se compara por primer nombre y por apellido, en
+ * minúsculas y sin acentos, y sólo cuenta si identifica a UNO: con dos
+ * hermanas de apellido igual, "soy Gonzalez" no alcanza y se sigue
+ * preguntando.
+ *
+ * Existe porque el paciente escribió "soy testuno" en medio de un flujo y
+ * recibió "Perdón, no entendí tu mensaje" dos veces. Lo había dicho con todas
+ * las letras.
+ */
+export function pacienteMencionado(
+  texto: string,
+  pacientes: PacienteConRecordatorio[],
+): PacienteConRecordatorio | null {
+  const crudo = String(texto || "").trim()
+  if (!crudo || pacientes.length === 0) return null
+
+  const digitos = crudo.replace(/[^0-9]/g, "")
+  if (digitos.length >= 7 && digitos.length <= 8) {
+    const porDni = pacientes.find((p) => String(p.dni || "").replace(/[^0-9]/g, "") === digitos)
+    if (porDni) return porDni
+  }
+
+  const normalizar = (v?: string | null) =>
+    String(v || "")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .trim()
+
+  const dicho = normalizar(crudo)
+  // Sin esto, un mensaje largo que mencione de paso el nombre de otro paciente
+  // cambiaría de paciente solo. Se exige que el mensaje sea el nombre, o un
+  // "soy <nombre>".
+  const soloNombre = dicho.replace(/^(soy|habla|es)\s+/, "").replace(/[.!¡?¿,]/g, "").trim()
+  if (!soloNombre || soloNombre.split(/\s+/).length > 3) return null
+
+  const coincidencias = pacientes.filter((p) => {
+    const nombres = normalizar(p.nombres)
+    const apellido = normalizar(p.apellido)
+    // "María Laura" son dos nombres de pila: tiene que coincidir la tira
+    // completa, no sólo una palabra. Y el orden nombre/apellido varía según
+    // quién lo escriba.
+    const formas = new Set(
+      [
+        nombres,
+        apellido,
+        `${nombres} ${apellido}`.trim(),
+        `${apellido} ${nombres}`.trim(),
+        ...nombres.split(/\s+/),
+        ...apellido.split(/\s+/),
+      ].filter(Boolean),
+    )
+    return formas.has(soloNombre)
+  })
+
+  return coincidencias.length === 1 ? coincidencias[0] : null
+}

@@ -1593,3 +1593,67 @@ export async function getDetectedPatientInfo(phoneNumber: string): Promise<{
     turnosQx: state.turnosQx,
   }
 }
+
+/**
+ * Pedirle el DNI porque el teléfono tiene varios pacientes (13/11/2026).
+ *
+ * La detección por teléfono ya hacía esto cuando `get_paciente` devolvía el
+ * aviso `pacientes_multiples`. Lo que faltaba era poder pedirlo desde el otro
+ * lado: cuando lo que delata que hay varios pacientes no es la API sino los
+ * recordatorios que mandamos —dos turnos del mismo día, dos personas, un
+ * teléfono— y llega un mensaje de texto libre que no viene atado a ninguno.
+ *
+ * Sin esto, la gestión arrancaba con el paciente del último recordatorio. En
+ * la prueba del 13/11: se confirmaron los dos turnos bien, el paciente
+ * escribió "puedo tomar otro turno?" y el bot le ofreció cancelar el turno de
+ * Testdos cuando estaba escribiendo Testuno.
+ *
+ * Deja el flujo en `awaiting_dni_for_disambiguation`, que es el mismo estado
+ * que ya maneja `processDNIForDisambiguation`: la respuesta del paciente se
+ * valida contra la API y de ahí sale el paciente con sus turnos, sin un camino
+ * paralelo que se desincronice.
+ */
+export async function pedirDniParaDesambiguar(
+  phoneNumber: string,
+  pacientes: Array<{ dni: string; nombres?: string; apellido?: string }>,
+  opciones?: {
+    permitirNuevoTurno?: boolean
+    permitirCancelacion?: boolean
+    escalationPhoneNumber?: string
+    usaPortalWeb?: boolean
+  },
+): Promise<boolean> {
+  const redis = getRedisClient()
+  if (!redis || pacientes.length < 2) return false
+
+  // Con la forma que usa la API, que es la que lee processDNIForDisambiguation.
+  const comoLaApi = pacientes.map((p) => ({
+    Nrodoc: p.dni,
+    Nombres: p.nombres || '',
+    Apellido: p.apellido || '',
+  }))
+
+  const estado: PatientDetectionState = {
+    phase: 'awaiting_dni_for_disambiguation',
+    patientPhone: phoneNumber,
+    multiplePatients: comoLaApi,
+    permitirNuevoTurno: opciones?.permitirNuevoTurno,
+    permitirCancelacion: opciones?.permitirCancelacion,
+    escalationPhoneNumber: opciones?.escalationPhoneNumber,
+    usaPortalWeb: opciones?.usaPortalWeb,
+    detectedAt: Date.now(),
+    attempts: 1,
+  }
+
+  try {
+    await redis.setex(
+      `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`,
+      PATIENT_DETECTION_TTL,
+      JSON.stringify(estado),
+    )
+    return true
+  } catch (error) {
+    console.error('[PATIENT-DETECTION] No se pudo pedir el DNI para desambiguar:', error)
+    return false
+  }
+}

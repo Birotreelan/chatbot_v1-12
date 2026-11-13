@@ -16,7 +16,11 @@ import { atencionPorChatWeb } from "./atencion/switch"
 import {
   leerRecordatorioDelMensaje,
   wamidDelMensajeRespondido,
+  pacientesDelTelefono,
+  quienEstaEscribiendo,
 } from "./recordatorio-del-mensaje"
+import { pedirDniParaDesambiguar } from "./conversation-state/patient-detection/patient-flow-handler"
+import { buildMultiplePatientGreeting } from "./conversation-state/patient-detection/patient-templates"
 import { agregarMensaje } from "./atencion/conversacion"
 import { construirMensajeConEnlace, enviarMensajeConEnlace } from "./portal/mensaje-enlace"
 import {
@@ -2234,6 +2238,65 @@ async function enriquecerContextoConCirugias(
  *
  * Devuelve false si no hay turno activo NI en Redis NI en backend (el caller decide el fallback).
  */
+/**
+ * ¿De quién es esta gestión? (13/11/2026)
+ *
+ * Con varios pacientes en el mismo teléfono, un mensaje de texto libre no dice
+ * de quién es. El botón de un recordatorio sí —viene atado a su mensaje, ver
+ * `turnoDelMensajeTocado`— pero "puedo tomar otro turno?" no.
+ *
+ * Hasta hoy se asumía el paciente del último recordatorio. En la prueba del
+ * 13/11 eso ofreció cancelarle el turno de Testdos a alguien que estaba
+ * escribiendo como Testuno, con el nombre del otro en el mensaje.
+ *
+ * Ahora se pregunta. El estado queda en `awaiting_dni_for_disambiguation`, el
+ * mismo que ya resolvía el caso en que la API avisa `pacientes_multiples`, así
+ * que la respuesta del paciente —su documento o su nombre— sigue el camino que
+ * ya estaba probado.
+ *
+ * Devuelve true si preguntó, y entonces el llamador no hace nada más.
+ *
+ * Con un solo paciente en el teléfono —la enorme mayoría— esto cuesta una
+ * lectura a Redis y no cambia nada.
+ */
+async function hayQuePreguntarDeQuienEs(
+  userPhoneNumber: string,
+  config: any,
+  ctxDirect: DirectResponseContext,
+): Promise<boolean> {
+  try {
+    const pacientes = await pacientesDelTelefono(config.id, userPhoneNumber)
+    if (pacientes.length < 2) return false
+
+    // Ya se identificó después del último recordatorio: sabemos quién es.
+    const quien = await quienEstaEscribiendo(config.id, userPhoneNumber)
+    if (quien) return false
+
+    const pedido = await pedirDniParaDesambiguar(userPhoneNumber, pacientes, {
+      escalationPhoneNumber: config.escalationPhoneNumber,
+    })
+    if (!pedido) return false
+
+    console.log(
+      `[RECORDATORIO] ${userPhoneNumber} tiene ${pacientes.length} pacientes y el mensaje no viene de ` +
+        `ningún recordatorio: se pide el DNI antes de gestionar`,
+    )
+
+    await sendDirectResponse(
+      ctxDirect,
+      buildMultiplePatientGreeting(pacientes, config.displayName),
+      "varios-pacientes-pide-dni",
+    )
+    await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
+    return true
+  } catch (error) {
+    // Ante una falla se sigue como antes: es mejor gestionar con el contexto
+    // que tenemos que dejar al paciente sin respuesta.
+    console.warn("[RECORDATORIO] No se pudo decidir si preguntar de quién es la gestión:", error)
+    return false
+  }
+}
+
 async function startCancelDoubleConfirm(
   userPhoneNumber: string,
   config: any,
@@ -2256,6 +2319,11 @@ async function startCancelDoubleConfirm(
   }
 
   let chatbotData = await getAppointmentContext(userPhoneNumber, config.id)
+
+  // Antes de operar sobre cualquier turno: si el teléfono tiene varios
+  // pacientes y no sabemos quién escribe, se pregunta. Ver la nota de
+  // `hayQuePreguntarDeQuienEs`.
+  if (await hayQuePreguntarDeQuienEs(userPhoneNumber, config, ctxDirect)) return true
 
   // Fallback: contexto de Redis expirado → consultar el backend (fuente de verdad)
   if (!chatbotData || !chatbotData.turnos || chatbotData.turnos.length === 0) {

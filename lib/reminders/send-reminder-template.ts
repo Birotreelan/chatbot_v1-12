@@ -18,7 +18,11 @@ import { nanoid } from "nanoid"
 import { trackTemplateSent } from "../appointment-stats"
 import { extractAndFormatDate } from "../utils/date-utils"
 import { saveAppointmentContext } from "../appointment-flow-state"
-import { guardarRecordatorioDelMensaje, wamidDelEnvio } from "../recordatorio-del-mensaje"
+import {
+  guardarRecordatorioDelMensaje,
+  wamidDelEnvio,
+  anotarPacienteDelTelefono,
+} from "../recordatorio-del-mensaje"
 import { abrirEncuesta, esEncuestaPostoperatoria } from "../encuestas/encuesta-postoperatoria"
 import { extraerDatosDelTurno, type DatosDelTurno } from "./datos-del-turno"
 import { agregarBotonesAlEnvio } from "../flows/recordatorio-con-botones"
@@ -337,6 +341,15 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
         telefono: cleanPhoneNumber,
         wamid: wamidDelEnvio(whatsappResponse),
         chatbotData: chatbotDataParsed,
+      })
+
+      // Y el paciente, en la lista del teléfono: si son dos o más, una gestión
+      // por texto libre tiene que preguntar de quién es en vez de asumir el
+      // último recordatorio.
+      await anotarPacienteDelTelefono({
+        configId: config.id,
+        telefono: cleanPhoneNumber,
+        paciente: chatbotDataParsed.paciente,
       })
     } catch (e) {
       console.error("[REMINDERS] ⚠️ Error guardando contexto en Redis (continuando):", e)
