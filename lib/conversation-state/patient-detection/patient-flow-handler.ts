@@ -1,5 +1,6 @@
 import { getRedisClient } from '@/lib/redis'
 import { turnosDelPaciente } from "./turnos-del-paciente"
+import { atribucionPorRecordatorios } from "../../recordatorio-del-mensaje"
 import { createConversationLogger } from '../logger'
 import { ClinicAPI } from '../../clinic-api'
 import { savePatientSnapshot } from '../../conversations'
@@ -333,6 +334,7 @@ export async function startPatientDetectionFlow(
       turnosFromResponse,
       { patientId, patientDNI, hc: patient.HC || patient.hc },
       'detección por teléfono',
+      await atribucionPorRecordatorios(configId, phoneNumber),
     )
 
     // Filtrar turnos cancelados (Estado es string: "Cancelado", "No confirmado", "Confirmado")
@@ -483,6 +485,7 @@ export async function identifyPatientByDNI(
       turnosDeRespuesta,
       { patientId, patientDNI, hc: paciente.HC || paciente.hc },
       'DNI en el primer mensaje',
+      await atribucionPorRecordatorios(configId, phoneNumber),
     )
 
     const turnos = turnosPropios.filter(
@@ -789,6 +792,7 @@ export async function processDNIForDisambiguation(
         hc: validatedPatient.HC || validatedPatient.hc,
       },
       'DNI para desambiguar',
+      await atribucionPorRecordatorios(configId, phoneNumber),
     )
 
     // Filtrar turnos cancelados

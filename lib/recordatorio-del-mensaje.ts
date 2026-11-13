@@ -189,10 +189,23 @@ export function wamidDelMensajeRespondido(message: any): string | undefined {
  */
 const PREFIJO_PACIENTES = "recordatorio:pacientes:"
 
+export interface TurnoDeUnRecordatorio {
+  agendaId?: string
+  fecha?: string
+  hora?: string
+}
+
 export interface PacienteConRecordatorio {
   dni: string
   nombres?: string
   apellido?: string
+  /**
+   * Los turnos que le avisamos a ESTE paciente.
+   *
+   * Es lo que permite atribuir un turno cuando la lista que devuelve la API no
+   * dice de quién es cada uno. Ver `atribucionPorRecordatorios`.
+   */
+  turnos?: TurnoDeUnRecordatorio[]
 }
 
 interface RegistroDelTelefono {
@@ -246,15 +259,38 @@ export async function anotarPacienteDelTelefono(params: {
   configId: string
   telefono: string
   paciente?: { dni?: string; nombres?: string; apellido?: string }
+  /** Los turnos del recordatorio, para poder atribuirlos después. */
+  turnos?: any[]
 }): Promise<void> {
   const dni = String(params.paciente?.dni || "").trim()
   if (!dni || !params.configId || !params.telefono) return
 
   const registro = await leerRegistro(params.configId, params.telefono)
+  const yaAnotados = registro.pacientes[dni]?.turnos || []
+  const nuevos = (params.turnos || [])
+    .map((t) => ({
+      agendaId: String(t?.agenda_id ?? t?.agendaId ?? "").trim() || undefined,
+      fecha: String(t?.fecha ?? t?.Fecha ?? "").trim() || undefined,
+      hora: String(t?.hora ?? t?.Hora ?? "").trim() || undefined,
+    }))
+    .filter((t) => t.agendaId || (t.fecha && t.hora))
+
+  // Sin duplicar: el mismo turno puede venir en varios recordatorios.
+  const clavesYa = new Set(yaAnotados.map((t) => `${t.agendaId}|${t.fecha}|${t.hora}`))
+  const turnos = [...yaAnotados]
+  for (const t of nuevos) {
+    const clave = `${t.agendaId}|${t.fecha}|${t.hora}`
+    if (!clavesYa.has(clave)) {
+      clavesYa.add(clave)
+      turnos.push(t)
+    }
+  }
+
   registro.pacientes[dni] = {
     dni,
     nombres: params.paciente?.nombres,
     apellido: params.paciente?.apellido,
+    turnos,
   }
   registro.ultimoRecordatorioEl = new Date().toISOString()
 
@@ -377,4 +413,78 @@ export function pacienteMencionado(
   })
 
   return coincidencias.length === 1 ? coincidencias[0] : null
+}
+
+/**
+ * De quién es cada turno, según los recordatorios que mandamos (13/11/2026).
+ *
+ * ── Por qué hace falta ────────────────────────────────────────────────────
+ *
+ * `turnos_proximos` no dice de quién es cada turno. Se probó filtrar por
+ * `paciente_id`, HC o documento y las filas no traen ninguno de los tres: el
+ * paciente identificado como Testuno seguía viendo los dos turnos del
+ * teléfono, el suyo y el de Testdos.
+ *
+ * Pero nosotros ya sabemos de quién es cada uno, porque fuimos nosotros los
+ * que mandamos el recordatorio de cada turno a cada paciente. Esta función usa
+ * ese conocimiento: es la misma idea que arregló la confirmación por botón —el
+ * dato correcto ya lo teníamos, sólo había que no tirarlo—.
+ *
+ * ── Cómo se empareja ──────────────────────────────────────────────────────
+ *
+ * Por `agenda_id`, que identifica la fila exacta. Y si no está, por fecha más
+ * hora, que en una misma agenda no se repiten. La hora se compara por sus
+ * primeros cinco caracteres porque la API la devuelve de las dos formas —
+ * "18:00" y "18:00:00"— según por dónde salga.
+ *
+ * ── Qué NO es ─────────────────────────────────────────────────────────────
+ *
+ * No es la lista de turnos del paciente: es sólo lo que podemos atribuir. Un
+ * turno que el paciente sacó por teléfono y del que nunca se mandó un
+ * recordatorio no está acá, y por eso los turnos que no se pueden atribuir se
+ * conservan. Ver la nota de `turnosDelPaciente`.
+ */
+export interface AtribucionDeTurnos {
+  /** Devuelve el documento del dueño del turno, o null si no se puede atribuir. */
+  duenoDe(turno: any): string | null
+  /** Si es false, no hay nada atribuido y no vale la pena consultar. */
+  sirve: boolean
+}
+
+export async function atribucionPorRecordatorios(
+  configId: string,
+  telefono: string,
+): Promise<AtribucionDeTurnos> {
+  const pacientes = await pacientesDelTelefono(configId, telefono)
+
+  const porAgenda = new Map<string, string>()
+  const porFechaHora = new Map<string, string>()
+
+  const horaCorta = (v: unknown) => String(v ?? "").trim().slice(0, 5)
+
+  for (const paciente of pacientes) {
+    for (const turno of paciente.turnos || []) {
+      if (turno.agendaId) porAgenda.set(turno.agendaId, paciente.dni)
+      if (turno.fecha && turno.hora) {
+        porFechaHora.set(`${turno.fecha}|${horaCorta(turno.hora)}`, paciente.dni)
+      }
+    }
+  }
+
+  return {
+    sirve: porAgenda.size > 0 || porFechaHora.size > 0,
+    duenoDe(turno: any): string | null {
+      const agendaId = String(turno?.agenda_id ?? turno?.Agenda_Id ?? turno?.agendaId ?? "").trim()
+      if (agendaId && porAgenda.has(agendaId)) return porAgenda.get(agendaId)!
+
+      const fecha = String(turno?.fecha ?? turno?.Fecha ?? "").trim()
+      const hora = horaCorta(turno?.hora ?? turno?.Hora)
+      if (fecha && hora) {
+        const clave = `${fecha}|${hora}`
+        if (porFechaHora.has(clave)) return porFechaHora.get(clave)!
+      }
+
+      return null
+    },
+  }
 }

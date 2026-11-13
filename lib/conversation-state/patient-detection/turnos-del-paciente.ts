@@ -63,7 +63,18 @@ function identidadesDelTurno(turno: any): { id: string; hc: string; dni: string 
   }
 }
 
-export type CriterioDeFiltro = "id" | "hc" | "dni" | "sin_identidad"
+/**
+ * Quién es el dueño de un turno cuando la fila no lo dice.
+ *
+ * Lo provee `atribucionPorRecordatorios` (lib/recordatorio-del-mensaje.ts) a
+ * partir de los recordatorios que mandamos. Se probó primero con los campos de
+ * identidad de la fila y `turnos_proximos` no trae ninguno: ni `paciente_id`,
+ * ni HC, ni documento.
+ */
+export interface AtribucionExterna {
+  duenoDe(turno: any): string | null
+  sirve: boolean
+}
 
 export interface ResultadoDelFiltro {
   turnos: any[]
@@ -82,6 +93,7 @@ export interface ResultadoDelFiltro {
 export function filtrarTurnosDelPaciente(
   turnos: any[] | null | undefined,
   paciente: IdentidadDelPaciente,
+  atribucion?: AtribucionExterna | null,
 ): ResultadoDelFiltro {
   const lista = Array.isArray(turnos) ? turnos : []
   if (lista.length === 0) return { turnos: [], descartados: 0, sinIdentidad: 0 }
@@ -103,7 +115,27 @@ export function filtrarTurnosDelPaciente(
     const tieneAlguna = Boolean(delTurno.id || delTurno.hc || delTurno.dni)
 
     if (!tieneAlguna) {
-      // Ver la nota del encabezado: se conserva a propósito.
+      /**
+       * La fila no dice de quién es. Antes de conservarla, se le pregunta a
+       * los recordatorios: si de ese turno le avisamos a otro paciente, es de
+       * otro paciente, y eso lo sabemos con certeza porque el aviso lo
+       * mandamos nosotros.
+       *
+       * Éste es el camino real, no la excepción: `turnos_proximos` no trae
+       * `paciente_id`, ni HC, ni documento.
+       */
+      const dueno = atribucion?.sirve ? atribucion.duenoDe(turno) : null
+      if (dueno) {
+        if (dniPaciente && digitos(dueno) === dniPaciente) {
+          conservados.push(turno)
+        } else {
+          descartados += 1
+        }
+        continue
+      }
+
+      // Ni la fila ni los recordatorios lo atribuyen. Ver la nota del
+      // encabezado: se conserva a propósito.
       sinIdentidad += 1
       conservados.push(turno)
       continue
@@ -136,8 +168,9 @@ export function turnosDelPaciente(
   turnos: any[] | null | undefined,
   paciente: IdentidadDelPaciente,
   etiqueta: string,
+  atribucion?: AtribucionExterna | null,
 ): any[] {
-  const resultado = filtrarTurnosDelPaciente(turnos, paciente)
+  const resultado = filtrarTurnosDelPaciente(turnos, paciente, atribucion)
   const total = Array.isArray(turnos) ? turnos.length : 0
 
   if (resultado.descartados > 0) {

@@ -350,6 +350,9 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
         configId: config.id,
         telefono: cleanPhoneNumber,
         paciente: chatbotDataParsed.paciente,
+        // Con sus turnos: es lo que después permite saber de quién es cada
+        // turno de `turnos_proximos`, que no lo dice.
+        turnos: chatbotDataParsed.turnos,
       })
     } catch (e) {
       console.error("[REMINDERS] ⚠️ Error guardando contexto en Redis (continuando):", e)
