@@ -786,6 +786,30 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                     <AlertDescription className="text-red-700">{errors.searchOptions}</AlertDescription>
                   </Alert>
                 )}
+
+                {/* Acá y no en "Restricciones": esto no restringe lo que el
+                    paciente PUEDE hacer, cambia lo que VE al elegir. Va
+                    después de las tres opciones de búsqueda porque se usa
+                    junto con ellas — apagar "Médico en particular" y "Por
+                    especialidad" saca las pantallas donde elegiría, y esto
+                    saca el nombre de donde seguía apareciendo. */}
+                <div className="flex items-center space-x-2 p-2 rounded-md bg-muted/30">
+                  <Switch
+                    id="ocultarNombreDeProfesionales"
+                    checked={formData.ocultarNombreDeProfesionales === true}
+                    onCheckedChange={(checked) => updateFormData("ocultarNombreDeProfesionales", checked)}
+                  />
+                  <div className="flex-1">
+                    <Label htmlFor="ocultarNombreDeProfesionales" className="text-sm font-medium">
+                      Ocultar nombre de profesionales
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      En el portal web, el paciente elige sólo por horario: no se muestra el nombre en el
+                      calendario ni en los datos del turno reservado. No afecta a los recordatorios, que los
+                      arma el sistema de la clínica.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <Separator className="my-4" />

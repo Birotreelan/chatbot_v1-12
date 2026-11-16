@@ -136,6 +136,27 @@ export interface WhatsAppConfig {
    */
   modoMedicoParticular?: 'nombre' | 'lista'
 
+  /**
+   * Oculta el nombre del profesional en el portal de turnos (16/11/2026).
+   *
+   * Para las clínicas que no quieren que el paciente elija —ni sepa— con qué
+   * médico se va a atender: se reserva por horario y el nombre lo conoce
+   * cuando llega. Va de la mano de apagar `enableSearchByProfessional` y
+   * `enableSearchBySpecialty`, que sacan las dos pantallas donde el paciente
+   * elegiría; sin este switch el nombre volvía a aparecer igual en cada
+   * horario del calendario y en DATOS DEL TURNO.
+   *
+   * Alcance deliberado: el calendario y el resumen del turno reservado. NO
+   * toca la tarjeta del turno que el paciente ya tiene, ni los mensajes de
+   * WhatsApp, ni los recordatorios —esos los arma el sistema de la clínica
+   * con el nombre como parámetro de la plantilla, así que no se pueden tocar
+   * desde acá—.
+   *
+   * `=== true`: arranca apagado. Esconder información que hoy se muestra no
+   * puede pasarle a nadie por el solo hecho de que el campo exista.
+   */
+  ocultarNombreDeProfesionales?: boolean
+
   // Restricciones de acciones disponibles para pacientes. Default true (permitido).
   /** Si es false, el paciente no puede solicitar un turno nuevo (ni como paciente nuevo ni existente). */
   permitirNuevoTurno?: boolean

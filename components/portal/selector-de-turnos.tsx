@@ -150,6 +150,19 @@ interface Props {
    * profesional?", que es una propiedad de la búsqueda y no de la fecha.
    */
   profesionalFijo?: string
+  /**
+   * El cliente no muestra nombres de profesionales (16/11/2026).
+   *
+   * `WhatsAppConfig.ocultarNombreDeProfesionales`. Saca el nombre de los chips
+   * de horario y de los datos del turno reservado: el paciente elige por
+   * horario y nada más.
+   *
+   * Es distinto de `profesionalFijo`, aunque las dos oculten el nombre en la
+   * grilla. Con `profesionalFijo` el nombre no se repite porque el paciente ya
+   * lo eligió y está arriba; acá no se muestra porque no tiene que saberlo.
+   * Por eso ésta también lo saca del resumen final y aquélla no.
+   */
+  ocultarProfesional?: boolean
 }
 
 interface Elegido {
@@ -188,6 +201,7 @@ export function SelectorDeTurnos({
   reemplazaA,
   direccionesPorSede,
   profesionalFijo,
+  ocultarProfesional,
 }: Props) {
   const router = useRouter()
   const [diaElegido, setDiaElegido] = useState<string | null>(null)
@@ -227,7 +241,7 @@ export function SelectorDeTurnos({
 
   // Si la agenda no está acotada a un profesional, el nombre va en cada
   // horario. No se mira cuántos hay en el día: ver `profesionalFijo`.
-  const mostrarProfesional = !profesionalFijo
+  const mostrarProfesional = !profesionalFijo && !ocultarProfesional
 
   // ── Llevar la pantalla a los horarios al elegir un día (28/9/2026) ────────
   //
@@ -712,7 +726,13 @@ export function SelectorDeTurnos({
                     fecha: turno.fecha,
                     fechaFormateada: dias.find((d) => d.fecha === diaElegido)?.etiqueta || turno.fecha,
                     hora: turno.hora,
-                    profesional: turno.profesionalNombre,
+                    // Sin nombre cuando el cliente los oculta. Se decide acá,
+                    // en el único lugar donde se arma el turno elegido, y no en
+                    // cada tarjeta que lo muestra: las filas vacías ya no se
+                    // dibujan, así que la fila "Profesional" desaparece sola
+                    // del repaso y del resumen final. Una tarjeta nueva queda
+                    // cubierta sin acordarse de nada.
+                    profesional: ocultarProfesional ? undefined : turno.profesionalNombre,
                     sede: turno.sedeNombre,
                     direccion: turno.sedeId ? direccionesPorSede?.[turno.sedeId] : undefined,
                     particular: turno.soloParticular === true,

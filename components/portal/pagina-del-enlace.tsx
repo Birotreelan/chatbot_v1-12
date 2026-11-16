@@ -717,6 +717,7 @@ export async function PaginaDelEnlace({
             profesionalFijo={
               agenda.filtradoPorProfesional ? agenda.profesionalNombre : undefined
             }
+            ocultarProfesional={config?.ocultarNombreDeProfesionales === true}
             direccionesPorSede={direcciones}
             // Va adentro y no acá arriba porque tiene que irse cuando el
             // paciente pasa al repaso: el turno viejo y "elegí el nuevo
@@ -1430,6 +1431,7 @@ export async function PaginaDelEnlace({
           // lo dice, cada horario lo lleva. Dos reglas separadas para la misma
           // pregunta es cómo un día aparecía el nombre y al siguiente no.
           profesionalFijo={profesionalDeLaAgenda}
+          ocultarProfesional={config?.ocultarNombreDeProfesionales === true}
           // El "Volver" va adentro por el mismo motivo que el título: en el
           // repaso el paso atrás es "Elegir otro horario", y dos formas de
           // volver que hacen cosas distintas en la misma pantalla es cómo se
