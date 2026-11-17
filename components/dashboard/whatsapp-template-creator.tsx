@@ -576,7 +576,7 @@ const handleSubmit = async (e?: React.MouseEvent) => {
                 <p className="text-xs text-muted-foreground">Solo letras minusculas, numeros y guiones bajos</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="language">Idioma</Label>
                   <Select value={formData.language} onValueChange={(v) => updateFormData("language", v)}>

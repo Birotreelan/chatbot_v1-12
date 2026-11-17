@@ -167,10 +167,16 @@ export function FacturacionSection() {
 
   return (
     <div className="space-y-10">
-      <div className="flex items-center gap-3">
+      {/* Con `flex-wrap` (17/11/2026). Los tres bloques —el mes, el aviso de
+          consumo en curso y el dólar— no entran en una fila de 375px: el del
+          dólar quedaba cortado contra el borde derecho, con el input a medio
+          ver y sin forma de llegar a él. */}
+      <div className="flex flex-wrap items-center gap-3">
         <MonthSelector value={month} onChange={setMonth} />
         {esMesEnCurso && <span className="text-sm font-semibold text-red-600">Consumo en curso</span>}
-        <div className="ml-auto flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-2">
+        {/* `ml-auto` sólo cuando hay sitio: envuelto, empujarlo a la derecha
+            lo deja solo en su renglón, contra el borde. */}
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 sm:ml-auto sm:px-4">
           <span className="text-sm text-muted-foreground">
             {mesCerrado ? "Dólar del cierre" : "Dolar Venta"}
           </span>

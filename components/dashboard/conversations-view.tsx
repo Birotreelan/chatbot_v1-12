@@ -117,8 +117,8 @@ export function ConversationsView() {
   return (
     <div className="h-full flex flex-col">
       <div className="border-b bg-background p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold">Monitor de Conversaciones</h1>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-xl font-bold sm:text-2xl">Monitor de Conversaciones</h1>
           {selectedConfig && (
             <Button
               onClick={handleExport}
@@ -149,10 +149,24 @@ export function ConversationsView() {
         </Tabs>
       </div>
 
+      {/* ── Un panel por vez en el teléfono (17/11/2026) ──────────────────
+          Los dos paneles eran siempre visibles: en 375px la lista se quedaba
+          con 280px y la conversación con los 95px que sobraban, donde no
+          entra ni "Seleccioná un contacto". Dos paneles que no se pueden usar
+          en vez de uno que sí.
+
+          Desde `lg` no cambia nada: lista a la izquierda y conversación a la
+          derecha, como siempre. Abajo de eso se muestra el que corresponde al
+          paso en el que está la persona —la lista, o la conversación que
+          eligió— con una forma explícita de volver. */}
       <div className="flex-1 flex overflow-hidden">
         {selectedConfig && (
           <>
-            <div className="w-80 border-r bg-background overflow-y-auto">
+            <div
+              className={`w-full border-r bg-background overflow-y-auto lg:block lg:w-80 ${
+                selectedContact ? "hidden" : "block"
+              }`}
+            >
               <ConversationsList
                 configId={selectedConfig.id}
                 selectedContact={selectedContact}
@@ -160,7 +174,19 @@ export function ConversationsView() {
                 onFilteredContactsChange={handleFilteredContactsChange}
               />
             </div>
-            <div className="flex-1 bg-muted/20">
+            <div className={`flex-1 bg-muted/20 ${selectedContact ? "flex flex-col" : "hidden lg:block"}`}>
+              {/* El paso atrás, sólo donde la lista no está a la vista. Sin
+                  esto, el que entra a una conversación en el teléfono queda
+                  sin forma de volver a los contactos. */}
+              {selectedContact && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedContact(null)}
+                  className="flex items-center gap-2 border-b bg-background px-4 py-3 text-left text-sm font-medium text-primary lg:hidden"
+                >
+                  ← Volver a los contactos
+                </button>
+              )}
               {selectedContact ? (
                 <ConversationChat configId={selectedConfig.id} phoneNumber={selectedContact} />
               ) : (

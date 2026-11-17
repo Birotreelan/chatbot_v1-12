@@ -767,7 +767,10 @@ export function FacturacionTable({
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      {/* `flex-row` fijo hacía que el título y los botones se pelearan el
+          ancho en un teléfono: "Clientes Wpp con IA" quedaba en tres
+          renglones con "Actualizar" encima. En columna hasta `sm`. */}
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <CardTitle className="flex items-center gap-2">
             {title}
@@ -810,7 +813,7 @@ export function FacturacionTable({
             )}
           </CardDescription>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {cierre && (
             <Button variant="outline" size="sm" onClick={reabrir} disabled={loading || refreshing}>
               Reabrir mes

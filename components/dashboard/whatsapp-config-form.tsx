@@ -297,7 +297,14 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
+        {/* Seis pestañas no entran en 375px (17/11/2026).
+            Con `grid-cols-6` cada una se quedaba con 62px y los textos se
+            encimaban: "Atenció|Conocimient|Avanzado" ilegible, y las últimas
+            no se podían tocar. Fila con scroll horizontal, que es el mismo
+            patrón que ya usan las otras pestañas del dashboard
+            —conversations-view, appointment-stats-view, vista-de-integracion—
+            así que no se inventa nada nuevo. */}
+        <TabsList className="w-full justify-start overflow-x-auto">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="widget">Widget</TabsTrigger>
@@ -313,7 +320,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               <CardDescription>Configuración básica de la instancia de WhatsApp</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="displayName">Nombre de la Configuración *</Label>
                   <Input
@@ -340,7 +347,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="cliente_id">Cliente ID *</Label>
                   <Input
@@ -940,7 +947,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               <CardDescription>Configuración específica para la integración con WhatsApp Business API</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="phoneNumberId">Phone Number ID *</Label>
                   <Input
@@ -967,7 +974,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="wabaId">WABA ID</Label>
                   <Input
@@ -1250,7 +1257,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 {errors.widgetAssistantId && <p className="text-sm text-red-500">{errors.widgetAssistantId}</p>}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="widgetTitle">Título del Widget</Label>
                   <Input
@@ -1293,7 +1300,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="widgetPlaceholder">Placeholder del Input</Label>
                   <Input
@@ -1342,7 +1349,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               <CardTitle>Apariencia del Widget</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="widgetPrimaryColor">Color Primario</Label>
                   <div className="flex space-x-2">
@@ -1433,7 +1440,7 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="widgetMaxWidth">Ancho Máximo (px)</Label>
                   <Input

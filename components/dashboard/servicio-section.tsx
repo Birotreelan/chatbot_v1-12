@@ -278,7 +278,10 @@ export function ServicioSection() {
 
   return (
     <div className="space-y-10">
-      <div className="flex items-center gap-3">
+      {/* Con `flex-wrap`, por lo mismo que en facturacion-section: el mes, el
+          aviso y la exportación no entran en una fila de 375px y el último
+          quedaba cortado contra el borde. */}
+      <div className="flex flex-wrap items-center gap-3">
         <MonthSelector value={month} onChange={setMonth} />
         {esMesEnCurso && <span className="text-sm font-semibold text-red-600">Consumo en curso</span>}
         {/* La exportación para la empresa. Deshabilitada hasta que las dos
@@ -306,7 +309,7 @@ export function ServicioSection() {
             la pestaña. Vacío = usar el del día. Antes del corte de octubre el
             campo no aparece, porque esos meses muestran lo de Facturación y
             dejar un editor que no cambia nada sería mentir. */}
-        <div className="ml-auto flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-2">
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 sm:ml-auto sm:px-4">
           <span className="text-sm text-muted-foreground">
             {valoresPropios ? "Dólar venta" : "Dólar del cierre"}
           </span>
