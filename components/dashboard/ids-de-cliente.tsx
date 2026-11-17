@@ -159,13 +159,14 @@ export function IdsDeCliente() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* El texto y el botón se comprimían entre sí en pantallas angostas. */}
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">
           {huerfanos.length === 0
             ? "No hay ids sueltos: todo lo guardado pertenece a un cliente vigente."
             : `${huerfanos.length} ${huerfanos.length === 1 ? "id tiene" : "ids tienen"} datos y ningún cliente los reclama.`}
         </p>
-        <Button variant="outline" size="sm" onClick={cargar} className="gap-1.5">
+        <Button variant="outline" size="sm" onClick={cargar} className="shrink-0 gap-1.5">
           <RefreshCw className="h-3.5 w-3.5" />
           Actualizar
         </Button>

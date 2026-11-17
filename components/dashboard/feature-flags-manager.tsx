@@ -348,13 +348,21 @@ export function FeatureFlagsManager() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Una chapa con el texto cortado en cuatro renglones deja de parecer
+          una chapa: se dibuja como una mancha redondeada. En columna hasta
+          `sm`, donde el texto entra entero. */}
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Badge variant={hasExplicitData ? "default" : "secondary"}>
           {hasExplicitData
             ? "Redis es la fuente de verdad para estos flags"
             : "Todavía sin cambios guardados — rigen los overrides de código"}
         </Badge>
-        <Button variant="outline" onClick={handleReset} disabled={isResetting}>
+        <Button
+          variant="outline"
+          onClick={handleReset}
+          disabled={isResetting}
+          className="w-full shrink-0 sm:w-auto"
+        >
           Restablecer a valores por código
         </Button>
       </div>
