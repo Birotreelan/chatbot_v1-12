@@ -284,6 +284,72 @@ export async function buscarObrasSociales(
 }
 
 /**
+ * El catálogo completo de obras sociales de la clínica (17/11/2026).
+ *
+ * ── Por qué ahora sí se lista ─────────────────────────────────────────────
+ *
+ * `buscarObrasSociales` existe porque el campo era un autocompletado: el
+ * paciente escribía dos letras y se le ofrecían coincidencias. El problema de
+ * eso es que hay que saber cómo se escribe la propia obra social —"OSDE" y
+ * "O.S.D.E.", "Swiss" y "SWISS MEDICAL"— y el que no acierta las primeras
+ * letras no encuentra nada y queda trabado en el alta.
+ *
+ * Con el select, el paciente reconoce la suya en una lista en vez de
+ * escribirla. Reconocer es mucho más fácil que recordar, y acá la lista la
+ * define la clínica: son sus convenios y nada más.
+ *
+ * ── `busqueda: ""` ────────────────────────────────────────────────────────
+ *
+ * `get_obras_sociales` toma un término y hasta hoy nunca se lo llamó sin uno.
+ * Si el proxy interpreta la cadena vacía como "todas" —lo habitual en un LIKE
+ * '%%'— esto devuelve el catálogo. Si devuelve vacío, el llamador lo detecta y
+ * deja el campo de texto de antes: ver `ObraSocialDelAlta` en
+ * components/portal/identificarse.tsx. Pedirle al backend una acción de
+ * listado explícita sería lo prolijo, y está pedido; esto no bloquea mientras.
+ *
+ * Sin tope de 25 como la búsqueda: el tope existía para no llenar la pantalla
+ * de coincidencias, y acá la lista entera es justamente el punto. Van
+ * ordenadas alfabéticamente porque el orden en que las devuelve la base no
+ * significa nada para quien busca la suya.
+ */
+export async function catalogoDeObrasSociales(
+  clienteId: string,
+): Promise<ObraSocialDelPortal[]> {
+  try {
+    const respuesta = await validarObraSocial(clienteId, "")
+    const lista = respuesta?.datos?.obras_sociales
+    if (!respuesta?.exito || !Array.isArray(lista)) return []
+
+    const vistas = new Set<string>()
+    const catalogo: ObraSocialDelPortal[] = []
+
+    for (const os of lista) {
+      if (!os?.id || !os?.nombre) continue
+      const id = String(os.id)
+      // Un mismo convenio puede venir repetido por plan. En un desplegable dos
+      // filas con el mismo texto no se pueden distinguir, así que se queda la
+      // primera.
+      if (vistas.has(id)) continue
+      vistas.add(id)
+      catalogo.push({
+        id,
+        nombre: String(os.nombre).trim(),
+        // Mismo criterio fail-open que la búsqueda: ver obra-social.ts.
+        permiteOnline: os.permite_turnos_online !== false,
+      })
+    }
+
+    catalogo.sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
+
+    console.log(`[PORTAL] Catálogo de obras sociales de ${clienteId}: ${catalogo.length}`)
+    return catalogo
+  } catch (error) {
+    console.error("[PORTAL] Error leyendo el catálogo de obras sociales:", error)
+    return []
+  }
+}
+
+/**
  * ¿La obra social del paciente permite sacar turnos online?
  *
  * Se delega en `resolverTurnosOnline`, que ya existe y está escrito a partir de

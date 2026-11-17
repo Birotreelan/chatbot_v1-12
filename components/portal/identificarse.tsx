@@ -23,7 +23,7 @@
 
 import { useRouter } from "next/navigation"
 import { LoadingState } from "@/components/ui/loading-state"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Aviso, BotonPrimario } from "./marco"
 
 // 16px o más en el campo: con menos, iOS hace zoom solo al enfocarlo y el
@@ -192,6 +192,15 @@ export function DarseDeAlta({
   const [email, setEmail] = useState(valoresIniciales?.email || "")
   const [busquedaOS, setBusquedaOS] = useState("")
   const [opcionesOS, setOpcionesOS] = useState<ObraSocial[]>([])
+  /**
+   * El catálogo de la clínica, para el select (17/11/2026).
+   *
+   * `null` mientras se está pidiendo, `[]` si el proxy no lo devolvió. Son dos
+   * estados distintos y se ven distinto: "cargando" no puede verse igual que
+   * "no hay ninguna", porque en el segundo caso hay que ofrecerle al paciente
+   * la otra forma de completarlo.
+   */
+  const [catalogo, setCatalogo] = useState<ObraSocial[] | null>(null)
   const [elegida, setElegida] = useState<ObraSocial | null>(
     valoresIniciales?.obraSocialId && valoresIniciales?.obraSocialNombre
       ? {
@@ -206,6 +215,35 @@ export function DarseDeAlta({
   const router = useRouter()
   const [errores, setErrores] = useState<Record<string, string>>({})
   const [cargando, setCargando] = useState(false)
+
+  /** El select se usa cuando la clínica devolvió su catálogo. */
+  const hayCatalogo = Array.isArray(catalogo) && catalogo.length > 0
+
+  /**
+   * Se pide una sola vez, al abrir la pantalla.
+   *
+   * Y no al desplegar el select: en un teléfono el desplegable se abre y se
+   * cierra de un toque, y una lista que tarda en llenarse se lee como un
+   * select vacío. Para cuando el paciente terminó de escribir su apellido,
+   * su nombre y su email, esto ya está.
+   */
+  useEffect(() => {
+    let vigente = true
+    ;(async () => {
+      try {
+        const r = await fetch(`/api/portal/obras-sociales?token=${encodeURIComponent(token)}`)
+        const data = await r.json()
+        if (!vigente) return
+        setCatalogo(Array.isArray(data.opciones) ? data.opciones : [])
+      } catch {
+        // Queda en `[]`: el campo vuelve a ser el de escribir, que funciona.
+        if (vigente) setCatalogo([])
+      }
+    })()
+    return () => {
+      vigente = false
+    }
+  }, [token])
 
   async function buscarOS(texto: string) {
     setBusquedaOS(texto)
@@ -240,9 +278,13 @@ export function DarseDeAlta({
     // social.
     if (!elegida) {
       setErrores({
-        obraSocial: busquedaOS.trim()
-          ? "Tocá tu obra social en la lista de abajo para elegirla."
-          : "Elegí tu obra social: escribí las primeras letras y tocala en la lista.",
+        obraSocial: hayCatalogo
+          ? // Con el select no existe el caso "escribió y no eligió": o eligió
+            // una opción o el campo sigue en su valor inicial.
+            "Elegí tu obra social en la lista."
+          : busquedaOS.trim()
+            ? "Tocá tu obra social en la lista de abajo para elegirla."
+            : "Elegí tu obra social: escribí las primeras letras y tocala en la lista.",
       })
       return
     }
@@ -330,7 +372,47 @@ export function DarseDeAlta({
         etiqueta={paraFamiliar ? "Obra social del paciente" : "Obra social"}
         error={errores.obraSocial}
       >
-        {elegida ? (
+        {hayCatalogo ? (
+          /* ── El select (17/11/2026) ─────────────────────────────────────
+             Antes era un autocompletado: el paciente escribía dos letras y
+             elegía de las coincidencias. Para usarlo hay que saber cómo se
+             escribe la propia obra social, y el que no acierta las primeras
+             letras —"Swiss" cuando figura "SWISS MEDICAL SA"— no encuentra
+             nada y queda trabado en el alta.
+
+             Reconocer la propia en una lista es mucho más fácil que
+             recordar cómo se escribe. Y con un `<select>` nativo el
+             desplegable lo dibuja el sistema operativo: en un teléfono es
+             una rueda a pantalla completa con su propio buscador, mejor que
+             cualquier lista que podamos armar nosotros.
+
+             El estado "elegida" ya no necesita verse distinto —el select
+             muestra lo elegido por definición— así que el botón "Cambiar"
+             sólo queda para el camino de escribir. */
+          <select
+            value={elegida?.id || ""}
+            onChange={(e) => {
+              const encontrada = catalogo!.find((os) => os.id === e.target.value)
+              setElegida(encontrada || null)
+              setErrores((previos) => ({ ...previos, obraSocial: "" }))
+            }}
+            className={CLASES_CAMPO}
+          >
+            <option value="">Elegí tu obra social</option>
+            {catalogo!.map((os) => (
+              <option key={os.id} value={os.id}>
+                {/* Las que no permiten turnos online van en la misma lista,
+                    marcadas. Ocultarlas dejaría al paciente de PAMI sin
+                    encontrar la suya, y terminaría eligiendo una parecida
+                    que no es la de él: llega a la clínica con la cobertura
+                    equivocada, que es peor que derivarlo al teléfono.
+                    La marca va en el texto porque un `<option>` no admite
+                    nada más: lo dibuja el sistema operativo. */}
+                {os.permiteOnline ? os.nombre : `${os.nombre} — turno por teléfono`}
+              </option>
+            ))}
+          </select>
+        ) : elegida ? (
           <div className="flex min-h-[52px] items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3">
             <span className="text-[15px] font-medium sm:text-base">{elegida.nombre}</span>
             <button
@@ -350,7 +432,9 @@ export function DarseDeAlta({
             autoComplete="off"
             value={busquedaOS}
             onChange={(e) => buscarOS(e.target.value)}
-            placeholder="Escribí las primeras letras"
+            placeholder={
+              catalogo === null ? "Cargando las obras sociales…" : "Escribí las primeras letras"
+            }
             className={CLASES_CAMPO}
           />
         )}
@@ -358,11 +442,11 @@ export function DarseDeAlta({
 
       {/* Se dice qué falta hacer mientras la lista está abierta. Sin esto, la
           lista parece un autocompletado decorativo. */}
-      {!elegida && busquedaOS.trim().length >= 2 && opcionesOS.length > 0 && (
+      {!hayCatalogo && !elegida && busquedaOS.trim().length >= 2 && opcionesOS.length > 0 && (
         <p className="-mt-2 text-[13px] text-muted-foreground">Tocá la tuya para elegirla:</p>
       )}
 
-      {!elegida && opcionesOS.length > 0 && (
+      {!hayCatalogo && !elegida && opcionesOS.length > 0 && (
         <div className="-mt-2 space-y-2">
           {opcionesOS.map((os) => (
             <button
