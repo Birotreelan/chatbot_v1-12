@@ -248,8 +248,13 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
         </Alert>
       )}
 
-      {/* Two-column layout: chat + patient panel */}
-      <div className="flex flex-1 min-h-0 gap-0">
+      {/* ── Dos columnas desde `lg`, apilado abajo (17/11/2026) ───────────
+          El panel del paciente es `w-56 shrink-0`: 224px fijos. En un
+          teléfono de 375 le dejaba al chat unos 150px, donde un mensaje se
+          lee a razón de dos palabras por renglón. Abajo de `lg` el chat se
+          queda con todo el ancho y el panel pasa debajo, con su propio
+          scroll y un tope de altura para no comerse la conversación. */}
+      <div className="flex flex-1 min-h-0 flex-col gap-0 lg:flex-row">
         {/* Chat column */}
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
 
@@ -413,7 +418,7 @@ export function ConversationChat({ configId, phoneNumber }: ConversationChatProp
         </div>{/* end chat column */}
 
         {/* Patient panel column */}
-        <div className="w-56 shrink-0 border-l p-3 overflow-y-auto">
+        <div className="max-h-[45%] w-full shrink-0 overflow-y-auto border-t p-3 lg:max-h-none lg:w-56 lg:border-l lg:border-t-0">
           <MonitorPatientPanel key={phoneNumber} configId={configId} phoneNumber={phoneNumber} />
         </div>
 

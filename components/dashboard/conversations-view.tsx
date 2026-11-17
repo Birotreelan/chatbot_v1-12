@@ -182,13 +182,19 @@ export function ConversationsView() {
                 <button
                   type="button"
                   onClick={() => setSelectedContact(null)}
-                  className="flex items-center gap-2 border-b bg-background px-4 py-3 text-left text-sm font-medium text-primary lg:hidden"
+                  className="flex shrink-0 items-center gap-2 border-b bg-background px-4 py-3 text-left text-sm font-medium text-primary lg:hidden"
                 >
                   ← Volver a los contactos
                 </button>
               )}
               {selectedContact ? (
-                <ConversationChat configId={selectedConfig.id} phoneNumber={selectedContact} />
+                /* `min-h-0 flex-1`: el chat es `h-full`, así que sin esto se
+                   lleva el alto del contenedor entero y empuja la barra de
+                   arriba fuera de la zona visible —que está recortada por el
+                   `overflow-hidden` del contenedor de los dos paneles—. */
+                <div className="min-h-0 flex-1">
+                  <ConversationChat configId={selectedConfig.id} phoneNumber={selectedContact} />
+                </div>
               ) : (
                 <div className="flex items-center justify-center h-full">
                   <p className="text-muted-foreground">Selecciona un contacto para ver la conversación</p>
