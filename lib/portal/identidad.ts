@@ -301,11 +301,30 @@ export async function buscarObrasSociales(
  * ── `busqueda: ""` ────────────────────────────────────────────────────────
  *
  * `get_obras_sociales` toma un término y hasta hoy nunca se lo llamó sin uno.
- * Si el proxy interpreta la cadena vacía como "todas" —lo habitual en un LIKE
- * '%%'— esto devuelve el catálogo. Si devuelve vacío, el llamador lo detecta y
- * deja el campo de texto de antes: ver `ObraSocialDelAlta` en
- * components/portal/identificarse.tsx. Pedirle al backend una acción de
- * listado explícita sería lo prolijo, y está pedido; esto no bloquea mientras.
+ *
+ * PROBADO el 17/11/2026 contra el proxy de Clínica de Ojos, y NO alcanza:
+ *
+ *   busqueda=""      → []
+ *   busqueda="%%"    → []
+ *   busqueda="os"    → []
+ *   busqueda="osd"   → OSDE
+ *   busqueda="osde"  → OSDE
+ *
+ * O sea que exige tres caracteres y no tiene comodín. Mientras siga así, esta
+ * función devuelve `[]` y el campo se queda con la búsqueda por texto —ver
+ * `ObraSocialDelAlta` en components/portal/identificarse.tsx, que distingue
+ * "cargando" de "no vino"—.
+ *
+ * Lo que hace falta del lado del backend es una de estas dos, cualquiera
+ * sirve y el select se prende solo:
+ *
+ *   · que `get_obras_sociales` acepte la búsqueda vacía y devuelva todas, o
+ *   · una acción nueva —`get_obras_sociales_todas`, por ejemplo— sin término.
+ *
+ * No se fuerza desde acá armando el catálogo con muchas búsquedas: con un
+ * mínimo de tres caracteres habría que recorrer miles de combinaciones, y una
+ * lista armada así sería incompleta mostrándose como completa, que es peor que
+ * el campo de escribir.
  *
  * Sin tope de 25 como la búsqueda: el tope existía para no llenar la pantalla
  * de coincidencias, y acá la lista entera es justamente el punto. Van

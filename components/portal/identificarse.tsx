@@ -245,10 +245,23 @@ export function DarseDeAlta({
     }
   }, [token])
 
+  /**
+   * Tres letras, no dos (17/11/2026).
+   *
+   * Verificado contra el proxy de Clínica de Ojos: `get_obras_sociales` con
+   * "osd" devuelve OSDE y con "os" devuelve la lista vacía. O sea que exige
+   * tres caracteres y abajo de eso no avisa nada: contesta "ninguna".
+   *
+   * Buscando desde dos, el paciente que tipeaba exactamente dos letras veía
+   * una lista vacía y concluía que su obra social no estaba. Pedir una letra
+   * más es mejor que mentirle.
+   */
+  const MINIMO_PARA_BUSCAR = 3
+
   async function buscarOS(texto: string) {
     setBusquedaOS(texto)
     setElegida(null)
-    if (texto.trim().length < 2) {
+    if (texto.trim().length < MINIMO_PARA_BUSCAR) {
       setOpcionesOS([])
       return
     }
@@ -433,7 +446,9 @@ export function DarseDeAlta({
             value={busquedaOS}
             onChange={(e) => buscarOS(e.target.value)}
             placeholder={
-              catalogo === null ? "Cargando las obras sociales…" : "Escribí las primeras letras"
+              catalogo === null
+                ? "Cargando las obras sociales…"
+                : "Escribí al menos 3 letras del nombre"
             }
             className={CLASES_CAMPO}
           />
@@ -442,8 +457,20 @@ export function DarseDeAlta({
 
       {/* Se dice qué falta hacer mientras la lista está abierta. Sin esto, la
           lista parece un autocompletado decorativo. */}
-      {!hayCatalogo && !elegida && busquedaOS.trim().length >= 2 && opcionesOS.length > 0 && (
+      {!hayCatalogo && !elegida && busquedaOS.trim().length >= MINIMO_PARA_BUSCAR && opcionesOS.length > 0 && (
         <p className="-mt-2 text-[13px] text-muted-foreground">Tocá la tuya para elegirla:</p>
+      )}
+
+      {/* Y cuando no hay ninguna, también se dice (17/11/2026).
+          Antes, una búsqueda sin resultados no mostraba nada: el paciente
+          escribía, no pasaba nada, y no sabía si el campo estaba roto, si
+          tenía que seguir escribiendo o si su obra social no figuraba. Tres
+          situaciones distintas con la misma pantalla en blanco. */}
+      {!hayCatalogo && !elegida && busquedaOS.trim().length >= MINIMO_PARA_BUSCAR && opcionesOS.length === 0 && (
+        <p className="-mt-2 text-[13px] text-muted-foreground">
+          No encontramos ninguna obra social con «{busquedaOS.trim()}». Probá con otra parte del
+          nombre, sin siglas ni puntos.
+        </p>
       )}
 
       {!hayCatalogo && !elegida && opcionesOS.length > 0 && (
