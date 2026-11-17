@@ -113,7 +113,9 @@ export default function PortalPage() {
 
           <div className="space-y-2">
             <Label>¿Qué va a hacer el paciente?</Label>
-            <div className="flex gap-2">
+            {/* Envuelve: los dos botones juntos miden más de 375px y el
+                segundo quedaba cortado contra el borde. */}
+            <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
                 variant={intencion === "reagendar" ? "default" : "outline"}

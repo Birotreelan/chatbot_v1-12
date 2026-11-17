@@ -196,10 +196,13 @@ export function SupportUsersManager() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      {/* El filtro mide 250px fijos y el botón no se achica: en 375px la fila
+          se iba del borde y "Nuevo Usuario" quedaba a medio ver. Envuelve, y
+          el filtro ocupa el ancho disponible en el teléfono. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-1 items-center gap-4">
           <Select value={selectedTenant} onValueChange={setSelectedTenant}>
-            <SelectTrigger className="w-[250px]">
+            <SelectTrigger className="w-full sm:w-[250px]">
               <SelectValue placeholder="Filtrar por cliente" />
             </SelectTrigger>
             <SelectContent>
@@ -215,7 +218,7 @@ export function SupportUsersManager() {
             </SelectContent>
           </Select>
         </div>
-        <Button onClick={openCreateDialog}>
+        <Button onClick={openCreateDialog} className="w-full sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           Nuevo Usuario
         </Button>
