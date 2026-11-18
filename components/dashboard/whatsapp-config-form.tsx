@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
-import type { WhatsAppConfig, AdditionalAssistant } from "@/lib/types"
+import type { WhatsAppConfig } from "@/lib/types"
 import { Plus, Trash2, Info, Users, Bot } from "lucide-react"
 import { ScheduleConfigurator } from "./schedule-configurator"
 import { WhatsAppTemplates } from "./whatsapp-templates"
@@ -36,8 +36,6 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     phoneNumberId: "",
     whatsappNumber: "",
     wabaId: "",
-    whatsappAssistantId: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
-    widgetAssistantId: process.env.NEXT_PUBLIC_DEFAULT_ASSISTANT_ID || "",
     active: true,
     verifyToken: "",
     accessToken: "",
@@ -46,7 +44,6 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     proxy: "",
     escalationPhoneNumber: "",
     mostrarEnFacturacion: true,
-    additionalAssistants: [],
     businessHours: [],
     whatsappSupportHours: [],
     timezone: "America/Argentina/Buenos_Aires",
@@ -158,32 +155,8 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     }
   }
 
-  const addAdditionalAssistant = () => {
-    const newAssistant: AdditionalAssistant = {
-      functionName: "",
-      assistantId: "",
-      description: "",
-    }
-    setFormData((prev) => ({
-      ...prev,
-      additionalAssistants: [...(prev.additionalAssistants || []), newAssistant],
-    }))
-  }
 
-  const updateAdditionalAssistant = (index: number, field: keyof AdditionalAssistant, value: string) => {
-    setFormData((prev) => {
-      const updated = [...(prev.additionalAssistants || [])]
-      updated[index] = { ...updated[index], [field]: value }
-      return { ...prev, additionalAssistants: updated }
-    })
-  }
 
-  const removeAdditionalAssistant = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      additionalAssistants: (prev.additionalAssistants || []).filter((_, i) => i !== index),
-    }))
-  }
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {}
@@ -196,31 +169,8 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
       newErrors.phoneNumberId = "El Phone Number ID es requerido"
     }
 
-    if (!formData.whatsappAssistantId?.trim()) {
-      newErrors.whatsappAssistantId = "El Assistant ID de WhatsApp es requerido"
-    }
-
-    if (!formData.widgetAssistantId?.trim()) {
-      newErrors.widgetAssistantId = "El Assistant ID del Widget es requerido"
-    }
-
     if (!formData.cliente_id?.trim()) {
       newErrors.cliente_id = "El Cliente ID es requerido"
-    }
-
-    if (formData.additionalAssistants && formData.additionalAssistants.length > 0) {
-      formData.additionalAssistants.forEach((assistant, index) => {
-        if (!assistant.functionName.trim()) {
-          newErrors[`additionalAssistant_${index}_functionName`] = "El nombre de función es requerido"
-        }
-        if (!assistant.assistantId.trim()) {
-          newErrors[`additionalAssistant_${index}_assistantId`] = "El Assistant ID es requerido"
-        }
-        // Validate assistant ID format
-        if (assistant.assistantId.trim() && !assistant.assistantId.startsWith("asst_")) {
-          newErrors[`additionalAssistant_${index}_assistantId`] = "El ID debe comenzar con 'asst_'"
-        }
-      })
     }
 
     // Validar colores hex
@@ -986,124 +936,17 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="whatsappAssistantId">Assistant ID para WhatsApp *</Label>
-                <Input
-                  id="whatsappAssistantId"
-                  value={formData.whatsappAssistantId || ""}
-                  onChange={(e) => updateFormData("whatsappAssistantId", e.target.value)}
-                  placeholder="asst_..."
-                  className={errors.whatsappAssistantId ? "border-red-500" : ""}
-                />
-                {errors.whatsappAssistantId && <p className="text-sm text-red-500">{errors.whatsappAssistantId}</p>}
-                <p className="text-sm text-muted-foreground">ID del asistente de OpenAI que se usará para WhatsApp</p>
-              </div>
+              {/* ── Acá estaban los Assistant ID (18/11/2026) ─────────────────
+                  Tres campos: el Assistant ID de WhatsApp, el del Widget y el
+                  editor de "Asistentes Adicionales" con su mesh de
+                  route_to_*. Los tres eran de la Assistants API de OpenAI,
+                  dada de baja el 26/8/2026, y el motor vigente
+                  —lib/openai-responses.ts— no los lee: el modelo lo elige
+                  lib/ai-models.ts y las instrucciones están en el código.
 
-              <Separator className="my-6" />
-
-              <div className="space-y-4">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <Label className="text-base font-semibold">Asistentes Adicionales</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Configura asistentes adicionales que pueden ser invocados mediante function calling
-                    </p>
-                  </div>
-                  <Button type="button" onClick={addAdditionalAssistant} size="sm" variant="outline">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Agregar Asistente
-                  </Button>
-                </div>
-
-                <Alert>
-                  <Info className="h-4 w-4" />
-                  <AlertDescription>
-                    Ejemplo: El asistente principal puede llamar a la función <code>route_to_reagendamiento</code> y el
-                    sistema automáticamente switcheará al asistente configurado con ese nombre de función.
-                  </AlertDescription>
-                </Alert>
-
-                {formData.additionalAssistants && formData.additionalAssistants.length > 0 ? (
-                  <div className="space-y-4">
-                    {formData.additionalAssistants.map((assistant, index) => (
-                      <Card key={index} className="relative">
-                        <CardContent className="pt-6">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="absolute top-2 right-2"
-                            onClick={() => removeAdditionalAssistant(index)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-
-                          <div className="grid gap-4">
-                            <div className="space-y-2">
-                              <Label htmlFor={`functionName_${index}`}>
-                                Nombre de Función *
-                                <span className="text-xs text-muted-foreground ml-2">
-                                  (ej: route_to_reagendamiento)
-                                </span>
-                              </Label>
-                              <Input
-                                id={`functionName_${index}`}
-                                value={assistant.functionName}
-                                onChange={(e) => updateAdditionalAssistant(index, "functionName", e.target.value)}
-                                placeholder="route_to_reagendamiento"
-                                className={errors[`additionalAssistant_${index}_functionName`] ? "border-red-500" : ""}
-                              />
-                              {errors[`additionalAssistant_${index}_functionName`] && (
-                                <p className="text-sm text-red-500">
-                                  {errors[`additionalAssistant_${index}_functionName`]}
-                                </p>
-                              )}
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label htmlFor={`assistantId_${index}`}>
-                                Assistant ID *
-                                <span className="text-xs text-muted-foreground ml-2">
-                                  (ej: asst_4cN7IH01SVAp2witTAfhU3So)
-                                </span>
-                              </Label>
-                              <Input
-                                id={`assistantId_${index}`}
-                                value={assistant.assistantId}
-                                onChange={(e) => updateAdditionalAssistant(index, "assistantId", e.target.value)}
-                                placeholder="asst_..."
-                                className={errors[`additionalAssistant_${index}_assistantId`] ? "border-red-500" : ""}
-                              />
-                              {errors[`additionalAssistant_${index}_assistantId`] && (
-                                <p className="text-sm text-red-500">
-                                  {errors[`additionalAssistant_${index}_assistantId`]}
-                                </p>
-                              )}
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label htmlFor={`description_${index}`}>
-                                Descripción <span className="text-muted-foreground">(opcional)</span>
-                              </Label>
-                              <Textarea
-                                id={`description_${index}`}
-                                value={assistant.description || ""}
-                                onChange={(e) => updateAdditionalAssistant(index, "description", e.target.value)}
-                                placeholder="Asistente especializado en reagendamiento de turnos"
-                                rows={2}
-                              />
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-sm text-muted-foreground">
-                    No hay asistentes adicionales configurados. Haz clic en "Agregar Asistente" para comenzar.
-                  </div>
-                )}
-              </div>
+                  Los dos primeros además eran OBLIGATORIOS: para dar de alta
+                  una clínica había que inventar un identificador de un
+                  sistema que ya no existe. */}
 
               <div className="space-y-2">
                 <Label htmlFor="accessToken">Access Token</Label>
@@ -1244,18 +1087,6 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               </div>
 
               <Separator />
-
-              <div className="space-y-2">
-                <Label htmlFor="widgetAssistantId">Assistant ID para Widget *</Label>
-                <Input
-                  id="widgetAssistantId"
-                  value={formData.widgetAssistantId || ""}
-                  onChange={(e) => updateFormData("widgetAssistantId", e.target.value)}
-                  placeholder="asst_..."
-                  className={errors.widgetAssistantId ? "border-red-500" : ""}
-                />
-                {errors.widgetAssistantId && <p className="text-sm text-red-500">{errors.widgetAssistantId}</p>}
-              </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">

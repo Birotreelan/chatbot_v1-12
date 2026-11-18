@@ -147,8 +147,6 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
             <TableHead>Nombre</TableHead>
             <TableHead>Alias</TableHead>
             <TableHead>ID de Número</TableHead>
-            <TableHead>ID de Asistente</TableHead>
-            <TableHead>Asistentes Extra</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead>Health Status</TableHead>
             <TableHead>Mensajes</TableHead>
@@ -161,16 +159,6 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
               <TableCell className="font-medium">{config.displayName}</TableCell>
               <TableCell className="text-muted-foreground">{config.alias || <span className="text-muted-foreground/50">-</span>}</TableCell>
               <TableCell>{config.phoneNumberId}</TableCell>
-              <TableCell>
-                <span className="truncate max-w-[150px] inline-block">{config.whatsappAssistantId}</span>
-              </TableCell>
-              <TableCell>
-                {config.additionalAssistants && config.additionalAssistants.length > 0 ? (
-                  <Badge variant="secondary">{config.additionalAssistants.length} configurados</Badge>
-                ) : (
-                  <span className="text-muted-foreground text-sm">-</span>
-                )}
-              </TableCell>
               <TableCell>
                 <div className="flex flex-col gap-1">
                   {config.active ? (
