@@ -5,7 +5,8 @@ import type { SessionData } from '@/lib/types';
 
 export async function GET(request: NextRequest) {
   console.log('[SSO API] ========== NUEVA SOLICITUD SSO ==========');
-  console.log('[SSO API] URL completa:', request.url);
+  // Sin la URL: trae el token de SSO en la query (18/11/2026).
+  console.log('[SSO API] Entrada por SSO:', new URL(request.url).pathname);
   console.log('[SSO API] Headers relevantes:');
   console.log('[SSO API]   - x-forwarded-for:', request.headers.get('x-forwarded-for'));
   console.log('[SSO API]   - x-real-ip:', request.headers.get('x-real-ip'));

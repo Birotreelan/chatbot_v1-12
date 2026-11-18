@@ -83,7 +83,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const { id: sessionId } = await params
     console.log("[v0] [API SESSION POST] Iniciando para sessionId:", sessionId)
-    console.log("[v0] [API SESSION POST] URL:", request.url)
+    // Sin la URL: el panel manda el _sid en la query. Ver middleware.ts.
+    console.log("[v0] [API SESSION POST] Ruta:", new URL(request.url).pathname)
     console.log("[v0] [API SESSION POST] Método:", request.method)
 
     // Obtener sesión ANTES de consumir el body (para Safari support)

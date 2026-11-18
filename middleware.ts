@@ -26,15 +26,56 @@ import { dominiosPermitidosDelCliente, frameAncestors } from "@/lib/widget-domin
  */
 const HEADERS_PERMITIDOS = "Content-Type, Authorization, X-Requested-With, Cache-Control, Pragma, Expires"
 
+/**
+ * ── Lo que NO va al log (18/11/2026) ───────────────────────────────────────
+ *
+ * Este middleware escribía la URL completa y la query entera de CADA request.
+ * Dos cosas que no pueden quedar en un log:
+ *
+ *  · `_sid`, que es el id de sesión del panel de atención. Viaja en la URL
+ *    porque Safari bloquea la cookie de terceros dentro del iframe y el panel
+ *    lo manda en cada fetch; quien lea el log entra como ese usuario mientras
+ *    la sesión viva.
+ *  · El token del portal del paciente, que va en la RUTA —/p/<token>— y abre
+ *    la agenda y los datos de esa persona.
+ *
+ * No alcanza con sacar la query: el token del portal está en el pathname. Por
+ * eso se enmascaran los dos lados.
+ *
+ * Se enmascara en vez de borrarse para que el log siga sirviendo: los
+ * primeros caracteres permiten seguir una sesión entre líneas sin que el
+ * valor sea utilizable.
+ */
+const PARAMS_SECRETOS = new Set(["_sid", "token", "sid", "key", "apikey", "api_key"])
+
+/** Las rutas que llevan un token en el camino: portal, chat y atención. */
+const RUTAS_CON_TOKEN = /^\/(p|c|a)\/([^/]+)/
+
+function enmascarar(valor: string): string {
+  if (!valor) return valor
+  return valor.length <= 6 ? "***" : `${valor.slice(0, 4)}…(${valor.length})`
+}
+
+function rutaSinSecretos(pathname: string): string {
+  return pathname.replace(RUTAS_CON_TOKEN, (_, prefijo, token) => `/${prefijo}/${enmascarar(token)}`)
+}
+
+function querySinSecretos(params: URLSearchParams): string {
+  const partes: string[] = []
+  params.forEach((valor, clave) => {
+    partes.push(`${clave}=${PARAMS_SECRETOS.has(clave.toLowerCase()) ? enmascarar(valor) : valor}`)
+  })
+  return partes.join("&")
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
-  const fullUrl = request.url
   
-  // Log para TODAS las requests que pasan por el middleware
+  // Log para TODAS las requests que pasan por el middleware. Sin la URL
+  // completa: ver `rutaSinSecretos`.
   console.log("[MIDDLEWARE] ========== REQUEST ==========")
-  console.log("[MIDDLEWARE] Pathname:", pathname)
-  console.log("[MIDDLEWARE] Full URL:", fullUrl)
-  console.log("[MIDDLEWARE] Search params:", request.nextUrl.searchParams.toString())
+  console.log("[MIDDLEWARE] Pathname:", rutaSinSecretos(pathname))
+  console.log("[MIDDLEWARE] Search params:", querySinSecretos(request.nextUrl.searchParams))
 
   // Manejar OPTIONS requests (CORS preflight)
   if (request.method === "OPTIONS") {
@@ -54,12 +95,17 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith("/widget") || pathname.includes("widget")) {
     console.log("[MIDDLEWARE] 🚀 === PETICIÓN WIDGET ===")
     console.log("[MIDDLEWARE] 📅 Timestamp:", new Date().toISOString())
-    console.log("[MIDDLEWARE] 🌐 URL completa:", request.url)
-    console.log("[MIDDLEWARE] 📍 Pathname:", pathname)
-    console.log("[MIDDLEWARE] 🔍 Search params:", request.nextUrl.searchParams.toString())
+    console.log("[MIDDLEWARE] 📍 Pathname:", rutaSinSecretos(pathname))
+    console.log("[MIDDLEWARE] 🔍 Search params:", querySinSecretos(request.nextUrl.searchParams))
     console.log("[MIDDLEWARE] 📋 Headers:")
     request.headers.forEach((value, key) => {
-      console.log(`[MIDDLEWARE] - ${key}: ${value}`)
+      // `cookie` y `authorization` traen credenciales enteras: se dice que
+      // vinieron y nada más.
+      const k = key.toLowerCase()
+      const mostrado = k === "cookie" || k === "authorization" || k === "x-session-id"
+        ? `(presente, ${value.length} caracteres)`
+        : value
+      console.log(`[MIDDLEWARE] - ${key}: ${mostrado}`)
     })
     console.log("[MIDDLEWARE] 🌍 Origin:", request.headers.get("origin"))
     console.log("[MIDDLEWARE] 🔗 Referer:", request.headers.get("referer"))
@@ -183,7 +229,7 @@ export async function middleware(request: NextRequest) {
       
       // Verificar si ya existe la cookie session_id
       const existingCookie = request.cookies.get("session_id")?.value
-      console.log("[MIDDLEWARE] SSO: Cookie existente:", existingCookie || "ninguna")
+      console.log("[MIDDLEWARE] SSO: Cookie existente:", existingCookie ? enmascarar(existingCookie) : "ninguna")
 
       // Si ya tiene la cookie correcta, redirigir a URL limpia — PERO solo para
       // navegación de página (/support), nunca para /api/support/*. Este `if`
