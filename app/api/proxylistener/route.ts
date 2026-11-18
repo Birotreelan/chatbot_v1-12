@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { verificarLlaveDeEntrada, exigeLlave, registrarLlave } from "@/lib/llave-de-entrada"
 import { getWhatsAppConfigByPhoneIdFresh, getAllWhatsAppConfigs, getConfigByClienteId } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { saveConversationMessage } from "@/lib/conversations"
@@ -21,8 +22,23 @@ export async function POST(request: Request) {
 
     console.log("[v0] 📥 REQUEST DETAILS:")
     console.log("[v0] Method:", request.method)
-    console.log("[v0] URL:", request.url)
-    console.log("[v0] Headers:", JSON.stringify(Object.fromEntries(request.headers.entries()), null, 2))
+    console.log("[v0] Ruta:", new URL(request.url).pathname)
+    // Sin volcar los encabezados tal cual: desde hoy uno de ellos es la clave
+    // del cliente, y una credencial en un log es una credencial filtrada.
+    console.log(
+      "[v0] Headers:",
+      JSON.stringify(
+        Object.fromEntries(
+          [...request.headers.entries()].map(([k, v]) =>
+            ["x-api-key", "authorization", "cookie"].includes(k.toLowerCase())
+              ? [k, `(presente, ${v.length} caracteres)`]
+              : [k, v],
+          ),
+        ),
+        null,
+        2,
+      ),
+    )
 
     // Obtener los parámetros de la solicitud
     const data = await request.json()
@@ -33,6 +49,22 @@ export async function POST(request: Request) {
     console.log("[PROXYLISTENER] ===== FIN DE DETALLES DE REQUEST =====")
 
     console.log("[PROXYLISTENER] Datos recibidos:", JSON.stringify(data, null, 2))
+
+    /**
+     * ── La llave del cliente (18/11/2026) ─────────────────────────────────
+     *
+     * Modo tolerante: se verifica, se deja constancia y se deja pasar. El
+     * cierre es la variable `EXIGIR_LLAVE_DE_ENTRADA=1`, sin deploy. Ver
+     * lib/llave-de-entrada.ts, que explica por qué en dos pasos.
+     */
+    const llave = await verificarLlaveDeEntrada(request, data?.Cliente_Id)
+    registrarLlave({ ruta: "/api/proxylistener", verificacion: llave, clienteId: data?.Cliente_Id, request })
+    if (exigeLlave() && !llave.valida) {
+      return NextResponse.json(
+        { success: false, error: "Clave inválida o ausente. Enviá tu clave en el encabezado x-api-key." },
+        { status: 401 },
+      )
+    }
 
     // Detectar si es envío de template o respuesta de botón
     const isTemplateResponse = data.action === "template_response"

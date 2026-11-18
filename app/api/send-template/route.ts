@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { verificarLlaveDeEntrada, exigeLlave, registrarLlave } from "@/lib/llave-de-entrada"
 import { getWhatsAppConfigByPhoneId, getAllWhatsAppConfigs } from "@/lib/db"
 import { sendWhatsAppMessage } from "@/lib/whatsapp-api"
 import { saveConversationMessage } from "@/lib/conversations"
@@ -10,6 +11,17 @@ export async function POST(request: Request) {
     // Obtener los parámetros de la solicitud
     const data = await request.json()
     const { Cliente_Id, Phone_Number_Id, Telefono, Body, Template_Name, Has_Buttons, Button_Options } = data
+
+    // Misma llave y mismo modo tolerante que /api/proxylistener, que recibe
+    // este mismo tipo de payload. Ver lib/llave-de-entrada.ts.
+    const llave = await verificarLlaveDeEntrada(request, Cliente_Id)
+    registrarLlave({ ruta: "/api/send-template", verificacion: llave, clienteId: Cliente_Id, request })
+    if (exigeLlave() && !llave.valida) {
+      return NextResponse.json(
+        { success: false, error: "Clave inválida o ausente. Enviá tu clave en el encabezado x-api-key." },
+        { status: 401 },
+      )
+    }
 
     // Validar que se proporcionaron los parámetros necesarios
     if (!Cliente_Id) {
