@@ -1,8 +1,27 @@
 import { NextResponse } from "next/server"
+import { requireAuthFromRequest } from "@/lib/auth"
 import { buscarPaciente } from "@/lib/api-tools/api-functions"
 
 // Actualizar la ruta de prueba de DNI para utilizar los nuevos endpoints
+/**
+ * ── Esta escritura exige sesión (18/11/2026) ───────────────────────────────
+ *
+ * Segunda tanda de la auditoría: después de cerrar las lecturas críticas
+ * quedaban 37 rutas que ESCRIBEN o MANDAN sin verificar nada. El middleware
+ * hace CORS y la cookie del SSO, pero no autentica.
+ *
+ * Consulta datos de pacientes por documento contra el sistema de la clínica.
+ *
+ * La llama el dashboard desde el navegador, con la cookie de sesión: no hubo
+ * que tocar ningún `fetch`.
+ */
 export async function GET(request: Request) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   const { searchParams } = new URL(request.url)
   const dni = searchParams.get("dni")
   const clienteId = searchParams.get("cliente_id") || ""

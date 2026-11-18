@@ -1,8 +1,27 @@
 import { NextResponse } from "next/server"
+import { requireAuthFromRequest } from "@/lib/auth"
 import { getWhatsAppConfig, getAllWhatsAppConfigs, updateWhatsAppConfig } from "@/lib/db"
 import { checkWhatsAppHealth } from "@/lib/whatsapp-api"
 
+/**
+ * ── Esta escritura exige sesión (18/11/2026) ───────────────────────────────
+ *
+ * Segunda tanda de la auditoría: después de cerrar las lecturas críticas
+ * quedaban 37 rutas que ESCRIBEN o MANDAN sin verificar nada. El middleware
+ * hace CORS y la cookie del SSO, pero no autentica.
+ *
+ * Consulta el estado de las credenciales de cada clínica contra Meta.
+ *
+ * La llama el dashboard desde el navegador, con la cookie de sesión: no hubo
+ * que tocar ningún `fetch`.
+ */
 export async function POST(request: Request) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const { configId } = await request.json()
 

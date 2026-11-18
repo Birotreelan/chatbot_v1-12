@@ -1,10 +1,29 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { requireAuthFromRequest } from "@/lib/auth"
 import { getWhatsAppConfigByPhoneId } from "@/lib/db"
 import * as apiFunctions from "@/lib/api-tools/api-functions"
 import { resolveProxyUrl } from "@/lib/proxy-url-resolver"
 
 // Actualizar la ruta de API de prueba para utilizar los nuevos endpoints
+/**
+ * ── Esta escritura exige sesión (18/11/2026) ───────────────────────────────
+ *
+ * Segunda tanda de la auditoría: después de cerrar las lecturas críticas
+ * quedaban 37 rutas que ESCRIBEN o MANDAN sin verificar nada. El middleware
+ * hace CORS y la cookie del SSO, pero no autentica.
+ *
+ * Llama al proxy real de la clínica con los parámetros que le manden.
+ *
+ * La llama el dashboard desde el navegador, con la cookie de sesión: no hubo
+ * que tocar ningún `fetch`.
+ */
 export async function POST(req: NextRequest) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(req as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const { phoneNumberId, testType, params } = await req.json()
 

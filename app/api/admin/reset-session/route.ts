@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireAuthFromRequest } from "@/lib/auth"
 import { getRedisClient } from "@/lib/redis"
 import { setConversationPaused } from "@/lib/conversations"
 
@@ -17,7 +18,25 @@ const SUPPORT_PHONE_SESSION_PREFIX = "human_support:phone:"
  * 
  * SOLO PARA DESARROLLO/TESTING - En producción debería tener autenticación admin
  */
+/**
+ * ── Esta escritura exige sesión (18/11/2026) ───────────────────────────────
+ *
+ * Segunda tanda de la auditoría: después de cerrar las lecturas críticas
+ * quedaban 37 rutas que ESCRIBEN o MANDAN sin verificar nada. El middleware
+ * hace CORS y la cookie del SSO, pero no autentica.
+ *
+ * Borra sesiones de atención humana a mano.
+ *
+ * La llama el dashboard desde el navegador, con la cookie de sesión: no hubo
+ * que tocar ningún `fetch`.
+ */
 export async function POST(request: Request) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const body = await request.json()
     const { phoneNumber, configId } = body
@@ -173,6 +192,12 @@ export async function POST(request: Request) {
  * Lista las sesiones activas de un número de teléfono (sin eliminar)
  */
 export async function GET(request: Request) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const url = new URL(request.url)
     const phoneNumber = url.searchParams.get("phone")

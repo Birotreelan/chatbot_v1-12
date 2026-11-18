@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { requireAuthFromRequest } from "@/lib/auth"
 import { getWhatsAppConfig, updateWhatsAppConfig, deleteWhatsAppConfig } from "@/lib/db"
 import { logger } from "@/lib/logger"
 
@@ -8,7 +9,25 @@ interface RouteParams {
   }
 }
 
+/**
+ * ── Esta escritura exige sesión (18/11/2026) ───────────────────────────────
+ *
+ * Segunda tanda de la auditoría: después de cerrar las lecturas críticas
+ * quedaban 37 rutas que ESCRIBEN o MANDAN sin verificar nada. El middleware
+ * hace CORS y la cookie del SSO, pero no autentica.
+ *
+ * Modifica y borra configuraciones.
+ *
+ * La llama el dashboard desde el navegador, con la cookie de sesión: no hubo
+ * que tocar ningún `fetch`.
+ */
 export async function GET(request: NextRequest, { params }: RouteParams) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     logger.apiStart(`/configs/${params.id}`, "GET")
 
@@ -28,6 +47,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 }
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     logger.apiStart(`/configs/${params.id}`, "PUT")
 
@@ -64,6 +89,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 }
 
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     logger.apiStart(`/configs/${params.id}`, "DELETE")
 

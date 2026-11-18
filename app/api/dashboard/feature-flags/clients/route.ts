@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { requireAuthFromRequest } from "@/lib/auth"
 import {
   listClientsWithRawFlags,
   pruneClientFeatureFlags,
@@ -37,7 +38,25 @@ import { DEFAULT_FEATURE_FLAGS, type FeatureFlags } from "@/lib/conversation-sta
 
 const ALL_FLAG_KEYS = Object.keys(DEFAULT_FEATURE_FLAGS) as Array<keyof FeatureFlags>
 
+/**
+ * ── Esta escritura exige sesión (18/11/2026) ───────────────────────────────
+ *
+ * Segunda tanda de la auditoría: después de cerrar las lecturas críticas
+ * quedaban 37 rutas que ESCRIBEN o MANDAN sin verificar nada. El middleware
+ * hace CORS y la cookie del SSO, pero no autentica.
+ *
+ * Prende y apaga comportamientos del bot por cliente.
+ *
+ * La llama el dashboard desde el navegador, con la cookie de sesión: no hubo
+ * que tocar ningún `fetch`.
+ */
 export async function GET(request: NextRequest) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const configIdParam = request.nextUrl.searchParams.get("configId")
     if (configIdParam) {
@@ -70,6 +89,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const body = await request.json()
     const { configId, action } = body as { configId?: string; action?: string }

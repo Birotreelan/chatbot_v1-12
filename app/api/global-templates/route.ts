@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { requireAuthFromRequest, requireAuthForApi } from "@/lib/auth"
 import {
   getAllGlobalTemplates,
   createGlobalTemplate,
@@ -7,7 +8,25 @@ import {
 import type { GlobalTemplate } from "@/lib/types"
 
 // GET - Obtener todas las plantillas globales
+/**
+ * ── Esta escritura exige sesión (18/11/2026) ───────────────────────────────
+ *
+ * Segunda tanda de la auditoría: después de cerrar las lecturas críticas
+ * quedaban 37 rutas que ESCRIBEN o MANDAN sin verificar nada. El middleware
+ * hace CORS y la cookie del SSO, pero no autentica.
+ *
+ * Escribe las plantillas globales que usan todos los clientes.
+ *
+ * La llama el dashboard desde el navegador, con la cookie de sesión: no hubo
+ * que tocar ningún `fetch`.
+ */
 export async function GET() {
+  const { session: sesion, error: errorDeSesion } = await requireAuthForApi()
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     console.log("[GLOBAL-TEMPLATES] Obteniendo todas las plantillas globales")
     
@@ -34,6 +53,12 @@ export async function GET() {
 
 // POST - Crear una nueva plantilla global (o guardar una existente como global)
 export async function POST(req: NextRequest) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(req as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const body = await req.json()
     const { 

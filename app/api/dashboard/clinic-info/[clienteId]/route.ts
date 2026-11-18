@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { requireAuthFromRequest } from "@/lib/auth"
 import { getClinicInfo, saveClinicInfo } from "@/lib/db"
 import { logger } from "@/lib/logger"
 
@@ -14,7 +15,25 @@ interface RouteParams {
  * (ver lib/types.ts ClinicInfo) — se guarda con su propia clave por
  * cliente_id en vez de vivir dentro de WhatsAppConfig.
  */
+/**
+ * ── Esta escritura exige sesión (18/11/2026) ───────────────────────────────
+ *
+ * Segunda tanda de la auditoría: después de cerrar las lecturas críticas
+ * quedaban 37 rutas que ESCRIBEN o MANDAN sin verificar nada. El middleware
+ * hace CORS y la cookie del SSO, pero no autentica.
+ *
+ * Escribe la información institucional con la que el bot le contesta a los pacientes.
+ *
+ * La llama el dashboard desde el navegador, con la cookie de sesión: no hubo
+ * que tocar ningún `fetch`.
+ */
 export async function GET(request: NextRequest, { params }: RouteParams) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const info = await getClinicInfo(params.clienteId)
     return NextResponse.json({ success: true, info })
@@ -25,6 +44,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 }
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const updates = await request.json()
 

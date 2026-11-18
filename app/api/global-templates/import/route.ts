@@ -1,8 +1,27 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { requireAuthFromRequest } from "@/lib/auth"
 import { getGlobalTemplate, getWhatsAppConfig } from "@/lib/db"
 
 // POST - Importar plantillas globales a un cliente (crear en WhatsApp Business API)
+/**
+ * ── Esta escritura exige sesión (18/11/2026) ───────────────────────────────
+ *
+ * Segunda tanda de la auditoría: después de cerrar las lecturas críticas
+ * quedaban 37 rutas que ESCRIBEN o MANDAN sin verificar nada. El middleware
+ * hace CORS y la cookie del SSO, pero no autentica.
+ *
+ * Importa plantillas globales.
+ *
+ * La llama el dashboard desde el navegador, con la cookie de sesión: no hubo
+ * que tocar ningún `fetch`.
+ */
 export async function POST(req: NextRequest) {
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(req as Request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
+
   try {
     const body = await req.json()
     const { templateIds, wabaId, configId } = body
