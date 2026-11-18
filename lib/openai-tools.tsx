@@ -22,7 +22,6 @@ import { nanoid } from "nanoid"
 import { getRedisClient } from "./redis"
 import { trackAppointmentEvent, checkAndClearPendingReschedule, trackRescheduleStarted } from "./appointment-stats"
 import { comentarioParaLaReserva } from "./turnos/comentario-de-la-reserva"
-import { getAssistantIdByFunction } from "./assistant-utils"
 import { logError } from "./logging" // Assuming logError is in './logging'
 import { incrementMetric } from "./metrics" // Assuming incrementMetric is in './metrics'
 import {
@@ -357,151 +356,14 @@ const FUNCTION_MESSAGES: Record<string, string> = {
   validar_obra_social: "Verificando la obra social, aguardá unos instantes.",
 }
 
-// Función para truncar respuestas largas de herramientas
-function truncateToolResponse(response: any, maxLength = 1000): any {
-  const responseStr = JSON.stringify(response)
-  const originalLength = responseStr.length
-
-  if (responseStr.length <= maxLength) {
-    return response
-  }
-
-  // Si es un objeto con datos, truncar los datos
-  if (response.exito && response.datos) {
-    if (Array.isArray(response.datos)) {
-      const truncatedData = response.datos.slice(0, 40)
-      return {
-        ...response,
-        datos: truncatedData,
-        _truncated: true,
-        _originalLength: response.datos.length,
-      }
-    }
-  }
-
-  // Fallback: truncar el string completo
-  return {
-    exito: response.exito || false,
-    datos: responseStr.substring(0, maxLength - 100) + "... [TRUNCADO]",
-    _truncated: true,
-    _originalLength: originalLength,
-  }
-}
-
-// Detectar si una función es de routing (comienza con route_to_)
-function isRoutingFunction(functionName: string): boolean {
-  return functionName.startsWith("route_to_")
-}
-
-// Manejar el switch de asistente cuando se detecta una función de routing
-async function handleAssistantSwitch(
-  openai: OpenAI,
-  oldThreadId: string,
-  oldRunId: string, // Added oldRunId parameter to cancel the original run
-  functionName: string,
-  functionArgs: any,
-  phoneNumberId: string,
-  accessToken: string,
-  clienteId: string,
-  userPhoneNumber: string, // Added for updating thread mapping
-): Promise<{ switchedAssistant: boolean; assistantId?: string; newThreadId?: string }> {
-  try {
-    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
-    if (!config) {
-      console.error(`[OPENAI-SWITCH] No se encontró configuración para phoneNumberId: ${phoneNumberId}`)
-      return { switchedAssistant: false }
-    }
-
-    const newAssistantId = getAssistantIdByFunction(config, functionName)
-
-    if (!newAssistantId) {
-      console.warn(`[OPENAI-SWITCH] No se encontró asistente configurado para la función: ${functionName}`)
-      return { switchedAssistant: false }
-    }
-
-    // Trackear inicio de proceso de reagendamiento si es route_to_reagendamiento
-    if (functionName === "route_to_reagendamiento") {
-      await trackRescheduleStarted(clienteId, userPhoneNumber)
-    }
-
-    await cancelRunAndWait(oldThreadId, oldRunId)
-
-    const newThread = await openai.beta.threads.create({
-      metadata: {
-        name: `whatsapp-${userPhoneNumber}-${config.id}`,
-        previousThread: oldThreadId,
-        reason: "assistant_switch",
-        assistantId: newAssistantId,
-      },
-    })
-
-    await updateThreadId(userPhoneNumber, config.id, newThread.id, newAssistantId)
-    console.info(`[OPENAI-SWITCH] Switch ${functionName}: ${oldThreadId} -> ${newThread.id} (assistant: ${newAssistantId})`)
-
-    // Marcar que el paciente está en un flujo de asistente especializado.
-    // Esto previene que el NLU fallback intercepte sus respuestas durante el flujo.
-    if (functionName === "route_to_reagendamiento") {
-      const redisFlag = getRedisClient()
-      if (redisFlag) {
-        await redisFlag.setex(`specialized_assistant_active:${config.id}:${userPhoneNumber}`, 7200, 'reagendamiento')
-        console.info(`[OPENAI-SWITCH] Flag flujo especializado seteado: ${config.id}:${userPhoneNumber}`)
-      }
-    }
-
-    const { getArgentinaDateTime } = await import("@/lib/utils/date-utils") // import moved here
-    const fechaHora = getArgentinaDateTime()
-
-    const scheduleInfo = formatScheduleForSystemBlock(config)
-
-    const systemBlock = `[SISTEMA]
-Nombre: ${config.displayName}
-FechaHora: ${fechaHora}
-PrimerMensaje: true
-TipoMensaje: assistant_switch
-PacienteCelular: ${userPhoneNumber}${telefonoParaMensajes(config) ? `\nNumeroDerivacion: ${contactoDerivacionEnLinea(telefonoParaMensajes(config))}` : ""}
-FuncionOrigen: ${functionName}${scheduleInfo}
-[/SISTEMA]
-
-${JSON.stringify(functionArgs, null, 2)}`
-
-    await openai.beta.threads.messages.create(newThread.id, {
-      role: "user",
-      content: systemBlock,
-    })
-
-    const newRun = await openai.beta.threads.runs.create(newThread.id, {
-      assistant_id: newAssistantId,
-    })
-
-    await processRunWithCorrectFlow(
-      openai,
-      newThread.id,
-      newRun.id,
-      accessToken,
-      phoneNumberId,
-      clienteId,
-      userPhoneNumber,
-    )
-
-    return {
-      switchedAssistant: true,
-      assistantId: newAssistantId,
-      newThreadId: newThread.id,
-    }
-  } catch (error) {
-    console.error(`[OPENAI-SWITCH] Error en handleAssistantSwitch:`, error)
-    return {
-      switchedAssistant: false,
-    }
-  }
-}
-// Acciones irreversibles que el asistente libre NO debe ejecutar por su cuenta.
-// Cuando BLOCK_ASSISTANT_IRREVERSIBLE_ACTIONS=true, se bloquean y se pide confirmación
-// explícita del paciente (que el flujo determinístico/router procesa de forma segura).
-// Evita casos peligrosos como confirmar un turno que el paciente quería cancelar.
+/**
+ * Las dos acciones que el asistente libre no ejecuta por su cuenta.
+ *
+ * Vivía entre dos funciones de la Assistants API y se fue con ellas el
+ * 18/11/2026; la volvió a traer el typecheck, que es de lo que se trata.
+ */
 const ASSISTANT_GUARDED_TOOLS = new Set(["confirmar_turno", "cancelar_turno"])
 
-// Implementación directa de todas las funciones
 export async function executeOpenAITool(toolName: string, args: any, clienteId: string) {
 
   // Guard de seguridad: no permitir que el asistente libre confirme/cancele por su cuenta.
@@ -587,35 +449,19 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
       case "registrar_evento_cita":
         return await registrarEventoCitaHerramienta(clienteId, args.evento, args.turno_id, args.motivo)
 
-      // Ejecutar herramientas de routing
-      case "route_to_reservas_assistant":
-      case "route_to_turnos_assistant":
-      case "route_to_pacienteNuevo_SinCualquierMedico":
-      case "route_to_pacienteExistente_SinCualquierMedico":
-        // Retornar el resultado del switch de asistente directamente
-        // The following arguments are not needed for the initial call to executeOpenAITool,
-        // but they are required by handleAssistantSwitch. We will pass dummy values or null.
-        // In a real scenario, these would be available in the context of the webhook handler.
-        const currentConfig = await getWhatsAppConfigByPhoneId(null as any) // Assume this can fetch config or needs to be passed
-        const currentThreadId = null as any // Assume this can be retrieved or passed
-        const currentAccessToken = currentConfig?.accessToken || (null as any)
-        const currentUserPhoneNumber = null as any // Assume this can be retrieved or passed
-
-        // If the logic were to be directly inside this switch, we'd need to obtain these.
-        // However, since handleAssistantSwitch is already designed to be called from processRunWithCorrectFlow,
-        // we delegate the responsibility there. For the sake of this executeOpenAITool definition,
-        // we pass null/dummy values as they won't be used directly here, but by handleAssistantSwitch later.
-        return await handleAssistantSwitch(
-          getOpenAIClient(), // Pasar instancia de OpenAI
-          currentThreadId, // threadId no es necesario para la llamada inicial de handleAssistantSwitch *from here*
-          null as any, // oldRunId not needed *from here*
-          toolName,
-          args,
-          null as any, // phoneNumberId not needed *from here*
-          currentAccessToken,
-          clienteId,
-          currentUserPhoneNumber, // userPhoneNumber not needed *from here*
-        )
+      /**
+       * Las herramientas `route_to_*` se fueron el 18/11/2026.
+       *
+       * Eran el mesh de asistentes múltiples, que el motor vigente ya no
+       * declara: lib/openai-responses.ts lo dice con todas las letras —"NO
+       * intenta replicar el mesh de asistentes múltiples (route_to_* /
+       * additionalAssistants)"—. Si el modelo no tiene la herramienta
+       * declarada, no puede pedirla, así que esta rama no se alcanzaba.
+       *
+       * Y si se alcanzaba, no servía: llamaba a `handleAssistantSwitch`
+       * pasándole `null as any` en seis de sus nueve argumentos, con un
+       * comentario que lo admitía.
+       */
 
       case "request_human_support":
         // Este caso se maneja de forma especial en executeToolCall
@@ -640,106 +486,6 @@ export async function executeOpenAITool(toolName: string, args: any, clienteId: 
 }
 
 // Mensaje para procesar solo para web
-export async function processWebOnlyMessage(
-  threadId: string,
-  message: string,
-  assistantId: string,
-  clienteId: string,
-): Promise<string> {
-  const openai = getOpenAIClient()
-
-  try {
-    // Añadir el mensaje al thread
-    const messageResponse = await openai.beta.threads.messages.create(threadId, {
-      role: "user",
-      content: message,
-    })
-
-    // Crear un run con el asistente
-    const run = await openai.beta.threads.runs.create(threadId, {
-      assistant_id: assistantId,
-    })
-
-    // Procesar el run SIN enviar a WhatsApp
-    await processWebRunOnly(openai, threadId, run.id, clienteId)
-
-    // Obtener la respuesta
-    const messages = await openai.beta.threads.messages.list(threadId, {
-      order: "desc",
-      limit: 1,
-    })
-
-    if (messages.data.length === 0 || messages.data[0].role !== "assistant") {
-      throw new Error("No se pudo obtener respuesta del asistente")
-    }
-
-    let messageContent = ""
-    for (const content of messages.data[0].content) {
-      if (content.type === "text") {
-        messageContent += content.text.value
-      }
-    }
-
-    return messageContent
-  } catch (error) {
-    console.error("[OPENAI] Error processWebOnlyMessage:", error)
-    throw error
-  }
-}
-
-// Función para procesar run sin enviar a WhatsApp
-async function processWebRunOnly(openai: OpenAI, threadId: string, runId: string, clienteId: string): Promise<void> {
-  let run = await openai.beta.threads.runs.retrieve(runId, { thread_id: threadId })
-
-  while (run.status === "queued" || run.status === "in_progress") {
-    await wait(1000)
-    run = await openai.beta.threads.runs.retrieve(runId, { thread_id: threadId })
-  }
-
-  if (run.status === "requires_action") {
-    if (run.required_action?.type === "submit_tool_outputs") {
-      const toolCalls = run.required_action.submit_tool_outputs.tool_calls
-      const toolOutputs = []
-
-      for (const toolCall of toolCalls) {
-        const functionName = toolCall.function.name
-        const functionArgs = JSON.parse(toolCall.function.arguments)
-
-        const toolResult = await executeOpenAITool(functionName, functionArgs, clienteId)
-
-        toolOutputs.push({
-          tool_call_id: toolCall.id,
-          output: JSON.stringify(toolResult),
-        })
-      }
-
-      const url = `https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs` // FIX: 'url' variable declared
-      const submitResponse = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "assistants=v2",
-        },
-        body: JSON.stringify({ tool_outputs: toolOutputs }),
-      })
-
-      if (!submitResponse.ok) {
-        const errorText = await submitResponse.text()
-        throw new Error(`Submit tool outputs failed: ${submitResponse.status} ${errorText}`)
-      }
-
-
-
-      // Continuar procesando
-      await processWebRunOnly(openai, threadId, runId, clienteId)
-    }
-  } else if (run.status === "failed") {
-    throw new Error(`Run falló: ${run.last_error?.message}`)
-  }
-}
-
-// Función para obtener obras sociales
 export async function obtenerObrasSociales(clienteId: string): Promise<string> {
   try {
     let baseUrl: string
@@ -1362,15 +1108,6 @@ const CANCEL_WAIT_TIMEOUT = 10000 // 10 segundos máximo para esperar cancelaci�
 
 const CANCELLING_WAIT_TIMEOUT = 30000 // 30 segundos para esperar que un run en cancelling termine
 
-function calculateBackoffDelay(retryCount: number, baseDelay: number = RETRY_DELAY): number {
-  // Exponential backoff: 2s, 4s, 8s, 16s...
-  const exponentialDelay = baseDelay * Math.pow(2, retryCount)
-  // Add jitter (±20%) to prevent thundering herd
-  const jitter = exponentialDelay * 0.2 * (Math.random() - 0.5)
-  return Math.floor(exponentialDelay + jitter)
-}
-
-// Función para obtener una instancia de OpenAI
 function getOpenAIClient() {
   return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -1395,46 +1132,6 @@ async function getUserPhoneNumberFromThread(threadId: string): Promise<string | 
         return parts[1]
       }
     }
-    return null
-  } catch (error) {
-    console.error(`[OPENAI] Error obteniendo número de teléfono del thread:`, error)
-    return null
-  }
-}
-
-async function getPhoneNumberFromThread(threadId: string, configId: string): Promise<string | null> {
-  try {
-    const redisClient = getRedisClient()
-    if (!redisClient) return null
-
-    const pattern = `thread:*:${configId}`
-    let cursor = 0
-
-    do {
-      const result = await redisClient.scan(cursor, {
-        match: pattern,
-        count: 100,
-      })
-
-      cursor = result[0]
-      const keys = result[1]
-
-      for (const key of keys) {
-        const threadData = await redisClient.get(key)
-        if (typeof threadData === "string") {
-          const threadInfo = JSON.parse(threadData)
-          if (threadInfo.threadId === threadId) {
-            return threadInfo.phoneNumber || key.split(":")[1]
-          }
-        } else if (threadData && typeof threadData === "object") {
-          const threadInfo = threadData as any
-          if (threadInfo.threadId === threadId) {
-            return threadInfo.phoneNumber || key.split(":")[1]
-          }
-        }
-      }
-    } while (cursor !== 0)
-
     return null
   } catch (error) {
     console.error(`[OPENAI] Error obteniendo número de teléfono del thread:`, error)
@@ -1498,144 +1195,6 @@ async function cancelRunAndWait(threadId: string, runId: string): Promise<boolea
     return false
   }
 }
-
-async function waitForCancellingRunToFinish(threadId: string, runId: string): Promise<boolean> {
-  const startTime = Date.now()
-  let attempts = 0
-  const maxAttempts = 60 // 60 intentos x 500ms = 30 segundos máximo
-
-  while (Date.now() - startTime < CANCELLING_WAIT_TIMEOUT && attempts < maxAttempts) {
-    attempts++
-    await wait(500)
-
-    try {
-      const statusResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "assistants=v2",
-        },
-      })
-
-      if (!statusResponse.ok) continue
-
-      const runStatus = await statusResponse.json()
-
-      // Estados terminales - el run ya no está activo
-      if (["cancelled", "failed", "completed", "expired"].includes(runStatus.status)) {
-        return true
-      }
-    } catch (error) {
-      // Ignorar errores y seguir intentando
-    }
-  }
-
-  return false
-}
-
-// Helper function to create a new thread
-async function createNewThread(
-  openai: OpenAI,
-  assistantId: string,
-  initialMessage: string,
-  phoneNumber: string,
-  configId: string,
-): Promise<string | null> {
-  try {
-    const thread = await openai.beta.threads.create()
-
-    await openai.beta.threads.messages.create(thread.id, {
-      role: "user",
-      content: initialMessage,
-    })
-
-    // Guardar info del thread en Redis para poder recuperar el número de teléfono
-    const redisClient = getRedisClient()
-    if (redisClient) {
-      await redisClient.set(
-        `thread:${nanoid()}:${configId}`,
-        JSON.stringify({ threadId: thread.id, phoneNumber, configId }),
-        {
-          // En minúscula: el cliente de Upstash busca `ex`, no `EX`. Con la
-          // mayúscula la opción se ignoraba y la clave quedaba SIN vencimiento
-          // — una por cada thread creado, acumulándose para siempre (21/9/2026,
-          // mismo error que en lib/human-support.ts).
-          ex: 60 * 60 * 24 * 7, // Expire after 7 days
-        },
-      )
-    }
-
-    return thread.id
-  } catch (error) {
-    console.error(`[OPENAI] Error creando nuevo thread:`, error)
-    return null
-  }
-}
-
-// Helper function to create a new thread when a run is stuck
-async function createNewThreadForStuckRun(
-  oldThreadId: string,
-  phoneNumberId: string,
-): Promise<{ success: boolean; newThreadId?: string; userPhone?: string }> {
-  try {
-    const config = await getWhatsAppConfigByPhoneId(phoneNumberId)
-    if (!config) return { success: false }
-
-    // Obtener el número de teléfono del usuario del thread viejo
-    const userPhone = await getPhoneNumberFromThread(oldThreadId, config.id)
-    if (!userPhone) return { success: false }
-
-    // Crear nuevo thread en OpenAI
-    const openai = getOpenAIClient()
-    const newThread = await openai.beta.threads.create({
-      metadata: {
-        name: `whatsapp-${userPhone}-${config.id}`,
-        previousThread: oldThreadId,
-        reason: "stuck_run_recovery",
-      },
-    })
-
-    // Actualizar el thread en Redis para este usuario
-    const redis = await getRedisClient()
-    if (redis) {
-      const threadKey = `thread:${userPhone}:${config.id}`
-      const threadData = {
-        threadId: newThread.id,
-        phoneNumber: userPhone,
-        createdAt: new Date().toISOString(),
-        lastUsed: new Date().toISOString(),
-        previousThreadId: oldThreadId,
-      }
-      await redis.set(threadKey, JSON.stringify(threadData))
-      await redis.expire(threadKey, 24 * 60 * 60)
-    }
-
-    return {
-      success: true,
-      newThreadId: newThread.id,
-      userPhone,
-    }
-  } catch (error) {
-    console.error(`[OPENAI] Error creando nuevo thread para stuck run:`, error)
-    return { success: false }
-  }
-}
-
-// Función para obtener respuesta del asistente
-/**
- * ── getAssistantResponse y processRunWithCorrectFlow vivían acá ───────────
- *
- * 341 líneas, borradas el 18/11/2026. Estaban escritas sobre la Assistants
- * API de OpenAI —`openai.beta.threads.*`—, que OpenAI dio de baja el 26/8 sin
- * período de gracia: desde esa fecha cada llamada devolvía 404. El reemplazo
- * es lib/openai-responses.ts, sobre la Responses API, y ya no las llamaba
- * nadie.
- *
- * Se fueron con ellas lib/thread-manager.ts entero —su único consumidor era
- * este bloque— y nueve de los errores de tipos del proyecto, que eran el
- * compilador avisando que esos métodos ya no existen en el SDK.
- */
 
 async function executeToolCall(
   toolCall: any,
@@ -1791,119 +1350,16 @@ async function executeToolCall(
   return JSON.stringify(toolResult)
 }
 
-async function checkForActiveRuns(threadId: string): Promise<{
-  hasActive: boolean
-  runId?: string
-  status?: string
-}> {
-  try {
-    const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs?limit=1`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "assistants=v2",
-      },
-    })
 
-    if (!response.ok) return { hasActive: false }
-
-    const data = await response.json()
-    const runs = data.data || []
-
-    // Buscar runs en estados activos
-    const activeStates = ["queued", "in_progress", "cancelling", "requires_action"]
-    const activeRun = runs.find((run: any) => activeStates.includes(run.status))
-
-    if (activeRun) {
-      return {
-        hasActive: true,
-        runId: activeRun.id,
-        status: activeRun.status,
-      }
-    }
-
-    return { hasActive: false }
-  } catch (error) {
-    console.error(`[OPENAI] Error verificando runs activos:`, error)
-    return { hasActive: false }
-  }
-}
-
-// Función para esperar completación del run
-async function waitForRunCompletionOrAction(openai: OpenAI, threadId: string, runId: string) {
-  const startTime = Date.now()
-  let pollInterval = 800 // Start with 800ms for faster initial response
-  const maxPollInterval = 2500 // Max 2.5 seconds between polls
-  let earlyWarningSent = false
-  let queuedStartTime: number | null = null
-
-  const makeDirectAPICall = async (tId: string, rId: string) => {
-    const url = `https://api.openai.com/v1/threads/${tId}/runs/${rId}`
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-        "OpenAI-Beta": "assistants=v2",
-      },
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`API call failed: ${response.status} ${errorText}`)
-    }
-
-    return await response.json()
-  }
-
-  let run = await makeDirectAPICall(threadId, runId)
-  let pollCount = 0
-  let lastStatus = run.status
-
-  if (run.status === "queued") {
-    queuedStartTime = Date.now()
-  }
-
-  while (run.status === "queued" || run.status === "in_progress") {
-    pollCount++
-    const elapsed = Date.now() - startTime
-
-    if (run.status === "queued") {
-      if (queuedStartTime === null) {
-        queuedStartTime = Date.now()
-      }
-      const queuedElapsed = Date.now() - queuedStartTime
-
-      if (queuedElapsed > QUEUED_TIMEOUT) {
-        await cancelRunAndWait(threadId, runId)
-        throw new Error(`Run atascado en cola: ${queuedElapsed}ms en estado queued`)
-      }
-    } else {
-      queuedStartTime = null
-    }
-
-    if (!earlyWarningSent && elapsed > EARLY_WARNING_TIME) {
-      earlyWarningSent = true
-    }
-
-    if (elapsed > OPENAI_TIMEOUT) {
-      await cancelRunAndWait(threadId, runId)
-      throw new Error(`Timeout esperando run: ${OPENAI_TIMEOUT}ms (estado: ${run.status})`)
-    }
-
-    if (run.status !== lastStatus) {
-      lastStatus = run.status
-    }
-
-    await wait(pollInterval)
-
-    if (pollInterval < maxPollInterval) {
-      pollInterval = Math.min(pollInterval + 400, maxPollInterval)
-    }
-
-    run = await makeDirectAPICall(threadId, runId)
-  }
-
-  return run
-}
+/**
+ * ── Lo que había acá y ya no (18/11/2026) ─────────────────────────────────
+ *
+ * Doce funciones sobre la Assistants API de OpenAI —`openai.beta.threads.*`—,
+ * dada de baja el 26/8/2026: desde esa fecha cada llamada devuelve 404.
+ *
+ * Se encontraron recorriendo el grafo de llamadas desde las tres funciones
+ * que otros archivos importan —`executeOpenAITool`,
+ * `generateDynamicWaitingMessage` y `reservarTurno`— y quedándose con lo
+ * inalcanzable. Buscarlas de a una preguntando "¿esto se usa?" era cómo
+ * llegaron a ser doce: cada una parecía usada por la anterior.
+ */
