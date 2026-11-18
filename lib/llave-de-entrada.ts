@@ -14,13 +14,21 @@
  * ── Se replica lo que ya existe, no se inventa ────────────────────────────
  *
  * `/api/envios/pausa` resolvió esta misma pregunta el 1/10 y está en
- * producción: la clave va en el encabezado `x-api-key`, hay una clave por
- * cliente, se guarda sólo el hash y la comparación de la clave compartida es
- * de tiempo constante. Este módulo usa ese mismo índice de claves
- * —lib/pausa-claves.ts— para que una clínica no tenga que tener dos.
+ * producción: clave en un encabezado, comparación de tiempo constante y nunca
+ * por query string —las URLs quedan escritas en los logs de Vercel, en los
+ * del proxy del cliente y en cualquier intermediario—.
  *
- * Nunca por query string: las URLs quedan escritas en los logs de Vercel, en
- * los del proxy del cliente y en cualquier intermediario.
+ * ── Una sola llave, la que ya tienen ──────────────────────────────────────
+ *
+ * Decisión del 18/11: se usa la MISMA clave con la que el sistema externo da
+ * de alta clientes en `/api/clients`, y no una por clínica. El motivo es
+ * operativo y es bueno: no hay nada nuevo que distribuir, ni una segunda
+ * credencial que alguien tenga que recordar dónde guardó.
+ *
+ * Lo que se resigna, para que esté dicho: una clave compartida no distingue a
+ * una clínica de otra, así que si se filtra, se filtran todas, y no se puede
+ * detectar que una mande mensajes en nombre de otra. `PROXYLISTENER_API_KEY`
+ * queda disponible para separarlas el día que convenga, sin tocar código.
  *
  * ── Modo tolerante, y por qué ─────────────────────────────────────────────
  *
@@ -80,14 +88,73 @@ function coincide(recibida: string, esperada: string): boolean {
  * compartida no puede detectar —una clínica mandando mensajes en nombre de
  * otra— y es la razón principal para preferir la clave por cliente.
  */
+/**
+ * La clave, venga por donde venga.
+ *
+ * Se aceptan los dos encabezados a propósito: `/api/clients` —el alta de
+ * clientes, que el sistema externo ya usa— espera `Authorization: Bearer`, y
+ * `/api/envios/pausa` espera `x-api-key`. Pedirle a quien llama que use uno
+ * distinto según la ruta es una forma de que alguien se equivoque un martes a
+ * las tres de la mañana. Que mande el que ya tiene escrito.
+ *
+ * Por query string NO se acepta, y eso no es negociable: las URLs quedan en
+ * los logs de Vercel, en los del proxy del cliente y en cualquier
+ * intermediario.
+ */
+function claveDelPedido(request: Request): string | null {
+  const porHeader = request.headers.get("x-api-key")
+  if (porHeader) return porHeader
+
+  // El esquema, sin mirar mayúsculas: la norma HTTP dice que `Bearer`,
+  // `bearer` y `BEARER` son lo mismo, y varios clientes lo escriben en
+  // minúscula. Una llave correcta rechazada por eso se vería exactamente
+  // igual que una llave equivocada, y nos llevaría medio día encontrarlo. El
+  // valor sí se compara tal cual.
+  const autorizacion = request.headers.get("authorization") || ""
+  const [esquema, ...resto] = autorizacion.split(" ")
+  if (esquema.toLowerCase() === "bearer") {
+    const valor = resto.join(" ").trim()
+    if (valor) return valor
+  }
+
+  return null
+}
+
+/**
+ * La clave compartida que se acepta hoy.
+ *
+ * Es la misma con la que el sistema externo da de alta clientes: fue la
+ * decisión del 18/11, para que no tenga que distribuir ni recordar una
+ * segunda. `PROXYLISTENER_API_KEY` existe para el día que se quieran separar
+ * —se define y ésta deja de aceptarse, sin tocar código—, que es lo que
+ * conviene si alguna vez la de alta llega a más manos que las de hoy.
+ */
+function claveCompartida(): string | undefined {
+  return process.env.PROXYLISTENER_API_KEY || process.env.CLIENTS_API_KEY
+}
+
 export async function verificarLlaveDeEntrada(
   request: Request,
   clienteId?: string | null,
 ): Promise<Verificacion> {
-  const clave = request.headers.get("x-api-key")
+  const clave = claveDelPedido(request)
   if (!clave) return { estado: "sin_llave", valida: false }
 
-  // ── Camino 1: la clave identifica a un cliente ─────────────────────────
+  // ── Camino 1: la clave compartida ──────────────────────────────────────
+  //
+  // Va PRIMERO porque es el camino normal y no toca Redis. Al revés, cada
+  // recordatorio —que son miles por día— pagaría una lectura extra para
+  // terminar cayendo acá igual.
+  const compartida = claveCompartida()
+  if (compartida && coincide(clave, compartida)) {
+    return { estado: "ok_compartida", valida: true }
+  }
+
+  // ── Camino 2: una clave por cliente ────────────────────────────────────
+  //
+  // Hoy no se usa —se eligió la compartida— pero el índice ya existe para
+  // /api/envios/pausa y reconocerla no cuesta nada. Si algún día se migra,
+  // esto ya distingue a una clínica de otra sin tocar nada.
   try {
     const configId = await configDeLaClave(clave)
     if (configId) {
@@ -100,14 +167,8 @@ export async function verificarLlaveDeEntrada(
     }
   } catch (error) {
     // Un problema para leer el índice no puede hacerse pasar por una clave
-    // inválida: se registra y se sigue por el camino de la compartida.
+    // inválida: se registra y se devuelve desconocida.
     console.warn("[LLAVE] No se pudo resolver la clave del cliente:", error)
-  }
-
-  // ── Camino 2: la clave compartida ──────────────────────────────────────
-  const compartida = process.env.PROXYLISTENER_API_KEY
-  if (compartida && coincide(clave, compartida)) {
-    return { estado: "ok_compartida", valida: true }
   }
 
   return { estado: "desconocida", valida: false }
