@@ -6346,18 +6346,21 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
     
     if (nluFallbackFlags.nluFallbackRouter) {
 
-      // Si el paciente está en un flujo de asistente especializado (ej: reagendamiento),
-      // saltear el NLU fallback para no interceptar sus respuestas al asistente OpenAI.
-      const nluRedis = getRedisClient()
-      const specializedAssistantFlow = nluRedis
-        ? await nluRedis.get(`specialized_assistant_active:${config.id}:${userPhoneNumber}`)
-        : null
-
-      if (specializedAssistantFlow) {
-        logger.info("[NLU-FALLBACK] Saltando NLU fallback — paciente en flujo de asistente especializado", {
-          specializedFlow: specializedAssistantFlow,
-        })
-      } else {
+      /**
+       * ── Acá se salteaba el NLU fallback, y nunca se salteó (18/11/2026) ─
+       *
+       * La guarda leía `specialized_assistant_active:*` en Redis para no
+       * interceptar las respuestas del paciente a un asistente especializado
+       * de OpenAI. Esa clave NO LA ESCRIBE NADIE: era del camino de la
+       * Assistants API, dada de baja el 26/8/2026, y quedaron sólo dos
+       * lectores y ningún escritor.
+       *
+       * O sea que la condición era siempre falsa. Menos mal: adentro llamaba
+       * a `logger`, que en esta función no existe —el archivo arma uno por
+       * conversación con `createConversationLogger`—, así que el día que esa
+       * clave hubiera aparecido, el bot habría cortado con "logger is not
+       * defined" en vez de saltear nada.
+       */
 
       // Obtener el appointmentContext si existe
       const appointmentData = await getAppointmentContext(userPhoneNumber, config.id)
@@ -6444,7 +6447,6 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
         return
       }
 
-      } // end else (no specialized assistant flow)
     }
   }
 
@@ -8566,7 +8568,11 @@ Hola, quisiera reagendar mi turno.`
             )
             if (!resumeResult.shouldCallOpenAI) {
               const ctxResume: DirectResponseContext = {
-                phoneNumberId: value.metadata.phone_number_id,
+                // `value` es de handleMessage y acá no existe: esta función
+                // recibe el `phoneNumberId` por parámetro (18/11/2026). Tal
+                // como estaba, el paciente que retomaba un reagendamiento se
+                // encontraba con un corte, no con una respuesta.
+                phoneNumberId,
                 accessToken: config.accessToken,
                 userPhoneNumber,
                 configId: config.id,
@@ -8604,7 +8610,10 @@ Hola, quisiera reagendar mi turno.`
         }
 
         const ctxRescheduleError: DirectResponseContext = {
-          phoneNumberId: value.metadata.phone_number_id,
+          // Ídem: `value` no existe en esta función. Y acá dolía más, porque
+          // es el camino que avisa que el reagendamiento falló: el aviso
+          // moría con un ReferenceError encima del error que venía a contar.
+          phoneNumberId,
           accessToken: config.accessToken,
           userPhoneNumber,
           configId: config.id,
