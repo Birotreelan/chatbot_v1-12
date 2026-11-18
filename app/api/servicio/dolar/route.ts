@@ -8,6 +8,7 @@
  */
 
 import { NextResponse } from "next/server"
+import { requireAuthFromRequest } from "@/lib/auth"
 import { exigirSuperAdmin, esDenegado } from "@/lib/conversations-auth"
 import { getDolarServicio, setDolarServicio } from "@/lib/servicio-dolar"
 import { getDolarVenta } from "@/lib/facturacion-dolar"
@@ -18,7 +19,29 @@ function periodoValido(periodo: unknown): periodo is string {
   return typeof periodo === "string" && /^\d{4}-\d{2}$/.test(periodo)
 }
 
+/**
+ * ── Por qué esta lectura exige sesión (18/11/2026) ─────────────────────────
+ *
+ * Auditoría del 18/11: de 113 rutas, 84 no verificaban identidad. El
+ * middleware hace CORS y la cookie del SSO, pero no autentica, así que cada
+ * ruta se defiende sola y la mayoría no lo hacía.
+ *
+ * La cotización con la que se cierra la facturación del mes.
+ *
+ * Se protegen sólo las lecturas críticas —credenciales, conversaciones de
+ * pacientes, datos personales y comerciales—. Las estadísticas agregadas
+ * quedan abiertas a propósito: no identifican a nadie.
+ *
+ * La consumen pantallas del dashboard desde el navegador, que mandan la
+ * cookie de sesión sola: no hubo que tocar ningún `fetch`.
+ */
 export async function GET(request: Request) {
+  // Lectura crítica: exige sesión. Ver la nota de arriba.
+  const { session: sesion, error: errorDeSesion } = await requireAuthFromRequest(request)
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
   try {
     const acceso = await exigirSuperAdmin(request)
     if (esDenegado(acceso)) return acceso.respuesta

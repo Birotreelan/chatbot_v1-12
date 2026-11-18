@@ -1,8 +1,35 @@
 import { NextResponse } from "next/server"
+import { requireAuthForApi } from "@/lib/auth"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import { estadoDePausa, type EstadoDePausa } from "@/lib/pausa-de-envios"
 
+/**
+ * ── Por qué esta lectura exige sesión (18/11/2026) ─────────────────────────
+ *
+ * Auditoría del 18/11: de 113 rutas, 84 no verificaban identidad. El
+ * middleware hace CORS y la cookie del SSO, pero no autentica, así que cada
+ * ruta se defiende sola y la mayoría no lo hacía.
+ *
+ * Esta devolvía `...config` entero —accessToken de Meta, wabaId, phoneNumberId
+ * y la URL del proxy de cada clínica— sin pedir nada. Con eso se puede mandar
+ * WhatsApp en nombre de cualquier clínica. `/api/configs` devuelve lo mismo y
+ * exige super admin desde siempre: esta era la segunda puerta a la misma
+ * habitación, sin cerradura.
+ *
+ * Se protegen sólo las lecturas críticas —credenciales, conversaciones de
+ * pacientes, datos personales y comerciales—. Las estadísticas agregadas
+ * quedan abiertas a propósito: no identifican a nadie.
+ *
+ * La consumen pantallas del dashboard desde el navegador, que mandan la
+ * cookie de sesión sola: no hubo que tocar ningún `fetch`.
+ */
 export async function GET() {
+  // Lectura crítica: exige sesión. Ver la nota de arriba.
+  const { session: sesion, error: errorDeSesion } = await requireAuthForApi()
+  if (!sesion) {
+    return NextResponse.json({ error: errorDeSesion || "No autorizado" }, { status: 401 })
+  }
+
   try {
     const configs = await getAllWhatsAppConfigs()
 
