@@ -62,6 +62,13 @@ export const BOTON_REAGENDAR = "Reprogramar turno"
 const ETIQUETAS_VIEJAS: Record<string, AccionDelRecordatorio> = {
   confirmar: "confirmar",
   cancelar: "cancelar",
+  // Las que una clínica puede aprobar en su propio template. Van acá —exactas—
+  // y además las cubre `porAproximacion`, para que una variante no prevista
+  // siga ruteando.
+  asistire: "confirmar",
+  "si, asistire": "confirmar",
+  "no asistire": "cancelar",
+  "no, no asistire": "cancelar",
 }
 
 /**
@@ -102,7 +109,61 @@ export function accionDelBoton(boton: { text?: string; payload?: string } | null
   if (texto === BOTON_CANCELAR.toLowerCase()) return "cancelar"
   if (texto === BOTON_REAGENDAR.toLowerCase()) return "reagendar"
 
-  return ETIQUETAS_VIEJAS[texto] ?? null
+  const porEtiquetaConocida = ETIQUETAS_VIEJAS[sinAcentos(texto)]
+  if (porEtiquetaConocida) return porEtiquetaConocida
+
+  return porAproximacion(sinAcentos(texto))
+}
+
+/** "Asistiré" y "asistire" tienen que rutear igual. */
+function sinAcentos(texto: string): string {
+  return texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
+/**
+ * El último recurso: reconocer la intención en etiquetas que no conocemos.
+ *
+ * ── Por qué sigue existiendo un camino por aproximación ───────────────────
+ *
+ * Cada clínica aprueba su propio template en Meta con las etiquetas que
+ * quiere, y hoy conviven varias: "Confirmar", "Confirmar turno", "Confirmar
+ * Asistencia". Exigir coincidencia exacta dejaría sin rutear al primero que
+ * escriba la suya distinta, y el síntoma sería mudo: el paciente toca, recibe
+ * cualquier cosa del motor conversacional y el turno nunca se confirma.
+ *
+ * ── El orden es la corrección (19/11/2026) ────────────────────────────────
+ *
+ * Antes esto vivía en lib/whatsapp.tsx como dos líneas sueltas:
+ *
+ *     isCancellationButton = texto.includes("cancelar")
+ *     isConfirmButton      = !isCancellationButton && texto.includes("confirmar")
+ *
+ * Con eso, una etiqueta que NIEGA la acción se leía al derecho: "No cancelar"
+ * contiene "cancelar" y se rutea como cancelación. Y "Asistiré" / "No
+ * Asistiré" no entraban en ninguna de las dos: los dos toques se iban al
+ * motor conversacional y el turno no se confirmaba nunca.
+ *
+ * Por eso las negaciones se miran PRIMERO. "No asistiré" es una cancelación
+ * aunque contenga "asistir"; "Asistiré" es una confirmación sólo si antes no
+ * resultó ser una negación.
+ */
+/** Dice que NO va: cancela, contenga la palabra que contenga. */
+const NIEGA_LA_ASISTENCIA = ["no asistir", "no voy", "no podre", "no puedo", "no ire", "no confirmar"]
+/** Dice que NO cancela: o sea que se queda con el turno. */
+const NIEGA_LA_CANCELACION = ["no cancelar", "no anular"]
+const CANCELA = ["cancelar", "anular"]
+const CONFIRMA = ["confirmar", "asistir", "asistire", "ahi estare", "voy"]
+
+function porAproximacion(texto: string): AccionDelRecordatorio | null {
+  // Las negaciones van primero, y cada una invierte a su propia palabra: "No
+  // asistiré" cancela aunque diga "asistir", y "No cancelar" confirma aunque
+  // diga "cancelar". Mirar las afirmaciones antes era exactamente el bug.
+  if (NIEGA_LA_ASISTENCIA.some((x) => texto.includes(x))) return "cancelar"
+  if (NIEGA_LA_CANCELACION.some((x) => texto.includes(x))) return "confirmar"
+
+  if (CANCELA.some((x) => texto.includes(x))) return "cancelar"
+  if (CONFIRMA.some((x) => texto.includes(x))) return "confirmar"
+  return null
 }
 
 // ─── Creación del template (se hace una vez por WABA) ────────────────────────

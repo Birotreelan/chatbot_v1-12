@@ -3642,9 +3642,9 @@ export async function handleMessage(value: any) {
     // de audio. Las dos cosas importan:
     //
     // · Antes, porque los payloads ENCUESTA_CONFORME / ENCUESTA_DISCONFORME no
-    //   matchean con ninguno de los detectores de más abajo —que ruteán por
-    //   `includes("cancelar")` / `includes("confirmar")`— y hasta hoy caían al
-    //   asistente de texto libre. Un paciente que tocaba "Molestia o
+    //   matchean con el ruteo de botones de más abajo —`accionDelBoton`, que
+    //   devuelve null para ellos— y hasta hoy caían al asistente de texto
+    //   libre. Un paciente que tocaba "Molestia o
     //   disconformidad" recibía una respuesta improvisada sobre turnos.
     //
     // · Después del audio, porque una molestia postoperatoria contada en una
@@ -4535,11 +4535,28 @@ export async function handleMessage(value: any) {
     }
 
     if (message.type === "button" && message.button) {
-      // Detectar si es un botón de cancelación
-      const buttonText = (message.button.text || "").toLowerCase()
-      const buttonPayload = (message.button.payload || "").toLowerCase()
-      const isCancellationButton = buttonText.includes("cancelar") || buttonPayload.includes("cancel")
-      const isConfirmButton = !isCancellationButton && (buttonText.includes("confirmar") || buttonPayload.includes("confirmar"))
+      /**
+       * Qué botón tocó el paciente (19/11/2026).
+       *
+       * Acá había dos líneas con `includes`:
+       *
+       *     isCancellationButton = texto.includes("cancelar")
+       *     isConfirmButton      = !isCancellationButton && texto.includes("confirmar")
+       *
+       * Tenían dos problemas. Una etiqueta que NIEGA la acción se leía al
+       * derecho —"No cancelar" contiene "cancelar"— y una que no usa esas dos
+       * palabras no se reconocía: con "Asistiré" / "No Asistiré", los dos
+       * toques se iban al motor conversacional y el turno no se confirmaba
+       * nunca, sin ningún error a la vista.
+       *
+       * Ahora la decisión la toma `accionDelBoton`, que ya ruteaba los botones
+       * de los recordatorios con Flows: payload primero, etiqueta exacta
+       * después y, recién al final, aproximación mirando las negaciones antes
+       * que las afirmaciones. Una sola función para la misma pregunta.
+       */
+      const accionDelBotonTocado = accionDelBoton(message.button)
+      const isCancellationButton = accionDelBotonTocado === "cancelar"
+      const isConfirmButton = accionDelBotonTocado === "confirmar"
 
       // IMPORTANTE: Limpiar el assistantId del thread para volver al asistente principal
       // Esto es necesario porque las respuestas de botón vienen de templates externos (recordatorios)
@@ -4879,14 +4896,20 @@ Responde de manera apropiada según la acción realizada.`
             }
           } else {
             // Si success es true pero no hay action_type específico
-            const buttonTextLower = originalMessage.toLowerCase()
-            const accionDetectada = buttonTextLower.includes("confirmar")
-              ? "confirmacion"
-              : buttonTextLower.includes("cancelar")
-                ? "cancelacion"
-                : buttonTextLower.includes("reprogramar") || buttonTextLower.includes("reagendar")
-                  ? "reprogramacion"
-                  : "respuesta_generica"
+            // La MISMA pregunta que arriba, que acá estaba contestada por
+            // tercera vez con `includes` (19/11/2026). Con "No Asistiré"
+            // devolvía "respuesta_generica", así que el evento quedaba mal
+            // clasificado en las estadísticas aunque el turno se cancelara
+            // bien. Una sola función para los tres lugares.
+            const accionDelTexto = accionDelBoton({ text: originalMessage })
+            const accionDetectada =
+              accionDelTexto === "confirmar"
+                ? "confirmacion"
+                : accionDelTexto === "cancelar"
+                  ? "cancelacion"
+                  : accionDelTexto === "reagendar"
+                    ? "reprogramacion"
+                    : "respuesta_generica"
 
             if (config.cliente_id) {
               const templateSentAt = await getTemplateSentTime(config.cliente_id, userPhoneNumber)
