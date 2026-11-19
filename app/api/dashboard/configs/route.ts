@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireAuthForApi } from "@/lib/auth"
 import { getAllWhatsAppConfigs } from "@/lib/db"
 import { estadoDePausa, type EstadoDePausa } from "@/lib/pausa-de-envios"
+import { estadoDeRecordatorios } from "@/lib/pausa-de-recordatorios"
 
 /**
  * ── Por qué esta lectura exige sesión (18/11/2026) ─────────────────────────
@@ -48,11 +49,17 @@ export async function GET() {
       ),
     )
 
+    // Y la pausa SÓLO de recordatorios, que es otra cosa: el bot sigue
+    // contestando. Ver lib/pausa-de-recordatorios.ts.
+    const recordatorios = await Promise.all(configs.map((c) => estadoDeRecordatorios(c.id)))
+
     return NextResponse.json(
       configs.map((config, i) => ({
         ...config,
         enviosPausados: estados[i].pausado,
         enviosPausadosDesde: estados[i].desde,
+        recordatoriosPausados: recordatorios[i].pausado,
+        recordatoriosPausadosDesde: recordatorios[i].desde,
       })),
     )
   } catch (error) {

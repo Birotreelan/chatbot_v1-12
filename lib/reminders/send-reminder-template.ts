@@ -13,6 +13,11 @@
  */
 
 import { sendWhatsAppTemplate } from "../whatsapp-api"
+import {
+  recordatoriosPausados,
+  esRecordatorioDeTurno,
+  respuestaDeRecordatorioPausado,
+} from "../pausa-de-recordatorios"
 import { saveConversationMessage } from "../conversations"
 import { nanoid } from "nanoid"
 import { trackTemplateSent } from "../appointment-stats"
@@ -139,6 +144,37 @@ export interface SendReminderTemplateParams {
  */
 export async function sendReminderTemplate(params: SendReminderTemplateParams): Promise<any> {
   const { config, destinationPhone, cleanPhoneNumber, Body, Chatbot_Data, Sede_Id } = params
+
+  /**
+   * ── La pausa de recordatorios (19/11/2026) ──────────────────────────────
+   *
+   * Va ACÁ y no en la compuerta de lib/whatsapp-api.ts, que es donde vive la
+   * pausa total. Dos motivos:
+   *
+   *  · ahí sólo se sabe el `phoneNumberId` y el texto; no se sabe si lo que
+   *    sale es un recordatorio o el aviso de que a alguien le cancelaron el
+   *    turno, que NO se pausa;
+   *  · acá se puede contestarle al sistema de la clínica que el pedido se
+   *    procesó, para que no lo reintente en loop.
+   *
+   * Sólo las tres familias de recordatorio. Ver lib/pausa-de-recordatorios.ts.
+   */
+  const nombreDeLaPlantilla = (() => {
+    try {
+      const cuerpo = typeof Body === "string" ? JSON.parse(Body) : (Body as any)
+      return cuerpo?.template?.name as string | undefined
+    } catch {
+      return undefined
+    }
+  })()
+
+  if (esRecordatorioDeTurno(nombreDeLaPlantilla) && (await recordatoriosPausados(config?.id))) {
+    console.log(
+      `[REMINDERS] ⏸️ Recordatorio ignorado: ${config?.displayName || config?.id} tiene los ` +
+        `recordatorios pausados (plantilla ${nombreDeLaPlantilla}, destino ${cleanPhoneNumber})`,
+    )
+    return respuestaDeRecordatorioPausado(config?.id || "", nombreDeLaPlantilla)
+  }
 
   // ── Recordatorio con tres botones (22/9/2026) ────────────────────────────
   //
