@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DeleteWhatsAppConfig } from "@/components/dashboard/delete-whatsapp-config"
-import { Pause, Play, Activity, AlertTriangle, XCircle, BellOff, Bell } from "lucide-react"
+import { Pause, Play, Activity, AlertTriangle, XCircle } from "lucide-react"
 import { useState } from "react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -17,47 +17,8 @@ interface WhatsAppConfigListProps {
 export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigListProps) {
   const [configs, setConfigs] = useState(initialConfigs)
   const [loadingPause, setLoadingPause] = useState<string | null>(null)
-  const [loadingRecordatorios, setLoadingRecordatorios] = useState<string | null>(null)
   const [loadingHealth, setLoadingHealth] = useState<string | null>(null)
   const { toast } = useToast()
-
-  /**
-   * Pausar sólo los recordatorios.
-   *
-   * Separado de `handleTogglePause` a propósito: son dos cosas distintas y
-   * confundirlas sale caro en los dos sentidos. Aquélla deja muda a la
-   * clínica; ésta corta el gasto grande y deja al bot contestando.
-   */
-  const handleToggleRecordatorios = async (configId: string) => {
-    setLoadingRecordatorios(configId)
-    try {
-      const response = await fetch("/api/dashboard/configs/pausa-recordatorios", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ configId }),
-      })
-      if (!response.ok) throw new Error("Error al cambiar los recordatorios")
-      const data = await response.json()
-
-      setConfigs((prev) =>
-        prev.map((c) => (c.id === configId ? { ...c, recordatoriosPausados: data.paused } : c)),
-      )
-
-      toast({
-        title: data.paused ? "Recordatorios pausados" : "Recordatorios reanudados",
-        description: data.message,
-        variant: data.paused ? "destructive" : "default",
-      })
-    } catch {
-      toast({
-        title: "Error",
-        description: "No se pudo cambiar el estado de los recordatorios",
-        variant: "destructive",
-      })
-    } finally {
-      setLoadingRecordatorios(null)
-    }
-  }
 
   const handleTogglePause = async (configId: string) => {
     setLoadingPause(configId)
@@ -212,15 +173,6 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
                       Envíos pausados
                     </Badge>
                   )}
-                  {/* La pausa total ya lo dice todo: si está, ésta sobra. */}
-                  {!(config as any).enviosPausados && (config as any).recordatoriosPausados && (
-                    <Badge
-                      variant="destructive"
-                      title="Los recordatorios de turno se ignoran. El bot sigue contestando y los avisos de turno aprobado, cancelado o reagendado siguen saliendo."
-                    >
-                      Recordatorios pausados
-                    </Badge>
-                  )}
                 </div>
               </TableCell>
               <TableCell>
@@ -253,23 +205,6 @@ export function WhatsAppConfigList({ configs: initialConfigs }: WhatsAppConfigLi
                     title="Verificar Health Status"
                   >
                     <Activity className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={(config as any).recordatoriosPausados ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => handleToggleRecordatorios(config.id)}
-                    disabled={loadingRecordatorios === config.id}
-                    title={
-                      (config as any).recordatoriosPausados
-                        ? "Reanudar los recordatorios de turno"
-                        : "Ignorar los recordatorios de turno (el bot sigue contestando)"
-                    }
-                  >
-                    {(config as any).recordatoriosPausados ? (
-                      <Bell className="h-4 w-4" />
-                    ) : (
-                      <BellOff className="h-4 w-4" />
-                    )}
                   </Button>
                   <Button
                     variant={(config as any).enviosPausados ? "default" : "outline"}

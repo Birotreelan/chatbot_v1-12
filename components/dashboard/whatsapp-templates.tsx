@@ -30,7 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Copy, RefreshCw, AlertCircle, CheckCircle, Clock, XCircle, Send, Plus, Trash2, Loader2, Globe, Download, Upload } from "lucide-react"
+import { Copy, RefreshCw, AlertCircle, CheckCircle, Clock, XCircle, Send, Plus, Trash2, Loader2, Globe, Download, Upload, PauseCircle, PlayCircle } from "lucide-react"
 import type { WhatsAppConfig, GlobalTemplate } from "@/lib/types"
 import { WhatsAppTemplateCreator } from "./whatsapp-template-creator"
 
@@ -92,9 +92,62 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
     error?: string
   }[] | null>(null)
 
+  /**
+   * Qué plantillas de este cliente están pausadas (19/11/2026).
+   *
+   * Pausada = cuando el sistema de la clínica la manda, se ignora y no sale
+   * por WhatsApp. Es por plantilla y por cliente: la misma plantilla puede
+   * estar frenada en una clínica y andando en otra.
+   *
+   * Se guarda acá el nombre en minúscula, que es como lo normaliza el
+   * servidor. Ver lib/plantillas-pausadas.ts.
+   */
+  const [pausadas, setPausadas] = useState<Record<string, { desde: string; por?: string }>>({})
+  const [cambiandoPausa, setCambiandoPausa] = useState<string | null>(null)
+
   useEffect(() => {
     fetchTemplates()
+    fetchPausadas()
   }, [config.id])
+
+  async function fetchPausadas() {
+    try {
+      const r = await fetch(`/api/dashboard/configs/plantillas-pausadas?configId=${encodeURIComponent(config.id)}`)
+      const data = await r.json()
+      setPausadas(data?.pausadas || {})
+    } catch {
+      // Si no se pudo leer, no se marca ninguna: el envío decide igual del
+      // lado del servidor, así que lo único que se pierde es el cartel.
+      setPausadas({})
+    }
+  }
+
+  const estaPausada = (nombre: string) => Boolean(pausadas[(nombre || "").toLowerCase()])
+
+  async function togglePausa(nombre: string) {
+    setCambiandoPausa(nombre)
+    try {
+      const r = await fetch("/api/dashboard/configs/plantillas-pausadas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ configId: config.id, plantilla: nombre }),
+      })
+      if (!r.ok) throw new Error()
+      const data = await r.json()
+      await fetchPausadas()
+      toast({
+        title: data.paused ? `«${nombre}» pausada` : `«${nombre}» reanudada`,
+        // La advertencia del servidor cuando la plantilla es de las que, si
+        // no salen, dejan a un paciente sin saber algo que necesita.
+        description: data.advertencia || data.message,
+        variant: data.paused ? "destructive" : "default",
+      })
+    } catch {
+      toast({ title: "Error", description: "No se pudo cambiar el estado de la plantilla", variant: "destructive" })
+    } finally {
+      setCambiandoPausa(null)
+    }
+  }
 
   async function fetchTemplates() {
     if (!config.wabaId) {
@@ -553,10 +606,40 @@ export function WhatsAppTemplates({ config, onSelectTemplate }: WhatsAppTemplate
                       {template.quality_score && (
                         <Badge variant="outline">Calidad: {template.quality_score.score}</Badge>
                       )}
+                      {estaPausada(template.name) && (
+                        <Badge
+                          variant="destructive"
+                          title="Cuando el sistema de la clínica manda esta plantilla, se ignora y no se envía por WhatsApp"
+                        >
+                          Envío pausado
+                        </Badge>
+                      )}
                     </div>
                     {renderTemplatePreview(template)}
                   </div>
                   <div className="flex flex-col gap-2 ml-4">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => togglePausa(template.name)}
+                      disabled={cambiandoPausa === template.name}
+                      className={`flex items-center gap-1 ${estaPausada(template.name) ? "text-green-600" : "text-amber-600"}`}
+                      title={
+                        estaPausada(template.name)
+                          ? "Volver a enviar esta plantilla"
+                          : "Ignorar esta plantilla: cuando el sistema de la clínica la mande, no se envía"
+                      }
+                    >
+                      {cambiandoPausa === template.name ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : estaPausada(template.name) ? (
+                        <PlayCircle className="h-4 w-4" />
+                      ) : (
+                        <PauseCircle className="h-4 w-4" />
+                      )}
+                      {estaPausada(template.name) ? "Reanudar envío" : "Pausar envío"}
+                    </Button>
                     <Button
                       type="button"
                       variant="ghost"

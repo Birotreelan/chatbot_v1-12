@@ -13,11 +13,7 @@
  */
 
 import { sendWhatsAppTemplate } from "../whatsapp-api"
-import {
-  recordatoriosPausados,
-  esRecordatorioDeTurno,
-  respuestaDeRecordatorioPausado,
-} from "../pausa-de-recordatorios"
+import { plantillaPausada, respuestaDePlantillaPausada } from "../plantillas-pausadas"
 import { saveConversationMessage } from "../conversations"
 import { nanoid } from "nanoid"
 import { trackTemplateSent } from "../appointment-stats"
@@ -146,18 +142,20 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
   const { config, destinationPhone, cleanPhoneNumber, Body, Chatbot_Data, Sede_Id } = params
 
   /**
-   * ── La pausa de recordatorios (19/11/2026) ──────────────────────────────
+   * ── ¿Esta plantilla está pausada? (19/11/2026) ──────────────────────────
    *
-   * Va ACÁ y no en la compuerta de lib/whatsapp-api.ts, que es donde vive la
-   * pausa total. Dos motivos:
+   * Va ACÁ y no en la compuerta de lib/whatsapp-api.ts, donde vive la pausa
+   * total de envíos. Dos motivos:
    *
-   *  · ahí sólo se sabe el `phoneNumberId` y el texto; no se sabe si lo que
-   *    sale es un recordatorio o el aviso de que a alguien le cancelaron el
-   *    turno, que NO se pausa;
-   *  · acá se puede contestarle al sistema de la clínica que el pedido se
+   *  · ahí sólo se sabe el `phoneNumberId` y el texto; no se sabe qué
+   *    plantilla es, que es justamente la unidad de esta decisión;
+   *  · acá se le puede contestar al sistema de la clínica que el pedido se
    *    procesó, para que no lo reintente en loop.
    *
-   * Sólo las tres familias de recordatorio. Ver lib/pausa-de-recordatorios.ts.
+   * La primera versión de esto pausaba "los recordatorios" como categoría,
+   * con la lista de plantillas escrita en el código. Se cambió por plantilla:
+   * la lista había que acordarse de actualizarla, y la categoría la elegía el
+   * código en vez de quien opera. Ver lib/plantillas-pausadas.ts.
    */
   const nombreDeLaPlantilla = (() => {
     try {
@@ -168,12 +166,12 @@ export async function sendReminderTemplate(params: SendReminderTemplateParams): 
     }
   })()
 
-  if (esRecordatorioDeTurno(nombreDeLaPlantilla) && (await recordatoriosPausados(config?.id))) {
+  if (nombreDeLaPlantilla && (await plantillaPausada(config?.id, nombreDeLaPlantilla))) {
     console.log(
-      `[REMINDERS] ⏸️ Recordatorio ignorado: ${config?.displayName || config?.id} tiene los ` +
-        `recordatorios pausados (plantilla ${nombreDeLaPlantilla}, destino ${cleanPhoneNumber})`,
+      `[REMINDERS] ⏸️ Plantilla pausada: ${nombreDeLaPlantilla} no se envía para ` +
+        `${config?.displayName || config?.id} (destino ${cleanPhoneNumber})`,
     )
-    return respuestaDeRecordatorioPausado(config?.id || "", nombreDeLaPlantilla)
+    return respuestaDePlantillaPausada(config?.id || "", nombreDeLaPlantilla)
   }
 
   // ── Recordatorio con tres botones (22/9/2026) ────────────────────────────
