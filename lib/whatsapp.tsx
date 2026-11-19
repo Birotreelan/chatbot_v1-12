@@ -667,7 +667,7 @@ interface ProxyConfirmBody {
  * distinto: ante una falla técnica tiene sentido pedirle que reintente; si el
  * turno no existe más, reintentar no va a funcionar nunca y hay que derivarlo.
  */
-type MotivoFalloConfirmacion = "turno_no_encontrado" | "falla_tecnica"
+type MotivoFalloConfirmacion = "turno_no_encontrado" | "falla_tecnica" | "sin_documento"
 
 interface ResultadoConfirmacion {
   exito: boolean
@@ -696,6 +696,30 @@ function mensajeFalloConfirmacion(motivo: MotivoFalloConfirmacion, escalationPho
       ? fraseDerivacion('Para verificarlo, por favor comunicate con nosotros', escalationPhoneNumber)
       : `Por favor comunicate con la clínica para verificarlo.`
     return `No encontramos un turno agendado a tu nombre para esa fecha. Es posible que haya sido modificado o cancelado.\n\n${contacto}`
+  }
+  if (motivo === "sin_documento") {
+    /**
+     * El recordatorio llegó sin DNI (19/11/2026).
+     *
+     * Caso real: Omar Chocobar, turno 27915 del Consultorio Dr. Arroyo. El
+     * sistema de la clínica mandó el recordatorio con `"dni": ""`, y confirmar
+     * contra el proxy necesita documento + fecha. El paciente tocó "Confirmar"
+     * a las 11:43, a las 11:57 y a las 15:28, y las tres veces recibió
+     * "intentá de nuevo en unos minutos".
+     *
+     * Ese mensaje es el daño: invita a repetir algo que no puede funcionar
+     * nunca, y el paciente se queda creyendo que confirmó. Mientras el
+     * recordatorio venga sin documento no hay reintento que lo arregle, así
+     * que se lo deriva a la clínica, que es lo único que sí lo resuelve.
+     *
+     * El arreglo de fondo es de la otra punta: que el sistema mande el DNI, o
+     * que `confirmar_turno` acepte el `agenda_id` —que nosotros SÍ tenemos,
+     * viene en el mismo recordatorio—.
+     */
+    const contacto = escalationPhoneNumber
+      ? fraseDerivacion("Para confirmarlo, por favor comunicate con nosotros", escalationPhoneNumber)
+      : "Por favor comunicate con la clínica para confirmarlo."
+    return `No pudimos confirmar tu turno desde acá porque nos faltan algunos datos tuyos.\n\n${contacto}`
   }
   return "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos."
 }
@@ -761,7 +785,9 @@ async function confirmarTurnoEnProxy(
       tieneFecha: !!fecha,
       tieneDni: !!dni,
     })
-    return { exito: false, motivo: "falla_tecnica" }
+    // Falta el documento no es una falla técnica: no se arregla reintentando.
+    // Ver `mensajeFalloConfirmacion`.
+    return { exito: false, motivo: !dni && config?.proxy && fecha ? "sin_documento" : "falla_tecnica" }
   }
 
   try {
@@ -5949,7 +5975,17 @@ Informa que hubo un problema técnico y ofrece alternativas de contacto.`
                 tieneFecha,
                 tieneDni,
               })
-              await sendDirectResponse(confirmCtx, "No pudimos confirmar tu turno en este momento. Por favor intentá de nuevo en unos minutos.", "direct_confirm_error")
+              // Este era el mensaje del caso Omar Chocobar: invitaba a
+              // reintentar algo que sin documento no puede funcionar nunca, y
+              // el paciente lo tocó tres veces. Ahora se deriva a la clínica.
+              // Ver `mensajeFalloConfirmacion`.
+              const motivoDelFallo: MotivoFalloConfirmacion =
+                !tieneDni && tieneProxy && tieneFecha ? "sin_documento" : "falla_tecnica"
+              await sendDirectResponse(
+                confirmCtx,
+                mensajeFalloConfirmacion(motivoDelFallo, telefonoParaMensajes(config)),
+                motivoDelFallo === "sin_documento" ? "direct_confirm_sin_documento" : "direct_confirm_error",
+              )
               await updateWhatsAppStats(config.id, { messagesProcessed: 1 })
               return
             }
