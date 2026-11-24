@@ -21,7 +21,7 @@ export function buildInvalidEmailMessage(attempt: number): string {
 }
 
 export function buildSedeSelectionMessage(sedes: any[]): string {
-  let message = `Para continuar, necesito que selecciones la sede donde queres atenderte:\n\n`
+  let message = `Para continuar, elegí la sede donde querés atenderte:\n\n`
 
   sedes.forEach((sede, index) => {
     // Usar nombre completo y agregar direccion si esta disponible
@@ -43,7 +43,7 @@ export function buildSedeSelectionMessage(sedes: any[]): string {
     message += `${sedeInfo}\n`
   })
 
-  message += `\nResponde con el numero de tu opcion:`
+  message += `\nRespondé con el número de tu opción:`
   return message
 }
 
@@ -56,13 +56,13 @@ export function buildProfessionalSearchMessage(): string {
 }
 
 export function buildSpecialtySelectionMessage(especialidades: any[]): string {
-  let message = `Selecciona la especialidad:\n\n`
+  let message = `Elegí la especialidad:\n\n`
 
   especialidades.forEach((esp, index) => {
     message += `${index + 1}. ${esp.nombre}\n`
   })
 
-  message += `\nResponde con el número:`
+  message += `\nRespondé con el número:`
   return message
 }
 
@@ -77,7 +77,7 @@ export function buildTurnosListMessage(turnos: any[]): string {
     message += `${index + 1}. ${fecha} a las ${hora} - ${doctor}\n`
   })
 
-  message += `\nSelecciona el turno con su número:`
+  message += `\nElegí el turno con su número:`
   return message
 }
 

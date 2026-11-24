@@ -41,8 +41,8 @@ function getAvailableOptions(config?: SearchOptionsConfig): Array<{ number: numb
     {
       number: 1,
       key: 'medico_particular',
-      label: 'Medico en particular',
-      description: 'Si ya sabes con que profesional queres atenderte',
+      label: 'Médico en particular',
+      description: 'Si ya sabés con qué profesional querés atenderte',
     },
     {
       number: 2,
@@ -53,8 +53,8 @@ function getAvailableOptions(config?: SearchOptionsConfig): Array<{ number: numb
     {
       number: 3,
       key: 'cualquier_medico',
-      label: 'Cualquier medico',
-      description: 'Para ver los turnos mas proximos sin importar el profesional',
+      label: 'Cualquier médico',
+      description: 'Para ver los turnos más próximos sin importar el profesional',
     },
   ]
 
@@ -262,7 +262,7 @@ export async function handleSearchTypeSelection(
 
   return {
     handled: true,
-    message: `No reconozco esa opcion. Por favor, responde con el numero de la opcion:
+    message: `No reconozco esa opción. Por favor, respondé con el número de la opción:
 
 ${optionsText}`,
     nextPhase: 'awaiting_search_type',
@@ -273,5 +273,5 @@ ${optionsText}`,
  * Mensaje para solicitar nombre del profesional (opcion 1)
  */
 export function buildProfessionalNameRequestMessage(): string {
-  return `Por favor, escribime el *nombre o apellido* del profesional con el que queres atenderte.`
+  return `Por favor, escribime el *nombre o apellido* del profesional con el que querés atenderte.`
 }

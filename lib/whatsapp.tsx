@@ -10,6 +10,7 @@ import { enqueueUserMessage } from "./user-queue"
 import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
 import { registrarMensajeEntrante, normalizarMomento } from "./ventana-atencion"
 import { estaBloqueado } from "./contactos-bloqueados"
+import { estadoDeLaCancelacion } from "./cancelacion-de-turno"
 import { PAYLOAD_BOTON_REAPERTURA, registrarRespuesta } from "./reapertura"
 import { atenderRespuestaDeEncuesta } from "./encuestas/atender-encuesta"
 import { atencionPorChatWeb } from "./atencion/switch"
@@ -44,6 +45,8 @@ import {
   personalizarBotones,
   esBotonOtraConsulta,
   BOTON_OTRA_CONSULTA,
+  ETIQUETA_SIN_CONSULTAS,
+  BOTON_SIN_CONSULTAS,
 } from "./conversation-state/etiquetas-menu"
 import { nanoid } from "nanoid"
 import { TIMEOUTS, fetchWithRetry } from "./config/timeouts"
@@ -432,8 +435,31 @@ async function sendDirectResponse(
     if (mencionaOtraConsulta(message) || buttons?.some((b) => b.title === BOTON_OTRA_CONSULTA)) {
       try {
         const configEtiquetas = await getWhatsAppConfigById(ctx.configId)
-        message = personalizarMenu(message, configEtiquetas?.etiquetaOtraConsulta)
-        buttons = personalizarBotones(buttons, configEtiquetas?.botonOtraConsulta)
+        /**
+         * La etiqueta propia del cliente manda (24/11/2026).
+         *
+         * Si alguien escribió "Realizar otra consulta o solicitar turno de
+         * estudios", está diciendo que esa opción en su clínica sirve para
+         * algo; no somos nosotros los que vamos a contradecirlo. Recién cuando
+         * no hay etiqueta propia Y la clínica no tiene nada cargado para
+         * contestar, la opción pasa a decir lo que realmente va a hacer:
+         * derivar. Ver lib/clinic-info/disponibilidad.ts.
+         */
+        let etiqueta = configEtiquetas?.etiquetaOtraConsulta
+        let boton = configEtiquetas?.botonOtraConsulta
+        // El cliente sale de la configuración y no de `ctx`, donde es
+        // opcional: sin cliente no se puede saber nada y el menú tiene que
+        // quedar como estaba, no cambiar por falta de dato.
+        const clienteDelMenu = ctx.clienteId || configEtiquetas?.cliente_id
+        if (!etiqueta?.trim() && !boton?.trim() && clienteDelMenu) {
+          const { clinicaRespondeConsultas } = await import("./clinic-info/disponibilidad")
+          if (!(await clinicaRespondeConsultas(clienteDelMenu))) {
+            etiqueta = ETIQUETA_SIN_CONSULTAS
+            boton = BOTON_SIN_CONSULTAS
+          }
+        }
+        message = personalizarMenu(message, etiqueta)
+        buttons = personalizarBotones(buttons, boton)
       } catch {
         // Una etiqueta sin personalizar es infinitamente mejor que una
         // respuesta que no sale.
@@ -1127,7 +1153,11 @@ async function handlePendingFlowResponse(
           proxyBody = null
         }
 
-        if (response.ok && proxyBody?.success === true) {
+        // Ver la nota de `estadoDeLaCancelacion` en el flujo de uno solo: un
+        // turno que ya no estaba en la agenda cuenta como cancelado, no como
+        // fallido. Listarlo en `fallidos` le pedía al paciente reintentar la
+        // cancelación de un turno que ya no existe.
+        if (estadoDeLaCancelacion(proxyBody, { httpOk: response.ok }) !== "falla_tecnica") {
           cancelados++
           if (config.cliente_id) {
             await trackAppointmentEvent({
@@ -1240,8 +1270,33 @@ async function handlePendingFlowResponse(
           body: proxyBody,
         })
 
-        // El éxito depende de response.ok Y de que el body indique success: true
-        const proxySuccess = response.ok && proxyBody?.success === true
+        /**
+         * ── «Ya no estaba» no es un error (24/11/2026) ─────────────────────
+         *
+         * Acá se miraba `response.ok && body.success === true`, así que el
+         * turno que ya estaba cancelado caía en el mismo lado que un 500 y el
+         * paciente recibía "intentá de nuevo en unos momentos". Caso Patricia:
+         * lo intentó tres veces y ninguna podía funcionar, porque el turno no
+         * iba a volver a la agenda para poder cancelarse de nuevo.
+         *
+         * Las dos salidas buenas siguen el MISMO camino —el de éxito— y no
+         * una rama propia: para el paciente el resultado es idéntico (no tiene
+         * ese turno) y lo que sigue es lo mismo (ofrecerle reprogramar, que es
+         * justo lo que Patricia estaba haciendo). Es también lo que el prompt
+         * del asistente ya hacía en su "EXCEPCIÓN CRÍTICA — CANCELACIÓN
+         * IDEMPOTENTE": un cierre positivo y el mismo manejo de
+         * reagendamiento que un éxito real. La diferencia queda en el log,
+         * que es donde sirve.
+         */
+        const estadoCancelacion = estadoDeLaCancelacion(proxyBody, { httpOk: response.ok })
+        const proxySuccess = estadoCancelacion !== "falla_tecnica"
+
+        if (estadoCancelacion === "ya_no_estaba") {
+          logger.info("El turno ya no estaba en la agenda: la cancelación se cierra igual", {
+            httpStatus: response.status,
+            body: proxyBody,
+          })
+        }
 
         if (!proxySuccess) {
           logger.error("El proxy no confirmó la cancelacion", undefined, {

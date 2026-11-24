@@ -10,6 +10,7 @@
  */
 
 import { classifyTurnoEstado } from './turno-estado'
+import { identidadDeIris } from '../presentacion-inicial'
 import { seOfreceConfirmarAsistencia } from './opciones-del-turno'
 // El campo de derivación puede tener varias líneas (31/8/2026). fraseDerivacion
 // arma la frase completa: una línea → "... al *0800*."; varias → dos puntos y el
@@ -665,8 +666,20 @@ export function buildMultiplePatientGreeting(
   patients: any[],
   clinicName: string = DEFAULT_CLINIC_NAME
 ): string {
+  /**
+   * Faltaba decir quién habla (24/11/2026).
+   *
+   * Este saludo decía "*¡Bienvenido a X!*" y nada más. Y por decir
+   * "Bienvenido" activaba la guarda `YA_SE_PRESENTA` del embudo, que entonces
+   * NO le agregaba la identificación: el paciente con dos fichas en el mismo
+   * teléfono —justamente el que más confundido está— era el único que nunca se
+   * enteraba de que hablaba con una IA (caso Nilda).
+   *
+   * La frase se importa de presentacion-inicial para que sea la misma que la
+   * del resto del sistema. Ver `identidadDeIris`.
+   */
   return (
-    `*¡Bienvenido a ${clinicName}!*\n\n` +
+    `*¡Bienvenido a ${clinicName}!* ${identidadDeIris()}\n\n` +
     `Veo que este número está asociado a más de un paciente. ` +
     `Para poder ayudarte mejor, por favor *indicame tu DNI* (7 u 8 dígitos) ` +
     `para identificar correctamente tu información.`

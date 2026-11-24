@@ -991,7 +991,7 @@ async function handleObraSocialPhase(
       permite_turnos_online: os.permite_turnos_online, // 🆕 AGREGAR CAMPO
     }))
     
-    let mensaje = `Encontre varias opciones para "${input}":\n\n`
+    let mensaje = `Encontré varias opciones para "${input}":\n\n`
     opciones.forEach((os) => {
       mensaje += `${os.numero}. ${os.nombre}\n`
     })

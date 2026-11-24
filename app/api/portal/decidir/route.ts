@@ -25,6 +25,7 @@ import { anotarEnElMonitor, etiquetaDelDesenlace } from "@/lib/portal/monitor"
 import { leerEnlace, consumirEnlace } from "@/lib/portal/token"
 import { permiteGestionar } from "@/lib/portal/vigencia"
 import { cancelarTurno, confirmarTurno } from "@/lib/api-tools/api-functions"
+import { estadoDeLaCancelacion, mensajeTurnoYaCancelado } from "@/lib/cancelacion-de-turno"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
 import { trackAppointmentEvent } from "@/lib/appointment-stats"
 import { marcarCancelacion } from "@/lib/portal/cancelacion-reciente"
@@ -126,7 +127,31 @@ export async function POST(request: Request) {
     )
   }
 
-  if (resultado && resultado.exito === false) {
+  /**
+   * ── La cancelación se leía por el campo equivocado (24/11/2026) ──────────
+   *
+   * `resultado.exito === false` sirve para `confirmarTurno`, que devuelve
+   * `exito`. `cancelarTurno` devuelve el cuerpo del proxy tal cual, que trae
+   * `success` — así que esta comparación nunca daba true y una cancelación
+   * rechazada se le reportaba al paciente como hecha. `estadoDeLaCancelacion`
+   * lee las dos formas; ver la nota de ese módulo.
+   *
+   * Y un turno que ya no estaba en la agenda no es un rechazo: el paciente
+   * pidió que ese turno no exista y no existe. Se cierra bien, con el texto
+   * que lo dice.
+   */
+  let yaEstabaCancelado = false
+  if (accion === "cancelar") {
+    const estado = estadoDeLaCancelacion(resultado, { httpOk: true })
+    yaEstabaCancelado = estado === "ya_no_estaba"
+    if (estado === "falla_tecnica") {
+      console.warn(`[PORTAL] El proxy rechazó la cancelación:`, JSON.stringify(resultado)?.slice(0, 400))
+      return NextResponse.json(
+        { ok: false, error: "No pudimos completar la gestión. Escribinos por WhatsApp y lo resolvemos." },
+        { status: 409 },
+      )
+    }
+  } else if (resultado && resultado.exito === false) {
     console.warn(`[PORTAL] El proxy rechazó ${accion}:`, JSON.stringify(resultado)?.slice(0, 400))
     return NextResponse.json(
       { ok: false, error: "No pudimos completar la gestión. Escribinos por WhatsApp y lo resolvemos." },
@@ -136,7 +161,9 @@ export async function POST(request: Request) {
 
   const texto =
     accion === "cancelar"
-      ? `Cancelamos tu turno${cuando ? ` del ${cuando}` : ""}.`
+      ? yaEstabaCancelado
+        ? mensajeTurnoYaCancelado(cuando)
+        : `Cancelamos tu turno${cuando ? ` del ${cuando}` : ""}.`
       : `Confirmamos tu asistencia${cuando ? ` al turno del ${cuando}` : ""}.`
 
   await consumirEnlace(token, {

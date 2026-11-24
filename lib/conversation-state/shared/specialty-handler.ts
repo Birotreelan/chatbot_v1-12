@@ -56,7 +56,7 @@ export function buildSpecialtiesMessage(especialidades: SpecialtyOption[]): stri
     message += `${esp.numero}. ${esp.nombre}\n`
   })
 
-  message += `\nResponde con el *numero* de la especialidad que necesitas.`
+  message += `\nRespondé con el *número* de la especialidad que necesitás.`
   return message
 }
 

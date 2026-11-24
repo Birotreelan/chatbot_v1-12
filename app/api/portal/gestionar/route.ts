@@ -68,6 +68,7 @@ import { leerEnlace, consumirEnlace, type TurnoDelPortal } from "@/lib/portal/to
 import { permiteGestionar, reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
 import { resolverPorDNI } from "@/lib/portal/identidad"
 import { reservarTurno, cancelarTurno } from "@/lib/api-tools/api-functions"
+import { estadoDeLaCancelacion } from "@/lib/cancelacion-de-turno"
 import { deudorParticular, ofreceTurnosParticulares } from "@/lib/portal/particular"
 import { saveConversationMessage } from "@/lib/conversations"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
@@ -386,7 +387,17 @@ export async function POST(request: Request) {
         motivo: "Reprogramado por el paciente desde el portal",
         paciente_datos: { dni: datosDelPaciente.dni, telefono: contexto.phone },
       })
-      if (cancelacion && cancelacion.exito === false) cancelacionFallida = true
+      /**
+       * Leía `cancelacion.exito`, que `cancelarTurno` no devuelve: el cuerpo
+       * del proxy trae `success` (24/11/2026). La comparación nunca daba true,
+       * así que una cancelación rechazada se tomaba como hecha y el log de
+       * abajo —el que avisa que el paciente va a quedar con DOS turnos— no se
+       * escribía nunca. Ver lib/cancelacion-de-turno.ts.
+       *
+       * Un turno que ya no estaba en la agenda cuenta como cancelado: el
+       * objetivo de este bloque es que el turno viejo no quede, y no quedó.
+       */
+      if (estadoDeLaCancelacion(cancelacion, { httpOk: true }) === "falla_tecnica") cancelacionFallida = true
       else seCancelóElAnterior = true
     } catch (error) {
       cancelacionFallida = true

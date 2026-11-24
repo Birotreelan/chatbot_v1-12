@@ -100,7 +100,7 @@ export function buildSedesMessage(
     message += `Tu cobertura es *${obraSocial}*.\n\n`
   }
 
-  message += `Para continuar, selecciona la sede donde queres atenderte:\n\n`
+  message += `Para continuar, elegí la sede donde querés atenderte:\n\n`
 
   // Listar sedes con formato completo
   sedes.forEach((sede) => {
@@ -111,7 +111,7 @@ export function buildSedesMessage(
       .filter(Boolean)
       .map(toTitleCase)
     if (ubicacionParts.length > 0) {
-      sedeInfo += `\n   Ubicacion: ${ubicacionParts.join(', ')}`
+      sedeInfo += `\n   Ubicación: ${ubicacionParts.join(', ')}`
     }
 
     message += `${sedeInfo}\n`

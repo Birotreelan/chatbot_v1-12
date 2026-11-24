@@ -8,7 +8,7 @@
 import type { ChatbotData } from "../appointment-flow-state"
 import type { TurnoDisponible, RescheduleFlowState } from "./reschedule-flow-handler"
 import { getTimeBasedGreeting } from "../utils/date-utils"
-import { getFirstName } from "../utils/name-utils"
+import { getFirstName, formatName } from "../utils/name-utils"
 
 // ============================================================================
 // HELPERS DE FORMATO (reutilizados de direct-response-templates.ts)
@@ -92,7 +92,7 @@ export function buildRescheduleStartMessage(
     message += `  ${index + 1}. ${hora} - ${prof}\n`
   })
 
-  message += `\nResponde con el número del turno que queres reservar.`
+  message += `\nRespondé con el número del turno que querés reservar.`
   message += `\n\n0. *Volver al paso anterior*`
 
   return message
@@ -112,8 +112,11 @@ export function buildRescheduleConfirmationMessage(
   const fechaRaw = formatFullDate(turnoSeleccionado.fecha)
   const fecha = fechaRaw.charAt(0).toUpperCase() + fechaRaw.slice(1)
   const hora = formatTime(turnoSeleccionado.hora_formateada || turnoSeleccionado.hora)
-  const profesional = turnoSeleccionado.profesional
-  const sede = turnoSeleccionado.sede
+  // Capitalizados: ver la nota de shared/confirmation-handler.ts. Éste es el
+  // mismo repaso, el del reagendamiento, y llegaba con los mismos gritos.
+  const profesional = formatName(turnoSeleccionado.profesional || '')
+  // La sede sólo con trim: ver la nota en shared/confirmation-handler.ts.
+  const sede = (turnoSeleccionado.sede || '').trim()
 
   // Número del turno (1-based) según su posición en la lista mostrada.
   const idx = state.turnosDisponibles.findIndex(t => t.agenda_id === turnoSeleccionado.agenda_id)
@@ -122,10 +125,10 @@ export function buildRescheduleConfirmationMessage(
   let message = `${nombre}, para confirmar tu reserva necesito verificar los datos:\n\n`
 
   message += `**DATOS DEL PACIENTE:**\n\n`
-  message += `Apellido: ${state.paciente.apellido || ''}\n\n`
-  message += `Nombre: ${state.paciente.nombres || ''}\n\n`
+  message += `Apellido: ${formatName(state.paciente.apellido || '')}\n\n`
+  message += `Nombre: ${formatName(state.paciente.nombres || '')}\n\n`
   message += `DNI: ${state.paciente.dni || ''}\n\n`
-  message += `Obra Social: ${state.obra_social_nombre || ''}\n\n`
+  message += `Obra Social: ${(state.obra_social_nombre || '').trim()}\n\n`
 
   message += `**DATOS DEL TURNO:**\n\n`
   message += `Fecha: ${fecha}\n\n`

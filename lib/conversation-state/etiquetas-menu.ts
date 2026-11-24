@@ -37,6 +37,25 @@ export const ETIQUETA_OTRA_CONSULTA = "Realizar otra consulta"
 /** El título por defecto del botón correspondiente. */
 export const BOTON_OTRA_CONSULTA = "Otra consulta"
 
+/**
+ * ── Cuando la clínica no tiene nada cargado para contestar (24/11/2026) ────
+ *
+ * El menú ofrecía "Realizar otra consulta" y al elegirla contestaba «Este
+ * canal de WhatsApp es exclusivo para la gestión de turnos médicos» (Alicia y
+ * Teresa, 20/11). Un paso de más para llegar al mismo lugar, y dos mensajes
+ * pagos en vez de uno.
+ *
+ * La opción no se saca: es la única salida del paciente que no viene por un
+ * turno, y su mensaje es el que le da el teléfono. Lo que cambia es lo que
+ * promete. Ver lib/clinic-info/disponibilidad.ts para cuándo aplica.
+ *
+ * El botón entra justo en el tope de WhatsApp —20 caracteres— y por eso dice
+ * "Contactar" y no "Hablar con": pasarse no trunca, WhatsApp rechaza el
+ * mensaje interactivo entero.
+ */
+export const ETIQUETA_SIN_CONSULTAS = "Hablar con la clínica"
+export const BOTON_SIN_CONSULTAS = "Contactar la clínica"
+
 /** Tope de WhatsApp para el título de un botón de respuesta rápida. */
 export const LIMITE_TITULO_BOTON = 20
 
@@ -114,6 +133,13 @@ export function esBotonOtraConsulta(titulo: string, propio?: string | null): boo
   const normalizado = (titulo || "").toLowerCase().trim()
   if (!normalizado) return false
   if (normalizado === BOTON_OTRA_CONSULTA.toLowerCase()) return true
+  /**
+   * El botón de la clínica que no responde consultas enruta igual que el otro:
+   * son el mismo botón con otro texto. Sin esta línea, tocarlo dentro de un
+   * sub-flujo dejaría de interrumpirlo y el paciente quedaría atrapado — el
+   * mismo daño que describe el comentario de arriba para los menús viejos.
+   */
+  if (normalizado === BOTON_SIN_CONSULTAS.toLowerCase()) return true
 
   const custom = tituloBotonOtraConsulta(propio)
   return custom !== BOTON_OTRA_CONSULTA && normalizado === custom.toLowerCase()

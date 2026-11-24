@@ -121,7 +121,7 @@ Voy a buscar los turnos disponibles con este profesional.`
     message += '\n'
   })
 
-  message += `\nResponde con el *numero* del profesional con quien queres atenderte.`
+  message += `\nRespondé con el *número* del profesional con quien querés atenderte.`
   return message
 }
 
@@ -270,10 +270,10 @@ export async function handleProfessionalNameInput(
  * Mensaje cuando no se encuentran profesionales
  */
 export function buildNoProfessionalsFoundMessage(searchTerm: string): string {
-  return `No encontre profesionales con el nombre "${searchTerm}".
+  return `No encontré profesionales con el nombre "${searchTerm}".
 
 Por favor:
-- Verifica el nombre e intenta nuevamente
-- O responde *2* para buscar por especialidad
-- O responde *3* para ver cualquier medico disponible`
+- Revisá el nombre y probá de nuevo
+- O respondé *2* para buscar por especialidad
+- O respondé *3* para ver cualquier médico disponible`
 }

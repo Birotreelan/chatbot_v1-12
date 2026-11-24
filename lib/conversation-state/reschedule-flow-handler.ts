@@ -15,6 +15,7 @@ import { getRedisClient } from "@/lib/redis"
 import { isBackCommand } from "./shared/back-navigation"
 import type { ChatbotData, ChatbotDataTurno } from "../appointment-flow-state"
 import { getNextWindow, buildTurnosWindowMessage } from "./shared/turnos-handler"
+import { formatName } from "@/lib/utils/name-utils"
 import { handleTurnoSelection } from "./shared/turno-selection-handler"
 import { interpretarConfirmacion } from "./shared/interpretar-confirmacion"
 import { classifyOptionWithAI } from "./shared/ai-option-classifier"
@@ -328,7 +329,9 @@ function rescheduleTurnosToOptions(turnos: TurnoDisponible[]): TurnoOption[] {
     fecha: t.fecha,
     hora: t.hora_formateada || t.hora,
     profesionalId: t.profesional_id || '',
-    profesionalNombre: t.profesional || '',
+    // Ver shared/turnos-handler.ts: se capitaliza al armar la forma que se
+    // muestra, no en cada mensaje que la imprime.
+    profesionalNombre: formatName(t.profesional || ''),
     sedeNombre: t.sede || '',
   }))
 }

@@ -4,7 +4,7 @@
 
 import { createConversationLogger } from '../logger'
 import { reservarTurno } from '../../api-tools/api-functions'
-import { getFirstName } from '../../utils/name-utils'
+import { getFirstName, formatName } from '../../utils/name-utils'
 import type { TurnoOption, HandlerResult, SharedFlowState } from './types'
 import { parseOptionNumber } from '../selection-extractor'
 import { classifyOptionWithAI } from './ai-option-classifier'
@@ -50,17 +50,37 @@ export function buildConfirmationMessage(
     message = `${primerNombre}, para confirmar tu reserva necesito verificar los datos:\n\n`
   }
 
+  /**
+   * ── El repaso deja de gritar (24/11/2026) ──────────────────────────────
+   *
+   * Patricia recibió "Apellido: GALLO" y "Nombre: Patricia ELISABETH". Son los
+   * campos de la base, tal cual: el apellido en mayúsculas y el segundo nombre
+   * también, porque así los cargaron.
+   *
+   * Es el mensaje donde el paciente tiene que VERIFICAR sus datos antes de
+   * reservar, así que es el peor lugar para mostrarle algo que no se parece a
+   * cómo él escribe su nombre: lo que se le pide es decir si está bien.
+   *
+   * La obra social va con trim porque la agenda la devuelve rellenada con
+   * espacios —"OSDE          " en un payload real— y se nota en el renglón.
+   */
   message += `**DATOS DEL PACIENTE:**\n\n`
-  message += `Apellido: ${patientData?.apellido || ''}\n\n`
-  message += `Nombre: ${patientData?.nombre || ''}\n\n`
+  message += `Apellido: ${formatName(patientData?.apellido || '')}\n\n`
+  message += `Nombre: ${formatName(patientData?.nombre || '')}\n\n`
   message += `DNI: ${patientData?.dni || ''}\n\n`
-  message += `Obra Social: ${obraSocialNombre || ''}\n\n`
+  message += `Obra Social: ${(obraSocialNombre || '').trim()}\n\n`
 
   message += `**DATOS DEL TURNO:**\n\n`
   message += `Fecha: ${fechaFormateada.charAt(0).toUpperCase() + fechaFormateada.slice(1)}\n\n`
   message += `Hora: ${turno.hora}\n\n`
   message += `Profesional: Dr. ${turno.profesionalNombre}\n\n`
-  message += `Sede: ${sedeName || turno.sedeNombre || ''}\n\n`
+  /**
+   * La sede va con trim y nada más: no es un nombre de persona. Probado con
+   * formatName y el resultado fue peor —una sede escrita en siglas, como
+   * "IOM" o "C.A.B.A.", sale convertida en una palabra que no existe—. El
+   * capitalizador es para nombres, y una sede puede ser cualquier cosa.
+   */
+  message += `Sede: ${(sedeName || turno.sedeNombre || '').trim()}\n\n`
   message += `Id Turno: ${turno.id}\n\n`
 
   message += `¿Confirmás que los datos son correctos y deseás realizar la reserva del turno número ${turno.numero}?\n\n`

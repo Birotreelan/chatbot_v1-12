@@ -12,6 +12,7 @@ import { createConversationLogger } from '../logger'
 import { obtenerTurnos } from '../../api-tools/api-functions'
 import type { TurnoOption, HandlerResult } from './types'
 import { fraseDerivacion } from '@/lib/utils/escalation-contact'
+import { formatName } from '@/lib/utils/name-utils'
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -173,10 +174,33 @@ export async function searchTurnosFull(
       fecha: turno.Fecha || turno.fecha || '',
       hora: (turno.Hora || turno.hora || turno.Hora_Turno || 'N/A').toString().trim().substring(0, 5),
       profesionalId: turno.Profesional_Id || turno.profesional_id || turno.ProfesionalId || '',
-      profesionalNombre: (
-        turno.Profesional_Nombre || turno.profesional_nombre || turno.Profesional ||
-        turno.profesional || turno.nombre_profesional || turno.NombreProfesional || 'Sin asignar'
-      ).toString().trim(),
+      /**
+       * ── Capitalizado acá y no en cada mensaje (24/11/2026) ──────────────
+       *
+       * La agenda devuelve "LIMONES PAINII" y al paciente le llegaba así. El
+       * nombre del profesional se imprime en más de diez mensajes —las listas
+       * de turnos, el repaso de la reserva, la selección, las descripciones—
+       * y arreglarlo en cada uno es la clase de lista que alguien se olvida
+       * de actualizar: el menú del caso Liliana se desincronizó exactamente
+       * así.
+       *
+       * `TurnoOption` es una forma de PRESENTACIÓN: se arma para mostrar y
+       * para elegir por número. Lo que se le manda al sistema de la clínica
+       * son ids (`profesionalId`, `id` de agenda), nunca este texto, así que
+       * cambiarle las mayúsculas no puede alterar un dato del otro lado —que
+       * es el motivo por el que esto NO se hace al recibir del proxy—.
+       */
+      profesionalNombre:
+        formatName(
+          (
+            turno.Profesional_Nombre || turno.profesional_nombre || turno.Profesional ||
+            turno.profesional || turno.nombre_profesional || turno.NombreProfesional || ''
+          ).toString(),
+        ) ||
+        // El texto de cuando no vino ninguno queda AFUERA del capitalizador:
+        // es nuestro, ya está escrito como corresponde, y pasarlo lo
+        // convertía en "Sin Asignar".
+        'Sin asignar',
       especialidad: turno.Especialidad || turno.especialidad || turno.Subespecialidad,
       sedeId: turno.Sede_Id || turno.sede_id || params.sedeId,
       sedeNombre: turno.Sede_Nombre || turno.sede_nombre || turno.Centro_Nombre,

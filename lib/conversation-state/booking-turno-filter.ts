@@ -12,6 +12,7 @@
 import { openai } from '@/lib/openai'
 import type { TurnoOption } from './booking-flow-handler'
 import { formatHoraSinHipervinculo } from './shared/turnos-handler'
+import { formatName } from '@/lib/utils/name-utils'
 
 import { MODELO_EXTRACCION } from "@/lib/ai-models"
 
@@ -457,7 +458,10 @@ export function mapApiTurnosToOptions(rawResponse: any): TurnoOption[] {
       hora,
       fechaFormateada,
       horaFormateada: hora.substring(0, 5),
-      profesionalNombre: t.Profesional_Nombre || t.profesional_nombre || '',
+      // Capitalizado al armar la forma de presentación, por el mismo motivo
+      // que en shared/turnos-handler.ts: se imprime en varios mensajes y al
+      // proxy se le manda el id, no este texto.
+      profesionalNombre: formatName(t.Profesional_Nombre || t.profesional_nombre || ''),
       sedeNombre: t.Sede_Nombre || t.sede_nombre || '',
       profesionalId: t.Profesional_Id || t.profesional_id,
     })

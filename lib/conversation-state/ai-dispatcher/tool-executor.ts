@@ -19,6 +19,7 @@ import { fraseDerivacion } from '@/lib/utils/escalation-contact'
 import { TOOL_NAMES } from './tool-manifest'
 import type { DispatcherDecision } from './dispatcher'
 import type { DispatcherContext, CirugiaSnapshot } from './context-builder'
+import { identidadDeIris } from '../presentacion-inicial'
 
 // ============================================================================
 // TIPOS
@@ -131,10 +132,13 @@ function primerNombre(nombreCompleto?: string): string {
 
 function construirSaludo(ctx: DispatcherContext, clinicName?: string): string {
   const nombre = ctx.patient.identified ? primerNombre(ctx.patient.name) : ''
-  const deClinica = clinicName ? ` de ${clinicName}` : ''
-  return nombre
-    ? `*¡Hola, ${nombre}!* Soy Iris, la asistente virtual${deClinica}.`
-    : `*¡Hola!* Soy Iris, la asistente virtual${deClinica}.`
+  // La identidad viene de presentacion-inicial y no está escrita acá
+  // (24/11/2026): decía "la asistente virtual" donde el resto del sistema dice
+  // "tu asistente virtual de inteligencia artificial". Ver la nota de
+  // `identidadDeIris`: la diferencia también se le escapaba a la guarda que
+  // evita presentarse dos veces.
+  const identidad = identidadDeIris(clinicName)
+  return nombre ? `*¡Hola, ${nombre}!* ${identidad}` : `*¡Hola!* ${identidad}`
 }
 
 /**

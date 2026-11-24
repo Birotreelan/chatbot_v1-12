@@ -38,7 +38,7 @@ export function buildInvalidSelectionMessage(
   turnosOpciones: TurnoOption[],
   searchType?: SearchType
 ): string {
-  let message = `No encontre esa opcion entre las disponibles.\n\n`
+  let message = `No encontré esa opción entre las disponibles.\n\n`
   
   // Agrupar turnos por fecha
   const turnosPorFecha: Record<string, TurnoOption[]> = {}
@@ -65,12 +65,12 @@ export function buildInvalidSelectionMessage(
   // Agregar opcion extra al final (N+1)
   const opcionExtra = turnosOpciones.length + 1
   if (searchType === 'cualquier_medico') {
-    message += `*${opcionExtra}. Buscar mas turnos*\n\n`
+    message += `*${opcionExtra}. Buscar más turnos*\n\n`
   } else {
-    message += `*${opcionExtra}. Buscar con cualquier medico disponible*\n\n`
+    message += `*${opcionExtra}. Buscar con cualquier médico disponible*\n\n`
   }
   
-  message += `Responde con el *numero* de la opcion que prefieras.`
+  message += `Respondé con el *número* de la opción que prefieras.`
   return message
 }
 

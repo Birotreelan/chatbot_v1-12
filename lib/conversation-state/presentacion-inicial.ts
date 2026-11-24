@@ -115,13 +115,38 @@ export function nombreParaSaludar(opciones: {
  * Arma el bloque de presentación. Pura y exportada para poder testear las
  * cuatro combinaciones (con nombre o sin, saludando o no).
  */
+/**
+ * Cómo se presenta Iris. Una sola frase, exportada (24/11/2026).
+ *
+ * ── Dos personas distintas hablaban ───────────────────────────────────────
+ *
+ * En las conversaciones del 20/11 convivían:
+ *
+ *   «¡Hola, X! Soy Iris, tu asistente virtual de inteligencia artificial…»
+ *   «¡Bienvenido! Soy el asistente virtual…»
+ *   «Soy Iris, la asistente virtual de la clínica.»
+ *
+ * Las tres salían de lugares distintos —este archivo, el prompt de
+ * openai-responses y el ejecutor del dispatcher— y una de ellas, la del
+ * prompt, no decía ni el nombre. Para el paciente son tres interlocutores.
+ *
+ * Que la frase esté acá y se importe NO es elegancia: la guarda
+ * `YA_SE_PRESENTA` de este mismo archivo busca "asistente virtual" para no
+ * presentarse dos veces, así que una presentación escrita en otra parte con
+ * otras palabras se duplica o se come la de acá. Las dos fallas son
+ * invisibles hasta que un paciente las ve.
+ */
+export function identidadDeIris(clinica?: string | null): string {
+  const deLaClinica = clinica ? ` de ${clinica}` : ""
+  return `Soy Iris, tu asistente virtual de inteligencia artificial${deLaClinica}.`
+}
+
 export function construirPresentacion(opciones: {
   nombre?: string | null
   clinica?: string | null
   mensajeYaSaluda: boolean
 }): string {
-  const deLaClinica = opciones.clinica ? ` de ${opciones.clinica}` : ""
-  const identidad = `Soy Iris, tu asistente virtual de inteligencia artificial${deLaClinica}.`
+  const identidad = identidadDeIris(opciones.clinica)
 
   // Si el texto ya trae su propio saludo, no se le encima otro: sólo la
   // identificación, que es lo que no puede faltar.
