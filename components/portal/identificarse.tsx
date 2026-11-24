@@ -230,14 +230,37 @@ export function DarseDeAlta({
   useEffect(() => {
     let vigente = true
     ;(async () => {
-      try {
-        const r = await fetch(`/api/portal/obras-sociales?token=${encodeURIComponent(token)}`)
-        const data = await r.json()
+      /**
+       * Un reintento, no cero (24/11/2026).
+       *
+       * El pedido se hace una sola vez en toda la pantalla, y si falla el campo
+       * se degrada hasta que el paciente recargue —cosa que no va a hacer,
+       * porque el campo de escribir funciona y no parece roto—. Un corte de red
+       * de un segundo en un teléfono alcanzaba para perder el select.
+       *
+       * Uno solo y con una espera corta: si el proxy de la clínica no publica
+       * el catálogo, insistir no lo va a cambiar y el paciente está esperando.
+       */
+      for (let intento = 1; intento <= 2; intento++) {
+        try {
+          const r = await fetch(`/api/portal/obras-sociales?token=${encodeURIComponent(token)}`)
+          const data = await r.json()
+          if (!vigente) return
+          const opciones = Array.isArray(data?.opciones) ? data.opciones : []
+          if (opciones.length > 0 || intento === 2) {
+            setCatalogo(opciones)
+            return
+          }
+        } catch {
+          if (!vigente) return
+          if (intento === 2) {
+            // Queda en `[]`: el campo vuelve a ser el de escribir, que funciona.
+            setCatalogo([])
+            return
+          }
+        }
+        await new Promise((listo) => setTimeout(listo, 700))
         if (!vigente) return
-        setCatalogo(Array.isArray(data.opciones) ? data.opciones : [])
-      } catch {
-        // Queda en `[]`: el campo vuelve a ser el de escribir, que funciona.
-        if (vigente) setCatalogo([])
       }
     })()
     return () => {

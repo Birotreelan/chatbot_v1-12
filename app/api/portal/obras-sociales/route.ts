@@ -26,6 +26,25 @@ export async function GET(request: Request) {
 
   const lectura = await leerEnlace(token)
   if (!lectura || !lectura.contexto.clienteId || !permiteGestionar(lectura.estado)) {
+    /**
+     * El rechazo deja constancia (24/11/2026).
+     *
+     * Para el formulario del alta, este 404 es indistinguible de "la clínica no
+     * tiene catálogo": en los dos casos el campo vuelve a ser el de escribir.
+     * Sin este log, la pantalla contaba un problema del token como si fuera un
+     * problema del catálogo, y la investigación arrancaba en el lugar
+     * equivocado. El token no se registra entero —es la credencial— sólo su
+     * prefijo, que es con lo que se lo cruza con los otros logs del portal.
+     */
+    console.warn(
+      `[PORTAL] Catálogo rechazado: ${
+        !lectura
+          ? "el enlace no existe o no se pudo leer"
+          : !lectura.contexto.clienteId
+            ? "el enlace no tiene clienteId"
+            : `el enlace está en estado ${lectura.estado}`
+      } (enlace ${token.slice(0, 8)}). El alta cae al campo de búsqueda por texto.`,
+    )
     return NextResponse.json({ ok: false, opciones: [] }, { status: 404 })
   }
 

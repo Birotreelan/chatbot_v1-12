@@ -337,7 +337,29 @@ export async function catalogoDeObrasSociales(
   try {
     const respuesta = await validarObraSocial(clienteId, "")
     const lista = respuesta?.datos?.obras_sociales
-    if (!respuesta?.exito || !Array.isArray(lista)) return []
+    if (!respuesta?.exito || !Array.isArray(lista)) {
+      /**
+       * El catálogo vacío deja de ser silencioso (24/11/2026).
+       *
+       * Acá se devolvía `[]` sin decir nada, y en la pantalla eso se ve como el
+       * campo de escribir con "Escribí al menos 3 letras del nombre". Cuando
+       * pasó —una clínica a la que el select le volvió al campo de texto— no
+       * había forma de saber si el proxy había contestado mal, si ese cliente no
+       * publica el catálogo o si era otra cosa: la única traza era el log del
+       * camino exitoso, que justamente no estaba.
+       *
+       * Se registra qué contestó el proxy, porque las dos causas se arreglan en
+       * lugares distintos: `exito: false` es del lado de la clínica, y una
+       * respuesta exitosa sin `obras_sociales` es un contrato que cambió.
+       */
+      console.warn(
+        `[PORTAL] Sin catálogo de obras sociales para ${clienteId}: ` +
+          `exito=${respuesta?.exito === undefined ? "(no vino)" : respuesta.exito}, ` +
+          `obras_sociales=${Array.isArray(lista) ? `${lista.length} filas` : typeof lista}. ` +
+          `El alta cae al campo de búsqueda por texto.`,
+      )
+      return []
+    }
 
     const vistas = new Set<string>()
     const catalogo: ObraSocialDelPortal[] = []
