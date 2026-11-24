@@ -66,6 +66,7 @@ import { NextResponse } from "next/server"
 import { anotarEnElMonitor, etiquetaDelDesenlace } from "@/lib/portal/monitor"
 import { leerEnlace, consumirEnlace, type TurnoDelPortal } from "@/lib/portal/token"
 import { permiteGestionar, reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
+import { portalPuede, mensajeDeGestionNoDisponible } from "@/lib/portal/permisos"
 import { resolverPorDNI } from "@/lib/portal/identidad"
 import { reservarTurno, cancelarTurno } from "@/lib/api-tools/api-functions"
 import { estadoDeLaCancelacion } from "@/lib/cancelacion-de-turno"
@@ -122,6 +123,31 @@ export async function POST(request: Request) {
 
   if (!contexto.clienteId) {
     return NextResponse.json({ ok: false, error: "Configuración incompleta" }, { status: 500 })
+  }
+
+  /**
+   * ── Las restricciones del cliente, acá también (24/11/2026) ─────────────
+   *
+   * El portal no leía `permitirNuevoTurno` ni `permitirReagendamiento`: una
+   * clínica con los dos apagados reservaba igual. Ver lib/portal/permisos.ts.
+   *
+   * Va ANTES de cancelar el turno anterior, que es lo primero que hace este
+   * handler: si la reserva no está permitida, cancelar el viejo dejaría a la
+   * paciente sin nada, que es peor que no haber entrado.
+   */
+  const permiso = await portalPuede(contexto.configId, {
+    intencion: contexto.intencion,
+    gestion: "reservar",
+  })
+  if (!permiso.permitido) {
+    console.warn(
+      `[PORTAL] Reserva rechazada para ${contexto.phone}: el cliente ${contexto.clienteId} ` +
+        `tiene ${permiso.flag} desactivado (intención del enlace: ${contexto.intencion})`,
+    )
+    return NextResponse.json(
+      { ok: false, error: mensajeDeGestionNoDisponible("reservar", permiso.telefonoDeLaClinica) },
+      { status: 403 },
+    )
   }
 
   const datosDelTurnoElegido: TurnoDelPortal = {

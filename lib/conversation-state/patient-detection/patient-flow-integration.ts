@@ -986,12 +986,43 @@ export async function handleDNIForMultiplePatients(
   const currentState = await getPatientDetectionState(phoneNumber)
   const hasReminderFromState = currentState?.hasReminder ?? false
 
+  /**
+   * ── Los permisos del cliente, que acá se perdían (24/11/2026) ────────────
+   *
+   * Caso real, Daponte Ojos: tiene `permitirNuevoTurno: false` y
+   * `permitirReagendamiento: false`, y una paciente con dos fichas en el mismo
+   * teléfono pidió un turno, mandó su DNI y recibió el menú completo con
+   * "1- Solicitar turno médico". Eligió el 1, le llegó el enlace del portal y
+   * sacó el turno.
+   *
+   * Esta llamada pasaba cinco argumentos de los diez: `permitirNuevoTurno`,
+   * `permitirCancelacion`, el teléfono de derivación, la obra social bloqueada
+   * y `usaPortalWeb` quedaban en `undefined`, y los builders leen
+   * `=== false` —arrancan permitido— así que `undefined` es "se puede".
+   *
+   * Salen del ESTADO de detección y no de la configuración, que es lo que ya
+   * hacen los otros caminos: `startPatientDetectionFlow` los guardó cuando
+   * empezó la conversación, el estado se lee tres líneas más arriba y es el
+   * valor con el que se armó el menú que el paciente está mirando. Si alguien
+   * toca el switch entre el saludo y la respuesta, el action map de
+   * patient-flow-handler sigue interpretando los números como los muestra ese
+   * mensaje (ver la nota de `usaPortalWeb` en el estado).
+   *
+   * La obra social bloqueada no se resuelve acá a propósito: es una consulta al
+   * proxy, el flujo de reserva la vuelve a chequear y equivocarse para este
+   * lado muestra una opción de más, no una restricción del cliente ignorada.
+   */
   const greeting = buildExistingPatientGreeting(
     result.patientName || 'Paciente',
     result.turnos || [],
     clinicName,
     result.turnosQx || [],
-    hasReminderFromState
+    hasReminderFromState,
+    currentState?.permitirNuevoTurno,
+    currentState?.permitirCancelacion,
+    escalationPhoneNumber || currentState?.escalationPhoneNumber,
+    currentState?.obraSocialBloqueada ? { nombre: currentState.obraSocialNombre || '', telefonoDerivacion: escalationPhoneNumber } : undefined,
+    currentState?.usaPortalWeb,
   )
 
   return {

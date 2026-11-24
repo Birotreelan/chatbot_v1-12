@@ -26,6 +26,7 @@ import { leerEnlace, consumirEnlace } from "@/lib/portal/token"
 import { permiteGestionar } from "@/lib/portal/vigencia"
 import { cancelarTurno, confirmarTurno } from "@/lib/api-tools/api-functions"
 import { estadoDeLaCancelacion, mensajeTurnoYaCancelado } from "@/lib/cancelacion-de-turno"
+import { portalPuede, mensajeDeGestionNoDisponible } from "@/lib/portal/permisos"
 import { clearAppointmentContext } from "@/lib/appointment-flow-state"
 import { trackAppointmentEvent } from "@/lib/appointment-stats"
 import { marcarCancelacion } from "@/lib/portal/cancelacion-reciente"
@@ -103,6 +104,35 @@ export async function POST(request: Request) {
     })
     console.log(`[PORTAL] Enlace de PRUEBA: ${accion} simulado, no se tocó ninguna agenda (${contexto.phone})`)
     return NextResponse.json({ ok: true, demo: true, accion, texto: textoDemo })
+  }
+
+  /**
+   * ── Cancelar también es una gestión que el cliente puede apagar
+   *    (24/11/2026) ──────────────────────────────────────────────────────────
+   *
+   * Esta ruta no leía `permitirCancelacion`, igual que `gestionar` no leía
+   * `permitirNuevoTurno`. Ver lib/portal/permisos.ts: el chequeo existía en los
+   * flujos de WhatsApp y en ninguno del portal.
+   *
+   * Confirmar no se toca: no hay switch para eso y no tendría sentido —confirmar
+   * la asistencia no cambia nada en la agenda más que el estado del turno que la
+   * clínica ya dio—.
+   */
+  if (accion === "cancelar") {
+    const permiso = await portalPuede(contexto.configId, {
+      intencion: contexto.intencion,
+      gestion: "cancelar",
+    })
+    if (!permiso.permitido) {
+      console.warn(
+        `[PORTAL] Cancelación rechazada para ${contexto.phone}: el cliente ${contexto.clienteId} ` +
+          `tiene permitirCancelacion desactivado`,
+      )
+      return NextResponse.json(
+        { ok: false, error: mensajeDeGestionNoDisponible("cancelar", permiso.telefonoDeLaClinica) },
+        { status: 403 },
+      )
+    }
   }
 
   // ── La operación real ─────────────────────────────────────────────────────

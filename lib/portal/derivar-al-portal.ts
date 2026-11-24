@@ -31,6 +31,7 @@ import {
 } from "./mensaje-enlace"
 import { sendWhatsAppMessage } from "../whatsapp-api"
 import type { IntencionDelPortal, OrigenDelEnlace } from "./vigencia"
+import { veredictoDeLaConfig } from "./permisos"
 import { saveConversationMessage } from "../conversations"
 import { estaBloqueadaLaObraSocial } from "./identidad"
 import { sigueEnElChatPorMigracion } from "./migracion"
@@ -366,6 +367,36 @@ export async function derivarAlPortal(params: {
       console.log(
         `[PORTAL] ${params.userPhoneNumber}: obra social sin turnos online; no se manda el enlace, ` +
           `sigue el flujo conversacional que deriva por teléfono`,
+      )
+      return false
+    }
+  }
+
+  // ── Compuerta: ¿el cliente permite esta gestión? (24/11/2026) ───────────
+  //
+  // Caso Daponte Ojos: tiene `permitirNuevoTurno` y `permitirReagendamiento`
+  // apagados, y una paciente sacó un turno por el portal igual. El flag estaba
+  // chequeado en más de ochenta lugares de los flujos de WhatsApp y en NINGUNO
+  // del portal, así que no era una restricción del cliente sino de un canal
+  // —y justamente el canal al que el bot deriva para reservar la ignoraba—.
+  //
+  // Va acá por el mismo motivo que las dos compuertas de arriba: son varios los
+  // puntos desde los que se llega a "quiero un turno" y van a ser más. Y la
+  // verificación se repite en /api/portal/gestionar, que es la que de verdad
+  // cierra: un enlace emitido ayer sigue en el chat del paciente y no puede
+  // depender de que hoy no se emita otro.
+  //
+  // `cancelar` no pasa por acá: lo decide ese mismo módulo con
+  // `permitirCancelacion`, y un enlace de cancelación que termina en reserva
+  // —el paciente eligió "cambiarlo de horario"— queda cubierto por la
+  // verificación de la ruta, que mira la gestión real.
+  if (params.intencion !== "cancelar") {
+    const permiso = veredictoDeLaConfig(config, { intencion: params.intencion, gestion: "reservar" })
+    if (!permiso.permitido) {
+      console.log(
+        `[PORTAL] ${params.userPhoneNumber}: el cliente tiene ${permiso.flag} desactivado; ` +
+          `no se manda el enlace y sigue el flujo conversacional, que deriva a la clínica ` +
+          `(intención: ${params.intencion})`,
       )
       return false
     }
