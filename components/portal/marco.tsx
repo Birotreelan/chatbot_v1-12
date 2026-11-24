@@ -220,10 +220,21 @@ export function Marco({
           paddingTop: "max(env(safe-area-inset-top), 16px)",
         }}
       >
-        <div className={`${columna} flex items-center gap-3 px-4 pb-4 sm:gap-4`}>
-          <CalendarDays className="h-6 w-6 shrink-0 sm:h-7 sm:w-7" aria-hidden />
+        <div className={`${columna} flex items-start gap-3 px-4 pb-4 sm:gap-4`}>
+          <CalendarDays className="mt-0.5 h-6 w-6 shrink-0 sm:h-7 sm:w-7" aria-hidden />
           <div className="min-w-0">
-            <p className="truncate text-lg font-medium sm:text-xl">{marca.clinica}</p>
+            {/* ── El nombre entero, aunque ocupe dos líneas (24/11/2026) ─────
+                Estaba con `truncate`: "Centro Oftalmológico …" y el paciente no
+                veía de qué clínica era el enlace. Y es lo único que lo dice —el
+                portal se abre desde un WhatsApp, sin barra de direcciones a la
+                vista— así que cortarlo justamente ahí es cortar la única
+                referencia que tiene de dónde está.
+
+                Dos líneas de encabezado no molestan a nadie; `break-words` es
+                para el nombre de una palabra sola más ancha que la pantalla,
+                que sin eso desbordaría la banda. El ícono pasa a alinearse
+                arriba: centrado contra dos líneas quedaba flotando al medio. */}
+            <p className="break-words text-lg font-medium sm:text-xl">{marca.clinica}</p>
             <p className="text-sm opacity-90">Gestión de turnos</p>
           </div>
         </div>

@@ -23,13 +23,39 @@
 
 import { useRouter } from "next/navigation"
 import { LoadingState } from "@/components/ui/loading-state"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Aviso, BotonPrimario } from "./marco"
 
 // 16px o más en el campo: con menos, iOS hace zoom solo al enfocarlo y el
 // paciente queda con la pantalla corrida.
 const CLASES_CAMPO =
   "w-full rounded-xl border border-input bg-background px-4 py-3.5 text-base text-foreground sm:py-3 outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+
+/**
+ * Una fila tocable de la lista de obras sociales.
+ *
+ * Las dos listas —la del catálogo y la de la búsqueda contra el proxy— tienen
+ * que verse iguales: es la misma acción, elegir una obra social, y que cambie
+ * de aspecto según de dónde salió la lista no significa nada para el paciente.
+ * Cada lista le agrega lo suyo: la del catálogo va dentro de un recuadro, así
+ * que no lleva borde propio.
+ */
+const CLASES_OPCION =
+  "min-h-[52px] w-full rounded-xl px-4 py-3 text-left text-[15px] transition-colors hover:bg-accent sm:min-h-[48px] sm:px-5 sm:text-base"
+
+/**
+ * Para comparar lo que el paciente escribe con el nombre de la obra social.
+ *
+ * Sin acentos y en minúscula porque nadie escribe "ASOCIACIÓN" con tilde en un
+ * teclado de teléfono, y la lista de la clínica los usa de las dos maneras.
+ */
+function paraComparar(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim()
+}
 
 function Campo({
   etiqueta,
@@ -281,9 +307,54 @@ export function DarseDeAlta({
    */
   const MINIMO_PARA_BUSCAR = 3
 
+  /**
+   * El catálogo, filtrado con lo que el paciente escribe (24/11/2026).
+   *
+   * ── Por qué el filtro y no sólo el desplegable ───────────────────────────
+   *
+   * Un `<select>` nativo con 243 convenios obliga a recorrer la lista entera
+   * con el pulgar. En Android el desplegable del sistema no trae buscador —el
+   * de iOS sí— así que la mitad de los pacientes quedaba haciendo scroll.
+   *
+   * ── Y por qué el filtro es local ─────────────────────────────────────────
+   *
+   * El catálogo ya está en memoria: filtrarlo acá responde en el mismo golpe de
+   * tecla, sin un pedido por letra ni la lista parpadeando mientras llega. El
+   * camino que consulta al proxy sigue existiendo para cuando la clínica no
+   * publica el catálogo, y ahí sí cada búsqueda es un pedido.
+   *
+   * ── Todas las palabras, en cualquier orden ───────────────────────────────
+   *
+   * "medical swiss" encuentra "SWISS MEDICAL SA". Pedir el orden exacto es
+   * volver al problema que el select vino a resolver: tener que acordarse de
+   * cómo está escrita la propia obra social.
+   *
+   * Las que EMPIEZAN con lo escrito van primero. Con "os" la lista alfabética
+   * arranca en "DOSUBA" y "OSDE" queda a veinte filas de distancia.
+   */
+  const filtradas = useMemo(() => {
+    if (!catalogo) return []
+    const buscado = paraComparar(busquedaOS)
+    if (!buscado) return catalogo
+
+    const palabras = buscado.split(/\s+/)
+    return catalogo
+      .filter((os) => {
+        const nombre = paraComparar(os.nombre)
+        return palabras.every((palabra) => nombre.includes(palabra))
+      })
+      .sort(
+        (a, b) =>
+          (paraComparar(a.nombre).startsWith(buscado) ? 0 : 1) -
+          (paraComparar(b.nombre).startsWith(buscado) ? 0 : 1),
+      )
+  }, [catalogo, busquedaOS])
+
   async function buscarOS(texto: string) {
     setBusquedaOS(texto)
     setElegida(null)
+    // Con catálogo el filtrado es local —`filtradas`— y no hay nada que pedir.
+    if (hayCatalogo) return
     if (texto.trim().length < MINIMO_PARA_BUSCAR) {
       setOpcionesOS([])
       return
@@ -312,14 +383,17 @@ export function DarseDeAlta({
     // "escribiste pero no elegiste" se arreglan de maneras distintas, y el
     // segundo es el que estaba haciendo que los turnos se reservaran sin obra
     // social.
+    //
+    // Vale para los dos caminos. Con el `<select>` el caso no existía —o
+    // elegía una opción o el campo quedaba en su valor inicial— pero desde que
+    // el catálogo también se filtra escribiendo, el que tipea "osde" y aprieta
+    // Continuar sin tocar la fila está otra vez en esta situación.
     if (!elegida) {
       setErrores({
-        obraSocial: hayCatalogo
-          ? // Con el select no existe el caso "escribió y no eligió": o eligió
-            // una opción o el campo sigue en su valor inicial.
-            "Elegí tu obra social en la lista."
-          : busquedaOS.trim()
-            ? "Tocá tu obra social en la lista de abajo para elegirla."
+        obraSocial: busquedaOS.trim()
+          ? "Tocá tu obra social en la lista para elegirla."
+          : hayCatalogo
+            ? "Elegí tu obra social en la lista."
             : "Elegí tu obra social: escribí las primeras letras y tocala en la lista.",
       })
       return
@@ -408,47 +482,7 @@ export function DarseDeAlta({
         etiqueta={paraFamiliar ? "Obra social del paciente" : "Obra social"}
         error={errores.obraSocial}
       >
-        {hayCatalogo ? (
-          /* ── El select (17/11/2026) ─────────────────────────────────────
-             Antes era un autocompletado: el paciente escribía dos letras y
-             elegía de las coincidencias. Para usarlo hay que saber cómo se
-             escribe la propia obra social, y el que no acierta las primeras
-             letras —"Swiss" cuando figura "SWISS MEDICAL SA"— no encuentra
-             nada y queda trabado en el alta.
-
-             Reconocer la propia en una lista es mucho más fácil que
-             recordar cómo se escribe. Y con un `<select>` nativo el
-             desplegable lo dibuja el sistema operativo: en un teléfono es
-             una rueda a pantalla completa con su propio buscador, mejor que
-             cualquier lista que podamos armar nosotros.
-
-             El estado "elegida" ya no necesita verse distinto —el select
-             muestra lo elegido por definición— así que el botón "Cambiar"
-             sólo queda para el camino de escribir. */
-          <select
-            value={elegida?.id || ""}
-            onChange={(e) => {
-              const encontrada = catalogo!.find((os) => os.id === e.target.value)
-              setElegida(encontrada || null)
-              setErrores((previos) => ({ ...previos, obraSocial: "" }))
-            }}
-            className={CLASES_CAMPO}
-          >
-            <option value="">Elegí tu obra social</option>
-            {catalogo!.map((os) => (
-              <option key={os.id} value={os.id}>
-                {/* Las que no permiten turnos online van en la misma lista,
-                    marcadas. Ocultarlas dejaría al paciente de PAMI sin
-                    encontrar la suya, y terminaría eligiendo una parecida
-                    que no es la de él: llega a la clínica con la cobertura
-                    equivocada, que es peor que derivarlo al teléfono.
-                    La marca va en el texto porque un `<option>` no admite
-                    nada más: lo dibuja el sistema operativo. */}
-                {os.permiteOnline ? os.nombre : `${os.nombre} — turno por teléfono`}
-              </option>
-            ))}
-          </select>
-        ) : elegida ? (
+        {elegida ? (
           <div className="flex min-h-[52px] items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3">
             <span className="text-[15px] font-medium sm:text-base">{elegida.nombre}</span>
             <button
@@ -471,12 +505,74 @@ export function DarseDeAlta({
             placeholder={
               catalogo === null
                 ? "Cargando las obras sociales…"
-                : "Escribí al menos 3 letras del nombre"
+                : hayCatalogo
+                  ? "Buscá la tuya o elegila de la lista"
+                  : "Escribí al menos 3 letras del nombre"
             }
             className={CLASES_CAMPO}
           />
         )}
       </Campo>
+
+      {/* ── El catálogo: un campo igual al resto, con la lista abajo
+             (24/11/2026) ──────────────────────────────────────────────────
+          Era un `<select>` nativo. Dos problemas: con 243 convenios el
+          desplegable de Android no trae buscador y hay que recorrerlo entero
+          con el pulgar, y el campo se veía distinto del resto del formulario
+          —el sistema operativo lo dibuja a su manera, con su flecha y su
+          altura—.
+
+          Ahora es el mismo input que Apellido, Nombre y Email, y la lista
+          está a la vista: se puede recorrer sin tocar nada, o filtrar
+          escribiendo. Nada se esconde detrás de un desplegable.
+
+          El recuadro con scroll y no la lista entera: 243 filas sueltas
+          empujan el botón "Continuar" fuera de cualquier pantalla, y el
+          paciente que no sabe que hay un botón ahí abajo no llega nunca. */}
+      {hayCatalogo && !elegida && (
+        <div className="-mt-2 max-h-72 overflow-y-auto rounded-xl border border-input bg-background p-1.5">
+          {filtradas.length === 0 ? (
+            <p className="px-3 py-3 text-[13px] text-muted-foreground">
+              No encontramos ninguna obra social con «{busquedaOS.trim()}». Probá con otra parte
+              del nombre, sin siglas ni puntos.
+            </p>
+          ) : (
+            filtradas.map((os) => (
+              <button
+                key={os.id}
+                type="button"
+                onClick={() => {
+                  setElegida(os)
+                  setBusquedaOS("")
+                  setErrores((previos) => ({ ...previos, obraSocial: "" }))
+                }}
+                className={CLASES_OPCION}
+              >
+                {os.nombre}
+                {/* Las que no permiten turnos online van en la misma lista,
+                    marcadas. Ocultarlas dejaría al paciente de PAMI sin
+                    encontrar la suya, y terminaría eligiendo una parecida que
+                    no es la de él: llega a la clínica con la cobertura
+                    equivocada, que es peor que derivarlo al teléfono. */}
+                {!os.permiteOnline && (
+                  <span className="mt-0.5 block text-[13px] text-warning">
+                    Con esta obra social el turno se saca por teléfono
+                  </span>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Cuántas quedaron, sólo mientras el filtro está puesto.
+          El que escribe tres letras y ve cuatro filas no sabe si la lista se
+          filtró o si la clínica tiene cuatro convenios. */}
+      {hayCatalogo && !elegida && busquedaOS.trim() && filtradas.length > 0 && (
+        <p className="-mt-2 text-[13px] text-muted-foreground">
+          {filtradas.length} de {catalogo!.length} obras sociales. Tocá la tuya para elegirla.
+        </p>
+      )}
 
       {/* Se dice qué falta hacer mientras la lista está abierta. Sin esto, la
           lista parece un autocompletado decorativo. */}
@@ -506,7 +602,7 @@ export function DarseDeAlta({
                 setElegida(os)
                 setOpcionesOS([])
               }}
-              className="min-h-[52px] w-full rounded-xl border bg-card px-4 py-3 text-left text-[15px] transition-colors hover:bg-accent sm:min-h-[48px] sm:px-5 sm:text-base"
+              className={`${CLASES_OPCION} border bg-card`}
             >
               {os.nombre}
               {/* Las que no permiten turnos online se muestran igual, marcadas.
