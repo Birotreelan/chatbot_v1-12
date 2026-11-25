@@ -764,7 +764,12 @@ interface ProxyConfirmBody {
  * distinto: ante una falla técnica tiene sentido pedirle que reintente; si el
  * turno no existe más, reintentar no va a funcionar nunca y hay que derivarlo.
  */
-type MotivoFalloConfirmacion = "turno_no_encontrado" | "falla_tecnica" | "sin_documento"
+type MotivoFalloConfirmacion =
+  | "turno_no_encontrado"
+  | "falla_tecnica"
+  | "sin_documento"
+  /** No tenemos ningún turno en el contexto: no hay qué confirmar. */
+  | "sin_turno"
 
 interface ResultadoConfirmacion {
   exito: boolean
@@ -817,6 +822,33 @@ function mensajeFalloConfirmacion(motivo: MotivoFalloConfirmacion, escalationPho
       ? fraseDerivacion("Para confirmarlo, por favor comunicate con nosotros", escalationPhoneNumber)
       : "Por favor comunicate con la clínica para confirmarlo."
     return `No pudimos confirmar tu turno desde acá porque nos faltan algunos datos tuyos.\n\n${contacto}`
+  }
+  if (motivo === "sin_turno") {
+    /**
+     * No hay turno en el contexto (25/11/2026).
+     *
+     * El caso que lo destapó —el más frecuente de todos, ver
+     * `confirmarTurnoEnProxy`— es el paciente que acaba de pedir un turno por
+     * el portal: la pantalla le dijo "pendiente de aprobación de la clínica",
+     * el turno todavía no está en la agenda, y él toca "Confirmar".
+     *
+     * El mensaje lo dice en ese orden a propósito: primero que no hay nada que
+     * confirmar, después el motivo más probable. Al que pidió un turno hace un
+     * rato le explica exactamente lo que le pasa; al que llega por cualquier
+     * otro camino no le miente, porque no afirma que haya pedido uno.
+     *
+     * Y no invita a reintentar. Esa es la única cosa que este mensaje no puede
+     * hacer: el turno no va a aparecer porque el paciente toque el botón otra
+     * vez.
+     */
+    const contacto = escalationPhoneNumber
+      ? fraseDerivacion("Si necesitás confirmarlo ahora, comunicate con nosotros", escalationPhoneNumber)
+      : "Si necesitás confirmarlo ahora, comunicate con la clínica."
+    return (
+      `No encontramos un turno tuyo para confirmar.\n\n` +
+      `Si lo pediste hace poco, la clínica todavía tiene que aprobarlo y te vamos a avisar por acá cuando esté listo.\n\n` +
+      `${contacto}`
+    )
   }
   return "Hubo un problema al confirmar tu turno. Por favor intentá de nuevo en unos momentos."
 }
@@ -882,9 +914,35 @@ async function confirmarTurnoEnProxy(
       tieneFecha: !!fecha,
       tieneDni: !!dni,
     })
-    // Falta el documento no es una falla técnica: no se arregla reintentando.
-    // Ver `mensajeFalloConfirmacion`.
-    return { exito: false, motivo: !dni && config?.proxy && fecha ? "sin_documento" : "falla_tecnica" }
+    /**
+     * ── Lo que falta decide el mensaje (25/11/2026) ──────────────────────
+     *
+     * Las tres situaciones se veían iguales —"Hubo un problema, intentá de
+     * nuevo"— y sólo una se arregla reintentando.
+     *
+     * Falta el DOCUMENTO: el recordatorio vino sin DNI (caso Omar Chocobar,
+     * 19/11). No hay reintento que lo arregle.
+     *
+     * Falta el TURNO: no tenemos ninguno en el contexto, así que no hay qué
+     * confirmar. Es el agujero más caro del sistema y lo encontró la línea de
+     * base: Iglicki Oftalmología, 69 de 162 conversaciones de una semana
+     * terminadas acá, el 57% de los errores de las 20 clínicas juntas.
+     *
+     * El caso real: el paciente pidió turno por el portal, la pantalla le dijo
+     * "pendiente de aprobación de la clínica" —así que el turno todavía no está
+     * en la agenda— y una hora y media después toca "Confirmar". No hay turno
+     * que confirmar, y el bot le pedía reintentar algo que no iba a funcionar
+     * nunca. Es la misma forma del caso Patricia con la cancelación, del otro
+     * lado del sistema.
+     *
+     * Falta el PROXY: eso sí es nuestro y es una falla técnica de verdad.
+     */
+    const motivo: MotivoFalloConfirmacion = !config?.proxy
+      ? "falla_tecnica"
+      : !fecha
+        ? "sin_turno"
+        : "sin_documento"
+    return { exito: false, motivo }
   }
 
   try {

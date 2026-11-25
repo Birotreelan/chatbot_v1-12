@@ -87,10 +87,17 @@ export async function GET(request: NextRequest) {
       sinFinales: url.searchParams.get("rapido") === "1",
     })
 
-    // Se guarda sólo si se pidió: una medición parcial —una clínica sola, o sin
-    // los finales— no es la línea de base y guardarla la pisaría.
+    /**
+     * Se guarda sólo si se pidió, y sólo si la medición está completa.
+     *
+     * Una clínica sola o una corrida sin los finales no son la línea de base, y
+     * guardarlas pisaría la buena con una parcial que después nadie distingue
+     * —el JSON guardado no dice "esto salió con ?rapido=1"—. El comentario de
+     * la primera versión decía esto y el código sólo chequeaba `configIds`.
+     */
+    const parcial = configIds.length > 0 || url.searchParams.get("rapido") === "1"
     let guardada = false
-    if (url.searchParams.get("guardar") === "1" && !configIds.length) {
+    if (url.searchParams.get("guardar") === "1" && !parcial) {
       guardada = await guardarMedicion(medicion)
     }
 

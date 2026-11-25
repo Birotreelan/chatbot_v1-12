@@ -164,17 +164,49 @@ export function anteponerPresentacion(
   mensaje: string,
   opciones: { nombre?: string | null; clinica?: string | null },
 ): string {
-  const texto = mensaje || ""
+  let texto = mensaje || ""
   if (!texto.trim()) return texto
 
   // Ya se identifica solo (el saludo de detección de paciente, por ejemplo).
   if (YA_SE_PRESENTA.test(texto)) return texto
 
+  const nombre = primerNombre(opciones.nombre)
   const presentacion = construirPresentacion({
     nombre: opciones.nombre,
     clinica: opciones.clinica,
     mensajeYaSaluda: YA_SALUDA.test(texto),
   })
+
+  /**
+   * ── El nombre, una vez (25/11/2026) ──────────────────────────────────────
+   *
+   * Visto en producción:
+   *
+   *     *¡Hola, Elizabeth!* Soy Iris, tu asistente virtual…
+   *
+   *     Elizabeth, tu confirmación fue recibida. Te esperamos el…
+   *
+   * El cuerpo empieza con el nombre porque los templates del proyecto escriben
+   * así —"[nombre], [mensaje]" es el formato estándar, está documentado en
+   * patient-templates.ts— y eso estaba bien cuando el saludo no existía. Con la
+   * presentación delante, el paciente lee su nombre dos veces en dos líneas, y
+   * suena a dos personas hablando una después de la otra.
+   *
+   * Se saca del CUERPO y no del saludo: el saludo con el nombre es lo que hace
+   * que la presentación no suene a locución, y el cuerpo sin el vocativo se lee
+   * igual de bien. La mayúscula se ajusta porque lo que quedó es el arranque de
+   * la oración.
+   *
+   * Sólo cuando el saludo nombra a la persona: sin nombre en la presentación no
+   * hay repetición, y sacarlo del cuerpo sería perderlo.
+   */
+  if (nombre && presentacion.includes(nombre)) {
+    const sinVocativo = new RegExp(`^${nombre}\\s*,\\s*`, "i")
+    if (sinVocativo.test(texto)) {
+      texto = texto.replace(sinVocativo, "")
+      texto = texto.charAt(0).toUpperCase() + texto.slice(1)
+    }
+  }
 
   return `${presentacion}\n\n${texto}`
 }
