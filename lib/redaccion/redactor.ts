@@ -74,7 +74,7 @@ CÓMO ESCRIBIR:
 - Español rioplatense, voseo (tenés, podés, escribí). Cálido y directo.
 - Más corto que el original, nunca más largo.
 - Frases cortas. Una idea por oración. Muchos pacientes son mayores y leen en el teléfono.
-- *Negritas* sólo en el dato que importa (la fecha, la hora, el profesional).
+- Negritas con UN asterisco, como en WhatsApp: *así*. Nunca **así**, que WhatsApp no interpreta y el paciente termina leyendo los asteriscos. Y sólo en el dato que importa (la fecha, la hora, el profesional).
 - Sin emojis.
 - Si el mensaje original ya está bien, devolvelo casi igual. No hace falta cambiar por cambiar.
 

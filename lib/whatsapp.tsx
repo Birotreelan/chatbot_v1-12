@@ -14,6 +14,7 @@ import {
   type ConversationMessage,
 } from "./conversations"
 import { laIaRedacta } from "./redaccion/switch"
+import { aFormatoDeWhatsApp, restosDeMarkdown } from "./redaccion/formato-whatsapp"
 import { registrarMensajeEntrante, normalizarMomento } from "./ventana-atencion"
 import { estaBloqueado } from "./contactos-bloqueados"
 import { estadoDeLaCancelacion } from "./cancelacion-de-turno"
@@ -512,6 +513,28 @@ async function sendDirectResponse(
         // Una etiqueta sin personalizar es infinitamente mejor que una
         // respuesta que no sale.
       }
+    }
+
+    /**
+     * ── El formato, lo último antes de enviar (25/11/2026) ────────────────
+     *
+     * WhatsApp usa UN asterisco para negrita; con dos no interpreta nada y el
+     * paciente lee los asteriscos. Pasaba con la primera redacción de la IA
+     * —los modelos escriben Markdown— y pasaba desde antes en el repaso de la
+     * reserva, que tiene `**DATOS DEL PACIENTE:**` escrito a mano en tres
+     * archivos. Ver lib/redaccion/formato-whatsapp.ts.
+     *
+     * Va acá, al final y para todos, porque es una propiedad del canal y no de
+     * quién escribió el texto: cualquier cosa que salga por WhatsApp tiene que
+     * estar en el formato de WhatsApp. La conversión es idempotente, así que un
+     * mensaje que ya venía bien sale igual.
+     */
+    message = aFormatoDeWhatsApp(message)
+    const restos = restosDeMarkdown(message)
+    if (restos) {
+      // No bloquea el envío: un mensaje con un asterisco de más es mejor que
+      // ningún mensaje. Pero queda dicho, porque el que lo ve es el paciente.
+      console.warn(`[FORMATO] ${restos} (fase ${phase}). Revisar lib/redaccion/formato-whatsapp.ts.`)
     }
 
     if (buttons && buttons.length > 0) {
