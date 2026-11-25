@@ -326,16 +326,76 @@ export async function initializePatientDetection(
           }
         }
       } else {
-        logger.info('Multiple patients detected, requesting DNI', {
-          count: detectionResult.multiplePatients.length,
-          phone: phoneNumber,
-        })
-        return {
-          handled: true,
-          message: buildMultiplePatientGreeting(detectionResult.multiplePatients, clinicName),
-          patientInfo: {
-            isNewPatient: false,
-          },
+        /**
+         * ── El que se identificó hace un rato no vuelve a empezar
+         *    (25/11/2026) ───────────────────────────────────────────────────
+         *
+         * El caso, de la misma conversación de Iglicki que el DNI vencido:
+         *
+         *   15:40  da su DNI, se lo saluda por su nombre, pide un turno
+         *   15:49  reserva por el portal
+         *   15:50  escribe "Menú"
+         *   15:50  «Veo que este número está asociado a más de un paciente.
+         *           Por favor indicame tu DNI»
+         *
+         * Diez minutos, y el bot no se acuerda de con quién está hablando.
+         *
+         * La identidad estaba guardada: `clearPatientDetectionFlow` escribe
+         * `identified_patient` con una hora de vida justamente para esto. Lo
+         * que pasa es que `restoreDetectionStateFromCache` se consulta en UN
+         * solo lugar —el interceptor global de BOTONES de whatsapp.tsx—, así
+         * que el paciente que toca el botón del menú sigue identificado y el
+         * que escribe "Menú" o "1" vuelve a foja cero. La misma acción, dos
+         * resultados, según si tocó o tipeó.
+         *
+         * Se restaura acá, que es el punto exacto donde se iba a pedir el DNI
+         * por segunda vez, y sólo cuando el teléfono tiene varios pacientes:
+         * es el único caso en que preguntar tiene sentido, y por lo tanto el
+         * único en que evitarlo lo tiene.
+         *
+         * Una hora es la ventana que ya estaba decidida para esa caché. Pasada
+         * la hora se vuelve a preguntar, que es lo correcto: un teléfono con
+         * dos fichas puede cambiar de manos entre un trámite y el siguiente.
+         */
+        const yaIdentificado = await getIdentifiedPatient(phoneNumber)
+        if (yaIdentificado?.patientDNI) {
+          logger.info('El teléfono tiene varios pacientes pero hay identidad reciente — no se vuelve a pedir el DNI', {
+            dni: yaIdentificado.patientDNI.substring(0, 3) + '****',
+          })
+          const resolucion = await processDNIForDisambiguation(
+            phoneNumber,
+            yaIdentificado.patientDNI,
+            configId,
+            clienteId,
+          )
+          if (resolucion.found) {
+            detectionResult.patientId = resolucion.patientId
+            detectionResult.patientName = resolucion.patientName
+            detectionResult.turnos = resolucion.turnos || []
+            detectionResult.multiplePatients = undefined
+          } else {
+            // La identidad guardada ya no resuelve: se pregunta, como antes.
+            logger.info('La identidad guardada no resolvió la desambiguación — se pide el DNI', {
+              error: resolucion.error,
+            })
+            return {
+              handled: true,
+              message: buildMultiplePatientGreeting(detectionResult.multiplePatients, clinicName),
+              patientInfo: { isNewPatient: false },
+            }
+          }
+        } else {
+          logger.info('Multiple patients detected, requesting DNI', {
+            count: detectionResult.multiplePatients.length,
+            phone: phoneNumber,
+          })
+          return {
+            handled: true,
+            message: buildMultiplePatientGreeting(detectionResult.multiplePatients, clinicName),
+            patientInfo: {
+              isNewPatient: false,
+            },
+          }
         }
       }
     }
