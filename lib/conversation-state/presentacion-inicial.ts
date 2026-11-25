@@ -208,6 +208,35 @@ export function anteponerPresentacion(
     }
   }
 
+  /**
+   * ── Después del saludo, no antes (25/11/2026) ───────────────────────────
+   *
+   * Visto en producción un minuto después de un deploy, Daponte Ojos:
+   *
+   *     Soy Iris, tu asistente virtual de inteligencia artificial de Daponte
+   *     Ojos.
+   *
+   *     ¡Hola, Facundo!
+   *
+   *     Gracias por comunicarte con Daponte Ojos.
+   *
+   * Al revés. Pasa cuando el cuerpo ya trae su propio saludo: ahí la
+   * presentación es sólo la línea de identidad —no se le encima otro "¡Hola!"—
+   * pero se anteponía igual, y el mensaje empieza presentándose a alguien a
+   * quien todavía no saludó.
+   *
+   * Se mete DESPUÉS de esa primera línea. Sólo si es corta: un primer renglón
+   * largo no es un saludo sino el mensaje, y ahí la identificación tiene que ir
+   * adelante —es el caso Marcela (17/9), donde GPT arrancó con "Hola, estoy
+   * bien, gracias" y la paciente nunca se enteró de que hablaba con una IA—.
+   */
+  const TOPE_DE_UN_SALUDO = 60
+  const corte = texto.indexOf("\n")
+  const primeraLinea = corte === -1 ? texto : texto.slice(0, corte)
+  if (YA_SALUDA.test(texto) && primeraLinea.trim().length <= TOPE_DE_UN_SALUDO && corte !== -1) {
+    return `${primeraLinea}\n\n${presentacion}\n\n${texto.slice(corte).replace(/^\n+/, "")}`
+  }
+
   return `${presentacion}\n\n${texto}`
 }
 
