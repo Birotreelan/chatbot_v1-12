@@ -251,6 +251,29 @@ function redondear(valor: number | null, decimales = 2): number | null {
  */
 const TOPE_DE_CONVERSACIONES_REVISADAS = 400
 
+/**
+ * ── Medir un día en curso engaña, y hay que decirlo (25/11/2026) ──────────
+ *
+ * Primera comparación real, el 25 contra la semana del 18 al 24:
+ * "resueltas por conversación" dio 0,43 contra 0,77, y no es que haya
+ * empeorado nada.
+ *
+ * Las conversaciones se cuentan en cuanto alguien escribe; las gestiones
+ * aparecen después, cuando el trámite se completa. A media mañana el
+ * denominador ya tiene a todos los que escribieron y el numerador todavía no
+ * tiene a los que van a resolver a la tarde. Tres de las cuatro métricas
+ * —resueltas por conversación, mensajes por gestión y costo por gestión— salen
+ * mal por el mismo motivo, y la cuarta (en qué terminan) no, porque se mide
+ * sobre la conversación que ya existe.
+ *
+ * Es el tipo de error que no se nota: el número sale, parece una medición y
+ * lleva a conclusiones al revés. Así que la medición lo avisa, en el mismo
+ * lugar donde avisa los otros huecos.
+ */
+function diaEnCurso(hasta: string): boolean {
+  return hasta >= new Date().toISOString().slice(0, 10)
+}
+
 export async function medirLineaDeBase(params: {
   desde: string
   hasta: string
@@ -355,12 +378,21 @@ export async function medirLineaDeBase(params: {
     })
   }
 
+  const total = totalizar(clientes)
+  if (diaEnCurso(hasta)) {
+    total.huecos.push(
+      `la ventana termina hoy: las conversaciones ya están contadas y las gestiones todavía no, ` +
+        `así que resueltas por conversación, mensajes por gestión y costo por gestión salen peores ` +
+        `de lo que son. Comparar sólo "en qué terminan", o esperar a que el día cierre.`,
+    )
+  }
+
   return {
     desde,
     hasta,
     medidoEn: new Date().toISOString(),
     clientes,
-    total: totalizar(clientes),
+    total,
   }
 }
 

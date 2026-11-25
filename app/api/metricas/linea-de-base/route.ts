@@ -95,7 +95,14 @@ export async function GET(request: NextRequest) {
      * —el JSON guardado no dice "esto salió con ?rapido=1"—. El comentario de
      * la primera versión decía esto y el código sólo chequeaba `configIds`.
      */
-    const parcial = configIds.length > 0 || url.searchParams.get("rapido") === "1"
+    /**
+     * Un día en curso tampoco se guarda: tres de las cuatro métricas salen
+     * mal porque las conversaciones ya están contadas y las gestiones todavía
+     * no (ver `diaEnCurso`). Guardarlo dejaría en el historial un número que
+     * dentro de dos meses nadie va a poder distinguir de una medición buena.
+     */
+    const terminaHoy = hasta >= new Date().toISOString().slice(0, 10)
+    const parcial = configIds.length > 0 || url.searchParams.get("rapido") === "1" || terminaHoy
     let guardada = false
     if (url.searchParams.get("guardar") === "1" && !parcial) {
       guardada = await guardarMedicion(medicion)
