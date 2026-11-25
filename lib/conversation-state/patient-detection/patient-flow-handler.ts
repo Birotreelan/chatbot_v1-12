@@ -636,6 +636,70 @@ export async function processDNIForDisambiguation(
     })
 
     if (!matchingPatient) {
+      /**
+       * ── Antes de decirle que no está, preguntarle a la clínica
+       *    (25/11/2026) ───────────────────────────────────────────────────
+       *
+       * El caso real, Iglicki Oftalmología: a las 15:40 el paciente dio su DNI
+       * y fue reconocido; a las 15:51 el MISMO DNI recibió "El DNI no está
+       * registrado con este número de teléfono". En el medio reservó un turno
+       * por el portal.
+       *
+       * `state.multiplePatients` es una COPIA de lo que el proxy contestó
+       * cuando empezó la detección. Si entre las dos cosas cambió lo que
+       * devuelve —y una reserva nueva es exactamente algo que lo cambia— la
+       * copia queda vieja y el paciente queda afuera por un dato nuestro, no
+       * por un dato de la clínica.
+       *
+       * Es la misma forma del `tenantId` viejo en el panel de soporte: una
+       * copia a la que se le cree más que a la fuente. Y la fuente está a una
+       * llamada: `identifyPatientByDNI` consulta al proxy por DNI y es la
+       * misma función que ya usa el camino del "DNI en el primer mensaje".
+       *
+       * ── Lo que esto cambia, dicho ──────────────────────────────────────
+       *
+       * Antes, identificarse exigía que el DNI estuviera entre los de ESTE
+       * teléfono; ahora alcanza con que la clínica lo conozca. No es una
+       * puerta nueva: el camino del primer mensaje ya identificaba así desde el
+       * 28/8, y el proyecto ya decidió que el teléfono no es una credencial
+       * —cualquiera que lea el WhatsApp del paciente puede cancelarle el turno
+       * sin que se le pregunte nada (ver lib/portal/vigencia.ts)—. La
+       * inconsistencia entre los dos caminos era el bug, no el arreglo.
+       */
+      const porLaClinica = await identifyPatientByDNI(phoneNumber, dni, configId, clienteId)
+      if (porLaClinica) {
+        logger.warn('El DNI no estaba en la copia del teléfono pero la clínica lo conoce', {
+          dnisDeLaCopia: state.multiplePatients.map((p: any) =>
+            (p.dni || p.Nrodoc || '').toString().replace(/[^0-9]/g, '').slice(0, 3) + '****',
+          ),
+        })
+        /**
+         * `identifyPatientByDNI` ya dejó el estado con el paciente
+         * identificado, pero lo escribe sin los campos del cliente —el mismo
+         * agujero que se arregla más abajo en esta función—. Se vuelven a
+         * poner acá, que es donde todavía tenemos el estado anterior.
+         */
+        await redis.setex(
+          `${PATIENT_DETECTION_STATE_KEY}:${phoneNumber}`,
+          PATIENT_DETECTION_TTL,
+          JSON.stringify({
+            ...((await getPatientDetectionState(phoneNumber)) || {}),
+            permitirNuevoTurno: state.permitirNuevoTurno,
+            permitirCancelacion: state.permitirCancelacion,
+            escalationPhoneNumber: state.escalationPhoneNumber,
+            usaPortalWeb: state.usaPortalWeb,
+            hasReminder: state.hasReminder,
+            multiplePatients: state.multiplePatients,
+          }),
+        )
+        return {
+          found: true,
+          patientId: porLaClinica.patientId,
+          patientName: porLaClinica.patientName,
+          turnos: porLaClinica.turnos,
+        }
+      }
+
       logger.warn('No patient found with provided DNI', {})
 
       // Incrementar intentos
@@ -800,8 +864,40 @@ export async function processDNIForDisambiguation(
       (t: any) => t.estado !== 'cancelado' && t.status !== 'cancelado'
     )
 
-    // Actualizar estado a paciente existente identificado
+    /**
+     * ── Lo que NO cambia porque el paciente se identifique (25/11/2026) ──
+     *
+     * Este objeto reemplaza el estado entero, y al escribirlo campo por campo
+     * se perdían cuatro que no son del paciente sino del CLIENTE y de la
+     * conversación: los dos permisos, el teléfono de derivación y si la clínica
+     * usa el portal. Más `hasReminder`, que es de la conversación.
+     *
+     * Las consecuencias eran silenciosas y las dos aparecieron esta semana:
+     *
+     *  - Daponte Ojos tiene `permitirNuevoTurno: false` y una paciente con dos
+     *    fichas en el teléfono recibió el menú completo con "Solicitar turno
+     *    médico". Ayer lo arreglé del lado del saludo, leyendo los permisos del
+     *    estado; pero el estado los había perdido ACÁ, tres líneas antes. O sea
+     *    que el arreglo de ayer leía un campo que esta función acababa de
+     *    borrar: la causa estaba un paso más atrás.
+     *  - `hasReminder` volvía siempre `false` después de desambiguar, así que
+     *    el saludo de ese paciente nunca ofrecía confirmar la asistencia.
+     *
+     * `obraSocialBloqueada` es el único que a propósito NO se conserva: es del
+     * paciente, no del cliente, y acabamos de cambiar de paciente. Arrastrarlo
+     * le escondería la opción de pedir turno a alguien por la obra social de
+     * otro.
+     */
     const identifiedPatientState: PatientDetectionState = {
+      permitirNuevoTurno: state.permitirNuevoTurno,
+      permitirCancelacion: state.permitirCancelacion,
+      escalationPhoneNumber: state.escalationPhoneNumber,
+      usaPortalWeb: state.usaPortalWeb,
+      hasReminder: state.hasReminder,
+      // La lista de pacientes del teléfono sigue siendo la misma: el paciente
+      // eligió uno, no dejó de haber dos.
+      multiplePatients: state.multiplePatients,
+
       phase: 'awaiting_action_selection',
       patientPhone: phoneNumber,
       patientId: foundPatientId,
