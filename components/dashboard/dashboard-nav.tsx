@@ -74,6 +74,14 @@ export function DashboardNav() {
             <Link href="/dashboard/portal" className="shrink-0 whitespace-nowrap text-foreground/60 hover:text-foreground">
               Portal
             </Link>
+            {/* El banco de pruebas del motor conversacional: conversaciones
+                reales etiquetadas a mano. Ver app/dashboard/evaluacion. */}
+            <Link
+              href="/dashboard/evaluacion"
+              className="shrink-0 whitespace-nowrap text-foreground/60 hover:text-foreground"
+            >
+              Evaluación
+            </Link>
             {/* Mantenimiento: los clientes que cambiaron de cliente_id y
                 quedaron partidos en dos. Ver app/dashboard/ids/page.tsx. */}
             <Link href="/dashboard/ids" className="shrink-0 whitespace-nowrap text-foreground/60 hover:text-foreground">

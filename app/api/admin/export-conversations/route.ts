@@ -176,13 +176,30 @@ export async function GET(request: Request) {
     // Más largas primero: son las que más señal tienen sobre fricción real
     conversaciones.sort((a, b) => b.cantidadMensajes - a.cantidadMensajes)
 
+    /**
+     * ── Un tope del total, no sólo por clínica (25/11/2026) ────────────────
+     *
+     * `limit` acota por clínica, así que con veinte clínicas el archivo trae
+     * veinte veces eso, con los mensajes completos de cada conversación: son
+     * varios megabytes y la pantalla de etiquetado los tiene que bajar antes
+     * de mostrar la primera. El tope se aplica DESPUÉS de ordenar, así que lo
+     * que queda son las conversaciones más largas de todas —las que más señal
+     * tienen—, no las primeras veinte de la primera clínica.
+     *
+     * Opcional a propósito: el export completo sigue sirviendo para el archivo
+     * de análisis, que se baja una vez y no mientras alguien espera.
+     */
+    const totalMax = Number(searchParams.get("totalMax")) || 0
+    const devueltas = totalMax > 0 ? conversaciones.slice(0, totalMax) : conversaciones
+
     return NextResponse.json({
       exportadoEl: new Date().toISOString(),
+      totalAntesDelTope: conversaciones.length,
       nota: "Datos anonimizados (teléfono hasheado; DNI, email y nombres conocidos redactados). La redacción por regex sobre texto libre no es perfecta: revisar una muestra antes de compartir fuera del equipo.",
-      totalConversaciones: conversaciones.length,
-      totalMensajes: conversaciones.reduce((acc, c) => acc + c.cantidadMensajes, 0),
+      totalConversaciones: devueltas.length,
+      totalMensajes: devueltas.reduce((acc, c) => acc + c.cantidadMensajes, 0),
       porClinica,
-      conversaciones,
+      conversaciones: devueltas,
     })
   } catch (error) {
     console.error("[EXPORT-CONVERSATIONS] Error:", error)
