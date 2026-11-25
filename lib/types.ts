@@ -158,6 +158,22 @@ export interface WhatsAppConfig {
   ocultarNombreDeProfesionales?: boolean
 
   /**
+   * El saludo de bienvenida, escrito por la clínica (25/11/2026).
+   *
+   * Reemplaza el generado —"¡Bienvenido a {clinica}!", "{nombre}, ¡bienvenido
+   * de nuevo a {clinica}!", "¡Hola, {nombre}!" y "¡Hola!"— por el texto propio.
+   * Acepta los marcadores `{nombre}` y `{clinica}`.
+   *
+   * NO incluye la línea "Soy Iris, tu asistente virtual de inteligencia
+   * artificial", que va aparte y no se puede quitar desde acá: es la
+   * identificación como IA. Ver lib/conversation-state/saludo-propio.ts.
+   *
+   * Vacío o ausente: sigue el saludo generado, que es el caso de todos los
+   * clientes menos el que lo configure.
+   */
+  saludoPropio?: string
+
+  /**
    * La IA reescribe los mensajes que el paciente lee (25/11/2026).
    *
    * Etapa 3 del plan de la próxima versión del chatbot. El flujo sigue

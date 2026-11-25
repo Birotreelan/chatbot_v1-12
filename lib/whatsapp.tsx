@@ -15,6 +15,7 @@ import {
 } from "./conversations"
 import { laIaRedacta } from "./redaccion/switch"
 import { aFormatoDeWhatsApp, restosDeMarkdown } from "./redaccion/formato-whatsapp"
+import { empiezaConSaludo, personalizarSaludo } from "./conversation-state/saludo-propio"
 import { registrarMensajeEntrante, normalizarMomento } from "./ventana-atencion"
 import { estaBloqueado } from "./contactos-bloqueados"
 import { estadoDeLaCancelacion } from "./cancelacion-de-turno"
@@ -473,6 +474,30 @@ async function sendDirectResponse(
     // el router primario y el NLU fallback, tres parches del mismo agujero.
     // Ver lib/conversation-state/presentacion-inicial.ts.
     message = await presentarSiCorresponde(message, ctx.configId, ctx.userPhoneNumber)
+
+    /**
+     * ── El saludo que escribió la clínica (25/11/2026) ────────────────────
+     *
+     * Reemplaza el saludo generado —"*¡Bienvenido a Salud Ocular!*" y sus tres
+     * variantes— por el texto propio del cliente. Mismo criterio que la
+     * etiqueta del menú: está escrito literal en siete lugares de
+     * patient-templates más los dos que arma la presentación, y el embudo es el
+     * único punto donde ninguno se olvida.
+     *
+     * Va DESPUÉS de la presentación porque la presentación es la que arma dos
+     * de las cuatro formas; antes, esas dos no existirían todavía. Y no toca la
+     * línea "Soy Iris, tu asistente virtual de inteligencia artificial": ver la
+     * nota del módulo.
+     */
+    if (empiezaConSaludo(message)) {
+      try {
+        const configSaludo = await getWhatsAppConfigById(ctx.configId)
+        message = personalizarSaludo(message, configSaludo?.saludoPropio, configSaludo?.displayName)
+      } catch {
+        // Un saludo sin personalizar es infinitamente mejor que una respuesta
+        // que no sale.
+      }
+    }
 
     // Etiqueta propia de "Realizar otra consulta" (22/9/2026). Mismo criterio
     // que la presentación: se decide en el embudo porque el texto está escrito

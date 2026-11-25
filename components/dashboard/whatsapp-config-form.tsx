@@ -614,6 +614,48 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
 
               <Separator className="my-4" />
 
+              {/* ── El saludo propio (25/11/2026) ───────────────────────────
+                  Pedido de Nicolás: el saludo hoy se arma solo con el nombre
+                  de la clínica y hay clínicas que quieren el suyo. Va antes del
+                  menú porque es lo primero que el paciente lee. */}
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Saludo de bienvenida</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Reemplaza el saludo que se arma solo. Dejalo vacío para usar el de siempre:
+                    &ldquo;¡Bienvenido a {formData.displayName || "la clínica"}!&rdquo; o
+                    &ldquo;Ana, ¡bienvenido de nuevo a {formData.displayName || "la clínica"}!&rdquo;.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="saludoPropio">Tu saludo</Label>
+                  <Textarea
+                    id="saludoPropio"
+                    value={formData.saludoPropio || ""}
+                    onChange={(e) => updateFormData("saludoPropio", e.target.value)}
+                    placeholder={`*¡Hola, {nombre}!* Te damos la bienvenida a ${formData.displayName || "la clínica"}.`}
+                    rows={2}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Podés usar <code>{"{nombre}"}</code> y <code>{"{clinica}"}</code>. Cuando todavía no
+                    sabemos el nombre del paciente, <code>{"{nombre}"}</code> se saca junto con su coma, así
+                    que conviene que la frase se entienda sin él. Para negrita, un solo asterisco:{" "}
+                    <code>*así*</code>.
+                  </p>
+                  {/* El aviso no es un detalle legal: es la frase que le dice al
+                      paciente que habla con una IA, y hay clínicas que van a
+                      querer sacarla. Mejor que se enteren acá. */}
+                  <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs">
+                    Debajo del saludo sigue apareciendo <strong>&ldquo;Soy Iris, tu asistente virtual de
+                    inteligencia artificial&rdquo;</strong>. Eso no se cambia desde acá: es lo que le dice
+                    al paciente que está hablando con una IA y no con una persona del equipo.
+                  </p>
+                </div>
+              </div>
+
+              <Separator className="my-4" />
+
               <div className="space-y-3">
                 <div className="space-y-1">
                   <Label className="text-base font-semibold">Menú principal</Label>
