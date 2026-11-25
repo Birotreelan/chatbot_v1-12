@@ -157,6 +157,21 @@ export interface WhatsAppConfig {
    */
   ocultarNombreDeProfesionales?: boolean
 
+  /**
+   * La IA reescribe los mensajes que el paciente lee (25/11/2026).
+   *
+   * Etapa 3 del plan de la próxima versión del chatbot. El flujo sigue
+   * decidiendo todo igual —qué preguntar, qué turno, qué menú— y lo único que
+   * cambia es quién pone las palabras: hoy salen de 161 funciones con el texto
+   * escrito de antemano.
+   *
+   * `=== true`, o sea apagado por defecto, al revés que los otros campos de
+   * esta pantalla: cambia lo que 25 clínicas le dicen a sus pacientes y se
+   * prende de a una. Ver lib/redaccion/switch.ts, que además tiene la llave
+   * general para apagarlo en todos sin entrar al panel.
+   */
+  laIaRedacta?: boolean
+
   // Restricciones de acciones disponibles para pacientes. Default true (permitido).
   /** Si es false, el paciente no puede solicitar un turno nuevo (ni como paciente nuevo ni existente). */
   permitirNuevoTurno?: boolean

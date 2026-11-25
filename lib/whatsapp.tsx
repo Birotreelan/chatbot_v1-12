@@ -7,7 +7,13 @@ import { getArgentinaDateTime, formatDateWithDayOfWeek } from "@/lib/utils/date-
 import { normalizePhoneNumber } from "@/lib/utils"
 import { getRedisClient } from "./redis"
 import { enqueueUserMessage } from "./user-queue"
-import { saveConversationMessage, isConversationPaused, type ConversationMessage } from "./conversations"
+import {
+  saveConversationMessage,
+  isConversationPaused,
+  getConversationMessages,
+  type ConversationMessage,
+} from "./conversations"
+import { laIaRedacta } from "./redaccion/switch"
 import { registrarMensajeEntrante, normalizarMomento } from "./ventana-atencion"
 import { estaBloqueado } from "./contactos-bloqueados"
 import { estadoDeLaCancelacion } from "./cancelacion-de-turno"
@@ -418,6 +424,48 @@ async function sendDirectResponse(
      * Si alguna vez se quieren de vuelta, están en el historial de git:
      * buscar `esIdenticoALoUltimo` antes de esta fecha.
      */
+    /**
+     * ── La IA reescribe el mensaje, si el cliente lo tiene prendido
+     *    (25/11/2026) ─────────────────────────────────────────────────────
+     *
+     * Etapa 3 del plan: "la IA pasa a escribir lo que el paciente lee". Acá, en
+     * el embudo, por el mismo motivo que la presentación y la etiqueta del
+     * menú: las 161 funciones que arman mensajes no se pueden tocar de a una
+     * sin dejar el sistema con dos formas de escribir.
+     *
+     * ── Por qué ANTES de la presentación ───────────────────────────────────
+     *
+     * Para que "Soy Iris, tu asistente virtual de inteligencia artificial" se
+     * antepone después y quede fuera del alcance del modelo. Es la frase que no
+     * puede cambiar de forma: la guarda que evita presentarse dos veces la
+     * busca literal, y una redacción que la diga "con otras palabras" hace que
+     * el bot se presente dos veces o ninguna.
+     *
+     * Y antes de la etiqueta del menú por lo mismo: el redactor no toca las
+     * líneas numeradas, así que `personalizarMenu` sigue encontrándolas igual.
+     *
+     * Apagado para todos hasta que se prenda de a uno. Ver lib/redaccion/.
+     */
+    try {
+      const configRedaccion = await getWhatsAppConfigById(ctx.configId)
+      if (laIaRedacta(configRedaccion)) {
+        const { redactar } = await import("./redaccion/redactor")
+        const historial = await getConversationMessages(ctx.configId, ctx.userPhoneNumber, 4, 0).catch(
+          () => ({ messages: [] as ConversationMessage[] }),
+        )
+        const redaccion = await redactar({
+          mensaje: message,
+          fase: phase,
+          historial: historial.messages?.map((m) => ({ role: m.role, content: m.content })),
+        })
+        message = redaccion.texto
+      }
+    } catch (error) {
+      // La redacción es una mejora, no un requisito: si algo falla acá, sale el
+      // mensaje de siempre. Ni un paciente se queda sin respuesta por esto.
+      console.error("[REDACCION] No se pudo evaluar la reescritura:", error)
+    }
+
     // Presentación como asistente de IA en la primera respuesta del día
     // (17/9/2026). Se decide acá, en el embudo, y no en cada rama: estaba
     // resuelta a mano en 13 lugares y cada capa nueva se olvidaba —el executor,

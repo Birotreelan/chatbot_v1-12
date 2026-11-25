@@ -142,6 +142,9 @@ export async function createWhatsAppConfig(config: Partial<WhatsAppConfig>): Pro
     permitirNuevoTurno: config.permitirNuevoTurno !== undefined ? config.permitirNuevoTurno : true,
     permitirReagendamiento: config.permitirReagendamiento !== undefined ? config.permitirReagendamiento : true,
     permitirCancelacion: config.permitirCancelacion !== undefined ? config.permitirCancelacion : true,
+    // Sin `!== undefined ? … : true`: éste arranca apagado a propósito, así que
+    // el default es el del campo ausente. Ver lib/redaccion/switch.ts.
+    laIaRedacta: config.laIaRedacta === true,
     additionalAssistants: config.additionalAssistants || [],
     // Añadir configuraciones por defecto del widget
     widgetEnabled: config.widgetEnabled !== undefined ? config.widgetEnabled : true,

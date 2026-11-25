@@ -76,6 +76,8 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
     permitirNuevoTurno: true,
     permitirReagendamiento: true,
     permitirCancelacion: true,
+    // Apagado: ver la nota del switch en el formulario y lib/redaccion/switch.ts.
+    laIaRedacta: false,
     ...config,
   })
 
@@ -772,6 +774,40 @@ export function WhatsAppConfigForm({ config, onSave, onCancel, isLoading }: What
               <Separator className="my-4" />
 
               <div className="space-y-3">
+                {/* ── La redacción por IA (25/11/2026) ────────────────────
+                    Va arriba de las restricciones y no entre ellas: no es un
+                    permiso del paciente sino quién escribe los mensajes. Y
+                    arranca apagado, al revés que los switches de abajo: los de
+                    abajo son opciones que ya existían, éste cambia lo que la
+                    clínica le dice a sus pacientes. */}
+                <div className="space-y-1">
+                  <Label className="text-base font-semibold">Redacción</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Quién pone las palabras de los mensajes que recibe el paciente.
+                  </p>
+                </div>
+
+                <div className="space-y-3 pl-0">
+                  <div className="flex items-center space-x-2 rounded-md bg-muted/30 p-2">
+                    <Switch
+                      id="laIaRedacta"
+                      checked={formData.laIaRedacta === true}
+                      onCheckedChange={(checked) => updateFormData("laIaRedacta", checked)}
+                    />
+                    <div className="flex-1">
+                      <Label htmlFor="laIaRedacta" className="text-sm font-medium">
+                        La IA reescribe los mensajes
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        El flujo decide lo mismo que siempre —qué preguntar, qué turnos, qué menú— y la IA
+                        reescribe el texto para que suene a una persona. Los menús numerados, los enlaces y
+                        los datos del turno no se tocan: si la IA agrega o pierde un dato, sale el mensaje
+                        de siempre. Empezá por una clínica.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-1">
                   <Label className="text-base font-semibold">Restricciones de Turnos</Label>
                   <p className="text-sm text-muted-foreground">
