@@ -808,6 +808,62 @@ export interface ClinicInfoProfesional {
   especialidad?: string
 }
 
+/**
+ * Una obra social, con lo que el paciente realmente pregunta (25/11/2026).
+ *
+ * ── Por qué no alcanza la lista de nombres ────────────────────────────────
+ *
+ * `obrasSociales: string[]` existe desde el principio y responde "¿atienden
+ * OSDE?". Pero en 709 conversaciones reales nadie preguntó eso. Preguntaron:
+ *
+ *     "¿atienden con medife bronce?"
+ *     "¿Ustedes trabajan con el plan 0,25 de OSDE?"
+ *     "¿Con IOMA hay copago?"
+ *     "jerárquicos salud. ¿Tiene costo la consulta?"
+ *
+ * O sea: el plan, no la obra social; y si hay que pagar algo igual. Una lista
+ * de nombres contesta las cuatro con un "sí" que después se cae en el
+ * mostrador.
+ */
+export interface ClinicInfoCobertura {
+  nombre: string
+  /** Los planes que se atienden. Vacío = todos los de esa obra social. */
+  planes?: string[]
+  /** Planes que explícitamente NO. Es la mitad que falta en todos los sitios. */
+  planesNoAceptados?: string[]
+  /** `true` si el paciente tiene que traer orden o autorización. */
+  requiereOrden?: boolean
+  /** Lo que paga igual, tal como la clínica lo quiera decir. */
+  copago?: string
+  /** Cómo se saca la autorización de ESTA obra social. Ver `ordenesYAutorizaciones`. */
+  comoAutorizar?: string
+}
+
+/**
+ * Un estudio, con lo que hay que saber ANTES de venir (25/11/2026).
+ *
+ * De las conversaciones: "¿el fondo de ojos entra en esta orden?", "es campo
+ * visual, ¿por qué me van a dilatar?", "¿cuánto sale hacerse el fondo de
+ * ojos?", "¿puedo realizar el estudio sin la consulta con la doctora?".
+ *
+ * `dilata` merece ser un campo propio y no una línea de la preparación: si
+ * dilatan, el paciente no puede manejar al volver, y eso nadie se lo dice
+ * hasta que llega.
+ */
+export interface ClinicInfoEstudio {
+  nombre: string
+  requiereOrden?: boolean
+  /** Si se dilata la pupila: hay que avisar que no puede manejar. */
+  dilata?: boolean
+  /** Cuánto dura, para que el paciente se organice. */
+  duracion?: string
+  /** Preparación propia de ESTE estudio. */
+  preparacion?: string
+  /** `true` si se puede hacer sin consulta previa con el profesional. */
+  sinConsultaPrevia?: boolean
+  arancelParticular?: string
+}
+
 export interface ClinicInfo {
   clienteId: string
 
@@ -822,6 +878,98 @@ export interface ClinicInfo {
   profesionales?: ClinicInfoProfesional[]
   equipamiento?: string[] // ej: OCT, campo visual computarizado, facoemulsificador
   obrasSociales?: string[]
+
+  // ── Los cuatro bloques más preguntados (25/11/2026) ─────────────────────
+  //
+  // Salen de 37 preguntas reales en 709 conversaciones de cuatro clínicas,
+  // agrupadas por tema. Entre los cuatro cubren 17 de las 37; el resto —edades
+  // de atención, resultados, qué traer, lo que la clínica no hace— quedó
+  // diseñado y sin construir a propósito: primero se carga esto en una clínica
+  // y se mide si baja la derivación.
+
+  /**
+   * Guardia y urgencias.
+   *
+   * "¿Para asistir a la guardia es por orden de llegada?" apareció dos veces
+   * textual, y "¿atienden hoy por urgencias?" una más. La pregunta no es si
+   * existe la guardia: es CÓMO se accede.
+   */
+  guardia?: {
+    /** `false` dicho explícitamente también es información: evita el viaje. */
+    disponible?: boolean
+    horarios?: string
+    /** Por orden de llegada o con turno. Es la pregunta textual de los pacientes. */
+    porOrdenDeLlegada?: boolean
+    /** En qué sede, cuando la clínica tiene varias y la guardia está en una. */
+    sede?: string
+    /** Qué se atiende por guardia, en las palabras de la clínica. */
+    queSeAtiende?: string
+    /** Y qué no: lo que hay que derivar a otro lado. */
+    queNoSeAtiende?: string
+  }
+
+  /** Ver `ClinicInfoCobertura`. Reemplaza a `obrasSociales` sin borrarla. */
+  coberturas?: ClinicInfoCobertura[]
+
+  /**
+   * Órdenes y autorizaciones: el tema MÁS preguntado de todos.
+   *
+   * Seis de las 37 preguntas, por encima de cualquier tema clínico. Y tres
+   * pacientes mandaron capturas de pantalla del sitio de su obra social
+   * preguntando qué poner en "seleccione sede": nos piden ayuda con un trámite
+   * que no es nuestro, porque somos el único lugar donde alguien les contesta.
+   */
+  ordenesYAutorizaciones?: {
+    /** `true` si en general hace falta. El detalle fino va por cobertura. */
+    hacenFalta?: boolean
+    /** Cómo se obtiene, paso a paso, en las palabras de la clínica. */
+    comoObtenerla?: string
+    /** "A nombre de quién" — pregunta textual, dos veces. */
+    aNombreDe?: string
+    /** Códigos de prestación por estudio, que es lo que les piden cargar. */
+    codigos?: string
+    /** Qué pasa si llega sin la orden. Hoy se entera en el mostrador. */
+    siNoLaTrae?: string
+  }
+
+  /**
+   * Aranceles y medios de pago.
+   *
+   * "¿Cuánto es el arancel?", "¿cuánto sale hacerse el fondo de ojos?",
+   * "¿tiene costo la consulta?". El precio por estudio va en `estudios`; acá va
+   * lo transversal.
+   */
+  aranceles?: {
+    consultaParticular?: string
+    mediosDePago?: string[]
+    /** Cuotas, recargos, descuentos por pago anticipado. */
+    financiacion?: string
+    /** Si se factura, y cómo se pide. Un paciente pidió la factura. */
+    facturacion?: string
+    /** Hasta cuándo valen estos precios, para que no queden viejos sin aviso. */
+    vigenciaDeclarada?: string
+  }
+
+  /** Ver `ClinicInfoEstudio`. */
+  estudios?: ClinicInfoEstudio[]
+
+  /**
+   * ── Qué de todo esto puede contestar el bot (25/11/2026) ───────────────
+   *
+   * Decisión de Nicolás: el bot contesta con lo que la clínica escribió,
+   * literal, y cierra ofreciendo el teléfono. Es la demanda insatisfecha más
+   * grande que mostraron las conversaciones y hoy se deriva siempre.
+   *
+   * Pero la decisión es POR CAMPO y es de la clínica, no nuestra. Hay cosas que
+   * dependen de la historia de cada paciente —"qué gotas me pongo y en qué
+   * orden", con una cirugía al otro día— y ahí contestar con un texto general
+   * es peor que derivar.
+   *
+   * Los nombres son las claves de los bloques de arriba. Un campo que no está
+   * en la lista NO se contesta: el default es el comportamiento de hoy, y
+   * sumar un bloque nuevo no lo habilita solo.
+   */
+  camposQueElBotPuedeContestar?: string[]
 
   // Instrucciones frecuentes
   instruccionesPreConsulta?: string // qué traer, preparación, ayuno, etc.
