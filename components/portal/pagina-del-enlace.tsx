@@ -94,7 +94,7 @@ import { lineasDeContactoParaWeb, telefonoParaMensajes} from "@/lib/utils/escala
 import type { AnchoDelMarco } from "@/components/portal/marco"
 import { ElegirFiltro } from "@/components/portal/elegir-filtro"
 import { SelectorDeTurnos } from "@/components/portal/selector-de-turnos"
-import { PedirDNI, DarseDeAlta } from "@/components/portal/identificarse"
+import { PedirDNI, DarseDeAlta, CorregirCobertura } from "@/components/portal/identificarse"
 import { GestionarTurno } from "@/components/portal/gestionar-turno"
 import { reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
 import {
@@ -312,8 +312,8 @@ export async function PaginaDelEnlace({
   const corregirDatosEn =
     contexto.identidad?.tieneFicha === false
       ? urlCon({ paso: "registrar" })
-      : contexto.identidad?.dni
-        ? urlCon({ paso: "pedir_dni" })
+      : identidad.dni
+        ? urlCon({ paso: "corregir_cobertura" })
         : null
 
   /**
@@ -327,19 +327,23 @@ export async function PaginaDelEnlace({
    * cuatro campos para editar: ahí "corregir mis datos" es exactamente lo que
    * pasa.
    *
-   * El que YA tiene ficha va a `pedir_dni`, y ahí lo único que puede cambiar es
-   * el documento: el nombre, el apellido, el email y la obra social salen de la
-   * ficha de la clínica y el portal no los edita. Si toca el botón esperando
-   * arreglar su email, vuelve a escribir el mismo DNI y aterriza donde estaba.
-   * Fue el reporte de Nicolás del 27/11, y la mitad del problema era ésta: el
-   * botón decía otra cosa de la que hacía.
+   * El que YA tiene ficha iba a `pedir_dni`, y ahí lo único que podía cambiar
+   * era el documento: reescribía el mismo DNI y aterrizaba donde estaba. Era el
+   * reporte de Nicolás del 27/11, y la mitad del problema era ésta —el botón
+   * decía algo distinto de lo que hacía—.
    *
-   * Así que para ése el botón dice qué es lo que sí puede hacer. Cambiar el DNI
-   * tiene sentido —quien se equivocó un dígito al escribirlo cayó en la ficha
-   * de otra persona, que es el caso que hizo nacer este botón— y ahora lo dice.
+   * Ahora va a `corregir_cobertura`, que es la pantalla donde sí puede cambiar
+   * lo que `set_turno` acepta: la obra social y el número de afiliado. El
+   * nombre, el apellido y el email siguen saliendo de la ficha de la clínica y
+   * el portal no los edita, así que el botón nombra lo que sí se puede hacer en
+   * vez de prometer "tus datos" en general.
+   *
+   * Para cambiar el DNI está "Volver" en el primer paso: es otra cosa —no es
+   * corregir un dato suyo, es decir que es otra persona— y mezclar las dos en
+   * un botón fue parte de lo que lo hacía confuso.
    */
   const textoDeCorregir =
-    contexto.identidad?.tieneFicha === false ? "Corregir mis datos" : "Estos no son mis datos"
+    contexto.identidad?.tieneFicha === false ? "Corregir mis datos" : "Corregir mi obra social"
 
   // Los mismos datos que muestra el bot antes de confirmar.
   //
@@ -558,6 +562,32 @@ export async function PaginaDelEnlace({
           token={token}
           paraFamiliar={paraFamiliar}
           valorInicial={contexto.identidad?.dni}
+        />
+      </>,
+    )
+  }
+
+  /**
+   * ── Tiene ficha y corrige su cobertura (27/11/2026) ────────────────────
+   *
+   * El único paso donde el paciente con ficha puede cambiar algo suyo. Lleva
+   * "Volver" al repaso del turno, que es de donde viene: a diferencia del DNI
+   * —que es el primer paso y no tiene atrás— acá el paciente ya recorrió todo
+   * y puede querer salirse sin cambiar nada.
+   */
+  if (paso === "corregir_cobertura") {
+    return marco(
+      <>
+        {volverArriba(urlCon({}))}
+        <EncabezadoDelPaso formato={formato} paso="corregir_cobertura" paraFamiliar={paraFamiliar} />
+        <CorregirCobertura
+          ruta={ruta}
+          token={token}
+          valoresIniciales={{
+            obraSocialId: identidad.obraSocialId,
+            obraSocialNombre: identidad.obraSocialNombre,
+            nroAfiliado: contexto.identidad?.nroAfiliado,
+          }}
         />
       </>,
     )

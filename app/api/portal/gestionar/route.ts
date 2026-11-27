@@ -67,6 +67,7 @@ import { anotarEnElMonitor, etiquetaDelDesenlace } from "@/lib/portal/monitor"
 import { leerEnlace, consumirEnlace, type TurnoDelPortal } from "@/lib/portal/token"
 import { permiteGestionar, reemplazaElTurnoPrevio } from "@/lib/portal/vigencia"
 import { portalPuede, mensajeDeGestionNoDisponible } from "@/lib/portal/permisos"
+import { comentarioDeLaCobertura } from "@/lib/turnos/comentario-de-la-cobertura"
 import { resolverPorDNI } from "@/lib/portal/identidad"
 import { reservarTurno, cancelarTurno } from "@/lib/api-tools/api-functions"
 import { estadoDeLaCancelacion } from "@/lib/cancelacion-de-turno"
@@ -296,6 +297,14 @@ export async function POST(request: Request) {
     // No es simetría por prolijidad: `set_turno` recibe los dos campos, y
     // mandar uno vacío deja la ficha a medias del lado de la clínica.
     deudorNombre: ident?.obraSocialNombre || contexto.obraSocialNombre,
+    /**
+     * El número de afiliado, cuando el paciente lo corrigió (27/11/2026).
+     *
+     * `set_turno` lo acepta como `Nro_Afiliado` desde siempre; el portal no lo
+     * mandaba nunca porque tampoco lo pedía. Ahora la pantalla de cobertura lo
+     * pide, y sin esta línea ese dato se quedaba en el token.
+     */
+    nroAfiliado: contexto.identidad?.nroAfiliado,
   }
 
   // ── Turno particular (27/10/2026) ─────────────────────────────────────────
@@ -461,9 +470,31 @@ export async function POST(request: Request) {
       // Que el turno sea particular queda escrito en la ficha: del lado de la
       // clínica, un turno con otro deudor que el de la ficha del paciente
       // parece un error de carga si nadie explica por qué.
-      ...(particular
-        ? { comentarios: `Turno particular: el profesional no atiende la obra social del paciente.` }
-        : {}),
+      /**
+       * ── Los dos comentarios conviven (27/11/2026) ─────────────────────
+       *
+       * El de "turno particular" ya estaba. El de la cobertura corregida es
+       * nuevo y un turno puede necesitar los dos —el paciente cambió su obra
+       * social Y terminó eligiendo un horario particular— así que se
+       * concatenan en vez de que el segundo pise al primero.
+       *
+       * Y lo que sale de acá se concatena otra vez, más adentro, con el
+       * comentario de reagendamiento: `comentarioParaLaReserva` conserva el
+       * del llamador desde el 26/10. O sea que un turno puede salir con los
+       * tres avisos, que es exactamente lo que alguien de la clínica necesita
+       * leer de un turno así.
+       */
+      ...(() => {
+        const avisos = [
+          particular ? "Turno particular: el profesional no atiende la obra social del paciente." : "",
+          comentarioDeLaCobertura({
+            obraSocialNombre: datosDelPaciente.deudorNombre,
+            nroAfiliado: datosDelPaciente.nroAfiliado,
+            deLaFicha: contexto.identidad?.coberturaDeLaFicha,
+          }) || "",
+        ].filter(Boolean)
+        return avisos.length > 0 ? { comentarios: avisos.join(" ") } : {}
+      })(),
       ...(hayQueCancelarElAnterior
         ? {
             reagendamiento: {

@@ -102,6 +102,68 @@ export async function POST(request: Request) {
     })
   }
 
+  /**
+   * ── Corregir la cobertura, para el paciente que YA tiene ficha
+   *    (27/11/2026) ───────────────────────────────────────────────────────────
+   *
+   * Es lo único de sus datos que el portal puede cambiar: `set_turno` lleva
+   * `Deudor_Id` y `Nro_Afiliado`, y el proxy no tiene ninguna acción para
+   * escribir la ficha. Así que el cambio llega a ESE turno y un comentario le
+   * avisa a la clínica.
+   *
+   * Se separa de `alta` a propósito aunque comparta los campos: `alta` valida
+   * nombre, apellido y email porque sin eso `reservarTurno` no puede crear la
+   * ficha, y este paciente ya la tiene. Mezclarlos obligaría a `validarAlta` a
+   * saber en qué caso está, que es cómo nacen los `if` que después nadie
+   * entiende.
+   */
+  if (cuerpo.accion === "cobertura") {
+    const obraSocialId = cuerpo.obraSocialId ? String(cuerpo.obraSocialId).trim() : ""
+    const obraSocialNombre = cuerpo.obraSocialNombre ? String(cuerpo.obraSocialNombre).trim() : ""
+    // Sólo dígitos y letras: los números de afiliado vienen con guiones y
+    // barras según la obra social, pero no con texto libre.
+    const nroAfiliado = String(cuerpo.nroAfiliado || "")
+      .trim()
+      .slice(0, 40)
+
+    if (!obraSocialId || !obraSocialNombre) {
+      return NextResponse.json(
+        { ok: false, errores: { obraSocial: "Elegí tu obra social de la lista." } },
+        { status: 400 },
+      )
+    }
+
+    /**
+     * El chequeo se rehace del lado del servidor, igual que en el alta: la
+     * pantalla ya marca las obras sociales que no permiten turnos online, pero
+     * eso es una ayuda visual y el cuerpo de este POST lo arma el cliente.
+     */
+    const bloqueada = await estaBloqueadaLaObraSocial(contexto.clienteId, obraSocialNombre, obraSocialId)
+
+    /**
+     * Lo que decía la ficha se guarda UNA sola vez.
+     *
+     * Si el paciente corrige dos veces, lo que le importa a la clínica sigue
+     * siendo lo que tiene cargado, no el paso intermedio. Y si ya estaba
+     * guardado de una corrección anterior, se conserva.
+     */
+    const coberturaDeLaFicha =
+      contexto.identidad?.coberturaDeLaFicha ?? {
+        obraSocialNombre: contexto.identidad?.obraSocialNombre || contexto.obraSocialNombre,
+        nroAfiliado: contexto.identidad?.nroAfiliado,
+      }
+
+    await guardarIdentidad(token, {
+      obraSocialId,
+      obraSocialNombre,
+      nroAfiliado: nroAfiliado || undefined,
+      obraSocialBloqueada: bloqueada,
+      coberturaDeLaFicha,
+    })
+
+    return NextResponse.json({ ok: true, obraSocialBloqueada: bloqueada === true })
+  }
+
   // ── Paso 2: el alta ───────────────────────────────────────────────────────
   if (cuerpo.accion === "alta") {
     // El DNI vuelve a validarse acá aunque ya haya pasado por el paso 1. Esta

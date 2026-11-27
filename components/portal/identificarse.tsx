@@ -22,14 +22,17 @@
  */
 
 import { useRouter } from "next/navigation"
-import { LoadingState } from "@/components/ui/loading-state"
-import { useEffect, useMemo, useState } from "react"
+import { useState } from "react"
 import { Aviso, BotonPrimario } from "./marco"
-
-// 16px o más en el campo: con menos, iOS hace zoom solo al enfocarlo y el
-// paciente queda con la pantalla corrida.
-const CLASES_CAMPO =
-  "w-full rounded-xl border border-input bg-background px-4 py-3.5 text-base text-foreground sm:py-3 outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+/**
+ * Las piezas compartidas salieron de este archivo el 27/11/2026, cuando
+ * apareció el segundo usuario: la pantalla donde el paciente con ficha corrige
+ * su cobertura. El campo de obra social tiene cinco comportamientos adentro,
+ * cada uno con un caso real detrás, y copiarlos habría dejado dos versiones
+ * que se separan en el primer ajuste. Ver ./campos.tsx y ./obra-social.tsx.
+ */
+import { CLASES_CAMPO, Campo, Enviando } from "./campos"
+import { CampoDeObraSocial, type ObraSocial } from "./obra-social"
 
 /**
  * A dónde volver después de guardar la identidad (27/11/2026).
@@ -65,58 +68,6 @@ function volverAlFlujo(ruta: string, token: string): string {
   parametros.delete("paso")
   const query = parametros.toString()
   return query ? `${base}?${query}` : base
-}
-
-/**
- * Una fila tocable de la lista de obras sociales.
- *
- * Las dos listas —la del catálogo y la de la búsqueda contra el proxy— tienen
- * que verse iguales: es la misma acción, elegir una obra social, y que cambie
- * de aspecto según de dónde salió la lista no significa nada para el paciente.
- * Cada lista le agrega lo suyo: la del catálogo va dentro de un recuadro, así
- * que no lleva borde propio.
- */
-const CLASES_OPCION =
-  "min-h-[52px] w-full rounded-xl px-4 py-3 text-left text-[15px] transition-colors hover:bg-accent sm:min-h-[48px] sm:px-5 sm:text-base"
-
-/**
- * Para comparar lo que el paciente escribe con el nombre de la obra social.
- *
- * Sin acentos y en minúscula porque nadie escribe "ASOCIACIÓN" con tilde en un
- * teclado de teléfono, y la lista de la clínica los usa de las dos maneras.
- */
-function paraComparar(texto: string): string {
-  return texto
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .trim()
-}
-
-function Campo({
-  etiqueta,
-  error,
-  children,
-}: {
-  etiqueta: string
-  error?: string
-  children: React.ReactNode
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-foreground">{etiqueta}</span>
-      {children}
-      {error && (
-        <span role="alert" className="mt-1.5 block text-sm text-destructive">
-          {error}
-        </span>
-      )}
-    </label>
-  )
-}
-
-function Enviando({ children }: { children: React.ReactNode }) {
-  return <LoadingState inline label={typeof children === "string" ? children : undefined} />
 }
 
 /** Paso 1: el DNI, solo. */
@@ -216,12 +167,6 @@ export function PedirDNI({
   )
 }
 
-interface ObraSocial {
-  id: string
-  nombre: string
-  permiteOnline: boolean
-}
-
 /** Paso 2: sólo para quien no tiene ficha. */
 export function DarseDeAlta({
   token,
@@ -248,17 +193,14 @@ export function DarseDeAlta({
   const [nombre, setNombre] = useState(valoresIniciales?.nombre || "")
   const [apellido, setApellido] = useState(valoresIniciales?.apellido || "")
   const [email, setEmail] = useState(valoresIniciales?.email || "")
-  const [busquedaOS, setBusquedaOS] = useState("")
-  const [opcionesOS, setOpcionesOS] = useState<ObraSocial[]>([])
   /**
-   * El catálogo de la clínica, para el select (17/11/2026).
+   * De la obra social acá queda sólo qué eligió el paciente.
    *
-   * `null` mientras se está pidiendo, `[]` si el proxy no lo devolvió. Son dos
-   * estados distintos y se ven distinto: "cargando" no puede verse igual que
-   * "no hay ninguna", porque en el segundo caso hay que ofrecerle al paciente
-   * la otra forma de completarlo.
+   * El catálogo, el reintento, el filtro local, la búsqueda contra el proxy y
+   * el marcado de las que no permiten turnos online se fueron a
+   * ./obra-social.tsx el 27/11/2026, cuando la misma pantalla hizo falta para
+   * corregir la cobertura de un paciente que ya tiene ficha.
    */
-  const [catalogo, setCatalogo] = useState<ObraSocial[] | null>(null)
   const [elegida, setElegida] = useState<ObraSocial | null>(
     valoresIniciales?.obraSocialId && valoresIniciales?.obraSocialNombre
       ? {
@@ -273,134 +215,6 @@ export function DarseDeAlta({
   const router = useRouter()
   const [errores, setErrores] = useState<Record<string, string>>({})
   const [cargando, setCargando] = useState(false)
-
-  /** El select se usa cuando la clínica devolvió su catálogo. */
-  const hayCatalogo = Array.isArray(catalogo) && catalogo.length > 0
-
-  /**
-   * Se pide una sola vez, al abrir la pantalla.
-   *
-   * Y no al desplegar el select: en un teléfono el desplegable se abre y se
-   * cierra de un toque, y una lista que tarda en llenarse se lee como un
-   * select vacío. Para cuando el paciente terminó de escribir su apellido,
-   * su nombre y su email, esto ya está.
-   */
-  useEffect(() => {
-    let vigente = true
-    ;(async () => {
-      /**
-       * Un reintento, no cero (24/11/2026).
-       *
-       * El pedido se hace una sola vez en toda la pantalla, y si falla el campo
-       * se degrada hasta que el paciente recargue —cosa que no va a hacer,
-       * porque el campo de escribir funciona y no parece roto—. Un corte de red
-       * de un segundo en un teléfono alcanzaba para perder el select.
-       *
-       * Uno solo y con una espera corta: si el proxy de la clínica no publica
-       * el catálogo, insistir no lo va a cambiar y el paciente está esperando.
-       */
-      for (let intento = 1; intento <= 2; intento++) {
-        try {
-          const r = await fetch(`/api/portal/obras-sociales?token=${encodeURIComponent(token)}`)
-          const data = await r.json()
-          if (!vigente) return
-          const opciones = Array.isArray(data?.opciones) ? data.opciones : []
-          if (opciones.length > 0 || intento === 2) {
-            setCatalogo(opciones)
-            return
-          }
-        } catch {
-          if (!vigente) return
-          if (intento === 2) {
-            // Queda en `[]`: el campo vuelve a ser el de escribir, que funciona.
-            setCatalogo([])
-            return
-          }
-        }
-        await new Promise((listo) => setTimeout(listo, 700))
-        if (!vigente) return
-      }
-    })()
-    return () => {
-      vigente = false
-    }
-  }, [token])
-
-  /**
-   * Tres letras, no dos (17/11/2026).
-   *
-   * Verificado contra el proxy de Clínica de Ojos: `get_obras_sociales` con
-   * "osd" devuelve OSDE y con "os" devuelve la lista vacía. O sea que exige
-   * tres caracteres y abajo de eso no avisa nada: contesta "ninguna".
-   *
-   * Buscando desde dos, el paciente que tipeaba exactamente dos letras veía
-   * una lista vacía y concluía que su obra social no estaba. Pedir una letra
-   * más es mejor que mentirle.
-   */
-  const MINIMO_PARA_BUSCAR = 3
-
-  /**
-   * El catálogo, filtrado con lo que el paciente escribe (24/11/2026).
-   *
-   * ── Por qué el filtro y no sólo el desplegable ───────────────────────────
-   *
-   * Un `<select>` nativo con 243 convenios obliga a recorrer la lista entera
-   * con el pulgar. En Android el desplegable del sistema no trae buscador —el
-   * de iOS sí— así que la mitad de los pacientes quedaba haciendo scroll.
-   *
-   * ── Y por qué el filtro es local ─────────────────────────────────────────
-   *
-   * El catálogo ya está en memoria: filtrarlo acá responde en el mismo golpe de
-   * tecla, sin un pedido por letra ni la lista parpadeando mientras llega. El
-   * camino que consulta al proxy sigue existiendo para cuando la clínica no
-   * publica el catálogo, y ahí sí cada búsqueda es un pedido.
-   *
-   * ── Todas las palabras, en cualquier orden ───────────────────────────────
-   *
-   * "medical swiss" encuentra "SWISS MEDICAL SA". Pedir el orden exacto es
-   * volver al problema que el select vino a resolver: tener que acordarse de
-   * cómo está escrita la propia obra social.
-   *
-   * Las que EMPIEZAN con lo escrito van primero. Con "os" la lista alfabética
-   * arranca en "DOSUBA" y "OSDE" queda a veinte filas de distancia.
-   */
-  const filtradas = useMemo(() => {
-    if (!catalogo) return []
-    const buscado = paraComparar(busquedaOS)
-    if (!buscado) return catalogo
-
-    const palabras = buscado.split(/\s+/)
-    return catalogo
-      .filter((os) => {
-        const nombre = paraComparar(os.nombre)
-        return palabras.every((palabra) => nombre.includes(palabra))
-      })
-      .sort(
-        (a, b) =>
-          (paraComparar(a.nombre).startsWith(buscado) ? 0 : 1) -
-          (paraComparar(b.nombre).startsWith(buscado) ? 0 : 1),
-      )
-  }, [catalogo, busquedaOS])
-
-  async function buscarOS(texto: string) {
-    setBusquedaOS(texto)
-    setElegida(null)
-    // Con catálogo el filtrado es local —`filtradas`— y no hay nada que pedir.
-    if (hayCatalogo) return
-    if (texto.trim().length < MINIMO_PARA_BUSCAR) {
-      setOpcionesOS([])
-      return
-    }
-    try {
-      const r = await fetch(
-        `/api/portal/obras-sociales?token=${encodeURIComponent(token)}&q=${encodeURIComponent(texto)}`,
-      )
-      const data = await r.json()
-      setOpcionesOS(Array.isArray(data.opciones) ? data.opciones : [])
-    } catch {
-      setOpcionesOS([])
-    }
-  }
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault()
@@ -420,14 +234,14 @@ export function DarseDeAlta({
     // elegía una opción o el campo quedaba en su valor inicial— pero desde que
     // el catálogo también se filtra escribiendo, el que tipea "osde" y aprieta
     // Continuar sin tocar la fila está otra vez en esta situación.
+    //
+    // El mensaje dejó de distinguir "escribiste pero no elegiste" de "no
+    // escribiste nada" (27/11/2026): esa diferencia la sabía este componente
+    // cuando tenía el texto tipeado, y ahora lo tiene el campo. Pedirle al
+    // campo que lo informe hacia arriba sería arrastrar su estado interno para
+    // elegir entre dos frases que dicen lo mismo —tocá la de la lista—.
     if (!elegida) {
-      setErrores({
-        obraSocial: busquedaOS.trim()
-          ? "Tocá tu obra social en la lista para elegirla."
-          : hayCatalogo
-            ? "Elegí tu obra social en la lista."
-            : "Elegí tu obra social: escribí las primeras letras y tocala en la lista.",
-      })
+      setErrores({ obraSocial: "Tocá tu obra social en la lista para elegirla." })
       return
     }
 
@@ -500,168 +314,169 @@ export function DarseDeAlta({
         />
       </Campo>
 
-      {/* ── Elegida vs. escrita ──────────────────────────────────────────────
-          Hasta el 9/10/2026 los dos estados se veían IGUAL: un input con el
-          texto adentro. El paciente escribía "osde", no tocaba la opción, y
-          continuaba convencido de haber elegido — pero `elegida` seguía en
-          null y el turno se reservaba sin `Deudor_Id`.
-
-          Ahora la elección se ve como tal: deja de ser un campo de texto y
-          pasa a ser el nombre confirmado con un botón para cambiarlo. Es la
-          diferencia entre pedirle al paciente que recuerde un paso y mostrarle
-          en qué estado está. */}
-      <Campo
+      {/* Todo el campo —el estado "elegida vs. escrita", el catálogo, el
+          filtro y el aviso de las que no dan turnos online— vive en
+          ./obra-social.tsx desde el 27/11/2026. */}
+      <CampoDeObraSocial
+        token={token}
         etiqueta={paraFamiliar ? "Obra social del paciente" : "Obra social"}
         error={errores.obraSocial}
-      >
-        {elegida ? (
-          <div className="flex min-h-[52px] items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3">
-            <span className="text-[15px] font-medium sm:text-base">{elegida.nombre}</span>
-            <button
-              type="button"
-              className="shrink-0 text-[14px] text-primary underline underline-offset-2"
-              onClick={() => {
-                setElegida(null)
-                setBusquedaOS("")
-                setOpcionesOS([])
-              }}
-            >
-              Cambiar
-            </button>
-          </div>
-        ) : (
-          <input
-            autoComplete="off"
-            value={busquedaOS}
-            onChange={(e) => buscarOS(e.target.value)}
-            placeholder={
-              catalogo === null
-                ? "Cargando las obras sociales…"
-                : hayCatalogo
-                  ? "Buscá la tuya o elegila de la lista"
-                  : "Escribí al menos 3 letras del nombre"
-            }
-            className={CLASES_CAMPO}
-          />
-        )}
-      </Campo>
-
-      {/* ── El catálogo: un campo igual al resto, con la lista abajo
-             (24/11/2026) ──────────────────────────────────────────────────
-          Era un `<select>` nativo. Dos problemas: con 243 convenios el
-          desplegable de Android no trae buscador y hay que recorrerlo entero
-          con el pulgar, y el campo se veía distinto del resto del formulario
-          —el sistema operativo lo dibuja a su manera, con su flecha y su
-          altura—.
-
-          Ahora es el mismo input que Apellido, Nombre y Email, y la lista
-          está a la vista: se puede recorrer sin tocar nada, o filtrar
-          escribiendo. Nada se esconde detrás de un desplegable.
-
-          El recuadro con scroll y no la lista entera: 243 filas sueltas
-          empujan el botón "Continuar" fuera de cualquier pantalla, y el
-          paciente que no sabe que hay un botón ahí abajo no llega nunca. */}
-      {hayCatalogo && !elegida && (
-        <div className="-mt-2 max-h-72 overflow-y-auto rounded-xl border border-input bg-background p-1.5">
-          {filtradas.length === 0 ? (
-            <p className="px-3 py-3 text-[13px] text-muted-foreground">
-              No encontramos ninguna obra social con «{busquedaOS.trim()}». Probá con otra parte
-              del nombre, sin siglas ni puntos.
-            </p>
-          ) : (
-            filtradas.map((os) => (
-              <button
-                key={os.id}
-                type="button"
-                onClick={() => {
-                  setElegida(os)
-                  setBusquedaOS("")
-                  setErrores((previos) => ({ ...previos, obraSocial: "" }))
-                }}
-                className={CLASES_OPCION}
-              >
-                {os.nombre}
-                {/* Las que no permiten turnos online van en la misma lista,
-                    marcadas. Ocultarlas dejaría al paciente de PAMI sin
-                    encontrar la suya, y terminaría eligiendo una parecida que
-                    no es la de él: llega a la clínica con la cobertura
-                    equivocada, que es peor que derivarlo al teléfono. */}
-                {!os.permiteOnline && (
-                  <span className="mt-0.5 block text-[13px] text-warning">
-                    Con esta obra social el turno se saca por teléfono
-                  </span>
-                )}
-              </button>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Cuántas quedaron, sólo mientras el filtro está puesto.
-          El que escribe tres letras y ve cuatro filas no sabe si la lista se
-          filtró o si la clínica tiene cuatro convenios. */}
-      {hayCatalogo && !elegida && busquedaOS.trim() && filtradas.length > 0 && (
-        <p className="-mt-2 text-[13px] text-muted-foreground">
-          {filtradas.length} de {catalogo!.length} obras sociales. Tocá la tuya para elegirla.
-        </p>
-      )}
-
-      {/* Se dice qué falta hacer mientras la lista está abierta. Sin esto, la
-          lista parece un autocompletado decorativo. */}
-      {!hayCatalogo && !elegida && busquedaOS.trim().length >= MINIMO_PARA_BUSCAR && opcionesOS.length > 0 && (
-        <p className="-mt-2 text-[13px] text-muted-foreground">Tocá la tuya para elegirla:</p>
-      )}
-
-      {/* Y cuando no hay ninguna, también se dice (17/11/2026).
-          Antes, una búsqueda sin resultados no mostraba nada: el paciente
-          escribía, no pasaba nada, y no sabía si el campo estaba roto, si
-          tenía que seguir escribiendo o si su obra social no figuraba. Tres
-          situaciones distintas con la misma pantalla en blanco. */}
-      {!hayCatalogo && !elegida && busquedaOS.trim().length >= MINIMO_PARA_BUSCAR && opcionesOS.length === 0 && (
-        <p className="-mt-2 text-[13px] text-muted-foreground">
-          No encontramos ninguna obra social con «{busquedaOS.trim()}». Probá con otra parte del
-          nombre, sin siglas ni puntos.
-        </p>
-      )}
-
-      {!hayCatalogo && !elegida && opcionesOS.length > 0 && (
-        <div className="-mt-2 space-y-2">
-          {opcionesOS.map((os) => (
-            <button
-              key={os.id}
-              type="button"
-              onClick={() => {
-                setElegida(os)
-                setOpcionesOS([])
-              }}
-              className={`${CLASES_OPCION} border bg-card`}
-            >
-              {os.nombre}
-              {/* Las que no permiten turnos online se muestran igual, marcadas.
-                  Ocultarlas dejaría al paciente buscando la suya sin encontrarla,
-                  y terminaría eligiendo una parecida que no es la de él. */}
-              {!os.permiteOnline && (
-                <span className="mt-0.5 block text-[13px] text-warning">
-                  Con esta obra social el turno se saca por teléfono
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {elegida && !elegida.permiteOnline && (
-        <Aviso
-          titulo={`Los turnos de ${elegida.nombre} se gestionan por teléfono`}
-          detalle="Si continuás, te vamos a pasar el contacto de la clínica."
-          tono="atencion"
-        />
-      )}
+        inicial={
+          valoresIniciales?.obraSocialId && valoresIniciales?.obraSocialNombre
+            ? { id: valoresIniciales.obraSocialId, nombre: valoresIniciales.obraSocialNombre }
+            : null
+        }
+        onCambio={(os) => {
+          setElegida(os)
+          if (os) setErrores((previos) => ({ ...previos, obraSocial: "" }))
+        }}
+      />
 
       {errores.general && <Aviso titulo="No pudimos guardar tus datos" detalle={errores.general} tono="error" />}
 
       <BotonPrimario type="submit" deshabilitado={cargando}>
         {cargando ? <Enviando>Guardando…</Enviando> : "Continuar"}
+      </BotonPrimario>
+    </form>
+  )
+}
+
+/**
+ * El paciente que YA tiene ficha corrige su cobertura (27/11/2026).
+ *
+ * ── Qué puede cambiar, y por qué sólo eso ─────────────────────────────────
+ *
+ * La obra social y el número de afiliado. No el nombre, el apellido ni el
+ * email: ésos salen de la ficha de la clínica y el proxy no tiene ninguna
+ * acción para escribirlos —sus escrituras son `set_turno`, `confirmar_turno` y
+ * `cancelar_turno`, nada más—.
+ *
+ * Los dos que sí se pueden cambiar es porque `set_turno` los lleva:
+ * `Deudor_Id` y `Nro_Afiliado`. Así que el cambio llega a ESE turno y un
+ * comentario le avisa a la clínica para que corrija la ficha. Ver
+ * lib/turnos/comentario-de-la-cobertura.ts.
+ *
+ * ── Lo que esta pantalla NO promete ───────────────────────────────────────
+ *
+ * Que la ficha quede corregida. El texto lo dice: la próxima vez que entre va
+ * a volver a ver la cobertura vieja hasta que alguien de la clínica la
+ * actualice. Prometerlo y que no pase es peor que no ofrecerlo.
+ */
+export function CorregirCobertura({
+  token,
+  ruta = "p",
+  valoresIniciales,
+}: {
+  ruta?: string
+  token: string
+  valoresIniciales?: {
+    obraSocialId?: string
+    obraSocialNombre?: string
+    nroAfiliado?: string
+  }
+}) {
+  const [elegida, setElegida] = useState<ObraSocial | null>(null)
+  const [nroAfiliado, setNroAfiliado] = useState(valoresIniciales?.nroAfiliado || "")
+  const router = useRouter()
+  const [errores, setErrores] = useState<Record<string, string>>({})
+  const [cargando, setCargando] = useState(false)
+
+  async function enviar(e: React.FormEvent) {
+    e.preventDefault()
+
+    if (!elegida) {
+      setErrores({ obraSocial: "Tocá tu obra social en la lista para elegirla." })
+      return
+    }
+
+    setCargando(true)
+    setErrores({})
+    try {
+      const r = await fetch("/api/portal/identificar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          accion: "cobertura",
+          obraSocialId: elegida.id,
+          obraSocialNombre: elegida.nombre,
+          nroAfiliado: nroAfiliado.trim() || undefined,
+        }),
+      })
+      const data = await r.json()
+      if (data.ok) {
+        /**
+         * Se vuelve al flujo SIN los filtros de la agenda (27/11/2026).
+         *
+         * Pedido de Nicolás: "lo ideal es que el turno se busque de nuevo luego
+         * de cambiar la obra social". Y es lo correcto, no sólo lo pedido: la
+         * agenda se filtra por `Deudor_Id`, así que el horario que el paciente
+         * había elegido pertenece a la cobertura anterior y puede no existir
+         * para la nueva.
+         *
+         * La sede SÍ se conserva: no depende de la obra social, y hacérsela
+         * elegir de nuevo sería la misma pérdida de pasos que arreglamos hoy en
+         * `volverAlFlujo`.
+         */
+        const parametros = new URLSearchParams(
+          typeof window === "undefined" ? "" : window.location.search,
+        )
+        for (const filtro of ["paso", "tipoBusqueda", "profesionalId", "especialidadId", "fecha"]) {
+          parametros.delete(filtro)
+        }
+        const query = parametros.toString()
+        router.replace(`/${ruta}/${token}${query ? `?${query}` : ""}`)
+        router.refresh()
+        return
+      }
+      setErrores(data.errores || { general: data.error || "Revisá los datos." })
+      setCargando(false)
+    } catch {
+      setErrores({ general: "No pudimos conectarnos. Revisá tu señal y probá de nuevo." })
+      setCargando(false)
+    }
+  }
+
+  return (
+    <form onSubmit={enviar} noValidate className="space-y-4">
+      <CampoDeObraSocial
+        token={token}
+        etiqueta="Obra social"
+        error={errores.obraSocial}
+        inicial={
+          valoresIniciales?.obraSocialId && valoresIniciales?.obraSocialNombre
+            ? { id: valoresIniciales.obraSocialId, nombre: valoresIniciales.obraSocialNombre }
+            : null
+        }
+        onCambio={(os) => {
+          setElegida(os)
+          if (os) setErrores((previos) => ({ ...previos, obraSocial: "" }))
+        }}
+      />
+
+      <Campo etiqueta="Número de afiliado" error={errores.nroAfiliado}>
+        <input
+          autoComplete="off"
+          value={nroAfiliado}
+          onChange={(e) => setNroAfiliado(e.target.value)}
+          placeholder="El que figura en tu credencial"
+          className={CLASES_CAMPO}
+        />
+      </Campo>
+
+      {/* No se promete lo que no va a pasar: la ficha no se toca. Decirlo acá
+          es lo que hace que el paciente no vuelva a buscar el cambio la próxima
+          vez y crea que se perdió. */}
+      <Aviso
+        titulo="Esto se aplica a este turno"
+        detalle="Le avisamos a la clínica para que actualice tu ficha. Hasta que lo haga, la próxima vez vas a ver la cobertura anterior."
+        tono="atencion"
+      />
+
+      {errores.general && <Aviso titulo="No pudimos guardar los datos" detalle={errores.general} tono="error" />}
+
+      <BotonPrimario type="submit" deshabilitado={cargando}>
+        {cargando ? <Enviando>Guardando…</Enviando> : "Guardar y buscar turnos"}
       </BotonPrimario>
     </form>
   )

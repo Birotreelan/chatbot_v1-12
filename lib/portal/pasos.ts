@@ -19,6 +19,19 @@ export type Paso =
   | "pedir_dni"
   /** Tiene DNI pero no tiene ficha: hay que darlo de alta. */
   | "registrar"
+  /**
+   * El paciente CON ficha corrige su cobertura (27/11/2026).
+   *
+   * Es lo único de sus datos que el portal puede cambiar: el nombre, el
+   * apellido y el email salen de la ficha de la clínica y el proxy no tiene
+   * ninguna acción para escribirlos —sus escrituras son `set_turno`,
+   * `confirmar_turno` y `cancelar_turno`, nada más—.
+   *
+   * La obra social y el número de afiliado sí viajan en `set_turno`, así que
+   * el cambio llega a ESE turno y un comentario le avisa a la clínica para que
+   * corrija la ficha. Ver lib/turnos/comentario-de-la-cobertura.ts.
+   */
+  | "corregir_cobertura"
   /** Su obra social no permite turnos online. Fin del camino, con teléfono. */
   | "derivar_obra_social"
   | "reprogramar"
@@ -184,6 +197,32 @@ export interface IdentidadDelPaciente {
    * `resolverTurnosOnline` sobre por qué el caso indeterminado NO bloquea.
    */
   obraSocialBloqueada?: boolean
+
+  /**
+   * El número de afiliado, cuando el paciente lo corrige (27/11/2026).
+   *
+   * `set_turno` lo acepta como `Nro_Afiliado` desde siempre y hasta hoy el
+   * portal no lo pedía nunca: el único que lo mandaba era la herramienta que la
+   * IA llama por su cuenta.
+   */
+  nroAfiliado?: string
+
+  /**
+   * Lo que decía la ficha ANTES de que el paciente lo corrigiera.
+   *
+   * No es historial por prolijidad: es lo que hace útil el comentario del
+   * turno. "El paciente declaró OSDE 310" obliga a alguien de la clínica a
+   * abrir la ficha para ver qué cambió; "declaró OSDE 310, en su ficha figura
+   * IOMA" se entiende de una sola lectura.
+   *
+   * Se guarda una sola vez, en la primera corrección: si el paciente cambia de
+   * opinión dos veces, lo que importa sigue siendo lo que la clínica tiene
+   * cargado, no el paso intermedio.
+   */
+  coberturaDeLaFicha?: {
+    obraSocialNombre?: string
+    nroAfiliado?: string
+  }
 }
 
 /** ¿Están todos los datos que `reservarTurno` necesita para dar de alta? */
@@ -214,7 +253,7 @@ export function altaCompleta(identidad: IdentidadDelPaciente | undefined): boole
  * están puestos. Forzar un paso que el flujo no puede sostener deja al paciente
  * en una pantalla que no sabe qué hacer con él.
  */
-export const PASOS_REVISITABLES = ["pedir_dni", "registrar", "elegir_sede"] as const
+export const PASOS_REVISITABLES = ["pedir_dni", "registrar", "elegir_sede", "corregir_cobertura"] as const
 
 export type PasoRevisitable = (typeof PASOS_REVISITABLES)[number]
 

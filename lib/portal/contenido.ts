@@ -119,6 +119,32 @@ export function encabezadoDelPaso(
         ],
       }
 
+    /**
+     * Corregir la cobertura (27/11/2026).
+     *
+     * El título no dice "corregir tus datos" porque el paciente llega acá
+     * justamente cuando los datos que vio no eran los suyos, y nombrar las dos
+     * cosas que SÍ puede cambiar evita que busque el nombre o el email, que
+     * salen de la ficha de la clínica y el portal no edita.
+     *
+     * El detalle avisa que hay que volver a elegir el horario ANTES de que lo
+     * pierda: la agenda se filtra por obra social, así que al cambiarla el
+     * turno que había elegido puede no corresponder. Decirlo después sería la
+     * misma sorpresa que este arreglo vino a sacar.
+     */
+    case "corregir_cobertura":
+      return {
+        avance: "Elegir",
+        tipo: "datos",
+        titulo: "Tu obra social y tu número de afiliado",
+        detalle: [
+          paraFamiliar
+            ? "Si la cobertura que figura no es la de la persona que se atiende, corregila acá."
+            : "Si la cobertura que figura no es la tuya, corregila acá.",
+          "Al cambiar la obra social vamos a volver a buscar los turnos, porque la disponibilidad depende de la cobertura.",
+        ],
+      }
+
     case "elegir_sede":
       return {
         avance: "Elegir",
