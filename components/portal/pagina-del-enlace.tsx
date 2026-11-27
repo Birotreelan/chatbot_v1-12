@@ -86,6 +86,7 @@ import {
   Avance,
   Aviso,
   EncabezadoDelPaso,
+  ResumenDeConfirmacion,
   ResumenDelTurno,
   Volver,
 } from "@/components/portal/marco"
@@ -125,6 +126,8 @@ export async function PaginaDelEnlace({
     especialidadId?: string
     profesionalId?: string
     sinFiltro?: string
+    /** El paciente ya verificó sus datos. Ver `decidirPaso`. */
+    verificado?: string
     /** Panel de diagnóstico. Ver `diagnostico` más abajo: no alcanza con pedirlo. */
     debug?: string
   }>
@@ -197,6 +200,7 @@ export async function PaginaDelEnlace({
     especialidadId?: string
     profesionalId?: string
     sinFiltro: boolean
+    verificado?: boolean
   } = {
     // La del query gana sobre la del token: si el paciente eligió otra sede,
     // eligió otra sede.
@@ -206,6 +210,8 @@ export async function PaginaDelEnlace({
     especialidadId: filtrosCrudos.especialidadId,
     profesionalId: filtrosCrudos.profesionalId,
     sinFiltro: filtrosCrudos.sinFiltro === "1",
+    // El paciente ya dijo que sus datos están bien. Ver `decidirPaso`.
+    verificado: filtrosCrudos.verificado === "1",
   }
 
   /**
@@ -222,6 +228,7 @@ export async function PaginaDelEnlace({
   if (filtrosCrudos.especialidadId) elegido.especialidadId = filtrosCrudos.especialidadId
   // Se arrastra como un filtro más: `elegido` es lo que cada opción de la
   // lista se lleva al paso siguiente. Ver `urlCon`.
+  if (filtrosCrudos.verificado === "1") elegido.verificado = "1"
   if (filtrosCrudos.debug === "1") elegido.debug = "1"
 
   /** La URL de este mismo enlace con un subconjunto de lo ya elegido. */
@@ -563,6 +570,44 @@ export async function PaginaDelEnlace({
           paraFamiliar={paraFamiliar}
           valorInicial={contexto.identidad?.dni}
         />
+      </>,
+    )
+  }
+
+  /**
+   * ── Verificar los datos, antes de empezar a elegir (27/11/2026) ─────────
+   *
+   * Reusa el mismo `ResumenDeConfirmacion` del repaso final, con el bloque del
+   * turno vacío: ése se oculta solo cuando no tiene nada. No es ahorro de
+   * código —es que las dos pantallas muestran los mismos datos del paciente, y
+   * con dos componentes se separan el día que alguien agregue un renglón en uno
+   * de los dos.
+   *
+   * Los dos botones son los dos caminos y nada más: seguir, o corregir la obra
+   * social. No lleva "Volver": atrás está la pantalla del DNI, y el paciente
+   * que llegó acá ya se identificó.
+   */
+  if (paso === "verificar_datos") {
+    return marco(
+      <>
+        <EncabezadoDelPaso formato={formato} paso="verificar_datos" paraFamiliar={paraFamiliar} />
+        <ResumenDeConfirmacion paciente={datosParaElResumen} turno={{}} />
+        {/* Un enlace y no un botón: estos pasos navegan por URL, así que el
+            "atrás" del teléfono funciona y el clic sirve aunque el JavaScript
+            no haya cargado. Las clases son las de `BotonPrimario` —no se
+            importa el botón porque ése lleva `onClick`, no `href`—. */}
+        <EnlaceDePaso
+          href={urlCon({ verificado: "1" })}
+          className="flex h-auto w-full items-center justify-center rounded-md bg-primary py-4 text-[17px] font-medium text-primary-foreground sm:mx-auto sm:max-w-sm sm:py-3.5 sm:text-base"
+        >
+          Sí, continuar
+        </EnlaceDePaso>
+        <EnlaceDePaso
+          href={urlCon({ paso: "corregir_cobertura" })}
+          className="mx-auto inline-flex items-center gap-2 text-[15px] text-muted-foreground underline"
+        >
+          Corregir mi obra social
+        </EnlaceDePaso>
       </>,
     )
   }

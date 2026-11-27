@@ -426,6 +426,17 @@ export function CorregirCobertura({
         for (const filtro of ["paso", "tipoBusqueda", "profesionalId", "especialidadId", "fecha"]) {
           parametros.delete(filtro)
         }
+        /**
+         * `verificado` NO se borra, y los dos caminos salen bien (27/11/2026):
+         *
+         *  - si el paciente llegó desde la pantalla de verificación, ese
+         *    parámetro no está, así que vuelve a verla —ahora con la obra social
+         *    nueva— y confirma lo que corrigió;
+         *  - si llegó desde el repaso final, ya había verificado, y lo que
+         *    necesita es volver a elegir el horario con la cobertura nueva.
+         *    Mandarlo otra vez a verificar sería un toque de más para mostrarle
+         *    algo que va a volver a ver en el repaso.
+         */
         const query = parametros.toString()
         router.replace(`/${ruta}/${token}${query ? `?${query}` : ""}`)
         router.refresh()

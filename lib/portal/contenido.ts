@@ -145,6 +145,25 @@ export function encabezadoDelPaso(
         ],
       }
 
+    /**
+     * Verificar los datos (27/11/2026).
+     *
+     * El título pregunta en lugar de afirmar —"¿son tuyos estos datos?" y no
+     * "verificá tus datos"— porque lo que se le pide es una respuesta, no una
+     * tarea. Y el detalle dice para qué sirve mirar: la obra social cambia los
+     * turnos que va a ver, así que revisarla ahora le ahorra recorrer todo con
+     * la agenda de otra cobertura.
+     */
+    case "verificar_datos":
+      return {
+        avance: "Elegir",
+        tipo: "datos",
+        titulo: paraFamiliar ? "¿Son correctos estos datos?" : "¿Son estos tus datos?",
+        detalle: [
+          "Así figurás en la clínica. Revisá sobre todo la obra social: de eso dependen los turnos que te vamos a mostrar.",
+        ],
+      }
+
     case "elegir_sede":
       return {
         avance: "Elegir",

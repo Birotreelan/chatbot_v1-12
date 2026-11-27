@@ -32,6 +32,14 @@ export type Paso =
    * corrija la ficha. Ver lib/turnos/comentario-de-la-cobertura.ts.
    */
   | "corregir_cobertura"
+  /**
+   * El paciente mira sus datos antes de empezar a elegir (27/11/2026).
+   *
+   * Ver el bloque de `decidirPaso`: existe para que la obra social equivocada
+   * se descubra al principio y no después de recorrer sede, profesional, fecha
+   * y hora con la agenda filtrada por la cobertura de otro.
+   */
+  | "verificar_datos"
   /** Su obra social no permite turnos online. Fin del camino, con teléfono. */
   | "derivar_obra_social"
   | "reprogramar"
@@ -89,6 +97,16 @@ export interface FiltrosElegidos {
    * cancelar" de "vengo a cancelar pero elegí cambiar el horario".
    */
   accion?: string
+  /**
+   * El paciente ya vio sus datos y dijo que están bien (27/11/2026).
+   *
+   * Viaja por la query, como el resto de los filtros, y no en el token: es una
+   * decisión de ESTE recorrido, no un dato del paciente. Y así la pantalla de
+   * corrección vuelve sin él y la verificación se muestra otra vez con la obra
+   * social nueva, que es lo que uno quiere —confirmar lo corregido— sin que
+   * haga falta ningún borrado explícito.
+   */
+  verificado?: boolean
 }
 
 /**
@@ -304,6 +322,32 @@ export function decidirPaso(
   // Zelmira: la paciente recorrió sede, profesional y especialidad completas
   // para enterarse al final de que su obra social no sacaba turnos online.
   if (identidad.obraSocialBloqueada === true) return "derivar_obra_social"
+
+  /**
+   * ── Verificar los datos antes de empezar a elegir (27/11/2026) ──────────
+   *
+   * Pedido de Nicolás. Hasta hoy el paciente veía sus datos UNA sola vez: en
+   * el repaso final, cuando ya había elegido sede, profesional, fecha y hora.
+   * Si la obra social estaba mal, descubrirlo ahí significaba volver a
+   * recorrerlo todo — y además la agenda que acababa de ver estaba filtrada
+   * por la cobertura equivocada.
+   *
+   * Mostrarlos al principio es el mismo criterio que ya rige dos pasos más
+   * arriba: la obra social bloqueada se chequea ANTES de la agenda porque el
+   * caso Zelmira demostró lo que cuesta enterarse al final.
+   *
+   * ── Sólo cuando los datos no son suyos de hace un minuto ────────────────
+   *
+   * El que acaba de completar el alta escribió su nombre, su apellido, su email
+   * y eligió su obra social en la pantalla anterior: mostrarle eso para que lo
+   * confirme es un paso que no agrega nada. Esta pantalla existe para el
+   * paciente cuyos datos salieron de la ficha de la clínica —el que el bot
+   * reconoció, o el que puso su DNI— que es el único que nunca los vio.
+   *
+   * Es el mismo criterio con el que el repaso decide si ofrecer "corregir":
+   * una pantalla que no cambia nada es peor que no ofrecerla.
+   */
+  if (!filtros.verificado && identidad.tieneFicha === true) return "verificar_datos"
 
   // ── La sede, antes que el resto (24/9/2026) ──────────────────────────────
   //
