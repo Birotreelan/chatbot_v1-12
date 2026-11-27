@@ -464,13 +464,30 @@ export function CorregirCobertura({
         />
       </Campo>
 
-      {/* No se promete lo que no va a pasar: la ficha no se toca. Decirlo acá
-          es lo que hace que el paciente no vuelva a buscar el cambio la próxima
-          vez y crea que se perdió. */}
+      {/* ── El aviso, reescrito (27/11/2026) ──────────────────────────────
+          Decía:
+
+            "Esto se aplica a este turno. Le avisamos a la clínica para que
+             actualice tu ficha. Hasta que lo haga, la próxima vez vas a ver la
+             cobertura anterior."
+
+          Nicolás lo marcó como confuso y tenía razón. Tres problemas:
+
+           - "tu ficha" y "la cobertura anterior" son conceptos NUESTROS. El
+             paciente no sabe que existe una ficha ni por qué su cobertura
+             tendría versiones.
+           - de los tres datos, dos eran plomería interna y ninguno le servía
+             para decidir nada.
+           - y el conjunto se lee como una advertencia de que el cambio no
+             funcionó, que es lo contrario de lo que pasa.
+
+          Queda lo que sí le sirve: para qué vale lo que acaba de cambiar, que
+          alguien lo va a ver, y qué conviene que haga el día del turno. El
+          tono pasa de `atencion` a `neutro`: no es un problema de nadie, y el
+          amarillo con el triángulo decía "algo salió mal". */}
       <Aviso
-        titulo="Esto se aplica a este turno"
-        detalle="Le avisamos a la clínica para que actualice tu ficha. Hasta que lo haga, la próxima vez vas a ver la cobertura anterior."
-        tono="atencion"
+        titulo="Vale para este turno"
+        detalle="La clínica va a ver el cambio junto con tu turno. Llevá tu credencial el día de la consulta."
       />
 
       {errores.general && <Aviso titulo="No pudimos guardar los datos" detalle={errores.general} tono="error" />}
