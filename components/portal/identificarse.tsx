@@ -32,6 +32,42 @@ const CLASES_CAMPO =
   "w-full rounded-xl border border-input bg-background px-4 py-3.5 text-base text-foreground sm:py-3 outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
 /**
+ * A dónde volver después de guardar la identidad (27/11/2026).
+ *
+ * ── El caso ───────────────────────────────────────────────────────────────
+ *
+ * Reportado por Nicolás y reproducido en el enlace real: el paciente completa
+ * todo el proceso, llega al repaso final, toca "Corregir mis datos", vuelve a
+ * la pantalla del DNI —prellenada, bien— aprieta Continuar y aparece en
+ * "¿A qué sede querés ir?". Perdió la sede, el tipo de búsqueda, la fecha y el
+ * horario que ya había elegido. Desde su lado, el proceso empieza de nuevo.
+ *
+ * ── Por qué pasaba ───────────────────────────────────────────────────────
+ *
+ * Volvía a `/p/<token>` a secas. El `replace` limpia la query a propósito
+ * —para sacarse de encima el `?paso=` con el que se llegó a corregir, que si
+ * no lo deja atrapado en esa pantalla— y de paso se llevaba `sedeId`,
+ * `tipoBusqueda`, `profesionalId` y todo lo demás, que viven ahí.
+ *
+ * Así que se saca SÓLO `paso`. El resto de los filtros se conserva, que es lo
+ * que hace que "corregir" sea corregir un dato y no empezar de cero.
+ *
+ * El horario elegido no está en la URL —vive en el estado del selector— así
+ * que ése se vuelve a elegir igual. Y está bien que así sea: si el paciente
+ * cambió el DNI, cambió la ficha y puede haber cambiado la obra social, con lo
+ * cual la agenda que vio ya no es necesariamente la suya.
+ */
+function volverAlFlujo(ruta: string, token: string): string {
+  const base = `/${ruta}/${token}`
+  if (typeof window === "undefined") return base
+
+  const parametros = new URLSearchParams(window.location.search)
+  parametros.delete("paso")
+  const query = parametros.toString()
+  return query ? `${base}?${query}` : base
+}
+
+/**
  * Una fila tocable de la lista de obras sociales.
  *
  * Las dos listas —la del catálogo y la de la búsqueda contra el proxy— tienen
@@ -89,17 +125,16 @@ export function PedirDNI({
   paraFamiliar,
   valorInicial,
   ruta = "p",
-  debug,
 }: {
   /**
-   * Volver con el panel de diagnóstico puesto (30/10/2026).
+   * El prop `debug` se fue con el arreglo del 27/11/2026.
    *
-   * El `replace` de acá abajo limpia la query a propósito, y eso se llevaba
-   * puesto el `?debug=1`: justo después de identificarse —que es donde se
-   * resuelve la obra social, o sea lo que uno vino a mirar— el panel
-   * desaparecía.
+   * Existía porque el `replace` limpiaba la query y se llevaba puesto el
+   * `?debug=1` (30/10/2026): justo después de identificarse —que es donde se
+   * resuelve la obra social, o sea lo que uno vino a mirar— el panel de
+   * diagnóstico desaparecía. Ahora `volverAlFlujo` conserva la query entera,
+   * así que el panel vuelve solo, igual que la sede y el resto de los filtros.
    */
-  debug?: boolean
   /** "p" o "c": a dónde volver después de guardar. Ver ElegirFiltro. */
   ruta?: string
   token: string
@@ -140,7 +175,7 @@ export function PedirDNI({
         // `refresh` vuelve a pedir la página al servidor sin parpadeo. Van los
         // dos: si la URL ya estaba limpia, `replace` no hace nada y sin el
         // `refresh` la pantalla se quedaría igual.
-        router.replace(`/${ruta}/${token}${debug ? "?debug=1" : ""}`)
+        router.replace(volverAlFlujo(ruta, token))
         router.refresh()
         return
       }
@@ -194,10 +229,7 @@ export function DarseDeAlta({
   paraFamiliar,
   valoresIniciales,
   ruta = "p",
-  debug,
 }: {
-  /** Ver PedirDNI: el `replace` limpia la query y se llevaba el `?debug=1`. */
-  debug?: boolean
   /** "p" o "c": a dónde volver después de guardar. Ver ElegirFiltro. */
   ruta?: string
   token: string
@@ -419,7 +451,7 @@ export function DarseDeAlta({
       const data = await r.json()
       if (data.ok) {
         // Ver el comentario en PedirDNI: navegación del lado del cliente.
-        router.replace(`/${ruta}/${token}${debug ? "?debug=1" : ""}`)
+        router.replace(volverAlFlujo(ruta, token))
         router.refresh()
         return
       }

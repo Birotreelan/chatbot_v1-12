@@ -69,6 +69,12 @@ interface Props {
   nombreParticular?: string
   /** URL para volver a editar los datos personales. `null` si no hay nada que editar. */
   corregirDatosEn?: string | null
+  /**
+   * Qué dice ese enlace. Lo decide la página, que es la que sabe si el paciente
+   * puede editar sus datos o sólo cambiar el DNI. Ver la nota en
+   * pagina-del-enlace.tsx (27/11/2026).
+   */
+  textoDeCorregir?: string
   etiquetaConfirmar?: string
   /**
    * El título y el contexto de la pantalla de elegir horario (28/9/2026).
@@ -195,6 +201,7 @@ export function SelectorDeTurnos({
   paciente,
   nombreParticular,
   corregirDatosEn,
+  textoDeCorregir = "Corregir mis datos",
   etiquetaConfirmar = "Confirmar este horario",
   encabezado,
   accion = "reservar",
@@ -522,7 +529,7 @@ export function SelectorDeTurnos({
             href={corregirDatosEn}
             className="inline-flex items-center gap-2 text-[15px] text-muted-foreground underline"
           >
-            Corregir mis datos
+            {textoDeCorregir}
           </EnlaceDePaso>
         )}
 

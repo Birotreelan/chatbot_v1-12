@@ -316,6 +316,31 @@ export async function PaginaDelEnlace({
         ? urlCon({ paso: "pedir_dni" })
         : null
 
+  /**
+   * ── Qué dice el botón, según lo que el paciente puede cambiar
+   *    (27/11/2026) ──────────────────────────────────────────────────────────
+   *
+   * Decía "Corregir mis datos" siempre, y para la mitad de los pacientes eso
+   * es una promesa que no se puede cumplir.
+   *
+   * El que se dio de alta por el portal va a `registrar`, donde están sus
+   * cuatro campos para editar: ahí "corregir mis datos" es exactamente lo que
+   * pasa.
+   *
+   * El que YA tiene ficha va a `pedir_dni`, y ahí lo único que puede cambiar es
+   * el documento: el nombre, el apellido, el email y la obra social salen de la
+   * ficha de la clínica y el portal no los edita. Si toca el botón esperando
+   * arreglar su email, vuelve a escribir el mismo DNI y aterriza donde estaba.
+   * Fue el reporte de Nicolás del 27/11, y la mitad del problema era ésta: el
+   * botón decía otra cosa de la que hacía.
+   *
+   * Así que para ése el botón dice qué es lo que sí puede hacer. Cambiar el DNI
+   * tiene sentido —quien se equivocó un dígito al escribirlo cayó en la ficha
+   * de otra persona, que es el caso que hizo nacer este botón— y ahora lo dice.
+   */
+  const textoDeCorregir =
+    contexto.identidad?.tieneFicha === false ? "Corregir mis datos" : "Estos no son mis datos"
+
   // Los mismos datos que muestra el bot antes de confirmar.
   //
   // Nombre y apellido van separados SÓLO cuando los tenemos separados —el
@@ -533,7 +558,6 @@ export async function PaginaDelEnlace({
           token={token}
           paraFamiliar={paraFamiliar}
           valorInicial={contexto.identidad?.dni}
-          debug={filtrosCrudos.debug === "1"}
         />
       </>,
     )
@@ -554,7 +578,6 @@ export async function PaginaDelEnlace({
           dni={identidad.dni}
           paraFamiliar={paraFamiliar}
           valoresIniciales={contexto.identidad}
-          debug={filtrosCrudos.debug === "1"}
         />
       </>,
     )
@@ -711,6 +734,7 @@ export async function PaginaDelEnlace({
             dias={dias}
             paciente={datosParaElResumen}
             corregirDatosEn={corregirDatosEn}
+          textoDeCorregir={textoDeCorregir}
             etiquetaConfirmar="Confirmar el cambio"
             accion="cambiar"
             reemplazaA={contexto.turno}
@@ -1424,6 +1448,7 @@ export async function PaginaDelEnlace({
           // social: el paciente tiene que leerlo antes de confirmar.
           nombreParticular={particularDelTurno?.nombre}
           corregirDatosEn={corregirDatosEn}
+          textoDeCorregir={textoDeCorregir}
           etiquetaConfirmar="Confirmar mi turno"
           direccionesPorSede={direccionesNuevo}
           // El MISMO valor que decide el aviso azul de arriba. Si el aviso dice
