@@ -342,19 +342,24 @@ export function DarseDeAlta({
 }
 
 /**
- * El paciente que YA tiene ficha corrige su cobertura (27/11/2026).
+ * El paciente que YA tiene ficha corrige su obra social (27/11/2026).
  *
  * ── Qué puede cambiar, y por qué sólo eso ─────────────────────────────────
  *
- * La obra social y el número de afiliado. No el nombre, el apellido ni el
- * email: ésos salen de la ficha de la clínica y el proxy no tiene ninguna
- * acción para escribirlos —sus escrituras son `set_turno`, `confirmar_turno` y
- * `cancelar_turno`, nada más—.
+ * La obra social, y nada más.
  *
- * Los dos que sí se pueden cambiar es porque `set_turno` los lleva:
- * `Deudor_Id` y `Nro_Afiliado`. Así que el cambio llega a ESE turno y un
- * comentario le avisa a la clínica para que corrija la ficha. Ver
- * lib/turnos/comentario-de-la-cobertura.ts.
+ * No el nombre, el apellido ni el email: salen de la ficha de la clínica y el
+ * proxy no tiene ninguna acción para escribirlos —sus escrituras son
+ * `set_turno`, `confirmar_turno` y `cancelar_turno`—.
+ *
+ * Y no el número de afiliado, que sí se podía mandar y se pidió durante un día:
+ * no hace falta para agendar y lo completa la clínica cuando ve la credencial.
+ * Pedirlo era hacerle buscar un número largo para algo que no cambia nada del
+ * turno.
+ *
+ * La obra social sí se puede porque `set_turno` lleva `Deudor_Id`: el cambio
+ * llega a ESE turno y un comentario le avisa a la clínica para que corrija la
+ * ficha. Ver lib/turnos/comentario-de-la-cobertura.ts.
  *
  * ── Lo que esta pantalla NO promete ───────────────────────────────────────
  *
@@ -372,11 +377,9 @@ export function CorregirCobertura({
   valoresIniciales?: {
     obraSocialId?: string
     obraSocialNombre?: string
-    nroAfiliado?: string
   }
 }) {
   const [elegida, setElegida] = useState<ObraSocial | null>(null)
-  const [nroAfiliado, setNroAfiliado] = useState(valoresIniciales?.nroAfiliado || "")
   const router = useRouter()
   const [errores, setErrores] = useState<Record<string, string>>({})
   const [cargando, setCargando] = useState(false)
@@ -400,7 +403,6 @@ export function CorregirCobertura({
           accion: "cobertura",
           obraSocialId: elegida.id,
           obraSocialNombre: elegida.nombre,
-          nroAfiliado: nroAfiliado.trim() || undefined,
         }),
       })
       const data = await r.json()
@@ -454,15 +456,15 @@ export function CorregirCobertura({
         }}
       />
 
-      <Campo etiqueta="Número de afiliado" error={errores.nroAfiliado}>
-        <input
-          autoComplete="off"
-          value={nroAfiliado}
-          onChange={(e) => setNroAfiliado(e.target.value)}
-          placeholder="El que figura en tu credencial"
-          className={CLASES_CAMPO}
-        />
-      </Campo>
+      {/* ── El número de afiliado NO se pide (27/11/2026) ──────────────────
+          Lo tuvo un día. Decisión de Nicolás: no hace falta para agendar y es
+          un dato que completa la clínica cuando ve la credencial. Pedirlo era
+          cargarle al paciente un número largo, de memoria o de una foto, para
+          algo que no cambia nada del turno.
+
+          Lo que sí queda es el aviso en el comentario: si la ficha ya tenía un
+          afiliado, ése es el de la obra social anterior. Ver
+          lib/turnos/comentario-de-la-cobertura.ts. */}
 
       {/* ── El aviso, reescrito (27/11/2026) ──────────────────────────────
           Decía:

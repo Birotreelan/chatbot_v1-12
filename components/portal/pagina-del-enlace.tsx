@@ -586,7 +586,6 @@ export async function PaginaDelEnlace({
           valoresIniciales={{
             obraSocialId: identidad.obraSocialId,
             obraSocialNombre: identidad.obraSocialNombre,
-            nroAfiliado: contexto.identidad?.nroAfiliado,
           }}
         />
       </>,

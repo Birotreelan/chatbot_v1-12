@@ -34,13 +34,11 @@
  */
 
 export interface CoberturaDeclarada {
-  /** Lo que el paciente eligió en el portal. */
+  /** La obra social que el paciente eligió en el portal. */
   obraSocialNombre?: string | null
-  nroAfiliado?: string | null
-  /** Lo que decía la ficha de la clínica antes. */
+  /** La que decía la ficha de la clínica antes. */
   deLaFicha?: {
     obraSocialNombre?: string | null
-    nroAfiliado?: string | null
   } | null
 }
 
@@ -58,35 +56,35 @@ function limpio(valor?: string | null): string {
  */
 export function comentarioDeLaCobertura(datos: CoberturaDeclarada): string | null {
   const obraDeclarada = limpio(datos.obraSocialNombre)
-  const afiliadoDeclarado = limpio(datos.nroAfiliado)
   const obraDeLaFicha = limpio(datos.deLaFicha?.obraSocialNombre)
-  const afiliadoDeLaFicha = limpio(datos.deLaFicha?.nroAfiliado)
 
-  const cambióLaObra = Boolean(obraDeclarada) && obraDeclarada !== obraDeLaFicha
-  const cambióElAfiliado = Boolean(afiliadoDeclarado) && afiliadoDeclarado !== afiliadoDeLaFicha
+  if (!obraDeclarada || obraDeclarada === obraDeLaFicha) return null
 
-  if (!cambióLaObra && !cambióElAfiliado) return null
+  const partes: string[] = ["OBRA SOCIAL CORREGIDA POR EL PACIENTE DESDE EL PORTAL."]
 
-  const partes: string[] = ["DATOS CORREGIDOS POR EL PACIENTE DESDE EL PORTAL."]
+  partes.push(
+    obraDeLaFicha
+      ? `Declaró "${obraDeclarada}" y en su ficha figura "${obraDeLaFicha}".`
+      : `Declaró "${obraDeclarada}" (en su ficha no figuraba ninguna).`,
+  )
 
-  if (cambióLaObra) {
-    partes.push(
-      obraDeLaFicha
-        ? `Obra social: declaró "${obraDeclarada}" y en su ficha figura "${obraDeLaFicha}".`
-        : `Obra social: declaró "${obraDeclarada}" (en su ficha no figuraba ninguna).`,
-    )
+  /**
+   * ── El número de afiliado de la ficha quedó viejo (27/11/2026) ──────────
+   *
+   * El portal dejó de pedirlo: lo completa la clínica. Pero si el paciente
+   * cambió de obra social y la ficha tiene un número cargado, ese número es el
+   * de la cobertura ANTERIOR, y eso no se nota mirando la ficha —hay una obra
+   * social nueva al lado de un afiliado que parece válido—.
+   *
+   * Decirlo acá es lo único que lo hace visible en el momento en que alguien
+   * puede resolverlo: cuando el paciente llega con la credencial.
+   */
+  if (obraDeLaFicha) {
+    partes.push("El N° de afiliado de la ficha corresponde a la obra social anterior: pedirle la credencial nueva.")
   }
 
-  if (cambióElAfiliado) {
-    partes.push(
-      afiliadoDeLaFicha
-        ? `N° de afiliado: declaró ${afiliadoDeclarado} y en su ficha figura ${afiliadoDeLaFicha}.`
-        : `N° de afiliado: declaró ${afiliadoDeclarado} (en su ficha no figuraba).`,
-    )
-  }
-
-  // La última línea es la que convierte el aviso en una tarea. Sin esto, el
-  // comentario describe algo que ya pasó y no dice qué falta hacer.
+  // La última línea convierte el aviso en una tarea. Sin esto, el comentario
+  // describe algo que ya pasó y no dice qué falta hacer.
   partes.push("La ficha NO se modificó: hay que actualizarla a mano si corresponde.")
 
   return partes.join(" ")

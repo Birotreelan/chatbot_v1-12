@@ -297,14 +297,6 @@ export async function POST(request: Request) {
     // No es simetría por prolijidad: `set_turno` recibe los dos campos, y
     // mandar uno vacío deja la ficha a medias del lado de la clínica.
     deudorNombre: ident?.obraSocialNombre || contexto.obraSocialNombre,
-    /**
-     * El número de afiliado, cuando el paciente lo corrigió (27/11/2026).
-     *
-     * `set_turno` lo acepta como `Nro_Afiliado` desde siempre; el portal no lo
-     * mandaba nunca porque tampoco lo pedía. Ahora la pantalla de cobertura lo
-     * pide, y sin esta línea ese dato se quedaba en el token.
-     */
-    nroAfiliado: contexto.identidad?.nroAfiliado,
   }
 
   // ── Turno particular (27/10/2026) ─────────────────────────────────────────
@@ -489,7 +481,6 @@ export async function POST(request: Request) {
           particular ? "Turno particular: el profesional no atiende la obra social del paciente." : "",
           comentarioDeLaCobertura({
             obraSocialNombre: datosDelPaciente.deudorNombre,
-            nroAfiliado: datosDelPaciente.nroAfiliado,
             deLaFicha: contexto.identidad?.coberturaDeLaFicha,
           }) || "",
         ].filter(Boolean)

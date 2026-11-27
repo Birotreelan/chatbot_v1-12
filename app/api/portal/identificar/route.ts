@@ -120,12 +120,6 @@ export async function POST(request: Request) {
   if (cuerpo.accion === "cobertura") {
     const obraSocialId = cuerpo.obraSocialId ? String(cuerpo.obraSocialId).trim() : ""
     const obraSocialNombre = cuerpo.obraSocialNombre ? String(cuerpo.obraSocialNombre).trim() : ""
-    // Sólo dígitos y letras: los números de afiliado vienen con guiones y
-    // barras según la obra social, pero no con texto libre.
-    const nroAfiliado = String(cuerpo.nroAfiliado || "")
-      .trim()
-      .slice(0, 40)
-
     if (!obraSocialId || !obraSocialNombre) {
       return NextResponse.json(
         { ok: false, errores: { obraSocial: "Elegí tu obra social de la lista." } },
@@ -150,13 +144,11 @@ export async function POST(request: Request) {
     const coberturaDeLaFicha =
       contexto.identidad?.coberturaDeLaFicha ?? {
         obraSocialNombre: contexto.identidad?.obraSocialNombre || contexto.obraSocialNombre,
-        nroAfiliado: contexto.identidad?.nroAfiliado,
       }
 
     await guardarIdentidad(token, {
       obraSocialId,
       obraSocialNombre,
-      nroAfiliado: nroAfiliado || undefined,
       obraSocialBloqueada: bloqueada,
       coberturaDeLaFicha,
     })

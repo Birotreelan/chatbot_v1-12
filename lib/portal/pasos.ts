@@ -198,14 +198,6 @@ export interface IdentidadDelPaciente {
    */
   obraSocialBloqueada?: boolean
 
-  /**
-   * El número de afiliado, cuando el paciente lo corrige (27/11/2026).
-   *
-   * `set_turno` lo acepta como `Nro_Afiliado` desde siempre y hasta hoy el
-   * portal no lo pedía nunca: el único que lo mandaba era la herramienta que la
-   * IA llama por su cuenta.
-   */
-  nroAfiliado?: string
 
   /**
    * Lo que decía la ficha ANTES de que el paciente lo corrigiera.
@@ -221,7 +213,6 @@ export interface IdentidadDelPaciente {
    */
   coberturaDeLaFicha?: {
     obraSocialNombre?: string
-    nroAfiliado?: string
   }
 }
 
