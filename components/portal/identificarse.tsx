@@ -486,8 +486,8 @@ export function CorregirCobertura({
           tono pasa de `atencion` a `neutro`: no es un problema de nadie, y el
           amarillo con el triángulo decía "algo salió mal". */}
       <Aviso
-        titulo="Vale para este turno"
-        detalle="La clínica va a ver el cambio junto con tu turno. Llevá tu credencial el día de la consulta."
+        titulo="El cambio es válido solo para este turno."
+        detalle="La clínica verá el cambio de obra social junto con tu turno. Recordá llevar la nueva credencial el día de la consulta."
       />
 
       {errores.general && <Aviso titulo="No pudimos guardar los datos" detalle={errores.general} tono="error" />}
